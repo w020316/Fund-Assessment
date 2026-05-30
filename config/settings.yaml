@@ -1,0 +1,41 @@
+app:
+  name: OpenClaw量化AI炒股机器人
+  version: "1.0"
+  debug: false
+
+data_source:
+  primary: akshare
+  fallback_1: tushare
+  fallback_2: eastmoney
+  cache_dir: data/cache
+  cache_expire: 300
+
+tushare:
+  token: ""
+
+risk:
+  system_drawdown_limit: 0.15
+  system_pause_days: 5
+  daily_loss_limit: 0.05
+  strategy_consecutive_stops: 3
+  strategy_position_reduction: 0.5
+
+broker:
+  type: simulated
+  api_key: ""
+  api_secret: ""
+  broker_id: ""
+
+notify:
+  dingtalk:
+    enabled: false
+    webhook: ""
+    secret: ""
+  wechat:
+    enabled: false
+    webhook: ""
+
+logging:
+  level: INFO
+  dir: data/logs
+  retention: 30

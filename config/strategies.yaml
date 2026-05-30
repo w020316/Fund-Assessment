@@ -1,0 +1,63 @@
+trading_quant:
+  weights:
+    technical: 0.25
+    capital: 0.30
+    fundamental: 0.10
+    news: 0.20
+    sentiment: 0.15
+  signals:
+    strong_buy: 80
+    buy: 65
+    watch: 50
+    hold: 35
+    sell: 20
+
+cb_t0_sniper:
+  max_premium_rate: 0.30
+  stop_loss: -0.03
+  scan_interval: 30
+  max_positions: 5
+
+limit_up:
+  min_quality_score: 60
+
+stock_monitor:
+  rules:
+    price_surge_daily: 0.15
+    price_surge_weekly: 0.12
+    eps_surprise: 0.04
+    eps_beat: 0.02
+    volume_price_diverge_vol: 0.24
+    volume_price_diverge_price: 0.0056
+    rsi_overbought: 70
+    rsi_oversold: 30
+    northbound_flow_1d: 0.01
+    northbound_flow_5d: 0.01
+    sector_flow: 0.10
+    stock_flow: 0.05
+
+strategies:
+  new_high:
+    max_position: 0.20
+    max_stocks: 5
+    total_position: 0.80
+    stop_loss: -0.08
+    use_atr: true
+    execute: "market_close"
+  limit_up_board:
+    max_position: 0.10
+    max_stocks: 3
+    total_position: 0.30
+    stop_loss: -0.05
+    execute: "immediate"
+  cb_t0:
+    max_positions: 5
+    total_position: 1.00
+    stop_loss: -0.03
+    execute: "immediate"
+  long_value:
+    max_position: 0.30
+    max_stocks: 3
+    total_position: 0.90
+    stop_loss: -0.15
+    execute: "market_close"
