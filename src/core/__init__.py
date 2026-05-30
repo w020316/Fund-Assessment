@@ -29,6 +29,15 @@ from .executor import (
     Trade,
     TradeExecutor,
 )
+from .backtest import (
+    BacktestEngine,
+    BacktestResult,
+    StrategyFunc,
+    cb_t0_strategy,
+    limit_up_strategy,
+    long_value_strategy,
+    new_high_strategy,
+)
 from .risk_manager import RiskLevel, RiskManager, RiskStatus, TradeRecord
 from .scheduler import Scheduler
 
@@ -65,4 +74,11 @@ __all__ = [
     "OrderStatus",
     "OrderType",
     "Scheduler",
+    "BacktestEngine",
+    "BacktestResult",
+    "StrategyFunc",
+    "new_high_strategy",
+    "limit_up_strategy",
+    "cb_t0_strategy",
+    "long_value_strategy",
 ]

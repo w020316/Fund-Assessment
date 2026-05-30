@@ -8,3 +8,6 @@ loguru>=0.7
 pyyaml>=6.0
 python-dotenv>=1.0
 requests>=2.31
+fastapi>=0.110
+uvicorn>=0.29
+pydantic>=2.6
