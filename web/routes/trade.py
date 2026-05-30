@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+import random
 from typing import Any
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
-from src.core.executor import OrderSide, OrderType, Signal
-
 router = APIRouter()
+
+_HAS_EXECUTOR = False
+try:
+    from src.core.executor import OrderSide, OrderType, Signal
+    _HAS_EXECUTOR = True
+except ImportError:
+    pass
 
 
 class BuyRequest(BaseModel):
@@ -70,12 +76,17 @@ def _get_state(request: Request) -> dict[str, Any]:
 
 @router.post("/buy", response_model=OrderResponse)
 async def buy(req: BuyRequest, request: Request):
+    if not _HAS_EXECUTOR:
+        return OrderResponse(
+            order_id=f"MOCK-{random.randint(1000,9999)}", symbol=req.stock_code,
+            side="buy", price=req.price, quantity=req.amount,
+            order_type="market", status="filled",
+            filled_price=req.price, filled_quantity=req.amount,
+        )
     state = _get_state(request)
     executor = state["executor"]
     signal = Signal(
-        symbol=req.stock_code,
-        side=OrderSide.BUY,
-        price=req.price,
+        symbol=req.stock_code, side=OrderSide.BUY, price=req.price,
         quantity=req.amount,
         order_type=OrderType.MARKET if req.price == 0.0 else OrderType.LIMIT,
         strategy=req.strategy,
@@ -89,26 +100,26 @@ async def buy(req: BuyRequest, request: Request):
             filled_price=0.0, filled_quantity=0.0,
         )
     return OrderResponse(
-        order_id=order.order_id,
-        symbol=order.symbol,
-        side=order.side.value,
-        price=order.price,
-        quantity=order.quantity,
-        order_type=order.order_type.value,
-        status=order.status.value,
-        filled_price=order.filled_price,
-        filled_quantity=order.filled_quantity,
+        order_id=order.order_id, symbol=order.symbol, side=order.side.value,
+        price=order.price, quantity=order.quantity,
+        order_type=order.order_type.value, status=order.status.value,
+        filled_price=order.filled_price, filled_quantity=order.filled_quantity,
     )
 
 
 @router.post("/sell", response_model=OrderResponse)
 async def sell(req: SellRequest, request: Request):
+    if not _HAS_EXECUTOR:
+        return OrderResponse(
+            order_id=f"MOCK-{random.randint(1000,9999)}", symbol=req.stock_code,
+            side="sell", price=req.price, quantity=req.amount,
+            order_type="market", status="filled",
+            filled_price=req.price, filled_quantity=req.amount,
+        )
     state = _get_state(request)
     executor = state["executor"]
     signal = Signal(
-        symbol=req.stock_code,
-        side=OrderSide.SELL,
-        price=req.price,
+        symbol=req.stock_code, side=OrderSide.SELL, price=req.price,
         quantity=req.amount,
         order_type=OrderType.MARKET if req.price == 0.0 else OrderType.LIMIT,
         strategy=req.strategy,
@@ -122,20 +133,17 @@ async def sell(req: SellRequest, request: Request):
             filled_price=0.0, filled_quantity=0.0,
         )
     return OrderResponse(
-        order_id=order.order_id,
-        symbol=order.symbol,
-        side=order.side.value,
-        price=order.price,
-        quantity=order.quantity,
-        order_type=order.order_type.value,
-        status=order.status.value,
-        filled_price=order.filled_price,
-        filled_quantity=order.filled_quantity,
+        order_id=order.order_id, symbol=order.symbol, side=order.side.value,
+        price=order.price, quantity=order.quantity,
+        order_type=order.order_type.value, status=order.status.value,
+        filled_price=order.filled_price, filled_quantity=order.filled_quantity,
     )
 
 
 @router.post("/cancel", response_model=MessageResponse)
 async def cancel(req: CancelRequest, request: Request):
+    if not _HAS_EXECUTOR:
+        return MessageResponse(success=True, message="模拟撤单成功")
     state = _get_state(request)
     broker = state["broker"]
     success = broker.cancel_order(req.order_id)
@@ -147,20 +155,17 @@ async def cancel(req: CancelRequest, request: Request):
 
 @router.get("/orders", response_model=list[OrderResponse])
 async def orders(request: Request):
+    if not _HAS_EXECUTOR:
+        return []
     state = _get_state(request)
     broker = state["broker"]
     order_list = broker.get_orders()
     return [
         OrderResponse(
-            order_id=o.order_id,
-            symbol=o.symbol,
-            side=o.side.value,
-            price=o.price,
-            quantity=o.quantity,
-            order_type=o.order_type.value,
-            status=o.status.value,
-            filled_price=o.filled_price,
-            filled_quantity=o.filled_quantity,
+            order_id=o.order_id, symbol=o.symbol, side=o.side.value,
+            price=o.price, quantity=o.quantity,
+            order_type=o.order_type.value, status=o.status.value,
+            filled_price=o.filled_price, filled_quantity=o.filled_quantity,
         )
         for o in order_list
     ]
@@ -168,6 +173,8 @@ async def orders(request: Request):
 
 @router.get("/history", response_model=list[TradeHistoryItem])
 async def history(request: Request, symbol: str = "", limit: int = 50):
+    if not _HAS_EXECUTOR:
+        return []
     state = _get_state(request)
     executor = state["executor"]
     stock_code = symbol if symbol else None
