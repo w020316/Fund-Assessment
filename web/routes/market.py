@@ -8,6 +8,8 @@ from typing import Optional
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
+from src.core import data_source_v2 as ds2
+
 router = APIRouter()
 
 try:
@@ -445,3 +447,154 @@ async def sector_flow():
         return result
     except Exception:
         return _mock_sector_flow()
+
+
+class ResearchReportItem(BaseModel):
+    title: str
+    rating: str
+    eps_predict: float
+    org_name: str
+    publish_date: str
+
+
+class DragonTigerItem(BaseModel):
+    code: str
+    name: str
+    price: float
+    change_pct: float
+    reason: str
+    buy_amount: float
+    sell_amount: float
+    net_amount: float
+    trade_date: str
+
+
+class MarginTradingItem(BaseModel):
+    code: str
+    trade_date: str
+    margin_buy: float
+    margin_balance: float
+    short_sell: float
+    short_balance: float
+    total_balance: float
+
+
+class BlockTradeItem(BaseModel):
+    code: str
+    name: str
+    trade_date: str
+    price: float
+    volume: float
+    amount: float
+    premium_pct: float
+    buyer: str
+    seller: str
+
+
+class ShareholderItem(BaseModel):
+    code: str
+    end_date: str
+    holder_num: int
+    change_pct: float
+
+
+class NewsItem(BaseModel):
+    title: str
+    content: str
+    url: str
+    source: str
+    publish_time: str
+
+
+class HotStockSignalItem(BaseModel):
+    code: str
+    name: str
+    price: float
+    change_pct: float
+    volume: float
+    reason: str
+    limit_up_time: str
+    open_times: int
+
+
+class SectorRankingItem(BaseModel):
+    code: str
+    name: str
+    change_pct: float
+    price: float
+    main_net_inflow: float
+    main_inflow_pct: float
+    super_large_net: float
+    super_large_pct: float
+    large_net: float
+    large_pct: float
+    medium_net: float
+    medium_pct: float
+    small_net: float
+    small_pct: float
+
+
+@router.get("/research_reports", response_model=list[ResearchReportItem])
+async def research_reports(
+    code: str = Query(..., description="股票代码"),
+    page: int = Query(1, description="页码"),
+    page_size: int = Query(10, description="每页条数"),
+):
+    data = ds2.get_research_reports(code, page=page, page_size=page_size)
+    return [ResearchReportItem(**item) for item in data]
+
+
+@router.get("/dragon_tiger", response_model=list[DragonTigerItem])
+async def dragon_tiger():
+    data = ds2.get_dragon_tiger()
+    return [DragonTigerItem(**item) for item in data]
+
+
+@router.get("/margin", response_model=MarginTradingItem)
+async def margin(code: str = Query(..., description="股票代码")):
+    data = ds2.get_margin_trading(code)
+    if not data:
+        return MarginTradingItem(code=code, trade_date="", margin_buy=0, margin_balance=0, short_sell=0, short_balance=0, total_balance=0)
+    return MarginTradingItem(**data)
+
+
+@router.get("/block_trades", response_model=list[BlockTradeItem])
+async def block_trades(code: str = Query(..., description="股票代码")):
+    data = ds2.get_block_trades(code)
+    return [BlockTradeItem(**item) for item in data]
+
+
+@router.get("/shareholder", response_model=ShareholderItem)
+async def shareholder(code: str = Query(..., description="股票代码")):
+    data = ds2.get_shareholder_count(code)
+    if not data:
+        return ShareholderItem(code=code, end_date="", holder_num=0, change_pct=0.0)
+    return ShareholderItem(**data)
+
+
+@router.get("/news", response_model=list[NewsItem])
+async def news(
+    code: str = Query(..., description="股票代码"),
+    page: int = Query(1, description="页码"),
+    page_size: int = Query(10, description="每页条数"),
+):
+    data = ds2.get_stock_news(code, page=page, page_size=page_size)
+    return [NewsItem(**item) for item in data]
+
+
+@router.get("/global_news", response_model=list[NewsItem])
+async def global_news():
+    data = ds2.get_global_news()
+    return [NewsItem(**item) for item in data]
+
+
+@router.get("/hot_stocks_signal", response_model=list[HotStockSignalItem])
+async def hot_stocks_signal():
+    data = ds2.get_hot_stocks_ths()
+    return [HotStockSignalItem(**item) for item in data]
+
+
+@router.get("/sector_ranking", response_model=list[SectorRankingItem])
+async def sector_ranking():
+    data = ds2.get_sector_ranking()
+    return [SectorRankingItem(**item) for item in data]

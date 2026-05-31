@@ -73,6 +73,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from web.routes import agent as agent_route
 from web.routes import config as config_route
 from web.routes import dashboard as dashboard_route
 from web.routes import market as market_route
@@ -86,6 +87,7 @@ app.include_router(trade_route.router, prefix="/api/trade", tags=["交易"])
 app.include_router(monitor_route.router, prefix="/api/monitor", tags=["监控"])
 app.include_router(config_route.router, prefix="/api/config", tags=["配置"])
 app.include_router(market_route.router, prefix="/api/market", tags=["行情"])
+app.include_router(agent_route.router, prefix="/api/agent", tags=["AI Agent"])
 
 _static_dir = Path(__file__).resolve().parent / "static"
 if _static_dir.is_dir():

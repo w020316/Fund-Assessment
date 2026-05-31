@@ -1,84 +1,66 @@
-from .data_source import (
-    AkShareSource,
-    CacheSource,
-    CapitalFlowResult,
-    DataSourceBase,
-    DataSourceError,
-    DataSourceManager,
-    EastMoneySource,
-    KlineResult,
-    NewsResult,
-    NorthboundFlowResult,
-    QuoteResult,
-    SourceLog,
-    TushareSource,
-)
-from .executor import (
-    Balance,
-    BrokerAPI,
-    LiveBroker,
-    LogNotifier,
-    Notifier,
-    Order,
-    OrderSide,
-    OrderStatus,
-    OrderType,
-    Position,
-    Signal,
-    SimulatedBroker,
-    Trade,
-    TradeExecutor,
-)
-from .backtest import (
-    BacktestEngine,
-    BacktestResult,
-    StrategyFunc,
-    cb_t0_strategy,
-    limit_up_strategy,
-    long_value_strategy,
-    new_high_strategy,
-)
-from .risk_manager import RiskLevel, RiskManager, RiskStatus, TradeRecord
-from .scheduler import Scheduler
+try:
+    from .data_source import (
+        AkShareSource,
+        CacheSource,
+        CapitalFlowResult,
+        DataSourceBase,
+        DataSourceError,
+        DataSourceManager,
+        EastMoneySource,
+        KlineResult,
+        NewsResult,
+        NorthboundFlowResult,
+        QuoteResult,
+        SourceLog,
+        TushareSource,
+    )
+except ImportError:
+    pass
 
-__all__ = [
-    "DataSourceBase",
-    "AkShareSource",
-    "TushareSource",
-    "EastMoneySource",
-    "CacheSource",
-    "DataSourceManager",
-    "DataSourceError",
-    "QuoteResult",
-    "KlineResult",
-    "CapitalFlowResult",
-    "NorthboundFlowResult",
-    "NewsResult",
-    "SourceLog",
-    "RiskManager",
-    "RiskLevel",
-    "RiskStatus",
-    "TradeRecord",
-    "BrokerAPI",
-    "SimulatedBroker",
-    "LiveBroker",
-    "TradeExecutor",
-    "Notifier",
-    "LogNotifier",
-    "Order",
-    "Trade",
-    "Position",
-    "Balance",
-    "Signal",
-    "OrderSide",
-    "OrderStatus",
-    "OrderType",
-    "Scheduler",
-    "BacktestEngine",
-    "BacktestResult",
-    "StrategyFunc",
-    "new_high_strategy",
-    "limit_up_strategy",
-    "cb_t0_strategy",
-    "long_value_strategy",
-]
+try:
+    from .executor import (
+        Balance,
+        BrokerAPI,
+        LiveBroker,
+        LogNotifier,
+        Notifier,
+        Order,
+        OrderSide,
+        OrderStatus,
+        OrderType,
+        Position,
+        Signal,
+        SimulatedBroker,
+        Trade,
+        TradeExecutor,
+    )
+except ImportError:
+    pass
+
+try:
+    from .backtest import (
+        BacktestEngine,
+        BacktestResult,
+        StrategyFunc,
+        cb_t0_strategy,
+        limit_up_strategy,
+        long_value_strategy,
+        new_high_strategy,
+    )
+except ImportError:
+    pass
+
+try:
+    from .risk_manager import RiskLevel, RiskManager, RiskStatus, TradeRecord
+except ImportError:
+    pass
+
+try:
+    from .scheduler import Scheduler
+except ImportError:
+    pass
+
+try:
+    from .data_source_v2 import *
+except ImportError:
+    pass
