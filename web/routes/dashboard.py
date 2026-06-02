@@ -205,18 +205,7 @@ async def positions(request: Request):
 @router.get("/trades", response_model=list[TradeItem])
 async def trades(request: Request, limit: int = 20):
     if not _HAS_CORE:
-        return [
-            TradeItem(trade_id="T001", order_id="O001", symbol="000001",
-                      side="buy", price=12.50, quantity=1000, amount=12500.0,
-                      commission=3.75, stamp_tax=0, net_amount=12503.75,
-                      strategy="new_high", reason="模拟交易",
-                      created_at="2026-05-30 09:35:00"),
-            TradeItem(trade_id="T002", order_id="O002", symbol="600519",
-                      side="buy", price=1680.00, quantity=10, amount=16800.0,
-                      commission=5.04, stamp_tax=0, net_amount=16805.04,
-                      strategy="long_value", reason="模拟交易",
-                      created_at="2026-05-30 10:15:00"),
-        ]
+        return []
     state = _get_state(request)
     executor = state["executor"]
     history = executor.get_trade_history(limit=limit)
@@ -243,12 +232,44 @@ async def trades(request: Request, limit: int = 20):
 @router.get("/risk", response_model=RiskResponse)
 async def risk(request: Request):
     if not _HAS_CORE:
+        enriched = _enrich_positions_with_realtime([dict(p) for p in _MOCK_POSITIONS])
+        market_value = sum(p.get("market_value", 0) for p in enriched)
+        daily_pnl = 0.0
+        try:
+            symbols = [p["symbol"] for p in enriched]
+            quotes = ds2.get_realtime_quote_tencent(symbols)
+            quote_map = {q.get("code", ""): q for q in quotes}
+            for p in enriched:
+                q = quote_map.get(p["symbol"], {})
+                change_pct = _safe_float(q.get("change_pct"), 0)
+                prev_close = _safe_float(q.get("prev_close"), 0)
+                if prev_close > 0:
+                    daily_pnl += p["quantity"] * prev_close * change_pct / 100.0
+        except Exception:
+            pass
+        available_cash = 800000.0
+        total_assets = available_cash + market_value
+        total_profit = sum(p.get("profit", 0) for p in enriched)
+        total_cost = sum(p.get("cost_price", 0) * p.get("quantity", 0) for p in enriched)
+        drawdown_pct = 0.0
+        if total_cost > 0 and total_profit < 0:
+            drawdown_pct = round(abs(total_profit) / total_cost * 100, 2)
+        daily_pnl_pct = round(daily_pnl / (total_assets - daily_pnl) * 100, 2) if (total_assets - daily_pnl) > 0 else 0.0
+        level = "NORMAL"
+        if drawdown_pct >= 15:
+            level = "CRITICAL"
+        elif drawdown_pct >= 10:
+            level = "DANGER"
+        elif drawdown_pct >= 5:
+            level = "WARNING"
         return RiskResponse(
-            level="NORMAL", total_assets=1000000.0, peak_assets=1020000.0,
-            drawdown_pct=1.96, daily_pnl=15000.0, daily_pnl_pct=1.5,
-            consecutive_stop_losses=0, is_paused=False, pause_until=None,
-            is_emergency_stopped=False, no_new_positions=False,
-            position_reduction=1.0, message="模拟数据 - 风控正常",
+            level=level, total_assets=round(total_assets, 2),
+            peak_assets=round(total_assets, 2),
+            drawdown_pct=drawdown_pct, daily_pnl=round(daily_pnl, 2),
+            daily_pnl_pct=daily_pnl_pct, consecutive_stop_losses=0,
+            is_paused=False, pause_until=None, is_emergency_stopped=False,
+            no_new_positions=False, position_reduction=1.0,
+            message="风控正常" if level == "NORMAL" else f"回撤 {drawdown_pct}%，需关注",
         )
     state = _get_state(request)
     risk_manager = state["risk_manager"]

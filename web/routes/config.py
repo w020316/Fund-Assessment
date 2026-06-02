@@ -91,7 +91,7 @@ async def test_notify():
             if webhook:
                 from src.utils.notify import DingTalkNotifier, LogLevel
                 notifier = DingTalkNotifier(webhook=webhook, secret=secret)
-                notifier.send("测试通知", "这是一条来自 OpenClaw 量化交易系统的测试通知", LogLevel.INFO)
+                notifier.send("测试通知", "这是一条来自 QuantFlow Pro 量化交易系统的测试通知", LogLevel.INFO)
                 return NotifyTestResponse(success=True, message="钉钉通知发送成功")
 
         if wechat_enabled:
@@ -99,7 +99,7 @@ async def test_notify():
             if webhook:
                 from src.utils.notify import WeComNotifier, LogLevel
                 notifier = WeComNotifier(webhook=webhook)
-                notifier.send("测试通知", "这是一条来自 OpenClaw 量化交易系统的测试通知", LogLevel.INFO)
+                notifier.send("测试通知", "这是一条来自 QuantFlow Pro 量化交易系统的测试通知", LogLevel.INFO)
                 return NotifyTestResponse(success=True, message="企业微信通知发送成功")
 
         return NotifyTestResponse(success=False, message="未启用任何通知渠道，请在配置中开启钉钉或企业微信")

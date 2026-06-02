@@ -224,12 +224,39 @@ async def remove_watchlist_by_body(req: RemoveWatchlistBodyRequest):
 @router.get("/capital_flow", response_model=CapitalFlowResponse)
 async def capital_flow(stock_code: str):
     if not _HAS_MONITOR:
+        try:
+            data = ds2.get_capital_flow_detail(stock_code)
+            if data:
+                main_net = _safe_float(data.get("main_net_inflow", 0))
+                main_pct = _safe_float(data.get("main_inflow_pct", 0))
+                large_net = _safe_float(data.get("large_net_inflow", 0))
+                super_large_net = _safe_float(data.get("super_large_net_inflow", 0))
+                medium_net = _safe_float(data.get("medium_net_inflow", 0))
+                small_net = _safe_float(data.get("small_net_inflow", 0))
+                total_amount = abs(large_net) + abs(super_large_net) + abs(medium_net) + abs(small_net)
+                large_ratio = (large_net + super_large_net) / total_amount * 100 if total_amount > 0 else 0
+                medium_ratio = medium_net / total_amount * 100 if total_amount > 0 else 0
+                small_ratio = small_net / total_amount * 100 if total_amount > 0 else 0
+                northbound_change = 0.0
+                try:
+                    nb_data = ds2.get_northbound_flow_realtime()
+                    if nb_data:
+                        total_nb = _safe_float(nb_data.get("total_net_inflow", 0))
+                        northbound_change = total_nb / 1e8 if total_nb != 0 else 0.0
+                except Exception:
+                    pass
+                return CapitalFlowResponse(
+                    main_net_inflow=round(main_net, 0),
+                    large_order_ratio=round(large_ratio, 2),
+                    medium_order_ratio=round(medium_ratio, 2),
+                    small_order_ratio=round(small_ratio, 2),
+                    northbound_change=round(northbound_change, 2),
+                )
+        except Exception:
+            pass
         return CapitalFlowResponse(
-            main_net_inflow=round(random.uniform(-5e8, 5e8), 0),
-            large_order_ratio=round(random.uniform(-10, 10), 2),
-            medium_order_ratio=round(random.uniform(-5, 5), 2),
-            small_order_ratio=round(random.uniform(-3, 3), 2),
-            northbound_change=round(random.uniform(-2, 2), 2),
+            main_net_inflow=0, large_order_ratio=0, medium_order_ratio=0,
+            small_order_ratio=0, northbound_change=0,
         )
     try:
         result = analyze_capital_flow(stock_code)

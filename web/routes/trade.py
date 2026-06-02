@@ -158,7 +158,9 @@ async def orders(request: Request):
     if not _HAS_EXECUTOR:
         return []
     state = _get_state(request)
-    broker = state["broker"]
+    broker = state.get("broker")
+    if broker is None:
+        return []
     order_list = broker.get_orders()
     return [
         OrderResponse(
@@ -176,7 +178,9 @@ async def history(request: Request, symbol: str = "", limit: int = 50):
     if not _HAS_EXECUTOR:
         return []
     state = _get_state(request)
-    executor = state["executor"]
+    executor = state.get("executor")
+    if executor is None:
+        return []
     stock_code = symbol if symbol else None
     records = executor.get_trade_history(symbol=stock_code, limit=limit)
     return [

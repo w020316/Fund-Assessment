@@ -196,34 +196,39 @@ async def fund_history(
     code: str = Query(..., description="基金代码"),
     period: str = Query("1y", description="周期: 1m/3m/6m/1y/3y/all"),
 ):
-    if not _HAS_AKSHARE:
-        return []
-    try:
-        df = ak.fund_em_open_fund_info(code, indicator="单位净值走势")
-        if df is None or df.empty:
-            return []
-        period_days = {"1m": 30, "3m": 90, "6m": 180, "1y": 365, "3y": 1095, "all": 99999}
-        days = period_days.get(period, 365)
-        cutoff = datetime.now() - timedelta(days=days)
-        df["净值日期"] = pd.to_datetime(df["净值日期"], errors="coerce")
-        df = df[df["净值日期"] >= cutoff]
-        result: list[FundHistoryItem] = []
-        prev_nav: Optional[float] = None
-        for _, row in df.iterrows():
-            nav = _safe_float(row.get("单位净值"))
-            acc_nav = _safe_float(row.get("累计净值"), nav)
-            if prev_nav is not None and prev_nav != 0:
-                change_pct = round((nav - prev_nav) / prev_nav * 100, 2)
-            else:
-                change_pct = 0.0
-            result.append(FundHistoryItem(
-                date=_safe_str(row.get("净值日期"))[:10],
-                nav=nav, acc_nav=acc_nav, change_pct=change_pct,
-            ))
-            prev_nav = nav
-        return result
-    except Exception:
-        return []
+    if _HAS_AKSHARE:
+        try:
+            df = ak.fund_em_open_fund_info(code, indicator="单位净值走势")
+            if df is None or df.empty:
+                return _fund_history_tencent_fallback(code, period)
+            period_days = {"1m": 30, "3m": 90, "6m": 180, "1y": 365, "3y": 1095, "all": 99999}
+            days = period_days.get(period, 365)
+            cutoff = datetime.now() - timedelta(days=days)
+            df["净值日期"] = pd.to_datetime(df["净值日期"], errors="coerce")
+            df = df[df["净值日期"] >= cutoff]
+            result: list[FundHistoryItem] = []
+            prev_nav: Optional[float] = None
+            for _, row in df.iterrows():
+                nav = _safe_float(row.get("单位净值"))
+                acc_nav = _safe_float(row.get("累计净值"), nav)
+                if prev_nav is not None and prev_nav != 0:
+                    change_pct = round((nav - prev_nav) / prev_nav * 100, 2)
+                else:
+                    change_pct = 0.0
+                result.append(FundHistoryItem(
+                    date=_safe_str(row.get("净值日期"))[:10],
+                    nav=nav, acc_nav=acc_nav, change_pct=change_pct,
+                ))
+                prev_nav = nav
+            return result
+        except Exception:
+            pass
+    return _fund_history_tencent_fallback(code, period)
+
+
+def _fund_history_tencent_fallback(code: str, period: str) -> list[FundHistoryItem]:
+    data = ds2.get_fund_history_tencent(code, period=period)
+    return [FundHistoryItem(**item) for item in data]
 
 
 @router.get("/index_realtime", response_model=list[IndexRealtimeItem])
@@ -411,10 +416,13 @@ async def shareholder(code: str = Query("", description="股票代码")):
 
 @router.get("/news", response_model=list[NewsItem])
 async def news(
-    code: str = Query(..., description="股票代码"),
+    code: str = Query("", description="股票代码（可选，为空时返回全局新闻）"),
     page: int = Query(1, description="页码"),
     page_size: int = Query(10, description="每页条数"),
 ):
+    if not code:
+        data = ds2.get_global_news()
+        return [NewsItem(**item) for item in data]
     data = ds2.get_stock_news(code, page=page, page_size=page_size)
     return [NewsItem(**item) for item in data]
 

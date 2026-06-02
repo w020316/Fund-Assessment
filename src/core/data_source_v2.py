@@ -1534,6 +1534,65 @@ def get_fund_realtime_tencent(codes: list[str]) -> list[dict]:
         return []
 
 
+def get_fund_history_tencent(code: str, period: str = "1y") -> list[dict]:
+    period_days = {"1m": 30, "3m": 90, "6m": 180, "1y": 365, "3y": 1095, "all": 99999}
+    days = period_days.get(period, 365)
+    end_date = datetime.now().strftime("%Y-%m-%d")
+    start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    try:
+        url = "https://api.fund.eastmoney.com/f10/lsjz"
+        params = {
+            "callback": "jQuery",
+            "fundCode": code,
+            "pageIndex": 1,
+            "pageSize": 30,
+            "startDate": start_date,
+            "endDate": end_date,
+        }
+        resp = _EM_SESSION.get(url, params=params, timeout=10, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://fund.eastmoney.com/",
+        })
+        text = resp.text
+        json_str = re.sub(r"^jQuery\(", "", text).rstrip(")")
+        import json
+        data = json.loads(json_str)
+        items = data.get("Data", {}).get("LSJZList", [])
+        result: list[dict] = []
+        prev_nav: Optional[float] = None
+        for item in items:
+            nav = _safe_float(item.get("DWJZ"))
+            acc_nav = _safe_float(item.get("LJJZ"), nav)
+            date_str = _safe_str(item.get("FSRQ"))[:10]
+            change_pct = _safe_float(item.get("JZZZL"))
+            if change_pct == 0 and prev_nav is not None and prev_nav != 0:
+                change_pct = round((nav - prev_nav) / prev_nav * 100, 2)
+            result.append({
+                "date": date_str,
+                "nav": nav,
+                "acc_nav": acc_nav,
+                "change_pct": change_pct,
+            })
+            prev_nav = nav
+        if result:
+            return result
+    except Exception as e:
+        logger.warning(f"get_fund_history_tencent eastmoney failed: {e}")
+    try:
+        data = get_fund_realtime_tencent([code])
+        if data:
+            item = data[0]
+            return [{
+                "date": _safe_str(item.get("update_time", ""))[:10],
+                "nav": _safe_float(item.get("nav", 0)),
+                "acc_nav": _safe_float(item.get("nav", 0)),
+                "change_pct": _safe_float(item.get("change_pct", 0)),
+            }]
+    except Exception as e:
+        logger.warning(f"get_fund_history_tencent tencent failed: {e}")
+    return []
+
+
 def get_northbound_flow_realtime() -> dict:
     try:
         result = get_northbound_flow()
