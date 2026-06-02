@@ -1,23 +1,21 @@
 from __future__ import annotations
 
 import math
-import random
 from datetime import datetime, timedelta
 from typing import Optional
 
+try:
+    import akshare as ak
+    _HAS_AKSHARE = True
+except ImportError:
+    _HAS_AKSHARE = False
+import pandas as pd
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from src.core import data_source_v2 as ds2
 
 router = APIRouter()
-
-try:
-    import akshare as ak
-    import pandas as pd
-    _HAS_AKSHARE = True
-except ImportError:
-    _HAS_AKSHARE = False
 
 
 class StockRealtimeItem(BaseModel):
@@ -113,143 +111,31 @@ def _safe_str(val: object, default: str = "") -> str:
     return str(val)
 
 
-def _mock_stock_realtime(codes: str) -> list[StockRealtimeItem]:
-    code_list = [c.strip() for c in codes.split(",") if c.strip()]
-    names = {"000001": "平安银行", "600519": "贵州茅台", "000858": "五粮液",
-             "601318": "中国平安", "000333": "美的集团", "600036": "招商银行",
-             "002714": "牧原股份", "601012": "隆基绿能", "300750": "宁德时代",
-             "002594": "比亚迪"}
-    result: list[StockRealtimeItem] = []
-    for code in code_list:
-        name = names.get(code, f"股票{code}")
-        base_price = random.uniform(10, 200)
-        change_pct = random.uniform(-5, 5)
-        price = round(base_price * (1 + change_pct / 100), 2)
-        change = round(base_price * change_pct / 100, 2)
-        result.append(StockRealtimeItem(
-            code=code, name=name, price=price, change=change,
-            change_pct=round(change_pct, 2),
-            volume=random.uniform(100000, 50000000),
-            amount=random.uniform(10000000, 500000000),
-            high=round(price * 1.03, 2), low=round(price * 0.97, 2),
-            open=round(price * random.uniform(0.98, 1.02), 2),
-            prev_close=round(base_price, 2),
-        ))
-    return result
-
-
-def _mock_kline(code: str, count: int) -> list[KlineItem]:
-    result: list[KlineItem] = []
-    base = random.uniform(10, 100)
-    for i in range(count):
-        d = (datetime.now() - timedelta(days=count - i))
-        if d.weekday() >= 5:
-            continue
-        o = round(base * random.uniform(0.97, 1.03), 2)
-        c = round(base * random.uniform(0.97, 1.03), 2)
-        h = round(max(o, c) * random.uniform(1.0, 1.03), 2)
-        l = round(min(o, c) * random.uniform(0.97, 1.0), 2)
-        result.append(KlineItem(
-            date=d.strftime("%Y-%m-%d"), open=o, high=h, low=l, close=c,
-            volume=random.uniform(50000, 5000000),
-            amount=random.uniform(5000000, 500000000),
-        ))
-        base = c
-    return result
-
-
-def _mock_index_realtime() -> list[IndexRealtimeItem]:
-    indices = [
-        ("000001", "上证指数", 3350.0), ("399001", "深证成指", 10800.0),
-        ("399006", "创业板指", 2150.0),
-    ]
-    result: list[IndexRealtimeItem] = []
-    for code, name, base in indices:
-        change_pct = random.uniform(-2, 2)
-        price = round(base * (1 + change_pct / 100), 2)
-        change = round(base * change_pct / 100, 2)
-        result.append(IndexRealtimeItem(
-            code=code, name=name, price=price, change=change,
-            change_pct=round(change_pct, 2),
-            volume=random.uniform(1e8, 5e8),
-            amount=random.uniform(3e11, 6e11),
-        ))
-    return result
-
-
-def _mock_hot_stocks() -> HotStocksResponse:
-    stocks = [
-        ("000001", "平安银行"), ("600519", "贵州茅台"), ("000858", "五粮液"),
-        ("601318", "中国平安"), ("000333", "美的集团"), ("600036", "招商银行"),
-        ("002714", "牧原股份"), ("601012", "隆基绿能"), ("300750", "宁德时代"),
-        ("002594", "比亚迪"), ("600900", "长江电力"), ("601899", "紫金矿业"),
-    ]
-    gainers, losers, volume_list = [], [], []
-    for code, name in stocks[:10]:
-        pct = random.uniform(3, 10)
-        price = round(random.uniform(10, 200), 2)
-        gainers.append(HotStocksItem(code=code, name=name, price=price,
-                                     change_pct=round(pct, 2),
-                                     volume=random.uniform(1e6, 1e7),
-                                     amount=random.uniform(1e8, 1e9)))
-    for code, name in stocks[2:12]:
-        pct = random.uniform(-10, -3)
-        price = round(random.uniform(10, 200), 2)
-        losers.append(HotStocksItem(code=code, name=name, price=price,
-                                    change_pct=round(pct, 2),
-                                    volume=random.uniform(1e6, 1e7),
-                                    amount=random.uniform(1e8, 1e9)))
-    for code, name in stocks[:10]:
-        price = round(random.uniform(10, 200), 2)
-        volume_list.append(HotStocksItem(code=code, name=name, price=price,
-                                         change_pct=round(random.uniform(-3, 3), 2),
-                                         volume=random.uniform(5e7, 2e8),
-                                         amount=random.uniform(5e9, 2e10)))
-    return HotStocksResponse(top_gainers=gainers, top_losers=losers, top_volume=volume_list)
-
-
-def _mock_sector_flow() -> list[SectorFlowItem]:
-    sectors = ["半导体", "新能源", "医药生物", "消费电子", "汽车", "银行", "房地产",
-               "计算机", "通信", "传媒", "食品饮料", "电力设备", "军工", "化工"]
-    result: list[SectorFlowItem] = []
-    for s in sectors:
-        result.append(SectorFlowItem(
-            sector=s,
-            change_pct=round(random.uniform(-3, 3), 2),
-            main_net_inflow=round(random.uniform(-5e9, 5e9), 0),
-            large_order_ratio=round(random.uniform(-5, 5), 2),
-        ))
-    return result
-
-
 @router.get("/stock_realtime", response_model=list[StockRealtimeItem])
 async def stock_realtime(codes: str = Query(..., description="股票代码，逗号分隔")):
-    if not _HAS_AKSHARE:
-        return _mock_stock_realtime(codes)
-    try:
-        df = ak.stock_zh_a_spot_em()
-        code_list = [c.strip() for c in codes.split(",") if c.strip()]
-        df_filtered = df[df["代码"].isin(code_list)]
-        result: list[StockRealtimeItem] = []
-        for _, row in df_filtered.iterrows():
-            price = _safe_float(row.get("最新价"))
-            prev_close = _safe_float(row.get("昨收"))
-            change = _safe_float(row.get("涨跌额"))
-            change_pct = _safe_float(row.get("涨跌幅"))
-            result.append(StockRealtimeItem(
-                code=_safe_str(row.get("代码")),
-                name=_safe_str(row.get("名称")),
-                price=price, change=change, change_pct=change_pct,
-                volume=_safe_float(row.get("成交量")),
-                amount=_safe_float(row.get("成交额")),
-                high=_safe_float(row.get("最高")),
-                low=_safe_float(row.get("最低")),
-                open=_safe_float(row.get("今开")),
-                prev_close=prev_close,
-            ))
-        return result
-    except Exception:
-        return _mock_stock_realtime(codes)
+    code_list = [c.strip() for c in codes.split(",") if c.strip()]
+    data = ds2.get_realtime_quote_tencent(code_list)
+    result: list[StockRealtimeItem] = []
+    for item in data:
+        price = _safe_float(item.get("price"))
+        prev_close = _safe_float(item.get("prev_close"))
+        change = _safe_float(item.get("change"))
+        if change == 0.0 and price != 0.0 and prev_close != 0.0:
+            change = round(price - prev_close, 2)
+        result.append(StockRealtimeItem(
+            code=_safe_str(item.get("code")),
+            name=_safe_str(item.get("name")),
+            price=price,
+            change=change,
+            change_pct=_safe_float(item.get("change_pct")),
+            volume=_safe_float(item.get("volume")),
+            amount=_safe_float(item.get("amount")),
+            high=_safe_float(item.get("high")),
+            low=_safe_float(item.get("low")),
+            open=_safe_float(item.get("open")),
+            prev_close=prev_close,
+        ))
+    return result
 
 
 @router.get("/stock_kline", response_model=list[KlineItem])
@@ -258,69 +144,51 @@ async def stock_kline(
     period: str = Query("daily", description="周期: daily/weekly/monthly"),
     count: int = Query(120, description="返回条数"),
 ):
-    if not _HAS_AKSHARE:
-        return _mock_kline(code, count)
-    try:
-        end_date = datetime.now().strftime("%Y%m%d")
-        start_date = (datetime.now() - timedelta(days=count * 2)).strftime("%Y%m%d")
-        period_map = {"daily": "daily", "weekly": "weekly", "monthly": "monthly"}
-        ak_period = period_map.get(period, "daily")
-        df = ak.stock_zh_a_hist(
-            symbol=code, period=ak_period,
-            start_date=start_date, end_date=end_date, adjust="qfq"
-        )
-        df = df.tail(count)
-        result: list[KlineItem] = []
-        for _, row in df.iterrows():
-            result.append(KlineItem(
-                date=_safe_str(row.get("日期")),
-                open=_safe_float(row.get("开盘")),
-                high=_safe_float(row.get("最高")),
-                low=_safe_float(row.get("最低")),
-                close=_safe_float(row.get("收盘")),
-                volume=_safe_float(row.get("成交量")),
-                amount=_safe_float(row.get("成交额")),
-            ))
-        return result
-    except Exception:
-        return _mock_kline(code, count)
+    data = ds2.get_kline_mootdx(code, period=period, count=count)
+    result: list[KlineItem] = []
+    for item in data:
+        result.append(KlineItem(
+            date=_safe_str(item.get("date")),
+            open=_safe_float(item.get("open")),
+            high=_safe_float(item.get("high")),
+            low=_safe_float(item.get("low")),
+            close=_safe_float(item.get("close")),
+            volume=_safe_float(item.get("volume")),
+            amount=_safe_float(item.get("amount")),
+        ))
+    return result
 
 
 @router.get("/fund_realtime", response_model=list[FundRealtimeItem])
 async def fund_realtime(codes: str = Query(..., description="基金代码，逗号分隔")):
     code_list = [c.strip() for c in codes.split(",") if c.strip()]
-    if not _HAS_AKSHARE:
+    if _HAS_AKSHARE:
         result: list[FundRealtimeItem] = []
-        for fc in code_list:
-            nav = round(random.uniform(0.5, 5.0), 4)
-            change_pct = round(random.uniform(-3, 3), 2)
-            result.append(FundRealtimeItem(
-                code=fc, name=f"基金{fc}", nav=nav, estimated_nav=nav,
-                change=round(nav * change_pct / 100, 4),
-                change_pct=change_pct,
-                update_time=datetime.now().strftime("%Y-%m-%d"),
-            ))
-        return result
-    result: list[FundRealtimeItem] = []
-    for fund_code in code_list:
         try:
-            df = ak.fund_em_open_fund_info(fund_code, indicator="单位净值走势")
-            if df is None or df.empty:
-                continue
-            latest = df.iloc[-1]
-            prev = df.iloc[-2] if len(df) >= 2 else latest
-            nav = _safe_float(latest.get("单位净值"))
-            prev_nav = _safe_float(prev.get("单位净值"))
-            change = nav - prev_nav if prev_nav != 0 else 0.0
-            change_pct = (change / prev_nav * 100) if prev_nav != 0 else 0.0
-            result.append(FundRealtimeItem(
-                code=fund_code, name="", nav=nav, estimated_nav=nav,
-                change=round(change, 4), change_pct=round(change_pct, 2),
-                update_time=_safe_str(latest.get("净值日期")),
-            ))
+            for fund_code in code_list:
+                try:
+                    df = ak.fund_em_open_fund_info(fund_code, indicator="单位净值走势")
+                    if df is None or df.empty:
+                        continue
+                    latest = df.iloc[-1]
+                    prev = df.iloc[-2] if len(df) >= 2 else latest
+                    nav = _safe_float(latest.get("单位净值"))
+                    prev_nav = _safe_float(prev.get("单位净值"))
+                    change = nav - prev_nav if prev_nav != 0 else 0.0
+                    change_pct = (change / prev_nav * 100) if prev_nav != 0 else 0.0
+                    result.append(FundRealtimeItem(
+                        code=fund_code, name="", nav=nav, estimated_nav=nav,
+                        change=round(change, 4), change_pct=round(change_pct, 2),
+                        update_time=_safe_str(latest.get("净值日期")),
+                    ))
+                except Exception:
+                    continue
         except Exception:
-            continue
-    return result
+            pass
+        if result:
+            return result
+    data = ds2.get_fund_realtime_tencent(code_list)
+    return [FundRealtimeItem(**item) for item in data]
 
 
 @router.get("/fund_history", response_model=list[FundHistoryItem])
@@ -329,22 +197,7 @@ async def fund_history(
     period: str = Query("1y", description="周期: 1m/3m/6m/1y/3y/all"),
 ):
     if not _HAS_AKSHARE:
-        period_days = {"1m": 30, "3m": 90, "6m": 180, "1y": 365, "3y": 1095, "all": 99999}
-        days = period_days.get(period, 365)
-        result: list[FundHistoryItem] = []
-        nav = random.uniform(0.8, 3.0)
-        for i in range(min(days, 365)):
-            d = (datetime.now() - timedelta(days=min(days, 365) - i))
-            if d.weekday() >= 5:
-                continue
-            pct = random.uniform(-2, 2)
-            nav = round(nav * (1 + pct / 100), 4)
-            acc_nav = round(nav * 1.3, 4)
-            result.append(FundHistoryItem(
-                date=d.strftime("%Y-%m-%d"), nav=nav, acc_nav=acc_nav,
-                change_pct=round(pct, 2),
-            ))
-        return result
+        return []
     try:
         df = ak.fund_em_open_fund_info(code, indicator="单位净值走势")
         if df is None or df.empty:
@@ -375,78 +228,56 @@ async def fund_history(
 
 @router.get("/index_realtime", response_model=list[IndexRealtimeItem])
 async def index_realtime():
-    if not _HAS_AKSHARE:
-        return _mock_index_realtime()
-    try:
-        df = ak.stock_zh_index_spot_em(symbol="上证系列指数")
-        df_sz = ak.stock_zh_index_spot_em(symbol="深证系列指数")
-        df_cy = ak.stock_zh_index_spot_em(symbol="创业板指数")
-        target_codes = {"000001", "399001", "399006"}
-        combined = pd.concat([df, df_sz, df_cy], ignore_index=True)
-        combined = combined[combined["代码"].isin(target_codes)]
-        result: list[IndexRealtimeItem] = []
-        for _, row in combined.iterrows():
-            result.append(IndexRealtimeItem(
-                code=_safe_str(row.get("代码")),
-                name=_safe_str(row.get("名称")),
-                price=_safe_float(row.get("最新价")),
-                change=_safe_float(row.get("涨跌额")),
-                change_pct=_safe_float(row.get("涨跌幅")),
-                volume=_safe_float(row.get("成交量")),
-                amount=_safe_float(row.get("成交额")),
-            ))
-        return result
-    except Exception:
-        return _mock_index_realtime()
+    data = ds2.get_index_realtime()
+    result: list[IndexRealtimeItem] = []
+    for item in data:
+        result.append(IndexRealtimeItem(
+            code=_safe_str(item.get("code")),
+            name=_safe_str(item.get("name")),
+            price=_safe_float(item.get("price")),
+            change=_safe_float(item.get("change")),
+            change_pct=_safe_float(item.get("change_pct")),
+            volume=_safe_float(item.get("volume")),
+            amount=_safe_float(item.get("amount")),
+        ))
+    return result
 
 
 @router.get("/hot_stocks", response_model=HotStocksResponse)
 async def hot_stocks():
-    if not _HAS_AKSHARE:
-        return _mock_hot_stocks()
-    try:
-        df = ak.stock_zh_a_spot_em()
-        df = df.dropna(subset=["涨跌幅", "成交额"])
-        top_gainers = df.nlargest(10, "涨跌幅")
-        top_losers = df.nsmallest(10, "涨跌幅")
-        top_volume = df.nlargest(10, "成交额")
+    top_gainers_data = ds2.get_stock_ranking_em(sort_field="f3", sort_order=0, count=10)
+    top_losers_data = ds2.get_stock_ranking_em(sort_field="f3", sort_order=1, count=10)
+    top_volume_data = ds2.get_stock_ranking_em(sort_field="f6", sort_order=0, count=10)
 
-        def _to_item(row) -> HotStocksItem:
-            return HotStocksItem(
-                code=_safe_str(row.get("代码")),
-                name=_safe_str(row.get("名称")),
-                price=_safe_float(row.get("最新价")),
-                change_pct=_safe_float(row.get("涨跌幅")),
-                volume=_safe_float(row.get("成交量")),
-                amount=_safe_float(row.get("成交额")),
-            )
-
-        return HotStocksResponse(
-            top_gainers=[_to_item(r) for _, r in top_gainers.iterrows()],
-            top_losers=[_to_item(r) for _, r in top_losers.iterrows()],
-            top_volume=[_to_item(r) for _, r in top_volume.iterrows()],
+    def _to_item(item: dict) -> HotStocksItem:
+        return HotStocksItem(
+            code=_safe_str(item.get("code")),
+            name=_safe_str(item.get("name")),
+            price=_safe_float(item.get("price")),
+            change_pct=_safe_float(item.get("change_pct")),
+            volume=_safe_float(item.get("volume")),
+            amount=_safe_float(item.get("amount")),
         )
-    except Exception:
-        return _mock_hot_stocks()
+
+    return HotStocksResponse(
+        top_gainers=[_to_item(i) for i in top_gainers_data],
+        top_losers=[_to_item(i) for i in top_losers_data],
+        top_volume=[_to_item(i) for i in top_volume_data],
+    )
 
 
 @router.get("/sector_flow", response_model=list[SectorFlowItem])
 async def sector_flow():
-    if not _HAS_AKSHARE:
-        return _mock_sector_flow()
-    try:
-        df = ak.stock_sector_fund_flow_rank(indicator="今日")
-        result: list[SectorFlowItem] = []
-        for _, row in df.iterrows():
-            result.append(SectorFlowItem(
-                sector=_safe_str(row.get("名称")),
-                change_pct=_safe_float(row.get("涨跌幅")),
-                main_net_inflow=_safe_float(row.get("主力净流入-净额")),
-                large_order_ratio=_safe_float(row.get("主力净流入-净占比")),
-            ))
-        return result
-    except Exception:
-        return _mock_sector_flow()
+    data = ds2.get_sector_ranking()
+    result: list[SectorFlowItem] = []
+    for item in data:
+        result.append(SectorFlowItem(
+            sector=_safe_str(item.get("name")),
+            change_pct=_safe_float(item.get("change_pct")),
+            main_net_inflow=_safe_float(item.get("main_net_inflow")),
+            large_order_ratio=_safe_float(item.get("main_inflow_pct")),
+        ))
+    return result
 
 
 class ResearchReportItem(BaseModel):
@@ -536,7 +367,7 @@ class SectorRankingItem(BaseModel):
 
 @router.get("/research_reports", response_model=list[ResearchReportItem])
 async def research_reports(
-    code: str = Query(..., description="股票代码"),
+    code: str = Query("", description="股票代码（可选，为空时返回最新研报）"),
     page: int = Query(1, description="页码"),
     page_size: int = Query(10, description="每页条数"),
 ):
@@ -591,6 +422,9 @@ async def global_news():
 @router.get("/hot_stocks_signal", response_model=list[HotStockSignalItem])
 async def hot_stocks_signal():
     data = ds2.get_hot_stocks_ths()
+    if data:
+        return [HotStockSignalItem(**item) for item in data]
+    data = ds2.get_hot_stocks_signal_fallback()
     return [HotStockSignalItem(**item) for item in data]
 
 
@@ -598,3 +432,149 @@ async def hot_stocks_signal():
 async def sector_ranking():
     data = ds2.get_sector_ranking()
     return [SectorRankingItem(**item) for item in data]
+
+
+class HeatmapItem(BaseModel):
+    name: str
+    change_pct: float
+    color: str
+
+
+class SearchResultItem(BaseModel):
+    code: str
+    name: str
+    price: float
+    change_pct: float
+
+
+class MarketStatusResponse(BaseModel):
+    is_open: bool
+    session: str
+    next_open_time: str
+    current_time: str
+
+
+class StockDetailResponse(BaseModel):
+    code: str
+    name: str
+    quote: dict
+    financial: dict
+    capital_flow: dict
+    kline_summary: dict
+
+
+@router.get("/heatmap", response_model=list[HeatmapItem])
+async def market_heatmap():
+    try:
+        data = ds2.get_sector_ranking()
+        result: list[HeatmapItem] = []
+        for item in data:
+            change_pct = _safe_float(item.get("change_pct"))
+            if change_pct > 0:
+                intensity = min(int(change_pct * 25.5), 255)
+                color = f"rgb({intensity},0,0)"
+            elif change_pct < 0:
+                intensity = min(int(abs(change_pct) * 25.5), 255)
+                color = f"rgb(0,{intensity},0)"
+            else:
+                color = "rgb(128,128,128)"
+            result.append(HeatmapItem(
+                name=_safe_str(item.get("name")),
+                change_pct=change_pct,
+                color=color,
+            ))
+        return result
+    except Exception:
+        return []
+
+
+@router.get("/search", response_model=list[SearchResultItem])
+async def stock_search(q: str = Query(..., description="搜索关键词（股票代码或名称）")):
+    try:
+        data = ds2.search_stock(q)
+        result: list[SearchResultItem] = []
+        for item in data:
+            result.append(SearchResultItem(
+                code=_safe_str(item.get("code")),
+                name=_safe_str(item.get("name")),
+                price=_safe_float(item.get("price")),
+                change_pct=_safe_float(item.get("change_pct")),
+            ))
+        return result
+    except Exception:
+        return []
+
+
+@router.get("/status", response_model=MarketStatusResponse)
+async def market_status():
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo("Asia/Shanghai")
+    now = datetime.now(tz)
+    current_time = now.strftime("%Y-%m-%d %H:%M:%S")
+    weekday = now.weekday()
+    time_val = now.hour * 100 + now.minute
+
+    is_open = False
+    session = "closed"
+
+    if weekday < 5:
+        if 930 <= time_val <= 1130:
+            is_open = True
+            session = "morning"
+        elif 1300 <= time_val <= 1500:
+            is_open = True
+            session = "afternoon"
+        elif 1130 < time_val < 1300:
+            session = "lunch_break"
+        else:
+            session = "closed"
+    else:
+        session = "weekend"
+
+    next_open_time = ""
+    if is_open:
+        next_open_time = ""
+    elif session == "lunch_break":
+        next_open_time = now.replace(hour=13, minute=0, second=0, microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
+    elif session == "closed" and weekday < 5:
+        if time_val < 930:
+            next_open_time = now.replace(hour=9, minute=30, second=0, microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            from datetime import timedelta as _td
+            days_ahead = 1
+            next_day = now + _td(days=days_ahead)
+            while next_day.weekday() >= 5:
+                next_day += _td(days=1)
+            next_open_time = next_day.replace(hour=9, minute=30, second=0, microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        from datetime import timedelta as _td
+        days_ahead = (7 - weekday) % 7
+        if days_ahead == 0:
+            days_ahead = 7
+        next_day = now + _td(days=days_ahead)
+        next_open_time = next_day.replace(hour=9, minute=30, second=0, microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
+
+    return MarketStatusResponse(
+        is_open=is_open,
+        session=session,
+        next_open_time=next_open_time,
+        current_time=current_time,
+    )
+
+
+@router.get("/stock_detail", response_model=StockDetailResponse)
+async def stock_detail(code: str = Query(..., description="股票代码")):
+    try:
+        data = ds2.get_stock_detail(code)
+        return StockDetailResponse(
+            code=_safe_str(data.get("code")),
+            name=_safe_str(data.get("name")),
+            quote=data.get("quote", {}),
+            financial=data.get("financial", {}),
+            capital_flow=data.get("capital_flow", {}),
+            kline_summary=data.get("kline_summary", {}),
+        )
+    except Exception:
+        return StockDetailResponse(
+            code=code, name="", quote={}, financial={}, capital_flow={}, kline_summary={},
+        )

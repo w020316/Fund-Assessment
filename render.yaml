@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: fund-assessment
+    runtime: python
+    buildCommand: pip install -r requirements-minimal.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+    startCommand: uvicorn web.api:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHONPATH
+        value: /opt/render/project/src
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: HOST
+        value: "0.0.0.0"
+      - key: TTAPI_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: TINYFISH_API_KEY
+        sync: false
+      - key: TUSHARE_TOKEN
+        sync: false

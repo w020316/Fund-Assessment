@@ -60,7 +60,7 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(
-    title="OpenClaw 量化交易系统",
+    title="QuantFlow Pro 量化交易系统",
     version="1.0.0",
     lifespan=lifespan,
 )

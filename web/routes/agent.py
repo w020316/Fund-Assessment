@@ -1,24 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import asdict
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
-from src.agents.base import AgentOpinion, DebateResult, TradingDecision
-from src.agents.trading_manager import TradingManager
+from src.core.ai_service import analyze_stock, quick_analysis as ai_quick_analysis, multi_analyze as ai_multi_analyze, analyze_portfolio as ai_analyze_portfolio, get_market_outlook as ai_get_market_outlook
 
 router = APIRouter()
 
-_manager: TradingManager | None = None
-
-
-def _get_manager() -> TradingManager:
-    global _manager
-    if _manager is None:
-        _manager = TradingManager()
-    return _manager
+_decision_history: list[dict[str, Any]] = []
 
 
 class AnalyzeRequest(BaseModel):
@@ -29,85 +21,77 @@ class QuickAnalysisRequest(BaseModel):
     stock_code: str
 
 
-def _opinion_to_dict(op: AgentOpinion) -> dict[str, Any]:
-    return {
-        "role": op.role.value,
-        "stock_code": op.stock_code,
-        "signal": op.signal,
-        "confidence": op.confidence,
-        "reasoning": op.reasoning,
-        "key_points": op.key_points,
-        "score": op.score,
-        "timestamp": op.timestamp,
-    }
+class MultiAnalyzeRequest(BaseModel):
+    stock_code: str
+    mode: str = "deep"
 
 
-def _debate_to_dict(dr: DebateResult) -> dict[str, Any]:
-    return {
-        "topic": dr.topic,
-        "bull_arguments": dr.bull_arguments,
-        "bear_arguments": dr.bear_arguments,
-        "bull_score": dr.bull_score,
-        "bear_score": dr.bear_score,
-        "consensus": dr.consensus,
-        "confidence": dr.confidence,
-    }
-
-
-def _decision_to_dict(d: TradingDecision) -> dict[str, Any]:
-    return {
-        "stock_code": d.stock_code,
-        "action": d.action,
-        "position_size": d.position_size,
-        "confidence": d.confidence,
-        "reasoning": d.reasoning,
-        "agent_opinions": [_opinion_to_dict(op) for op in d.agent_opinions],
-        "debate_result": _debate_to_dict(d.debate_result) if d.debate_result else None,
-        "risk_assessment": d.risk_assessment,
-        "timestamp": d.timestamp,
-    }
+class PortfolioRequest(BaseModel):
+    positions: list[dict]
 
 
 @router.post("/analyze")
 async def analyze(req: AnalyzeRequest) -> dict[str, Any]:
-    manager = _get_manager()
-    decision = manager.run_analysis(req.stock_code)
-    return _decision_to_dict(decision)
+    result = await asyncio.to_thread(analyze_stock, req.stock_code, "deep")
+    _decision_history.append(result)
+    if len(_decision_history) > 100:
+        _decision_history.pop(0)
+    return result
 
 
 @router.get("/opinions")
 async def get_opinions(code: str = Query(..., description="股票代码")) -> dict[str, Any]:
-    manager = _get_manager()
-    opinions = manager.quick_analysis(code)
+    result = await asyncio.to_thread(ai_quick_analysis, code)
     return {
         "stock_code": code,
-        "opinions": [_opinion_to_dict(op) for op in opinions],
+        "opinions": result.get("agent_opinions", []),
     }
 
 
 @router.get("/debate")
 async def get_debate(code: str = Query(..., description="股票代码")) -> dict[str, Any]:
-    manager = _get_manager()
-    opinions = manager.quick_analysis(code)
-    debate_result = manager.research_team.debate(opinions, rounds=2)
-    return _debate_to_dict(debate_result)
+    result = await asyncio.to_thread(analyze_stock, code, "quick")
+    return result.get("debate_result", {
+        "topic": f"{code}多空辩论",
+        "bull_arguments": [],
+        "bear_arguments": [],
+        "bull_score": 50,
+        "bear_score": 50,
+        "consensus": "NEUTRAL",
+        "confidence": 0.1,
+    })
 
 
 @router.get("/history")
 async def get_history() -> dict[str, Any]:
-    manager = _get_manager()
-    history = manager.get_decision_history()
     return {
-        "count": len(history),
-        "history": [_decision_to_dict(d) for d in history],
+        "count": len(_decision_history),
+        "history": _decision_history[-20:],
     }
 
 
 @router.post("/quick_analysis")
 async def quick_analysis(req: QuickAnalysisRequest) -> dict[str, Any]:
-    manager = _get_manager()
-    opinions = manager.quick_analysis(req.stock_code)
-    return {
-        "stock_code": req.stock_code,
-        "opinions": [_opinion_to_dict(op) for op in opinions],
-    }
+    result = await asyncio.to_thread(ai_quick_analysis, req.stock_code)
+    return result
+
+
+@router.post("/multi_analyze")
+async def multi_analyze(req: MultiAnalyzeRequest) -> dict[str, Any]:
+    result = await asyncio.to_thread(ai_multi_analyze, req.stock_code, req.mode)
+    _decision_history.append(result)
+    if len(_decision_history) > 100:
+        _decision_history.pop(0)
+    return result
+
+
+@router.post("/portfolio_advice")
+async def portfolio_advice(req: PortfolioRequest) -> dict[str, Any]:
+    result = await asyncio.to_thread(ai_analyze_portfolio, req.positions)
+    return result
+
+
+@router.get("/market_outlook")
+async def market_outlook() -> dict[str, Any]:
+    result = await asyncio.to_thread(ai_get_market_outlook)
+    return result

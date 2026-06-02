@@ -1,6 +1,13 @@
 __pycache__/
 *.pyc
 .env
+.venv/
+pylibs/
+__pypackage__/
+.python-version
+*.egg-info/
+dist/
+build/
 data/cache/
 data/logs/
 *.db

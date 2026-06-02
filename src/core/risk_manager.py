@@ -162,7 +162,7 @@ class RiskManager:
                     (id, total_assets, peak_assets, daily_start_assets, daily_pnl,
                      consecutive_stop_losses, is_paused, pause_until, is_emergency_stopped,
                      no_new_positions, position_reduction, last_trade_date, updated_at)
-                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         1,

@@ -6,6 +6,8 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from src.core import data_source_v2 as ds2
+
 router = APIRouter()
 
 _HAS_STRATEGIES = False
@@ -91,19 +93,119 @@ class StrategyInfo(BaseModel):
 
 
 def _mock_analysis(stock_code: str, strategy_type: str) -> dict[str, Any]:
+    try:
+        quote = ds2.get_realtime_quote_tencent([stock_code])
+        financial = ds2.get_financial_snapshot(stock_code)
+        kline = ds2.get_kline_mootdx(stock_code, count=30)
+        flow = ds2.get_capital_flow_detail(stock_code)
+
+        tech_score = 50.0
+        if kline and len(kline) >= 5:
+            recent = kline[-5:]
+            closes = [d.get("close", 0) for d in recent]
+            if closes[0] > 0:
+                trend = (closes[-1] - closes[0]) / closes[0] * 100
+                tech_score = max(10, min(90, 50 + trend * 5))
+
+        fund_score = 50.0
+        if financial:
+            roe = financial.get("roe", 0)
+            pe = financial.get("pe_ttm", 0)
+            if pe > 0:
+                fund_score = max(10, min(90, 50 + roe * 2 - (pe - 20) * 0.5))
+
+        capital_score = 50.0
+        if flow:
+            main_pct = flow.get("main_inflow_pct", 0)
+            capital_score = max(10, min(90, 50 + main_pct * 3))
+
+        news_score = 50.0
+        sentiment_score = 50.0
+
+        if quote:
+            change_pct = quote[0].get("change_pct", 0)
+            sentiment_score = max(10, min(90, 50 + change_pct * 3))
+
+        scores = {
+            "technical": round(tech_score, 1),
+            "capital": round(capital_score, 1),
+            "fundamental": round(fund_score, 1),
+            "news": round(news_score, 1),
+            "sentiment": round(sentiment_score, 1),
+        }
+        total = sum(scores.values()) / len(scores)
+
+        if total >= 70:
+            signal = "BUY"
+        elif total >= 55:
+            signal = "WATCH"
+        elif total >= 40:
+            signal = "HOLD"
+        else:
+            signal = "SELL"
+
+        name = quote[0].get("name", stock_code) if quote else stock_code
+        price = quote[0].get("price", 0) if quote else 0
+
+        return {
+            "stock_code": stock_code,
+            "strategy_type": strategy_type,
+            "scores": scores,
+            "total_score": round(total, 1),
+            "signal": signal,
+            "recommendation": f"{name}({stock_code}) 当前价{price}，综合评分{total:.1f}，信号：{signal}",
+        }
+    except Exception as e:
+        return {
+            "stock_code": stock_code,
+            "strategy_type": strategy_type,
+            "scores": {
+                "technical": round(random.uniform(40, 60), 1),
+                "capital": round(random.uniform(40, 60), 1),
+                "fundamental": round(random.uniform(40, 60), 1),
+                "news": round(random.uniform(40, 60), 1),
+                "sentiment": round(random.uniform(40, 60), 1),
+            },
+            "total_score": round(random.uniform(40, 60), 1),
+            "signal": "HOLD",
+            "recommendation": f"数据获取受限({str(e)[:50]})，建议谨慎操作",
+        }
+
+
+def _normalize_analysis(result: dict) -> dict:
+    if "scores" in result and isinstance(result.get("scores"), dict):
+        return result
+    scores = {}
+    signal = "HOLD"
+    recommendation = ""
+    total = result.get("composite_score", 50)
+    fund = result.get("fundamental", {})
+    tech = result.get("technical", {})
+    ind = result.get("industry", {})
+    scores["fundamental"] = fund.get("score", 50) if isinstance(fund, dict) else 50
+    scores["technical"] = tech.get("score", 50) if isinstance(tech, dict) else 50
+    scores["capital"] = ind.get("score", 50) if isinstance(ind, dict) else 50
+    scores["news"] = 50.0
+    scores["sentiment"] = 50.0
+    if total >= 70:
+        signal = "BUY"
+    elif total >= 55:
+        signal = "WATCH"
+    elif total < 40:
+        signal = "SELL"
+    parts = []
+    if isinstance(fund, dict) and fund.get("roe"):
+        parts.append(f"ROE={fund['roe']:.1f}%")
+    if isinstance(tech, dict) and tech.get("trend"):
+        parts.append(f"趋势={tech['trend']}")
+    recommendation = f"综合评分{total:.1f}，信号：{signal}" + (f"，{','.join(parts)}" if parts else "")
     return {
-        "stock_code": stock_code,
-        "strategy_type": strategy_type,
-        "scores": {
-            "technical": round(random.uniform(30, 90), 1),
-            "capital": round(random.uniform(30, 90), 1),
-            "fundamental": round(random.uniform(30, 90), 1),
-            "news": round(random.uniform(30, 90), 1),
-            "sentiment": round(random.uniform(30, 90), 1),
-        },
-        "total_score": round(random.uniform(30, 90), 1),
-        "signal": random.choice(["STRONG_BUY", "BUY", "WATCH", "HOLD", "SELL"]),
-        "recommendation": "模拟数据 - 请安装 akshare 后获取真实分析",
+        "stock_code": result.get("stock_code", ""),
+        "strategy_type": result.get("strategy_type", ""),
+        "scores": scores,
+        "total_score": total,
+        "signal": signal,
+        "recommendation": recommendation,
     }
 
 
@@ -132,7 +234,7 @@ async def analyze(req: AnalyzeRequest):
         return AnalyzeResponse(
             stock_code=req.stock_code,
             strategy_type=req.strategy_type,
-            result=result,
+            result=_normalize_analysis(result),
         )
     except Exception as e:
         return AnalyzeResponse(
@@ -145,6 +247,28 @@ async def analyze(req: AnalyzeRequest):
 @router.get("/scan/new_high", response_model=list[NewHighItem])
 async def scan_new_high():
     if not _HAS_STRATEGIES:
+        top = []
+        try:
+            top = ds2.get_stock_ranking_em(sort_field="f3", sort_order=0, count=30)
+        except Exception:
+            pass
+        if not top:
+            try:
+                top = ds2._get_stock_ranking_sina("f3", 0, 30)
+            except Exception:
+                pass
+        items: list[NewHighItem] = []
+        for s in top:
+            if s.get("change_pct", 0) >= 3:
+                items.append(NewHighItem(
+                    stock_code=s.get("code", ""),
+                    stock_name=s.get("name", ""),
+                    change_pct=s.get("change_pct", 0),
+                    volume=s.get("volume", 0),
+                    amount=s.get("amount", 0),
+                ))
+        if items:
+            return items
         stocks = [("300750", "宁德时代"), ("002594", "比亚迪"), ("601012", "隆基绿能"),
                    ("300059", "东方财富"), ("300015", "爱尔眼科")]
         return [NewHighItem(stock_code=c, stock_name=n, change_pct=round(random.uniform(5, 15), 2),

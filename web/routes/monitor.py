@@ -4,8 +4,10 @@ import random
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Body
 from pydantic import BaseModel
+
+from src.core import data_source_v2 as ds2
 
 router = APIRouter()
 
@@ -16,6 +18,15 @@ try:
     _HAS_MONITOR = True
 except ImportError:
     pass
+
+
+def _safe_float(val: object, default: float = 0.0) -> float:
+    if val is None:
+        return default
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
 
 
 class AlertItem(BaseModel):
@@ -65,7 +76,7 @@ _mock_watchlist: dict[str, list[str]] = {
 @router.get("/alerts", response_model=list[AlertItem])
 async def alerts(stock_code: str = ""):
     if not stock_code:
-        return []
+        return _generate_default_alerts()
     if not _HAS_MONITOR:
         return [AlertItem(
             stock_code=stock_code, alert_type="price_surge",
@@ -83,6 +94,67 @@ async def alerts(stock_code: str = ""):
         ) for a in results]
     except Exception:
         return []
+
+
+def _generate_default_alerts() -> list[AlertItem]:
+    alert_items: list[AlertItem] = []
+    watchlist_codes = list(_mock_watchlist.keys())
+    if not watchlist_codes:
+        watchlist_codes = ["000001", "600519"]
+    try:
+        quotes = ds2.get_realtime_quote_tencent(watchlist_codes)
+    except Exception:
+        quotes = []
+    quote_map = {q.get("code", ""): q for q in quotes}
+    for code in watchlist_codes:
+        q = quote_map.get(code, {})
+        change_pct = 0.0
+        try:
+            change_pct = float(q.get("change_pct", 0))
+        except (ValueError, TypeError):
+            pass
+        name = q.get("name", code)
+        if abs(change_pct) >= 5:
+            alert_items.append(AlertItem(
+                stock_code=code, alert_type="price_surge",
+                severity="critical" if abs(change_pct) >= 8 else "warning",
+                message=f"{name}({code}) 涨跌幅 {change_pct:.2f}%，波动异常",
+                detail={"change_pct": round(change_pct, 2), "price": float(q.get("price", 0))},
+            ))
+        elif abs(change_pct) >= 3:
+            alert_items.append(AlertItem(
+                stock_code=code, alert_type="price_alert",
+                severity="info",
+                message=f"{name}({code}) 涨跌幅 {change_pct:.2f}%，需关注",
+                detail={"change_pct": round(change_pct, 2), "price": float(q.get("price", 0))},
+            ))
+    try:
+        index_data = ds2.get_index_realtime()
+        for idx in index_data:
+            idx_change = 0.0
+            try:
+                idx_change = float(idx.get("change_pct", 0))
+            except (ValueError, TypeError):
+                pass
+            idx_name = idx.get("name", "")
+            idx_code = idx.get("code", "")
+            if abs(idx_change) >= 2:
+                alert_items.append(AlertItem(
+                    stock_code=idx_code, alert_type="market_alert",
+                    severity="warning",
+                    message=f"大盘指数 {idx_name} 涨跌幅 {idx_change:.2f}%，市场波动较大",
+                    detail={"change_pct": round(idx_change, 2)},
+                ))
+    except Exception:
+        pass
+    if not alert_items:
+        alert_items.append(AlertItem(
+            stock_code="000001", alert_type="market_status",
+            severity="info",
+            message="当前市场运行平稳，暂无异常警报",
+            detail={},
+        ))
+    return alert_items
 
 
 @router.get("/watchlist", response_model=list[WatchlistItem])
@@ -131,6 +203,24 @@ async def remove_watchlist(stock_code: str):
         return MessageResponse(success=False, message="移除失败")
 
 
+class RemoveWatchlistBodyRequest(BaseModel):
+    stock_code: str
+
+
+@router.delete("/watchlist", response_model=MessageResponse)
+async def remove_watchlist_by_body(req: RemoveWatchlistBodyRequest):
+    stock_code = req.stock_code
+    if not _HAS_MONITOR:
+        _mock_watchlist.pop(stock_code, None)
+        return MessageResponse(success=True, message=f"已移除 {stock_code}（模拟）")
+    try:
+        monitor = StockMonitor()
+        monitor.remove_watch(stock_code)
+        return MessageResponse(success=True, message=f"已移除 {stock_code}")
+    except Exception:
+        return MessageResponse(success=False, message="移除失败")
+
+
 @router.get("/capital_flow", response_model=CapitalFlowResponse)
 async def capital_flow(stock_code: str):
     if not _HAS_MONITOR:
@@ -159,6 +249,17 @@ async def capital_flow(stock_code: str):
 
 @router.get("/northbound", response_model=NorthboundResponse)
 async def northbound():
+    try:
+        data = ds2.get_northbound_flow_realtime()
+        if data:
+            return NorthboundResponse(
+                total_net_inflow=_safe_float(data.get("total_net_inflow", 0)),
+                sh_net_inflow=_safe_float(data.get("sh_net_inflow", 0)),
+                sz_net_inflow=_safe_float(data.get("sz_net_inflow", 0)),
+                top_stocks=[],
+            )
+    except Exception:
+        pass
     if not _HAS_MONITOR:
         return NorthboundResponse(
             total_net_inflow=round(random.uniform(-3e9, 3e9), 0),

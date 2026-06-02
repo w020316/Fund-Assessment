@@ -3,7 +3,14 @@
 $Workspace = Split-Path -Parent $MyInvocation.MyCommand.Path
 $LogDir = Join-Path $Workspace "data\logs"
 $PidDir = Join-Path $Workspace "data"
-$Python = "python"
+$PylibsDir = Join-Path $Workspace "pylibs"
+$Python = "D:\dev-tools\Python312\python.exe"
+
+if (-not (Test-Path $Python)) {
+    $Python = "python"
+}
+
+$env:PYTHONPATH = "$PylibsDir;$Workspace;$env:PYTHONPATH"
 
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
