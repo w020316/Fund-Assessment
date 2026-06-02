@@ -382,7 +382,9 @@ async def dragon_tiger():
 
 
 @router.get("/margin", response_model=MarginTradingItem)
-async def margin(code: str = Query(..., description="股票代码")):
+async def margin(code: str = Query("", description="股票代码")):
+    if not code:
+        return MarginTradingItem(code="", trade_date="", margin_buy=0, margin_balance=0, short_sell=0, short_balance=0, total_balance=0)
     data = ds2.get_margin_trading(code)
     if not data:
         return MarginTradingItem(code=code, trade_date="", margin_buy=0, margin_balance=0, short_sell=0, short_balance=0, total_balance=0)
@@ -390,13 +392,17 @@ async def margin(code: str = Query(..., description="股票代码")):
 
 
 @router.get("/block_trades", response_model=list[BlockTradeItem])
-async def block_trades(code: str = Query(..., description="股票代码")):
+async def block_trades(code: str = Query("", description="股票代码")):
+    if not code:
+        return []
     data = ds2.get_block_trades(code)
     return [BlockTradeItem(**item) for item in data]
 
 
 @router.get("/shareholder", response_model=ShareholderItem)
-async def shareholder(code: str = Query(..., description="股票代码")):
+async def shareholder(code: str = Query("", description="股票代码")):
+    if not code:
+        return ShareholderItem(code="", end_date="", holder_num=0, change_pct=0.0)
     data = ds2.get_shareholder_count(code)
     if not data:
         return ShareholderItem(code=code, end_date="", holder_num=0, change_pct=0.0)
