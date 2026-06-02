@@ -542,6 +542,28 @@ tr:hover td{background:rgba(59,130,246,.04)}
 @media(min-width:1025px) and (max-width:1366px){
   .agent-cards{grid-template-columns:repeat(2,1fr)}
 }
+.empty-state-icon{font-size:28px;margin-bottom:6px;opacity:.35;display:block}
+.empty-state-cta{margin-top:8px}
+.confirm-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.55);z-index:2000;display:flex;align-items:center;justify-content:center;animation:fadeIn .15s ease}
+.confirm-dialog{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:24px;max-width:400px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.6)}
+.confirm-dialog-title{font-size:15px;font-weight:700;margin-bottom:12px}
+.confirm-dialog-msg{font-size:13px;color:var(--text-sec);margin-bottom:20px;line-height:1.6}
+.confirm-dialog-btns{display:flex;gap:10px;justify-content:flex-end}
+.watch-search-dd{position:absolute;top:100%;left:0;right:58px;background:var(--bg-card);border:1px solid var(--border);border-radius:0 0 var(--radius) var(--radius);max-height:200px;overflow-y:auto;display:none;z-index:50;box-shadow:var(--shadow)}
+.watch-search-dd.show{display:block}
+.watch-search-dd-item{padding:8px 12px;cursor:pointer;font-size:12px;display:flex;justify-content:space-between;transition:var(--transition)}
+.watch-search-dd-item:hover{background:var(--bg-card-hover)}
+.ai-elapsed{font-size:12px;color:var(--text-muted);margin-top:8px;font-variant-numeric:tabular-nums}
+.ai-cancel-btn{margin-top:12px}
+.panel-hd-actions{display:flex;gap:8px;align-items:center}
+.hot-stock-row{cursor:pointer;transition:var(--transition)}
+.hot-stock-row:hover td{background:rgba(59,130,246,.08)!important}
+.dc-code-input{display:flex;gap:8px;margin-bottom:16px;max-width:360px;align-items:flex-end}
+.dc-code-input .form-group{margin-bottom:0;flex:1}
+.dc-no-code-hint{text-align:center;padding:40px 20px;color:var(--text-muted)}
+.dc-no-code-hint svg{width:48px;height:48px;opacity:.3;margin-bottom:12px}
+.dc-no-code-hint p{font-size:13px;margin-bottom:12px}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
 </style>
 </head>
 <body>
@@ -691,9 +713,10 @@ tr:hover td{background:rgba(59,130,246,.04)}
         <div class="panel">
           <div class="panel-hd">自选股实时行情</div>
           <div class="panel-bd">
-            <div class="watchlist-add">
-              <input class="form-input" id="mktWatchCode" placeholder="输入股票代码添加自选">
+            <div class="watchlist-add" style="position:relative">
+              <input class="form-input" id="mktWatchCode" placeholder="输入代码/名称搜索添加..." autocomplete="off" oninput="onWatchSearch(this.value)" onkeydown="if(event.key==='Enter')addWatchlistFromMarket()">
               <button class="btn btn-primary btn-sm" onclick="addWatchlistFromMarket()">添加</button>
+              <div class="watch-search-dd" id="watchSearchDd"></div>
             </div>
             <div id="watchlistMarket"><div class="empty-state">加载中...</div></div>
           </div>
@@ -776,6 +799,8 @@ tr:hover td{background:rgba(59,130,246,.04)}
           <div class="ai-loading-step" data-step="3"><span class="step-icon">⟳</span>多空辩论与风险评估</div>
           <div class="ai-loading-step" data-step="4"><span class="step-icon">⟳</span>生成交易决策</div>
         </div>
+        <div class="ai-elapsed" id="aiElapsed"></div>
+        <button class="btn btn-outline btn-sm ai-cancel-btn" id="aiCancelBtn" onclick="cancelAiAnalyze()">取消分析</button>
       </div>
       <div id="aiResultArea" style="display:none">
         <div class="agent-cards" id="agentCards"></div>
@@ -941,7 +966,7 @@ tr:hover td{background:rgba(59,130,246,.04)}
       </div>
       <div class="panels">
         <div class="panel panel-full">
-          <div class="panel-hd">持仓列表</div>
+          <div class="panel-hd panel-hd-actions"><span>持仓列表</span><button class="btn btn-outline btn-sm" id="refreshPositionsBtn" onclick="refreshPositions()"><span class="spinner"></span><span class="btn-text">🔄 刷新行情</span></button></div>
           <div style="overflow-x:auto">
             <table><thead><tr><th>股票代码</th><th>名称</th><th>数量</th><th>成本价</th><th>现价</th><th>市值</th><th>盈亏</th><th>盈亏%</th></tr></thead><tbody id="positionsBody"><tr><td colspan="8" class="empty-state">加载中...</td></tr></tbody></table>
           </div>
@@ -961,6 +986,10 @@ tr:hover td{background:rgba(59,130,246,.04)}
 
     <!-- ===== 数据中心 ===== -->
     <div class="page" id="page-datacenter">
+      <div class="dc-code-input">
+        <div class="form-group"><label>股票代码（可选）</label><input class="form-input" id="dataCode" placeholder="输入代码查看个股数据" onkeydown="if(event.key==='Enter')loadDataCenter()"></div>
+        <button class="btn btn-primary btn-sm" onclick="loadDataCenter()">查询</button>
+      </div>
       <div class="data-tabs" id="dataCenterTabs">
         <div class="data-tab active" onclick="switchDataTab('research',this)">研报</div>
         <div class="data-tab" onclick="switchDataTab('dragon_tiger',this)">龙虎榜</div>
@@ -969,14 +998,17 @@ tr:hover td{background:rgba(59,130,246,.04)}
         <div class="data-tab" onclick="switchDataTab('shareholder',this)">股东户数</div>
       </div>
       <div id="dataCenterContent">
-        <div class="form-group" style="max-width:300px;margin-bottom:16px"><label>股票代码（可选）</label><div style="display:flex;gap:8px"><input class="form-input" id="dataCode" placeholder="如 000001"><button class="btn btn-primary btn-sm" onclick="loadDataCenter()">查询</button></div></div>
         <div id="dataCenterDefault" class="cards-row" style="margin-bottom:16px">
           <div class="card"><div class="card-label">融资余额(市场)</div><div class="card-value" id="dcMarginBal">--</div><div class="card-sub">全市场融资余额</div></div>
           <div class="card"><div class="card-label">融券余额(市场)</div><div class="card-value" id="dcShortBal">--</div><div class="card-sub">全市场融券余额</div></div>
           <div class="card"><div class="card-label">今日大宗交易</div><div class="card-value" id="dcBlockCount">--</div><div class="card-sub">大宗交易笔数</div></div>
           <div class="card"><div class="card-label">股东户数变化</div><div class="card-value" id="dcHolderChg">--</div><div class="card-sub">平均变化率</div></div>
         </div>
-        <div class="empty-state" id="dcEmptyHint">请选择数据类型并查询，或直接查看上方市场概览数据</div>
+        <div class="dc-no-code-hint" id="dcNoCodeHint">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+          <p>请在上方输入股票代码查看个股详细数据</p>
+          <button class="btn btn-outline btn-sm" onclick="$('dataCode').focus()">输入代码</button>
+        </div>
       </div>
     </div>
 
@@ -1096,7 +1128,8 @@ function fmt(n, d) { d = d || 2; return n != null ? Number(n).toFixed(d) : '--' 
 function fmtMoney(n) { if (n == null) return '--'; var abs = Math.abs(n); return (n < 0 ? '-' : '') + '\u00a5' + abs.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }
 function pctCls(v) { return v > 0 ? 'text-up' : v < 0 ? 'text-down' : 'text-muted' }
 function pctStr(v) { return v != null ? (v > 0 ? '+' : '') + fmt(v) + '%' : '--' }
-function emptyRow(c, m) { return '<tr><td colspan="' + c + '" class="empty-state">' + m + '</td></tr>' }
+function emptyRow(c, m) { return '<tr><td colspan="' + c + '" class="empty-state"><span class="empty-state-icon">📭</span>' + m + '</td></tr>' }
+function emptyBlock(m, cta) { var h = '<div class="empty-state"><span class="empty-state-icon">📭</span>' + m; if (cta) h += '<div class="empty-state-cta">' + cta + '</div>'; h += '</div>'; return h }
 
 function showToast(msg, type) {
   type = type || 'info';
@@ -1108,12 +1141,23 @@ function showToast(msg, type) {
   setTimeout(function () { t.style.opacity = '0'; t.style.transform = 'translateX(100%)'; t.style.transition = 'all .3s'; setTimeout(function () { t.remove() }, 300) }, 3500);
 }
 
+function showConfirm(title, msg, onOk) {
+  var overlay = document.createElement('div');
+  overlay.className = 'confirm-overlay';
+  overlay.innerHTML = '<div class="confirm-dialog"><div class="confirm-dialog-title">' + title + '</div><div class="confirm-dialog-msg">' + msg + '</div><div class="confirm-dialog-btns"><button class="btn btn-outline" id="confirmCancel">取消</button><button class="btn btn-primary" id="confirmOk">确认</button></div></div>';
+  document.body.appendChild(overlay);
+  overlay.querySelector('#confirmCancel').onclick = function() { overlay.remove() };
+  overlay.querySelector('#confirmOk').onclick = function() { overlay.remove(); onOk() };
+  overlay.onclick = function(e) { if (e.target === overlay) overlay.remove() };
+}
+
 function api(url, opts) {
   opts = opts || {};
-  var controller = new AbortController();
-  var timeout = setTimeout(function() { controller.abort() }, opts.timeout || 30000);
+  var controller = opts.signal ? null : new AbortController();
+  var signal = opts.signal || controller.signal;
+  var timeout = setTimeout(function() { if (controller) controller.abort() }, opts.timeout || 30000);
   var reqStart = Date.now();
-  return fetch(API + url, Object.assign({ headers: { 'Content-Type': 'application/json' }, signal: controller.signal }, opts)).then(function (r) {
+  return fetch(API + url, Object.assign({ headers: { 'Content-Type': 'application/json' }, signal: signal }, opts)).then(function (r) {
     clearTimeout(timeout);
     lastApiLatency = Date.now() - reqStart;
     lastRefreshTime = new Date();
@@ -1123,7 +1167,8 @@ function api(url, opts) {
   }).catch(function (e) {
     clearTimeout(timeout);
     if (e.name === 'AbortError') {
-      showToast('请求超时，请稍后重试', 'error');
+      if (controller) showToast('请求超时，请稍后重试', 'error');
+      throw e;
     } else {
       showToast('请求失败: ' + e.message, 'error');
     }
@@ -1290,14 +1335,14 @@ function loadHotStocks(type) {
     $('hotStocksBody').innerHTML = list.map(function (s) {
       var cls = pctCls(s.change_pct);
       var code = s.code || s.stock_code || '';
-      return '<tr style="cursor:pointer" onclick="openStockDetail(\'' + code + '\')"><td>' + code + '</td><td>' + (s.name || s.stock_name || '') + '</td><td>' + fmt(s.price || s.current_price) + '</td><td class="' + cls + '">' + pctStr(s.change_pct) + '</td><td class="' + cls + '">' + (s.change > 0 ? '+' : '') + fmt(s.change) + '</td><td>' + fmtMoney(s.amount || s.volume || 0) + '</td></tr>';
+      return '<tr class="hot-stock-row" onclick="openStockDetail(\'' + code + '\')"><td style="color:var(--accent);font-weight:600">' + code + '</td><td>' + (s.name || s.stock_name || '') + '</td><td>' + fmt(s.price || s.current_price) + '</td><td class="' + cls + '">' + pctStr(s.change_pct) + '</td><td class="' + cls + '">' + (s.change > 0 ? '+' : '') + fmt(s.change) + '</td><td>' + fmtMoney(s.amount || s.volume || 0) + '</td></tr>';
     }).join('');
   }).catch(function () { $('hotStocksBody').innerHTML = emptyRow(6, '加载失败') });
 }
 
 function loadSectorFlow() {
   api('/market/sector_flow').then(function (list) {
-    if (!list || !list.length) { $('sectorHeatmap').innerHTML = '<div class="empty-state">暂无数据</div>'; return }
+    if (!list || !list.length) { $('sectorHeatmap').innerHTML = emptyBlock('暂无板块数据'); return }
     var maxAbs = 0;
     list.forEach(function (s) { var a = Math.abs(s.change_pct || 0); if (a > maxAbs) maxAbs = a });
     if (maxAbs === 0) maxAbs = 1;
@@ -1338,12 +1383,12 @@ function loadSectorFlow() {
     html += '</div>';
     $('sectorHeatmap').innerHTML = html;
     updateMarketPulse(list);
-  }).catch(function () { $('sectorHeatmap').innerHTML = '<div class="empty-state">加载失败</div>' });
+  }).catch(function () { $('sectorHeatmap').innerHTML = emptyBlock('板块数据加载失败') });
 }
 
 function loadWatchlistMarket() {
   api('/monitor/watchlist').then(function (list) {
-    if (!list || !list.length) { $('watchlistMarket').innerHTML = '<div class="empty-state">暂无自选股，请添加</div>'; return }
+    if (!list || !list.length) { $('watchlistMarket').innerHTML = emptyBlock('暂无自选股', '<button class="btn btn-outline btn-sm" onclick="$(\'mktWatchCode\').focus()">添加自选股</button>'); return }
     var codes = list.map(function (w) { return w.stock_code || w.code || w.symbol }).join(',');
     if (!codes) { $('watchlistMarket').innerHTML = '<div class="empty-state">暂无自选股</div>'; return }
     api('/market/stock_realtime?codes=' + codes).then(function (stocks) {
@@ -1363,11 +1408,54 @@ function loadWatchlistMarket() {
 function addWatchlistFromMarket() {
   var code = $('mktWatchCode').value.trim();
   if (!code) { showToast('请输入股票代码', 'error'); return }
+  var dd = $('watchSearchDd');
+  if (dd) dd.classList.remove('show');
   api('/monitor/watchlist', { method: 'POST', body: JSON.stringify({ stock_code: code }) }).then(function () {
     showToast('已添加到自选股', 'success');
     $('mktWatchCode').value = '';
     loadWatchlistMarket();
   }).catch(function () {});
+}
+
+var watchSearchDebounce = null;
+function onWatchSearch(val) {
+  clearTimeout(watchSearchDebounce);
+  var dd = $('watchSearchDd');
+  if (!val || val.length < 1) { dd.classList.remove('show'); dd.innerHTML = ''; return }
+  watchSearchDebounce = setTimeout(function() {
+    api('/market/search?keyword=' + encodeURIComponent(val)).then(function(list) {
+      if (!list || !list.length) {
+        api('/market/stock_realtime?keyword=' + encodeURIComponent(val)).then(function(list2) {
+          renderWatchSearchResults(list2);
+        }).catch(function() { dd.classList.remove('show') });
+        return;
+      }
+      renderWatchSearchResults(list.slice(0, 8));
+    }).catch(function() {
+      api('/market/stock_realtime?keyword=' + encodeURIComponent(val)).then(function(list2) {
+        renderWatchSearchResults(list2);
+      }).catch(function() { dd.classList.remove('show') });
+    });
+  }, 300);
+}
+
+function renderWatchSearchResults(list) {
+  var dd = $('watchSearchDd');
+  if (!list || !list.length) { dd.classList.remove('show'); dd.innerHTML = ''; return }
+  var html = '';
+  list.forEach(function(s) {
+    var code = s.code || s.stock_code || '';
+    var name = s.name || s.stock_name || '';
+    html += '<div class="watch-search-dd-item" onclick="selectWatchStock(\'' + code + '\')"><span><span style="color:var(--accent);font-weight:600">' + code + '</span> <span style="color:var(--text-sec)">' + name + '</span></span></div>';
+  });
+  dd.innerHTML = html;
+  dd.classList.add('show');
+}
+
+function selectWatchStock(code) {
+  $('mktWatchCode').value = code;
+  $('watchSearchDd').classList.remove('show');
+  addWatchlistFromMarket();
 }
 
 function removeWatchlistFromMarket(code) {
@@ -1389,6 +1477,9 @@ var agentDefs = [
 ];
 
 var aiLoadingTimer = null;
+var aiElapsedTimer = null;
+var aiAbortController = null;
+var aiStartTime = 0;
 
 function runAiAnalyze(mode) {
   var code = $('aiCode').value.trim();
@@ -1400,9 +1491,11 @@ function runAiAnalyze(mode) {
   $('aiLoadingOverlay').classList.add('active');
   $('decisionCard').style.display = 'none';
   $('riskCard').style.display = 'none';
+  $('aiCancelBtn').style.display = 'inline-flex';
+  $('aiElapsed').textContent = '';
 
   var steps = document.querySelectorAll('#aiLoadingSteps .ai-loading-step');
-  steps.forEach(function(s) { s.classList.remove('active', 'done') });
+  steps.forEach(function(s) { s.classList.remove('active', 'done'); s.querySelector('.step-icon').textContent = '⟳' });
 
   var progress = 0;
   var stepIdx = 0;
@@ -1415,6 +1508,19 @@ function runAiAnalyze(mode) {
   ];
 
   clearInterval(aiLoadingTimer);
+  clearInterval(aiElapsedTimer);
+  aiStartTime = Date.now();
+
+  aiElapsedTimer = setInterval(function() {
+    var elapsed = Math.floor((Date.now() - aiStartTime) / 1000);
+    $('aiElapsed').textContent = '已用时 ' + elapsed + ' 秒';
+    if (elapsed >= 25 && elapsed < 28) {
+      $('aiElapsed').innerHTML = '<span style="color:var(--orange)">⚠ 分析耗时较长，已用 ' + elapsed + ' 秒</span>';
+    } else if (elapsed >= 28) {
+      $('aiElapsed').innerHTML = '<span style="color:var(--red)">⚠ 分析超时风险，已用 ' + elapsed + ' 秒，可点击取消</span>';
+    }
+  }, 1000);
+
   aiLoadingTimer = setInterval(function() {
     progress = Math.min(progress + (mode === 'deep' ? 1.5 : 3), 90);
     $('aiLoadingBar').style.width = progress + '%';
@@ -1433,13 +1539,16 @@ function runAiAnalyze(mode) {
   $('aiLoadingText').textContent = stepTexts[0];
   $('aiLoadingBar').style.width = '5%';
 
+  aiAbortController = new AbortController();
   var endpoint = mode === 'deep' ? '/agent/multi_analyze' : '/agent/quick_analysis';
 
-  api(endpoint, { method: 'POST', body: JSON.stringify({ stock_code: code, agents: selectedAgents }), timeout: 60000 }).then(function (d) {
+  api(endpoint, { method: 'POST', body: JSON.stringify({ stock_code: code, agents: selectedAgents }), timeout: 90000, signal: aiAbortController.signal }).then(function (d) {
     clearInterval(aiLoadingTimer);
+    clearInterval(aiElapsedTimer);
     $('aiLoadingBar').style.width = '100%';
     steps.forEach(function(s) { s.classList.remove('active'); s.classList.add('done'); s.querySelector('.step-icon').textContent = '✓' });
     $('aiLoadingText').textContent = '分析完成！';
+    $('aiCancelBtn').style.display = 'none';
 
     setTimeout(function() {
       $('aiLoadingOverlay').classList.remove('active');
@@ -1448,13 +1557,34 @@ function runAiAnalyze(mode) {
       renderAiResult(d, code);
       addAiHistory(code, d);
     }, 600);
-  }).catch(function () {
+  }).catch(function (e) {
     clearInterval(aiLoadingTimer);
+    clearInterval(aiElapsedTimer);
     $('aiLoadingOverlay').classList.remove('active');
     $('aiResultArea').style.display = 'none';
+    $('aiCancelBtn').style.display = 'none';
     clearLoading(btn);
-    showToast('AI分析失败，请稍后重试', 'error');
+    if (e && e.name === 'AbortError') {
+      showToast('AI分析已取消', 'warning');
+    } else {
+      var elapsed = Math.floor((Date.now() - aiStartTime) / 1000);
+      showToast('AI分析失败（耗时' + elapsed + '秒），请检查网络或稍后重试', 'error');
+    }
   });
+}
+
+function cancelAiAnalyze() {
+  if (aiAbortController) {
+    aiAbortController.abort();
+    aiAbortController = null;
+  }
+  clearInterval(aiLoadingTimer);
+  clearInterval(aiElapsedTimer);
+  $('aiLoadingOverlay').classList.remove('active');
+  $('aiCancelBtn').style.display = 'none';
+  var btn = $('aiDeepBtn').classList.contains('loading') ? $('aiDeepBtn') : $('aiQuickBtn');
+  clearLoading(btn);
+  showToast('AI分析已取消', 'warning');
 }
 
 function renderAiResult(d, code) {
@@ -1835,31 +1965,47 @@ function loadTrade() {
 function submitBuy() {
   var code = $('buyCode').value.trim();
   if (!code) { showToast('请输入股票代码', 'error'); return }
-  var btn = $('buyBtn');
-  setLoading(btn);
-  api('/trade/buy', {
-    method: 'POST',
-    body: JSON.stringify({ stock_code: code, amount: parseInt($('buyAmount').value) || 0, price: parseFloat($('buyPrice').value) || 0, strategy: $('buyStrategy').value.trim() })
-  }).then(function () {
-    clearLoading(btn);
-    showToast('买入委托已提交', 'success');
-    $('buyCode').value = ''; $('buyAmount').value = ''; $('buyPrice').value = ''; $('buyStrategy').value = '';
-  }).catch(function () { clearLoading(btn) });
+  var amount = parseInt($('buyAmount').value) || 0;
+  var price = parseFloat($('buyPrice').value) || 0;
+  var strategy = $('buyStrategy').value.trim();
+  var priceText = price > 0 ? fmt(price) + '元' : '市价';
+  showConfirm('确认买入', '股票: ' + code + '<br>数量: ' + amount + '股<br>价格: ' + priceText + (strategy ? '<br>策略: ' + strategy : ''), function() {
+    var btn = $('buyBtn');
+    setLoading(btn);
+    api('/trade/buy', {
+      method: 'POST',
+      body: JSON.stringify({ stock_code: code, amount: amount, price: price, strategy: strategy })
+    }).then(function () {
+      clearLoading(btn);
+      showToast('买入委托已提交: ' + code + ' ' + amount + '股', 'success');
+      $('buyCode').value = ''; $('buyAmount').value = ''; $('buyPrice').value = ''; $('buyStrategy').value = '';
+      loadPositions();
+      loadTrade();
+    }).catch(function () { clearLoading(btn); showToast('买入委托失败，请重试', 'error') });
+  });
 }
 
 function submitSell() {
   var code = $('sellCode').value.trim();
   if (!code) { showToast('请输入股票代码', 'error'); return }
-  var btn = $('sellBtn');
-  setLoading(btn);
-  api('/trade/sell', {
-    method: 'POST',
-    body: JSON.stringify({ stock_code: code, amount: parseInt($('sellAmount').value) || 0, price: parseFloat($('sellPrice').value) || 0, strategy: $('sellStrategy').value.trim() })
-  }).then(function () {
-    clearLoading(btn);
-    showToast('卖出委托已提交', 'success');
-    $('sellCode').value = ''; $('sellAmount').value = ''; $('sellPrice').value = ''; $('sellStrategy').value = '';
-  }).catch(function () { clearLoading(btn) });
+  var amount = parseInt($('sellAmount').value) || 0;
+  var price = parseFloat($('sellPrice').value) || 0;
+  var strategy = $('sellStrategy').value.trim();
+  var priceText = price > 0 ? fmt(price) + '元' : '市价';
+  showConfirm('确认卖出', '股票: ' + code + '<br>数量: ' + amount + '股<br>价格: ' + priceText + (strategy ? '<br>策略: ' + strategy : ''), function() {
+    var btn = $('sellBtn');
+    setLoading(btn);
+    api('/trade/sell', {
+      method: 'POST',
+      body: JSON.stringify({ stock_code: code, amount: amount, price: price, strategy: strategy })
+    }).then(function () {
+      clearLoading(btn);
+      showToast('卖出委托已提交: ' + code + ' ' + amount + '股', 'success');
+      $('sellCode').value = ''; $('sellAmount').value = ''; $('sellPrice').value = ''; $('sellStrategy').value = '';
+      loadPositions();
+      loadTrade();
+    }).catch(function () { clearLoading(btn); showToast('卖出委托失败，请重试', 'error') });
+  });
 }
 
 /* ===== 持仓管理 ===== */
@@ -1881,14 +2027,7 @@ function loadPositions() {
     $('posRiskMsg').textContent = d.risk_message || '';
   }).catch(function () {});
 
-  api('/dashboard/positions').then(function (list) {
-    if (!list || !list.length) { $('positionsBody').innerHTML = emptyRow(8, '暂无持仓'); drawPie([]); return }
-    $('positionsBody').innerHTML = list.map(function (p) {
-      var cls = pctCls(p.profit_pct || p.pnl_pct);
-      return '<tr><td>' + (p.symbol || p.stock_code || '') + '</td><td>' + (p.name || p.stock_name || '') + '</td><td>' + (p.quantity || p.amount || 0) + '</td><td>' + fmt(p.cost_price || p.cost) + '</td><td>' + fmt(p.current_price) + '</td><td>' + fmtMoney(p.market_value) + '</td><td class="' + cls + '">' + ((p.profit || p.pnl || 0) > 0 ? '+' : '') + fmt(p.profit || p.pnl) + '</td><td class="' + cls + '">' + pctStr(p.profit_pct || p.pnl_pct) + '</td></tr>';
-    }).join('');
-    drawPie(list);
-  }).catch(function () { $('positionsBody').innerHTML = emptyRow(8, '加载失败') });
+  loadPositionsTable();
 
   api('/dashboard/risk').then(function (d) {
     var level = (d.level || 'low').toLowerCase();
@@ -1899,7 +2038,36 @@ function loadPositions() {
     html += '<div class="flow-item"><span class="flow-label">紧急停止</span><span class="flow-value">' + (d.is_emergency_stopped ? '<span style="color:var(--red)">是</span>' : '否') + '</span></div>';
     if (d.message) html += '<div style="margin-top:8px;padding:8px;background:var(--bg-input);border-radius:var(--radius);font-size:12px;color:var(--text-sec)">' + d.message + '</div>';
     $('riskDetail').innerHTML = html;
-  }).catch(function () { $('riskDetail').innerHTML = '<div class="empty-state">加载失败</div>' });
+  }).catch(function () { $('riskDetail').innerHTML = emptyBlock('风控数据加载失败') });
+}
+
+function loadPositionsTable() {
+  api('/dashboard/positions').then(function (list) {
+    if (!list || !list.length) { $('positionsBody').innerHTML = emptyRow(8, '暂无持仓'); drawPie([]); return }
+    $('positionsBody').innerHTML = list.map(function (p) {
+      var cls = pctCls(p.profit_pct || p.pnl_pct);
+      return '<tr><td>' + (p.symbol || p.stock_code || '') + '</td><td>' + (p.name || p.stock_name || '') + '</td><td>' + (p.quantity || p.amount || 0) + '</td><td>' + fmt(p.cost_price || p.cost) + '</td><td>' + fmt(p.current_price) + '</td><td>' + fmtMoney(p.market_value) + '</td><td class="' + cls + '">' + ((p.profit || p.pnl || 0) > 0 ? '+' : '') + fmt(p.profit || p.pnl) + '</td><td class="' + cls + '">' + pctStr(p.profit_pct || p.pnl_pct) + '</td></tr>';
+    }).join('');
+    drawPie(list);
+  }).catch(function () { $('positionsBody').innerHTML = emptyRow(8, '加载失败') });
+}
+
+function refreshPositions() {
+  var btn = $('refreshPositionsBtn');
+  setLoading(btn);
+  loadPositionsTable();
+  api('/dashboard/overview').then(function (d) {
+    $('posTotalAssets').textContent = fmtMoney(d.total_assets);
+    $('posAvailCash').textContent = '可用资金: ' + fmtMoney(d.available_cash);
+    $('posMarketValue').textContent = fmtMoney(d.market_value);
+    var pnl = d.daily_pnl;
+    $('posDailyPnl').textContent = (pnl > 0 ? '+' : '') + fmtMoney(pnl);
+    $('posDailyPnl').className = 'card-value ' + (pnl > 0 ? 'up' : pnl < 0 ? 'down' : '');
+    $('posDailyPnlPct').textContent = pctStr(d.daily_pnl_pct);
+    $('posDailyPnlPct').className = 'card-sub ' + pctCls(d.daily_pnl_pct);
+    clearLoading(btn);
+    showToast('行情已刷新', 'success');
+  }).catch(function () { clearLoading(btn); showToast('刷新失败', 'error') });
 }
 
 function drawPie(positions) {
@@ -1958,18 +2126,22 @@ function switchDataTab(type, el) {
 
 function loadDataCenter() {
   var code = $('dataCode').value.trim();
-  var container = $('dataCenterContent');
-
-  var inputHtml = '<div class="form-group" style="max-width:300px;margin-bottom:16px"><label>股票代码（可选）</label><div style="display:flex;gap:8px"><input class="form-input" id="dataCode" placeholder="如 000001" value="' + code + '"><button class="btn btn-primary btn-sm" onclick="loadDataCenter()">查询</button></div></div>';
-
   loadMarketWideData();
-
+  if (!code) {
+    if (!$('dataCenterDefault')) {
+      $('dataCenterContent').innerHTML = '<div id="dataCenterDefault" class="cards-row" style="margin-bottom:16px"><div class="card"><div class="card-label">融资余额(市场)</div><div class="card-value" id="dcMarginBal">--</div><div class="card-sub">全市场融资余额</div></div><div class="card"><div class="card-label">融券余额(市场)</div><div class="card-value" id="dcShortBal">--</div><div class="card-sub">全市场融券余额</div></div><div class="card"><div class="card-label">今日大宗交易</div><div class="card-value" id="dcBlockCount">--</div><div class="card-sub">大宗交易笔数</div></div><div class="card"><div class="card-label">股东户数变化</div><div class="card-value" id="dcHolderChg">--</div><div class="card-sub">平均变化率</div></div></div><div class="dc-no-code-hint" id="dcNoCodeHint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg><p>请在上方输入股票代码查看个股详细数据</p><button class="btn btn-outline btn-sm" onclick="$(\'dataCode\').focus()">输入代码</button></div>';
+      loadMarketWideData();
+    }
+    var hint = $('dcNoCodeHint');
+    if (hint) hint.style.display = 'block';
+    return;
+  }
   switch (currentDataTab) {
-    case 'research': loadResearch(inputHtml, code); break;
-    case 'dragon_tiger': loadDragonTiger(inputHtml); break;
-    case 'margin': loadMargin(inputHtml, code); break;
-    case 'block_trades': loadBlockTrades(inputHtml, code); break;
-    case 'shareholder': loadShareholder(inputHtml, code); break;
+    case 'research': loadResearch(code); break;
+    case 'dragon_tiger': loadDragonTiger(); break;
+    case 'margin': loadMargin(code); break;
+    case 'block_trades': loadBlockTrades(code); break;
+    case 'shareholder': loadShareholder(code); break;
   }
 }
 
@@ -1989,43 +2161,45 @@ function loadMarketWideData() {
   }).catch(function() {});
 }
 
-function loadResearch(inputHtml, code) {
-  var url = '/market/research_reports' + (code ? '?code=' + code : '');
+function loadResearch(code) {
+  if (!code) { loadDataCenter(); return }
+  var url = '/market/research_reports?code=' + code;
   api(url).then(function (list) {
-    if (!list || !list.length) { $('dataCenterContent').innerHTML = inputHtml + '<div class="empty-state">暂无研报数据</div>'; return }
-    var html = inputHtml + '<div style="overflow-x:auto"><table><thead><tr><th>标题</th><th>评级</th><th>机构</th><th>日期</th></tr></thead><tbody>';
+    if (!list || !list.length) { $('dataCenterContent').innerHTML = emptyBlock('该股票暂无研报数据', '<button class="btn btn-outline btn-sm" onclick="loadDataCenter()">返回市场概览</button>'); return }
+    var html = '<div style="overflow-x:auto"><table><thead><tr><th>标题</th><th>评级</th><th>机构</th><th>日期</th></tr></thead><tbody>';
     list.forEach(function (r) {
       var ratingCls = (r.rating || '').indexOf('买') >= 0 || (r.rating || '').indexOf('增') >= 0 ? 'text-up' : (r.rating || '').indexOf('减') >= 0 || (r.rating || '').indexOf('卖') >= 0 ? 'text-down' : 'text-muted';
       html += '<tr><td>' + (r.title || '') + '</td><td class="' + ratingCls + '">' + (r.rating || '') + '</td><td>' + (r.org_name || r.institution || r.org || '') + '</td><td>' + (r.publish_date || r.date || '') + '</td></tr>';
     });
     html += '</tbody></table></div>';
     $('dataCenterContent').innerHTML = html;
-  }).catch(function () { $('dataCenterContent').innerHTML = inputHtml + '<div class="empty-state">加载失败</div>' });
+  }).catch(function () { $('dataCenterContent').innerHTML = emptyBlock('研报数据加载失败') });
 }
 
-function loadDragonTiger(inputHtml) {
+function loadDragonTiger() {
   api('/market/dragon_tiger').then(function (list) {
-    if (!list || !list.length) { $('dataCenterContent').innerHTML = inputHtml + '<div class="empty-state">暂无龙虎榜数据</div>'; return }
-    var html = inputHtml + '<div style="overflow-x:auto"><table><thead><tr><th>股票</th><th>代码</th><th>现价</th><th>涨跌幅</th><th>上榜原因</th><th>净买额</th><th>日期</th></tr></thead><tbody>';
+    if (!list || !list.length) { $('dataCenterContent').innerHTML = emptyBlock('暂无龙虎榜数据'); return }
+    var html = '<div style="overflow-x:auto"><table><thead><tr><th>股票</th><th>代码</th><th>现价</th><th>涨跌幅</th><th>上榜原因</th><th>净买额</th><th>日期</th></tr></thead><tbody>';
     list.forEach(function (d) {
       var netCls = pctCls(d.net_amount || d.net_buy || 0);
       var chgCls = pctCls(d.change_pct || 0);
-      html += '<tr><td>' + (d.name || '') + '</td><td>' + (d.code || '') + '</td><td>' + fmt(d.price || 0) + '</td><td class="' + chgCls + '">' + pctStr(d.change_pct) + '</td><td>' + (d.reason || '') + '</td><td class="' + netCls + '">' + fmtMoney(d.net_amount || d.net_buy || 0) + '</td><td>' + (d.trade_date || '') + '</td></tr>';
+      html += '<tr style="cursor:pointer" onclick="openStockDetail(\'' + (d.code || '') + '\')"><td>' + (d.name || '') + '</td><td>' + (d.code || '') + '</td><td>' + fmt(d.price || 0) + '</td><td class="' + chgCls + '">' + pctStr(d.change_pct) + '</td><td>' + (d.reason || '') + '</td><td class="' + netCls + '">' + fmtMoney(d.net_amount || d.net_buy || 0) + '</td><td>' + (d.trade_date || '') + '</td></tr>';
     });
     html += '</tbody></table></div>';
     $('dataCenterContent').innerHTML = html;
-  }).catch(function () { $('dataCenterContent').innerHTML = inputHtml + '<div class="empty-state">加载失败</div>' });
+  }).catch(function () { $('dataCenterContent').innerHTML = emptyBlock('龙虎榜数据加载失败') });
 }
 
-function loadMargin(inputHtml, code) {
-  var url = '/market/margin' + (code ? '?code=' + code : '');
+function loadMargin(code) {
+  if (!code) { loadDataCenter(); return }
+  var url = '/market/margin?code=' + code;
   api(url).then(function (d) {
     var list = d.history || d.data || (Array.isArray(d) ? d : []);
     if (!list.length && !d.margin_balance && !d.margin_buy) {
-      $('dataCenterContent').innerHTML = inputHtml + '<div class="cards-row" style="margin-bottom:16px"><div class="card"><div class="card-label">融资余额(市场)</div><div class="card-value" id="dcMarginBal2">--</div></div><div class="card"><div class="card-label">融券余额(市场)</div><div class="card-value" id="dcShortBal2">--</div></div></div><div class="empty-state">输入股票代码查看个股融资融券详情</div>';
+      $('dataCenterContent').innerHTML = emptyBlock('该股票暂无融资融券数据');
       return;
     }
-    var html = inputHtml;
+    var html = '';
     if (d.margin_balance || d.margin_buy) {
       html += '<div class="cards-row" style="margin-bottom:16px">';
       html += '<div class="card"><div class="card-label">融资余额</div><div class="card-value">' + fmtMoney(d.margin_balance) + '</div></div>';
@@ -2035,7 +2209,7 @@ function loadMargin(inputHtml, code) {
       html += '</div>';
     }
     $('dataCenterContent').innerHTML = html;
-  }).catch(function () { $('dataCenterContent').innerHTML = inputHtml + '<div class="empty-state">加载失败</div>' });
+  }).catch(function () { $('dataCenterContent').innerHTML = emptyBlock('融资融券数据加载失败') });
 }
 
 function drawMarginChart(data) {
@@ -2071,14 +2245,14 @@ function drawMarginChart(data) {
   if (wrap) wrap.innerHTML = svg;
 }
 
-function loadBlockTrades(inputHtml, code) {
-  var url = '/market/block_trades' + (code ? '?code=' + code : '');
+function loadBlockTrades(code) {
+  if (!code) { loadDataCenter(); return }
+  var url = '/market/block_trades?code=' + code;
   api(url).then(function (list) {
-    if (!list || !list.length) { $('dataCenterContent').innerHTML = inputHtml + '<div class="empty-state">暂无大宗交易数据，请稍后再试</div>'; return }
+    if (!list || !list.length) { $('dataCenterContent').innerHTML = emptyBlock('该股票暂无大宗交易数据'); return }
     var totalAmt = 0;
     list.forEach(function(b) { totalAmt += Math.abs(b.amount || b.trade_amount || 0) });
-    var html = inputHtml;
-    html += '<div class="cards-row" style="margin-bottom:16px"><div class="card"><div class="card-label">今日笔数</div><div class="card-value">' + list.length + '</div></div><div class="card"><div class="card-label">总成交额</div><div class="card-value">' + fmtMoney(totalAmt) + '</div></div></div>';
+    var html = '<div class="cards-row" style="margin-bottom:16px"><div class="card"><div class="card-label">今日笔数</div><div class="card-value">' + list.length + '</div></div><div class="card"><div class="card-label">总成交额</div><div class="card-value">' + fmtMoney(totalAmt) + '</div></div></div>';
     html += '<div style="overflow-x:auto"><table><thead><tr><th>日期</th><th>股票</th><th>代码</th><th>成交价</th><th>成交量</th><th>成交额</th><th>折溢率</th><th>买方</th><th>卖方</th></tr></thead><tbody>';
     list.forEach(function (b) {
       var premiumCls = pctCls(b.premium_pct || b.premium_rate || b.discount_rate || 0);
@@ -2086,18 +2260,19 @@ function loadBlockTrades(inputHtml, code) {
     });
     html += '</tbody></table></div>';
     $('dataCenterContent').innerHTML = html;
-  }).catch(function () { $('dataCenterContent').innerHTML = inputHtml + '<div class="empty-state">加载失败</div>' });
+  }).catch(function () { $('dataCenterContent').innerHTML = emptyBlock('大宗交易数据加载失败') });
 }
 
-function loadShareholder(inputHtml, code) {
-  var url = '/market/shareholder' + (code ? '?code=' + code : '');
+function loadShareholder(code) {
+  if (!code) { loadDataCenter(); return }
+  var url = '/market/shareholder?code=' + code;
   api(url).then(function (d) {
     var list = d.history || d.data || (Array.isArray(d) ? d : []);
     if (!list.length && !d.holder_num && !d.count) {
-      $('dataCenterContent').innerHTML = inputHtml + '<div class="empty-state">暂无股东户数数据，输入股票代码查看个股股东变化</div>';
+      $('dataCenterContent').innerHTML = emptyBlock('该股票暂无股东户数数据');
       return;
     }
-    var html = inputHtml;
+    var html = '';
     var holderNum = d.holder_num || d.count || 0;
     var changePct = d.change_pct || 0;
     if (holderNum) {
@@ -2108,7 +2283,7 @@ function loadShareholder(inputHtml, code) {
       html += '</div>';
     }
     $('dataCenterContent').innerHTML = html;
-  }).catch(function () { $('dataCenterContent').innerHTML = inputHtml + '<div class="empty-state">加载失败</div>' });
+  }).catch(function () { $('dataCenterContent').innerHTML = emptyBlock('股东户数数据加载失败') });
 }
 
 function drawShareholderChart(data) {
@@ -2271,7 +2446,7 @@ function initSplash() {
       splash.classList.add('hidden');
       setTimeout(function() { splash.remove() }, 600);
     }
-  }, 2000);
+  }, 1500);
 }
 
 /* ===== Market Status ===== */
@@ -2397,6 +2572,13 @@ document.addEventListener('click', function(e) {
   var search = document.querySelector('.topbar-search');
   if (search && !search.contains(e.target)) {
     $('searchDropdown').classList.remove('show');
+  }
+  var watchDd = $('watchSearchDd');
+  if (watchDd && watchDd.classList.contains('show')) {
+    var watchWrap = document.querySelector('.watchlist-add');
+    if (watchWrap && !watchWrap.contains(e.target)) {
+      watchDd.classList.remove('show');
+    }
   }
 });
 

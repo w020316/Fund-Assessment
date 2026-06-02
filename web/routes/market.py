@@ -584,3 +584,19 @@ async def stock_detail(code: str = Query(..., description="股票代码")):
         return StockDetailResponse(
             code=code, name="", quote={}, financial={}, capital_flow={}, kline_summary={},
         )
+
+
+class MarketWideStatsResponse(BaseModel):
+    margin_balance: float
+    block_trades_count: int
+    avg_shareholder_change_pct: float
+
+
+@router.get("/market_wide_stats", response_model=MarketWideStatsResponse)
+async def market_wide_stats():
+    data = ds2.get_market_wide_stats()
+    return MarketWideStatsResponse(
+        margin_balance=_safe_float(data.get("margin_balance", 0)),
+        block_trades_count=int(_safe_float(data.get("block_trades_count", 0))),
+        avg_shareholder_change_pct=_safe_float(data.get("avg_shareholder_change_pct", 0)),
+    )

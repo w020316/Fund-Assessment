@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import random
 from typing import Any
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
+
+from src.core import data_source_v2 as ds2
 
 router = APIRouter()
 
@@ -16,6 +17,51 @@ try:
     _HAS_CORE = True
 except ImportError:
     pass
+
+
+def _safe_float(val: object, default: float = 0.0) -> float:
+    if val is None:
+        return default
+    try:
+        result = float(val)
+        return result
+    except (ValueError, TypeError):
+        return default
+
+
+def _safe_str(val: object, default: str = "") -> str:
+    if val is None or (isinstance(val, float) and val != val):
+        return default
+    return str(val)
+
+
+_MOCK_POSITIONS = [
+    {"symbol": "000001", "name": "平安银行", "quantity": 1000, "available_quantity": 1000, "cost_price": 12.50},
+    {"symbol": "600519", "name": "贵州茅台", "quantity": 10, "available_quantity": 10, "cost_price": 1680.00},
+    {"symbol": "300750", "name": "宁德时代", "quantity": 200, "available_quantity": 200, "cost_price": 195.00},
+]
+
+
+def _enrich_positions_with_realtime(positions: list[dict]) -> list[dict]:
+    symbols = [p["symbol"] for p in positions]
+    if not symbols:
+        return positions
+    try:
+        quotes = ds2.get_realtime_quote_tencent(symbols)
+    except Exception:
+        quotes = []
+    quote_map = {q.get("code", ""): q for q in quotes}
+    for p in positions:
+        q = quote_map.get(p["symbol"], {})
+        current_price = _safe_float(q.get("price"), p.get("cost_price", 0))
+        p["current_price"] = current_price
+        p["market_value"] = round(current_price * p["quantity"], 2)
+        cost = p["cost_price"] * p["quantity"]
+        p["profit"] = round(p["market_value"] - cost, 2)
+        p["profit_pct"] = round((current_price / p["cost_price"] - 1) * 100, 2) if p["cost_price"] else 0.0
+        if q.get("name"):
+            p["name"] = _safe_str(q.get("name"))
+    return positions
 
 
 class OverviewResponse(BaseModel):
@@ -83,11 +129,33 @@ def _get_state(request: Request) -> dict[str, Any]:
 @router.get("/overview", response_model=OverviewResponse)
 async def overview(request: Request):
     if not _HAS_CORE:
+        enriched = _enrich_positions_with_realtime([dict(p) for p in _MOCK_POSITIONS])
+        market_value = sum(p.get("market_value", 0) for p in enriched)
+        daily_pnl = 0.0
+        try:
+            symbols = [p["symbol"] for p in enriched]
+            quotes = ds2.get_realtime_quote_tencent(symbols)
+            quote_map = {q.get("code", ""): q for q in quotes}
+            for p in enriched:
+                q = quote_map.get(p["symbol"], {})
+                change_pct = _safe_float(q.get("change_pct"), 0)
+                prev_close = _safe_float(q.get("prev_close"), 0)
+                if prev_close > 0:
+                    daily_pnl += p["quantity"] * prev_close * change_pct / 100.0
+        except Exception:
+            pass
+        available_cash = 800000.0
+        total_assets = available_cash + market_value
+        daily_pnl_pct = round(daily_pnl / (total_assets - daily_pnl) * 100, 2) if (total_assets - daily_pnl) > 0 else 0.0
         return OverviewResponse(
-            available_cash=800000.0, total_assets=1000000.0,
-            market_value=200000.0, daily_pnl=15000.0,
-            daily_pnl_pct=1.5, position_count=3,
-            risk_level="NORMAL", risk_message="模拟数据 - 系统正常运行",
+            available_cash=available_cash,
+            total_assets=round(total_assets, 2),
+            market_value=round(market_value, 2),
+            daily_pnl=round(daily_pnl, 2),
+            daily_pnl_pct=daily_pnl_pct,
+            position_count=len(enriched),
+            risk_level="NORMAL",
+            risk_message="系统正常运行",
         )
     state = _get_state(request)
     broker = state["broker"]
@@ -110,19 +178,15 @@ async def overview(request: Request):
 @router.get("/positions", response_model=list[PositionItem])
 async def positions(request: Request):
     if not _HAS_CORE:
+        enriched = _enrich_positions_with_realtime([dict(p) for p in _MOCK_POSITIONS])
         return [
-            PositionItem(symbol="000001", name="平安银行", quantity=1000,
-                         available_quantity=1000, cost_price=12.50,
-                         current_price=13.20, market_value=13200.0,
-                         profit=700.0, profit_pct=5.6),
-            PositionItem(symbol="600519", name="贵州茅台", quantity=10,
-                         available_quantity=10, cost_price=1680.00,
-                         current_price=1720.00, market_value=17200.0,
-                         profit=400.0, profit_pct=2.38),
-            PositionItem(symbol="300750", name="宁德时代", quantity=200,
-                         available_quantity=200, cost_price=195.00,
-                         current_price=188.50, market_value=37700.0,
-                         profit=-1300.0, profit_pct=-3.33),
+            PositionItem(
+                symbol=p["symbol"], name=p["name"], quantity=p["quantity"],
+                available_quantity=p["available_quantity"], cost_price=p["cost_price"],
+                current_price=p["current_price"], market_value=p["market_value"],
+                profit=p["profit"], profit_pct=p["profit_pct"],
+            )
+            for p in enriched
         ]
     state = _get_state(request)
     broker = state["broker"]

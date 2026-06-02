@@ -252,11 +252,17 @@ async def northbound():
     try:
         data = ds2.get_northbound_flow_realtime()
         if data:
+            top_stocks_raw = data.get("top_stocks", [])
+            top_stocks = []
+            if isinstance(top_stocks_raw, list):
+                for s in top_stocks_raw:
+                    if isinstance(s, dict):
+                        top_stocks.append({str(k): v for k, v in s.items()})
             return NorthboundResponse(
                 total_net_inflow=_safe_float(data.get("total_net_inflow", 0)),
                 sh_net_inflow=_safe_float(data.get("sh_net_inflow", 0)),
                 sz_net_inflow=_safe_float(data.get("sz_net_inflow", 0)),
-                top_stocks=[],
+                top_stocks=top_stocks,
             )
     except Exception:
         pass
@@ -272,11 +278,17 @@ async def northbound():
         from src.strategies.trading_quant import TradingQuant
         quant = TradingQuant()
         result = quant.northbound_flow()
+        top_stocks_raw = result.get("top_stocks", [])
+        top_stocks = []
+        if isinstance(top_stocks_raw, list):
+            for s in top_stocks_raw:
+                if isinstance(s, dict):
+                    top_stocks.append({str(k): v for k, v in s.items()})
         return NorthboundResponse(
-            total_net_inflow=result.get("total_net_inflow", 0.0),
-            sh_net_inflow=result.get("sh_net_inflow", 0.0),
-            sz_net_inflow=result.get("sz_net_inflow", 0.0),
-            top_stocks=result.get("top_stocks", []),
+            total_net_inflow=_safe_float(result.get("total_net_inflow", 0)),
+            sh_net_inflow=_safe_float(result.get("sh_net_inflow", 0)),
+            sz_net_inflow=_safe_float(result.get("sz_net_inflow", 0)),
+            top_stocks=top_stocks,
         )
     except Exception:
         return NorthboundResponse(
