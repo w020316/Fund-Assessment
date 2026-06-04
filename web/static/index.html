@@ -178,8 +178,9 @@ tr:hover td{background:rgba(59,130,246,.04)}
 .news-ticker{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:10px 16px;margin-bottom:20px;display:flex;align-items:center;gap:12px;overflow:hidden}
 .news-ticker-label{font-size:11px;color:var(--orange);font-weight:600;white-space:nowrap;flex-shrink:0}
 .news-ticker-content{flex:1;overflow:hidden;white-space:nowrap}
-.news-ticker-scroll{display:inline-block;animation:ticker 120s linear infinite}
-@keyframes ticker{0%{transform:translateX(80%)}100%{transform:translateX(-100%)}}
+.news-ticker-scroll{display:inline-block;animation:ticker 300s linear infinite}
+@keyframes ticker{0%{transform:translateX(100%)}100%{transform:translateX(-100%)}}
+.news-ticker-scroll:hover{animation-play-state:paused}
 .news-item-inline{display:inline;margin-right:40px;font-size:12px;color:var(--text-sec)}
 .news-item-inline .news-time{color:var(--text-muted);margin-right:6px}
 
@@ -1499,15 +1500,15 @@ function loadGlobalNews() {
     }).join('');
     var el = $('newsTickerScroll');
     el.innerHTML = html;
-    // 根据内容宽度动态调整滚动速度，确保匀速可读
+    // 根据内容宽度动态调整滚动速度，确保可读（中文约18px/s）
     setTimeout(function () {
       var contentW = el.scrollWidth;
       var containerW = el.parentElement.clientWidth;
       var distance = contentW + containerW;
-      // 速度: 每秒约50px，确保可读
-      var duration = Math.max(30, Math.round(distance / 50));
+      // 速度: 每秒约18px，确保中文可读，最短60秒
+      var duration = Math.max(60, Math.round(distance / 18));
       el.style.animationDuration = duration + 's';
-    }, 50);
+    }, 100);
   }).catch(function () { $('newsTickerScroll').textContent = '资讯加载失败' });
 }
 
