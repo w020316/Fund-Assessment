@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import random
 from datetime import datetime
 from typing import Any
 
@@ -80,9 +79,9 @@ async def alerts(stock_code: str = ""):
     if not _HAS_MONITOR:
         return [AlertItem(
             stock_code=stock_code, alert_type="price_surge",
-            severity=random.choice(["info", "warning", "critical"]),
-            message=f"{stock_code} 涨幅异常（模拟数据）",
-            detail={"change_pct": round(random.uniform(5, 15), 2)},
+            severity="info",
+            message=f"{stock_code} 暂无监控数据",
+            detail={"change_pct": 0},
         )]
     try:
         monitor = StockMonitor()
@@ -222,56 +221,45 @@ async def remove_watchlist_by_body(req: RemoveWatchlistBodyRequest):
 
 
 @router.get("/capital_flow", response_model=CapitalFlowResponse)
-async def capital_flow(stock_code: str):
-    if not _HAS_MONITOR:
-        try:
-            data = ds2.get_capital_flow_detail(stock_code)
-            if data:
-                main_net = _safe_float(data.get("main_net_inflow", 0))
-                main_pct = _safe_float(data.get("main_inflow_pct", 0))
-                large_net = _safe_float(data.get("large_net_inflow", 0))
-                super_large_net = _safe_float(data.get("super_large_net_inflow", 0))
-                medium_net = _safe_float(data.get("medium_net_inflow", 0))
-                small_net = _safe_float(data.get("small_net_inflow", 0))
-                total_amount = abs(large_net) + abs(super_large_net) + abs(medium_net) + abs(small_net)
-                large_ratio = (large_net + super_large_net) / total_amount * 100 if total_amount > 0 else 0
-                medium_ratio = medium_net / total_amount * 100 if total_amount > 0 else 0
-                small_ratio = small_net / total_amount * 100 if total_amount > 0 else 0
-                northbound_change = 0.0
-                try:
-                    nb_data = ds2.get_northbound_flow_realtime()
-                    if nb_data:
-                        total_nb = _safe_float(nb_data.get("total_net_inflow", 0))
-                        northbound_change = total_nb / 1e8 if total_nb != 0 else 0.0
-                except Exception:
-                    pass
-                return CapitalFlowResponse(
-                    main_net_inflow=round(main_net, 0),
-                    large_order_ratio=round(large_ratio, 2),
-                    medium_order_ratio=round(medium_ratio, 2),
-                    small_order_ratio=round(small_ratio, 2),
-                    northbound_change=round(northbound_change, 2),
-                )
-        except Exception:
-            pass
+async def capital_flow(stock_code: str = ""):
+    northbound_change = 0.0
+    try:
+        nb_data = ds2.get_northbound_flow_realtime()
+        if nb_data:
+            total_nb = _safe_float(nb_data.get("total_net_inflow", 0))
+            northbound_change = total_nb / 1e8 if total_nb != 0 else 0.0
+    except Exception:
+        pass
+    if not stock_code:
         return CapitalFlowResponse(
             main_net_inflow=0, large_order_ratio=0, medium_order_ratio=0,
-            small_order_ratio=0, northbound_change=0,
+            small_order_ratio=0, northbound_change=round(northbound_change, 2),
         )
     try:
-        result = analyze_capital_flow(stock_code)
-        return CapitalFlowResponse(
-            main_net_inflow=result.get("main_net_inflow", 0.0),
-            large_order_ratio=result.get("large_order_ratio", 0.0),
-            medium_order_ratio=result.get("medium_order_ratio", 0.0),
-            small_order_ratio=result.get("small_order_ratio", 0.0),
-            northbound_change=result.get("northbound_change", 0.0),
-        )
+        data = ds2.get_capital_flow_detail(stock_code)
+        if data:
+            main_net = _safe_float(data.get("main_net_inflow", 0))
+            large_net = _safe_float(data.get("large_net_inflow", 0))
+            super_large_net = _safe_float(data.get("super_large_net_inflow", 0))
+            medium_net = _safe_float(data.get("medium_net_inflow", 0))
+            small_net = _safe_float(data.get("small_net_inflow", 0))
+            total_amount = abs(large_net) + abs(super_large_net) + abs(medium_net) + abs(small_net)
+            large_ratio = (large_net + super_large_net) / total_amount * 100 if total_amount > 0 else 0
+            medium_ratio = medium_net / total_amount * 100 if total_amount > 0 else 0
+            small_ratio = small_net / total_amount * 100 if total_amount > 0 else 0
+            return CapitalFlowResponse(
+                main_net_inflow=round(main_net, 0),
+                large_order_ratio=round(large_ratio, 2),
+                medium_order_ratio=round(medium_ratio, 2),
+                small_order_ratio=round(small_ratio, 2),
+                northbound_change=round(northbound_change, 2),
+            )
     except Exception:
-        return CapitalFlowResponse(
-            main_net_inflow=0, large_order_ratio=0, medium_order_ratio=0,
-            small_order_ratio=0, northbound_change=0,
-        )
+        pass
+    return CapitalFlowResponse(
+        main_net_inflow=0, large_order_ratio=0, medium_order_ratio=0,
+        small_order_ratio=0, northbound_change=round(northbound_change, 2),
+    )
 
 
 @router.get("/northbound", response_model=NorthboundResponse)
@@ -295,11 +283,10 @@ async def northbound():
         pass
     if not _HAS_MONITOR:
         return NorthboundResponse(
-            total_net_inflow=round(random.uniform(-3e9, 3e9), 0),
-            sh_net_inflow=round(random.uniform(-2e9, 2e9), 0),
-            sz_net_inflow=round(random.uniform(-1e9, 1e9), 0),
-            top_stocks=[{"code": "600519", "name": "贵州茅台",
-                         "net_inflow": round(random.uniform(-5e7, 5e7), 0)}],
+            total_net_inflow=0,
+            sh_net_inflow=0,
+            sz_net_inflow=0,
+            top_stocks=[],
         )
     try:
         from src.strategies.trading_quant import TradingQuant

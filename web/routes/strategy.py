@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import random
 from typing import Any
 
 from fastapi import APIRouter
@@ -160,13 +159,13 @@ def _mock_analysis(stock_code: str, strategy_type: str) -> dict[str, Any]:
             "stock_code": stock_code,
             "strategy_type": strategy_type,
             "scores": {
-                "technical": round(random.uniform(40, 60), 1),
-                "capital": round(random.uniform(40, 60), 1),
-                "fundamental": round(random.uniform(40, 60), 1),
-                "news": round(random.uniform(40, 60), 1),
-                "sentiment": round(random.uniform(40, 60), 1),
+                "technical": 50.0,
+                "capital": 50.0,
+                "fundamental": 50.0,
+                "news": 50.0,
+                "sentiment": 50.0,
             },
-            "total_score": round(random.uniform(40, 60), 1),
+            "total_score": 50.0,
             "signal": "HOLD",
             "recommendation": f"数据获取受限({str(e)[:50]})，建议谨慎操作",
         }
@@ -269,11 +268,7 @@ async def scan_new_high():
                 ))
         if items:
             return items
-        stocks = [("300750", "宁德时代"), ("002594", "比亚迪"), ("601012", "隆基绿能"),
-                   ("300059", "东方财富"), ("300015", "爱尔眼科")]
-        return [NewHighItem(stock_code=c, stock_name=n, change_pct=round(random.uniform(5, 15), 2),
-                            volume=random.uniform(1e6, 1e8), amount=random.uniform(1e8, 1e10))
-                for c, n in stocks]
+        return []
     try:
         import akshare as ak
         items: list[NewHighItem] = []
@@ -298,11 +293,7 @@ async def scan_new_high():
 @router.get("/scan/limit_up", response_model=list[LimitUpItem])
 async def scan_limit_up():
     if not _HAS_STRATEGIES:
-        stocks = [("000001", "平安银行"), ("600519", "贵州茅台")]
-        return [LimitUpItem(stock_code=c, stock_name=n, level="首板", reason="题材",
-                            seal_time="09:35", open_count=0, seal_volume=random.uniform(1e7, 1e9),
-                            quality_score=round(random.uniform(60, 95), 1))
-                for c, n in stocks]
+        return []
     try:
         analyzer = LimitUpAnalyzer()
         results = analyzer.scan_limit_up()
@@ -318,16 +309,7 @@ async def scan_limit_up():
 @router.get("/scan/cb", response_model=list[CBItem])
 async def scan_cb():
     if not _HAS_STRATEGIES:
-        return [CBItem(
-            cb_code="123456", cb_name="模拟转债", stock_code="000001",
-            stock_name="平安银行", cb_price=round(random.uniform(90, 130), 2),
-            stock_price=round(random.uniform(10, 50), 2),
-            conversion_price=round(random.uniform(10, 50), 2),
-            conversion_value=round(random.uniform(90, 130), 2),
-            premium_rate=round(random.uniform(-5, 25), 2),
-            is_limit_up=True, volume_ratio=round(random.uniform(1, 5), 2),
-            turnover_rate=round(random.uniform(5, 30), 2),
-        )]
+        return []
     try:
         sniper = CBT0Sniper()
         results = sniper.scan_cb_opportunities()
@@ -347,12 +329,8 @@ async def backtest(req: BacktestRequest):
     if not _HAS_STRATEGIES:
         return BacktestResponse(
             strategy=req.strategy, stock_code=req.stock_code,
-            total_return=round(random.uniform(-20, 40), 2),
-            annualized_return=round(random.uniform(-10, 20), 2),
-            max_drawdown=round(random.uniform(5, 25), 2),
-            sharpe_ratio=round(random.uniform(-0.5, 2.0), 2),
-            win_rate=round(random.uniform(40, 70), 2),
-            trades=random.randint(20, 100),
+            total_return=0, annualized_return=0, max_drawdown=0,
+            sharpe_ratio=0, win_rate=0, trades=0,
         )
     try:
         quant = BSProQuant()

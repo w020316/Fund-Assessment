@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import os
+
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -42,6 +45,30 @@ _MOCK_POSITIONS = [
 ]
 
 
+def _load_user_positions() -> list[dict]:
+    pos_file = os.path.join(os.path.dirname(__file__), "..", "user_positions.json")
+    if os.path.exists(pos_file):
+        try:
+            with open(pos_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data.get("positions", _MOCK_POSITIONS)
+        except Exception:
+            pass
+    return _MOCK_POSITIONS
+
+
+def _load_user_cash() -> float:
+    pos_file = os.path.join(os.path.dirname(__file__), "..", "user_positions.json")
+    if os.path.exists(pos_file):
+        try:
+            with open(pos_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return float(data.get("available_cash", 800000.0))
+        except Exception:
+            pass
+    return 800000.0
+
+
 def _enrich_positions_with_realtime(positions: list[dict]) -> list[dict]:
     symbols = [p["symbol"] for p in positions]
     if not symbols:
@@ -59,6 +86,8 @@ def _enrich_positions_with_realtime(positions: list[dict]) -> list[dict]:
         cost = p["cost_price"] * p["quantity"]
         p["profit"] = round(p["market_value"] - cost, 2)
         p["profit_pct"] = round((current_price / p["cost_price"] - 1) * 100, 2) if p["cost_price"] else 0.0
+        p["_change_pct"] = _safe_float(q.get("change_pct"), 0)
+        p["_prev_close"] = _safe_float(q.get("prev_close"), 0)
         if q.get("name"):
             p["name"] = _safe_str(q.get("name"))
     return positions
@@ -129,22 +158,18 @@ def _get_state(request: Request) -> dict[str, Any]:
 @router.get("/overview", response_model=OverviewResponse)
 async def overview(request: Request):
     if not _HAS_CORE:
-        enriched = _enrich_positions_with_realtime([dict(p) for p in _MOCK_POSITIONS])
+        enriched = _enrich_positions_with_realtime([dict(p) for p in _load_user_positions()])
         market_value = sum(p.get("market_value", 0) for p in enriched)
         daily_pnl = 0.0
         try:
-            symbols = [p["symbol"] for p in enriched]
-            quotes = ds2.get_realtime_quote_tencent(symbols)
-            quote_map = {q.get("code", ""): q for q in quotes}
             for p in enriched:
-                q = quote_map.get(p["symbol"], {})
-                change_pct = _safe_float(q.get("change_pct"), 0)
-                prev_close = _safe_float(q.get("prev_close"), 0)
+                change_pct = _safe_float(p.get("_change_pct", 0))
+                prev_close = _safe_float(p.get("_prev_close", 0))
                 if prev_close > 0:
                     daily_pnl += p["quantity"] * prev_close * change_pct / 100.0
         except Exception:
             pass
-        available_cash = 800000.0
+        available_cash = _load_user_cash()
         total_assets = available_cash + market_value
         daily_pnl_pct = round(daily_pnl / (total_assets - daily_pnl) * 100, 2) if (total_assets - daily_pnl) > 0 else 0.0
         return OverviewResponse(
@@ -178,7 +203,7 @@ async def overview(request: Request):
 @router.get("/positions", response_model=list[PositionItem])
 async def positions(request: Request):
     if not _HAS_CORE:
-        enriched = _enrich_positions_with_realtime([dict(p) for p in _MOCK_POSITIONS])
+        enriched = _enrich_positions_with_realtime([dict(p) for p in _load_user_positions()])
         return [
             PositionItem(
                 symbol=p["symbol"], name=p["name"], quantity=p["quantity"],
@@ -232,22 +257,18 @@ async def trades(request: Request, limit: int = 20):
 @router.get("/risk", response_model=RiskResponse)
 async def risk(request: Request):
     if not _HAS_CORE:
-        enriched = _enrich_positions_with_realtime([dict(p) for p in _MOCK_POSITIONS])
+        enriched = _enrich_positions_with_realtime([dict(p) for p in _load_user_positions()])
         market_value = sum(p.get("market_value", 0) for p in enriched)
         daily_pnl = 0.0
         try:
-            symbols = [p["symbol"] for p in enriched]
-            quotes = ds2.get_realtime_quote_tencent(symbols)
-            quote_map = {q.get("code", ""): q for q in quotes}
             for p in enriched:
-                q = quote_map.get(p["symbol"], {})
-                change_pct = _safe_float(q.get("change_pct"), 0)
-                prev_close = _safe_float(q.get("prev_close"), 0)
+                change_pct = _safe_float(p.get("_change_pct", 0))
+                prev_close = _safe_float(p.get("_prev_close", 0))
                 if prev_close > 0:
                     daily_pnl += p["quantity"] * prev_close * change_pct / 100.0
         except Exception:
             pass
-        available_cash = 800000.0
+        available_cash = _load_user_cash()
         total_assets = available_cash + market_value
         total_profit = sum(p.get("profit", 0) for p in enriched)
         total_cost = sum(p.get("cost_price", 0) * p.get("quantity", 0) for p in enriched)

@@ -24,6 +24,7 @@ class QuickAnalysisRequest(BaseModel):
 class MultiAnalyzeRequest(BaseModel):
     stock_code: str
     mode: str = "deep"
+    agents: list[str] = []
 
 
 class PortfolioRequest(BaseModel):
@@ -82,6 +83,7 @@ async def multi_analyze(req: MultiAnalyzeRequest) -> dict[str, Any]:
     _decision_history.append(result)
     if len(_decision_history) > 100:
         _decision_history.pop(0)
+    result["selected_agents"] = req.agents
     return result
 
 

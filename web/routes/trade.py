@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import random
 from typing import Any
 
 from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -77,12 +77,7 @@ def _get_state(request: Request) -> dict[str, Any]:
 @router.post("/buy", response_model=OrderResponse)
 async def buy(req: BuyRequest, request: Request):
     if not _HAS_EXECUTOR:
-        return OrderResponse(
-            order_id=f"MOCK-{random.randint(1000,9999)}", symbol=req.stock_code,
-            side="buy", price=req.price, quantity=req.amount,
-            order_type="market", status="filled",
-            filled_price=req.price, filled_quantity=req.amount,
-        )
+        return JSONResponse(status_code=503, content={"error": "交易功能未启用", "detail": "请先配置交易模块"})
     state = _get_state(request)
     executor = state["executor"]
     signal = Signal(
@@ -110,12 +105,7 @@ async def buy(req: BuyRequest, request: Request):
 @router.post("/sell", response_model=OrderResponse)
 async def sell(req: SellRequest, request: Request):
     if not _HAS_EXECUTOR:
-        return OrderResponse(
-            order_id=f"MOCK-{random.randint(1000,9999)}", symbol=req.stock_code,
-            side="sell", price=req.price, quantity=req.amount,
-            order_type="market", status="filled",
-            filled_price=req.price, filled_quantity=req.amount,
-        )
+        return JSONResponse(status_code=503, content={"error": "交易功能未启用", "detail": "请先配置交易模块"})
     state = _get_state(request)
     executor = state["executor"]
     signal = Signal(

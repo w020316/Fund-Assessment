@@ -822,18 +822,24 @@ def multi_analyze(stock_code: str, mode: str = "deep") -> dict[str, Any]:
 def analyze_portfolio(positions: list[dict]) -> dict[str, Any]:
     logger.info(f"starting portfolio analysis for {len(positions)} positions")
 
-    position_analyses: list[dict[str, Any]] = []
-    for pos in positions:
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _analyze_one(pos: dict) -> tuple[str, dict]:
         symbol = pos.get("symbol", pos.get("code", ""))
         if not symbol:
-            continue
+            return ("", {
+                "symbol": "", "name": pos.get("name", ""), "quantity": pos.get("quantity", 0),
+                "cost_price": pos.get("cost_price", 0), "current_price": pos.get("current_price", 0),
+                "profit": pos.get("profit", 0), "profit_pct": pos.get("profit_pct", 0),
+                "action": "HOLD", "confidence": 0, "target_price": 0, "stop_loss_price": 0, "risk_level": "HIGH",
+            })
         try:
             quotes = get_realtime_quote_tencent([symbol])
             if quotes:
                 pos["current_price"] = quotes[0].get("price", pos.get("current_price", 0))
                 pos["name"] = quotes[0].get("name", pos.get("name", ""))
             analysis = quick_analysis(symbol)
-            position_analyses.append({
+            return (symbol, {
                 "symbol": symbol,
                 "name": pos.get("name", ""),
                 "quantity": pos.get("quantity", 0),
@@ -849,20 +855,26 @@ def analyze_portfolio(positions: list[dict]) -> dict[str, Any]:
             })
         except Exception as e:
             logger.warning(f"portfolio analysis failed for {symbol}: {e}")
-            position_analyses.append({
-                "symbol": symbol,
-                "name": pos.get("name", ""),
-                "quantity": pos.get("quantity", 0),
-                "cost_price": pos.get("cost_price", 0),
-                "current_price": pos.get("current_price", 0),
-                "profit": pos.get("profit", 0),
-                "profit_pct": pos.get("profit_pct", 0),
-                "action": "HOLD",
-                "confidence": 0,
-                "target_price": 0,
-                "stop_loss_price": 0,
-                "risk_level": "HIGH",
+            return (symbol, {
+                "symbol": symbol, "name": pos.get("name", ""), "quantity": pos.get("quantity", 0),
+                "cost_price": pos.get("cost_price", 0), "current_price": pos.get("current_price", 0),
+                "profit": pos.get("profit", 0), "profit_pct": pos.get("profit_pct", 0),
+                "action": "HOLD", "confidence": 0, "target_price": 0, "stop_loss_price": 0, "risk_level": "HIGH",
             })
+
+    position_analyses: list[dict[str, Any]] = []
+    with ThreadPoolExecutor(max_workers=min(len(positions), 4)) as pool:
+        futures = {pool.submit(_analyze_one, pos): i for i, pos in enumerate(positions)}
+        results = [None] * len(positions)
+        for f in as_completed(futures):
+            idx = futures[f]
+            try:
+                _, analysis = f.result(timeout=30)
+                if analysis.get("symbol"):
+                    results[idx] = analysis
+            except Exception:
+                pass
+    position_analyses = [r for r in results if r is not None]
 
     total_value = sum(
         p.get("current_price", 0) * p.get("quantity", 0)
@@ -967,36 +979,50 @@ def analyze_portfolio(positions: list[dict]) -> dict[str, Any]:
 def get_market_outlook() -> dict[str, Any]:
     logger.info("starting market outlook analysis")
 
+    from src.core.data_source_v2 import _parallel_fetch
+
+    def _fetch_indices():
+        try:
+            return get_index_realtime()
+        except Exception:
+            return None
+
+    def _fetch_northbound():
+        try:
+            return get_northbound_flow_realtime()
+        except Exception:
+            return None
+
+    def _fetch_sectors():
+        try:
+            return get_sector_ranking()
+        except Exception:
+            return None
+
+    def _fetch_news():
+        try:
+            return get_global_news()
+        except Exception:
+            return None
+
+    fetched = _parallel_fetch([
+        ("indices", _fetch_indices),
+        ("northbound", _fetch_northbound),
+        ("sectors", _fetch_sectors),
+        ("news", _fetch_news),
+    ])
+
     market_data: dict[str, Any] = {}
-
-    try:
-        indices = get_index_realtime()
-        if indices:
-            market_data["indices"] = indices
-    except Exception as e:
-        logger.warning(f"gather index data failed: {e}")
-
-    try:
-        northbound = get_northbound_flow_realtime()
-        if northbound:
-            market_data["northbound_flow"] = northbound
-    except Exception as e:
-        logger.warning(f"gather northbound flow failed: {e}")
-
-    try:
-        sectors = get_sector_ranking()
-        if sectors:
-            market_data["hot_sectors"] = sectors[:10]
-            market_data["cold_sectors"] = sectors[-5:] if len(sectors) > 10 else []
-    except Exception as e:
-        logger.warning(f"gather sector ranking failed: {e}")
-
-    try:
-        global_news = get_global_news()
-        if global_news:
-            market_data["global_news"] = global_news[:8]
-    except Exception as e:
-        logger.warning(f"gather global news failed: {e}")
+    if fetched.get("indices"):
+        market_data["indices"] = fetched["indices"]
+    if fetched.get("northbound"):
+        market_data["northbound_flow"] = fetched["northbound"]
+    if fetched.get("sectors"):
+        sectors = fetched["sectors"]
+        market_data["hot_sectors"] = sectors[:10]
+        market_data["cold_sectors"] = sectors[-5:] if len(sectors) > 10 else []
+    if fetched.get("news"):
+        market_data["global_news"] = fetched["news"][:8]
 
     if not market_data:
         return {

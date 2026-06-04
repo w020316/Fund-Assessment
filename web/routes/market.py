@@ -250,9 +250,14 @@ async def index_realtime():
 
 @router.get("/hot_stocks", response_model=HotStocksResponse)
 async def hot_stocks():
-    top_gainers_data = ds2.get_stock_ranking_em(sort_field="f3", sort_order=0, count=10)
-    top_losers_data = ds2.get_stock_ranking_em(sort_field="f3", sort_order=1, count=10)
-    top_volume_data = ds2.get_stock_ranking_em(sort_field="f6", sort_order=0, count=10)
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        f_gainers = pool.submit(ds2.get_stock_ranking_em, "f3", 0, 10)
+        f_losers = pool.submit(ds2.get_stock_ranking_em, "f3", 1, 10)
+        f_volume = pool.submit(ds2.get_stock_ranking_em, "f6", 0, 10)
+        top_gainers_data = f_gainers.result(timeout=15)
+        top_losers_data = f_losers.result(timeout=15)
+        top_volume_data = f_volume.result(timeout=15)
 
     def _to_item(item: dict) -> HotStocksItem:
         return HotStocksItem(
@@ -598,6 +603,32 @@ class MarketWideStatsResponse(BaseModel):
     margin_balance: float
     block_trades_count: int
     avg_shareholder_change_pct: float
+
+
+class NorthboundFlowItem(BaseModel):
+    date: str = ""
+    total_net_inflow: float = 0.0
+    sh_net_inflow: float = 0.0
+    sz_net_inflow: float = 0.0
+
+
+@router.get("/northbound", response_model=NorthboundFlowItem)
+async def northbound():
+    data = ds2.get_northbound_flow_realtime()
+    if not data:
+        return NorthboundFlowItem()
+    return NorthboundFlowItem(
+        date=_safe_str(data.get("date", "")),
+        total_net_inflow=_safe_float(data.get("total_net_inflow", 0)),
+        sh_net_inflow=_safe_float(data.get("sh_net_inflow", 0)),
+        sz_net_inflow=_safe_float(data.get("sz_net_inflow", 0)),
+    )
+
+
+@router.get("/market_sentiment")
+async def market_sentiment():
+    data = ds2.get_market_sentiment()
+    return data
 
 
 @router.get("/market_wide_stats", response_model=MarketWideStatsResponse)

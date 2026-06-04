@@ -114,3 +114,33 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
         else:
             base[key] = value
     return base
+
+
+@router.get("/user_positions")
+async def get_user_positions():
+    import json, os
+    pos_file = os.path.join(os.path.dirname(__file__), "..", "user_positions.json")
+    if os.path.exists(pos_file):
+        try:
+            with open(pos_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"positions": [], "available_cash": 800000.0}
+
+
+class SavePositionsRequest(BaseModel):
+    positions: list[dict]
+    available_cash: float = 800000.0
+
+
+@router.post("/user_positions")
+async def save_user_positions(req: SavePositionsRequest):
+    import json, os
+    pos_file = os.path.join(os.path.dirname(__file__), "..", "user_positions.json")
+    try:
+        with open(pos_file, "w", encoding="utf-8") as f:
+            json.dump({"positions": req.positions, "available_cash": req.available_cash}, f, ensure_ascii=False, indent=2)
+        return {"success": True, "message": "持仓已保存"}
+    except Exception as e:
+        return {"success": False, "message": f"保存失败: {e}"}
