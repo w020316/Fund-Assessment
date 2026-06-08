@@ -1139,7 +1139,9 @@ async function loadIndexData() {
 
   // 数据质量检测
   if (data && data.data) {
-    markDataUpdated(data.cached ? 'delayed' : 'realtime');
+    const meta = data._meta || {};
+    const quality = meta.cached ? 'delayed' : 'realtime';
+    markDataUpdated(quality);
   } else {
     markDataUpdated('mock');
   }
