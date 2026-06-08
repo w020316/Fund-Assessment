@@ -16,3 +16,6 @@ tdxpy==0.1.2
 mootdx==0.5.10
 stockstats==0.7.0
 pandas-ta==0.3.14b
+litellm>=1.40.0
+httpx>=0.27.0
+json-repair>=0.25.0

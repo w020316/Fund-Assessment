@@ -1,0 +1,3 @@
+@echo off
+echo Starting OpenClaw Quantitative Trading System...
+D:\dev-tools\Python312\python.exe -m uvicorn web.api:app --host 0.0.0.0 --port 8000 --reload

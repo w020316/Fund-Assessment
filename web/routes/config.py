@@ -7,6 +7,54 @@ import yaml
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+SENSITIVE_KEYS: set[str] = {
+    "tushare_token",
+    "broker_api_key",
+    "broker_api_secret",
+    "dingtalk_secret",
+    "dingtalk_webhook",
+    "wechat_webhook",
+    "secret",
+    "api_key",
+    "api_secret",
+    "token",
+    "password",
+    "webhook",
+}
+
+MASK_PATTERN = "****"
+
+
+def _mask_value(val: str) -> str:
+    if not isinstance(val, str) or len(val) <= 8:
+        return MASK_PATTERN
+    return f"{val[:4]}{MASK_PATTERN}{val[-4:]}"
+
+
+def _mask_sensitive(data: Any) -> Any:
+    if isinstance(data, dict):
+        return {k: _mask_value(v) if k in SENSITIVE_KEYS and isinstance(v, str) else _mask_sensitive(v) for k, v in data.items()}
+    if isinstance(data, list):
+        return [_mask_sensitive(item) for item in data]
+    return data
+
+
+def _strip_masked(data: Any) -> Any:
+    if isinstance(data, dict):
+        result: dict[str, Any] = {}
+        for k, v in data.items():
+            if isinstance(v, str) and MASK_PATTERN in v:
+                continue
+            stripped = _strip_masked(v)
+            if not (isinstance(v, dict) and not stripped):
+                result[k] = stripped
+            else:
+                result[k] = stripped
+        return result
+    if isinstance(data, list):
+        return [_strip_masked(item) for item in data]
+    return data
+
 router = APIRouter()
 
 _CONFIG_DIR = Path(__file__).resolve().parent.parent.parent / "config"
@@ -52,15 +100,16 @@ def _save_yaml(filename: str, data: dict[str, Any]) -> None:
 @router.get("/settings", response_model=SettingsResponse)
 async def get_settings():
     data = _load_yaml("settings.yaml")
-    return SettingsResponse(settings=data)
+    return SettingsResponse(settings=_mask_sensitive(data))
 
 
 @router.put("/settings", response_model=SettingsResponse)
 async def update_settings(req: SettingsUpdateRequest):
     existing = _load_yaml("settings.yaml")
-    _deep_merge(existing, req.settings)
+    cleaned = _strip_masked(req.settings)
+    _deep_merge(existing, cleaned)
     _save_yaml("settings.yaml", existing)
-    return SettingsResponse(settings=existing)
+    return SettingsResponse(settings=_mask_sensitive(existing))
 
 
 @router.get("/strategies", response_model=StrategiesResponse)

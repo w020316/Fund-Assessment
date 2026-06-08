@@ -2,40 +2,241 @@ app:
   name: OpenClaw量化AI炒股机器人
   version: "1.0"
   debug: false
+  locale: zh_CN
+  timezone: Asia/Shanghai
 
+# ──────────────────────────────────────────────
+# AI 服务配置
+# ──────────────────────────────────────────────
+ai:
+  provider: openai                    # openai / azure / zhipu / deepseek / ollama
+  model: gpt-4o                      # 主模型
+  model_mini: gpt-4o-mini            # 轻量模型（用于分类/摘要等低复杂度任务）
+  base_url: ""                       # 自定义 API 端点（留空使用默认）
+  api_key: ""
+  temperature: 0.3
+  max_tokens: 4096
+  timeout: 60                         # 单次请求超时（秒）
+  max_retries: 3
+  retry_delay: 2                      # 重试间隔（秒）
+  search_engines:
+    - name: serpapi
+      api_key: ""
+      enabled: false
+    - name: tavily
+      api_key: ""
+      enabled: false
+    - name: bing
+      api_key: ""
+      enabled: false
+
+# ──────────────────────────────────────────────
+# 数据源配置
+# ──────────────────────────────────────────────
 data_source:
   primary: akshare
   fallback_1: tushare
   fallback_2: eastmoney
   cache_dir: data/cache
-  cache_expire: 300
+  cache_expire: 300                   # 默认缓存过期（秒）
+  rate_limit:
+    akshare:
+      requests_per_minute: 30
+      timeout: 30
+      retries: 3
+      retry_delay: 2
+    tushare:
+      requests_per_minute: 200
+      timeout: 15
+      retries: 3
+      retry_delay: 1
+    eastmoney:
+      requests_per_minute: 60
+      timeout: 20
+      retries: 3
+      retry_delay: 2
 
 tushare:
   token: ""
 
-risk:
-  system_drawdown_limit: 0.15
-  system_pause_days: 5
-  daily_loss_limit: 0.05
-  strategy_consecutive_stops: 3
-  strategy_position_reduction: 0.5
+# ──────────────────────────────────────────────
+# 缓存 TTL 配置（按数据类型，单位：秒）
+# ──────────────────────────────────────────────
+cache_ttl:
+  realtime_quote: 5                   # 实时行情
+  kline_daily: 300                    # 日K线
+  kline_minute: 60                    # 分钟K线
+  financial_report: 86400             # 财务报表（24小时）
+  stock_list: 86400                   # 股票列表
+  index_list: 86400                   # 指数列表
+  fund_list: 86400                    # 基金列表
+  fund_nav: 1800                      # 基金净值（30分钟）
+  news: 600                           # 新闻资讯（10分钟）
+  announcement: 1800                  # 公告（30分钟）
+  sector_info: 3600                   # 板块信息（1小时）
+  macro_data: 86400                   # 宏观数据（24小时）
 
+# ──────────────────────────────────────────────
+# 交易时间配置
+# ──────────────────────────────────────────────
+market_schedule:
+  timezone: Asia/Shanghai
+  trading_days_only: true             # 仅在交易日运行
+  pre_market:
+    start: "09:15"
+    end: "09:30"
+  morning_session:
+    start: "09:30"
+    end: "11:30"
+  afternoon_session:
+    start: "13:00"
+    end: "15:00"
+  post_market:
+    start: "15:00"
+    end: "15:30"
+  # 盘后分析时间
+  after_hours_analysis: "15:30"
+  # 隔夜策略生成时间
+  overnight_strategy: "20:00"
+
+# ──────────────────────────────────────────────
+# 策略配置
+# ──────────────────────────────────────────────
+strategy:
+  default_strategy: ai_driven         # 默认策略名称
+  strategy_dir: strategies            # 策略文件目录
+  max_strategies: 10                  # 最大同时运行策略数
+  position_sizing:
+    method: fixed_fraction            # fixed_fraction / kelly / risk_parity
+    default_fraction: 0.1             # 默认仓位比例
+    max_position_per_stock: 0.3       # 单股最大仓位
+    max_positions: 5                  # 最大持仓数
+  stop_loss:
+    default_pct: 0.05                 # 默认止损比例
+    trailing: false                   # 是否启用移动止损
+    trailing_pct: 0.03                # 移动止损回撤比例
+  take_profit:
+    default_pct: 0.15                 # 默认止盈比例
+    trailing: false
+    trailing_pct: 0.05
+  backtest:
+    initial_capital: 1000000
+    commission: 0.0003                # 佣金费率
+    slippage: 0.001                   # 滑点
+    benchmark: "000300"               # 沪深300
+
+# ──────────────────────────────────────────────
+# 风控配置
+# ──────────────────────────────────────────────
+risk:
+  system_drawdown_limit: 0.15         # 系统最大回撤
+  system_pause_days: 5                # 触发回撤后暂停天数
+  daily_loss_limit: 0.05              # 单日最大亏损
+  strategy_consecutive_stops: 3       # 策略连续止损次数
+  strategy_position_reduction: 0.5    # 连续止损后仓位缩减比例
+  max_open_orders: 20                 # 最大挂单数
+  single_order_max_amount: 500000     # 单笔最大金额
+  forbidden_stocks: []                # 禁买股票列表
+  forbidden_sectors: []               # 禁买板块列表
+  blacklist_file: config/blacklist.yaml
+
+# ──────────────────────────────────────────────
+# 券商配置
+# ──────────────────────────────────────────────
 broker:
-  type: simulated
+  type: simulated                     # simulated / xtp / ctrader / custom
   api_key: ""
   api_secret: ""
   broker_id: ""
+  trade_server: ""
+  market_server: ""
+  connection_timeout: 10
+  reconnect_interval: 5
+  max_reconnect: 10
 
+# ──────────────────────────────────────────────
+# CORS 配置
+# ──────────────────────────────────────────────
+cors:
+  allowed_origins:
+    - "http://localhost:3000"
+    - "http://localhost:8080"
+    - "http://127.0.0.1:3000"
+  allowed_methods:
+    - GET
+    - POST
+    - PUT
+    - DELETE
+    - OPTIONS
+  allowed_headers:
+    - "*"
+  allow_credentials: true
+  max_age: 86400
+
+# ──────────────────────────────────────────────
+# 通知配置
+# ──────────────────────────────────────────────
 notify:
+  # 钉钉
   dingtalk:
     enabled: false
     webhook: ""
     secret: ""
+    at_all: false
+    at_mobiles: []
+  # 企业微信
   wechat:
     enabled: false
     webhook: ""
+    mentioned_list: []
+    mentioned_mobile_list: []
+  # 飞书
+  feishu:
+    enabled: false
+    webhook: ""
+    secret: ""
+    msg_type: interactive             # text / interactive / post
+  # Telegram
+  telegram:
+    enabled: false
+    bot_token: ""
+    chat_id: ""
+    parse_mode: Markdown              # Markdown / HTML
+    disable_notification: false
+  # 邮件
+  email:
+    enabled: false
+    smtp_host: ""
+    smtp_port: 465
+    smtp_ssl: true
+    username: ""
+    password: ""
+    sender: ""
+    receivers: []
+  # PushPlus
+  pushplus:
+    enabled: false
+    token: ""
+    topic: ""
+    template: html                    # html / txt
+  # 通知过滤
+  filters:
+    min_level: WARNING                # DEBUG / INFO / WARNING / ERROR / CRITICAL
+    quiet_hours:
+      start: "23:00"
+      end: "07:00"
+    throttle_seconds: 60              # 同类通知最小间隔
 
+# ──────────────────────────────────────────────
+# 日志配置
+# ──────────────────────────────────────────────
 logging:
   level: INFO
   dir: data/logs
   retention: 30
+  format: "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+  date_format: "%Y-%m-%d %H:%M:%S"
+  separate_files:
+    trade: true                       # 交易日志单独文件
+    risk: true                        # 风控日志单独文件
+    ai: false                         # AI 调用日志单独文件

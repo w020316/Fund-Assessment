@@ -183,8 +183,21 @@ async def overview(request: Request):
             risk_message="系统正常运行",
         )
     state = _get_state(request)
-    broker = state["broker"]
-    risk_manager = state["risk_manager"]
+    broker = state.get("broker")
+    risk_manager = state.get("risk_manager")
+    if not broker or not risk_manager:
+        enriched = _enrich_positions_with_realtime([dict(p) for p in _load_user_positions()])
+        market_value = sum(p.get("market_value", 0) for p in enriched)
+        return OverviewResponse(
+            available_cash=1_000_000.0,
+            total_assets=round(1_000_000.0 + market_value, 2),
+            market_value=round(market_value, 2),
+            daily_pnl=0.0,
+            daily_pnl_pct=0.0,
+            position_count=len(enriched),
+            risk_level="NORMAL",
+            risk_message="模拟模式",
+        )
     balance = broker.get_balance()
     positions = broker.get_positions()
     risk_status = risk_manager.get_risk_status()

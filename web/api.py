@@ -1,4 +1,6 @@
+import os
 import sys
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -6,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.requests import Request
 
 _parent_dir = str(Path(__file__).resolve().parent.parent)
 if _parent_dir not in sys.path:
@@ -65,13 +68,24 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+_cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start = time.monotonic()
+    response = await call_next(request)
+    duration_ms = (time.monotonic() - start) * 1000
+    if request.url.path.startswith("/api/"):
+        from loguru import logger
+        logger.info(f"{request.method} {request.url.path} - {response.status_code} ({duration_ms:.0f}ms)")
+    return response
 
 from web.routes import agent as agent_route
 from web.routes import config as config_route
@@ -101,8 +115,10 @@ async def root():
 
 @app.get("/api/health")
 async def health_check():
+    from src.core.ai_service import _check_api_keys
     return {
         "status": "ok",
         "akshare": _HAS_AKSHARE,
         "core_modules": _HAS_CORE,
+        "ai_keys": _check_api_keys(),
     }

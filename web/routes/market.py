@@ -14,8 +14,34 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from src.core import data_source_v2 as ds2
+from src.core.cache import DataCache
+from src.core.data_validator import get_data_validator
 
 router = APIRouter()
+
+cache = DataCache(default_ttl=60)
+
+
+class ResponseMeta(BaseModel):
+    """API 响应元数据 - 数据质量与来源信息"""
+    data_source: str = ""
+    quality_score: float = 0.0
+    cached: bool = False
+    timestamp: str = ""
+
+
+def _build_meta(
+    data_source: str,
+    cached: bool = False,
+    quality_score: float | None = None,
+) -> dict:
+    """构建响应元数据"""
+    return ResponseMeta(
+        data_source=data_source,
+        quality_score=quality_score if quality_score is not None else (100.0 if cached else 80.0),
+        cached=cached,
+        timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    ).model_dump()
 
 
 class StockRealtimeItem(BaseModel):
@@ -111,8 +137,12 @@ def _safe_str(val: object, default: str = "") -> str:
     return str(val)
 
 
-@router.get("/stock_realtime", response_model=list[StockRealtimeItem])
+@router.get("/stock_realtime")
 async def stock_realtime(codes: str = Query(..., description="股票代码，逗号分隔")):
+    cache_key = f"market:stock_realtime:{codes}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": _build_meta("tencent", cached=True)}
     code_list = [c.strip() for c in codes.split(",") if c.strip()]
     data = ds2.get_realtime_quote_tencent(code_list)
     result: list[StockRealtimeItem] = []
@@ -135,15 +165,29 @@ async def stock_realtime(codes: str = Query(..., description="股票代码，逗
             open=_safe_float(item.get("open")),
             prev_close=prev_close,
         ))
-    return result
+    cache.set(cache_key, result)
+    # 计算数据质量评分
+    quality_score = 80.0
+    if result:
+        validator = get_data_validator()
+        scores = []
+        for r in result:
+            vr = validator.validate_quote(r.model_dump())
+            scores.append(vr.quality_score)
+        quality_score = sum(scores) / len(scores) if scores else 80.0
+    return {"data": result, "_meta": _build_meta("tencent", cached=False, quality_score=quality_score)}
 
 
-@router.get("/stock_kline", response_model=list[KlineItem])
+@router.get("/stock_kline")
 async def stock_kline(
     code: str = Query(..., description="股票代码"),
     period: str = Query("daily", description="周期: daily/weekly/monthly"),
     count: int = Query(120, description="返回条数"),
 ):
+    cache_key = f"market:stock_kline:{code}:{period}:{count}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": _build_meta("mootdx", cached=True)}
     data = ds2.get_kline_mootdx(code, period=period, count=count)
     result: list[KlineItem] = []
     for item in data:
@@ -156,12 +200,24 @@ async def stock_kline(
             volume=_safe_float(item.get("volume")),
             amount=_safe_float(item.get("amount")),
         ))
-    return result
+    cache.set(cache_key, result, ttl=300)
+    # 计算数据质量评分
+    quality_score = 80.0
+    if result:
+        validator = get_data_validator()
+        vr = validator.validate_kline([r.model_dump() for r in result], expected_count=count)
+        quality_score = vr.quality_score
+    return {"data": result, "_meta": _build_meta("mootdx", cached=False, quality_score=quality_score)}
 
 
-@router.get("/fund_realtime", response_model=list[FundRealtimeItem])
+@router.get("/fund_realtime")
 async def fund_realtime(codes: str = Query(..., description="基金代码，逗号分隔")):
+    cache_key = f"market:fund_realtime:{codes}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": _build_meta("akshare", cached=True)}
     code_list = [c.strip() for c in codes.split(",") if c.strip()]
+    data_source = "akshare"
     if _HAS_AKSHARE:
         result: list[FundRealtimeItem] = []
         try:
@@ -186,21 +242,33 @@ async def fund_realtime(codes: str = Query(..., description="基金代码，逗�
         except Exception:
             pass
         if result:
-            return result
+            cache.set(cache_key, result)
+            return {"data": result, "_meta": _build_meta("akshare", cached=False)}
     data = ds2.get_fund_realtime_tencent(code_list)
-    return [FundRealtimeItem(**item) for item in data]
+    result = [FundRealtimeItem(**item) for item in data]
+    data_source = "tencent"
+    cache.set(cache_key, result)
+    return {"data": result, "_meta": _build_meta(data_source, cached=False)}
 
 
-@router.get("/fund_history", response_model=list[FundHistoryItem])
+@router.get("/fund_history")
 async def fund_history(
     code: str = Query(..., description="基金代码"),
     period: str = Query("1y", description="周期: 1m/3m/6m/1y/3y/all"),
 ):
+    cache_key = f"market:fund_history:{code}:{period}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": _build_meta("akshare", cached=True)}
+    data_source = "akshare"
     if _HAS_AKSHARE:
         try:
             df = ak.fund_em_open_fund_info(code, indicator="单位净值走势")
             if df is None or df.empty:
-                return _fund_history_tencent_fallback(code, period)
+                result = _fund_history_tencent_fallback(code, period)
+                data_source = "tencent"
+                cache.set(cache_key, result, ttl=300)
+                return {"data": result, "_meta": _build_meta(data_source, cached=False)}
             period_days = {"1m": 30, "3m": 90, "6m": 180, "1y": 365, "3y": 1095, "all": 99999}
             days = period_days.get(period, 365)
             cutoff = datetime.now() - timedelta(days=days)
@@ -220,10 +288,14 @@ async def fund_history(
                     nav=nav, acc_nav=acc_nav, change_pct=change_pct,
                 ))
                 prev_nav = nav
-            return result
+            cache.set(cache_key, result, ttl=300)
+            return {"data": result, "_meta": _build_meta("akshare", cached=False)}
         except Exception:
             pass
-    return _fund_history_tencent_fallback(code, period)
+    result = _fund_history_tencent_fallback(code, period)
+    data_source = "tencent"
+    cache.set(cache_key, result, ttl=300)
+    return {"data": result, "_meta": _build_meta(data_source, cached=False)}
 
 
 def _fund_history_tencent_fallback(code: str, period: str) -> list[FundHistoryItem]:
@@ -231,8 +303,12 @@ def _fund_history_tencent_fallback(code: str, period: str) -> list[FundHistoryIt
     return [FundHistoryItem(**item) for item in data]
 
 
-@router.get("/index_realtime", response_model=list[IndexRealtimeItem])
+@router.get("/index_realtime")
 async def index_realtime():
+    cache_key = "market:index_realtime"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
     data = ds2.get_index_realtime()
     result: list[IndexRealtimeItem] = []
     for item in data:
@@ -245,11 +321,16 @@ async def index_realtime():
             volume=_safe_float(item.get("volume")),
             amount=_safe_float(item.get("amount")),
         ))
-    return result
+    cache.set(cache_key, result)
+    return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
 
 
-@router.get("/hot_stocks", response_model=HotStocksResponse)
+@router.get("/hot_stocks")
 async def hot_stocks():
+    cache_key = "market:hot_stocks"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=3) as pool:
         f_gainers = pool.submit(ds2.get_stock_ranking_em, "f3", 0, 10)
@@ -269,15 +350,21 @@ async def hot_stocks():
             amount=_safe_float(item.get("amount")),
         )
 
-    return HotStocksResponse(
+    result = HotStocksResponse(
         top_gainers=[_to_item(i) for i in top_gainers_data],
         top_losers=[_to_item(i) for i in top_losers_data],
         top_volume=[_to_item(i) for i in top_volume_data],
     )
+    cache.set(cache_key, result.model_dump())
+    return {"data": result.model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
 
 
-@router.get("/sector_flow", response_model=list[SectorFlowItem])
+@router.get("/sector_flow")
 async def sector_flow():
+    cache_key = "market:sector_flow"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
     data = ds2.get_sector_ranking()
     result: list[SectorFlowItem] = []
     for item in data:
@@ -287,7 +374,8 @@ async def sector_flow():
             main_net_inflow=_safe_float(item.get("main_net_inflow")),
             large_order_ratio=_safe_float(item.get("main_inflow_pct")),
         ))
-    return result
+    cache.set(cache_key, result)
+    return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
 
 
 class ResearchReportItem(BaseModel):
@@ -375,82 +463,140 @@ class SectorRankingItem(BaseModel):
     small_pct: float
 
 
-@router.get("/research_reports", response_model=list[ResearchReportItem])
+@router.get("/research_reports")
 async def research_reports(
     code: str = Query("", description="股票代码（可选，为空时返回最新研报）"),
     page: int = Query(1, description="页码"),
     page_size: int = Query(10, description="每页条数"),
 ):
+    cache_key = f"market:research_reports:{code}:{page}:{page_size}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
     data = ds2.get_research_reports(code, page=page, page_size=page_size)
-    return [ResearchReportItem(**item) for item in data]
+    result = [ResearchReportItem(**item) for item in data]
+    cache.set(cache_key, result, ttl=300)
+    return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
 
 
-@router.get("/dragon_tiger", response_model=list[DragonTigerItem])
+@router.get("/dragon_tiger")
 async def dragon_tiger():
+    cache_key = "market:dragon_tiger"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
     data = ds2.get_dragon_tiger()
-    return [DragonTigerItem(**item) for item in data]
+    result = [DragonTigerItem(**item) for item in data]
+    cache.set(cache_key, result, ttl=300)
+    return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
 
 
-@router.get("/margin", response_model=MarginTradingItem)
+@router.get("/margin")
 async def margin(code: str = Query("", description="股票代码")):
     if not code:
-        return MarginTradingItem(code="", trade_date="", margin_buy=0, margin_balance=0, short_sell=0, short_balance=0, total_balance=0)
+        return {"data": MarginTradingItem(code="", trade_date="", margin_buy=0, margin_balance=0, short_sell=0, short_balance=0, total_balance=0).model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
+    cache_key = f"market:margin:{code}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
     data = ds2.get_margin_trading(code)
     if not data:
-        return MarginTradingItem(code=code, trade_date="", margin_buy=0, margin_balance=0, short_sell=0, short_balance=0, total_balance=0)
-    return MarginTradingItem(**data)
+        return {"data": MarginTradingItem(code=code, trade_date="", margin_buy=0, margin_balance=0, short_sell=0, short_balance=0, total_balance=0).model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
+    result = MarginTradingItem(**data)
+    cache.set(cache_key, result.model_dump(), ttl=300)
+    return {"data": result.model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
 
 
-@router.get("/block_trades", response_model=list[BlockTradeItem])
+@router.get("/block_trades")
 async def block_trades(code: str = Query("", description="股票代码")):
     if not code:
-        return []
+        return {"data": [], "_meta": _build_meta("eastmoney", cached=False)}
+    cache_key = f"market:block_trades:{code}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
     data = ds2.get_block_trades(code)
-    return [BlockTradeItem(**item) for item in data]
+    result = [BlockTradeItem(**item) for item in data]
+    cache.set(cache_key, result, ttl=300)
+    return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
 
 
-@router.get("/shareholder", response_model=ShareholderItem)
+@router.get("/shareholder")
 async def shareholder(code: str = Query("", description="股票代码")):
     if not code:
-        return ShareholderItem(code="", end_date="", holder_num=0, change_pct=0.0)
+        return {"data": ShareholderItem(code="", end_date="", holder_num=0, change_pct=0.0).model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
+    cache_key = f"market:shareholder:{code}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
     data = ds2.get_shareholder_count(code)
     if not data:
-        return ShareholderItem(code=code, end_date="", holder_num=0, change_pct=0.0)
-    return ShareholderItem(**data)
+        return {"data": ShareholderItem(code=code, end_date="", holder_num=0, change_pct=0.0).model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
+    result = ShareholderItem(**data)
+    cache.set(cache_key, result.model_dump(), ttl=300)
+    return {"data": result.model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
 
 
-@router.get("/news", response_model=list[NewsItem])
+@router.get("/news")
 async def news(
     code: str = Query("", description="股票代码（可选，为空时返回全局新闻）"),
     page: int = Query(1, description="页码"),
     page_size: int = Query(10, description="每页条数"),
 ):
+    cache_key = f"market:news:{code}:{page}:{page_size}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
     if not code:
         data = ds2.get_global_news()
-        return [NewsItem(**item) for item in data]
-    data = ds2.get_stock_news(code, page=page, page_size=page_size)
-    return [NewsItem(**item) for item in data]
+        result = [NewsItem(**item) for item in data]
+    else:
+        data = ds2.get_stock_news(code, page=page, page_size=page_size)
+        result = [NewsItem(**item) for item in data]
+    cache.set(cache_key, result, ttl=120)
+    return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
 
 
-@router.get("/global_news", response_model=list[NewsItem])
+@router.get("/global_news")
 async def global_news():
+    cache_key = "market:global_news"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
     data = ds2.get_global_news()
-    return [NewsItem(**item) for item in data]
+    result = [NewsItem(**item) for item in data]
+    cache.set(cache_key, result, ttl=120)
+    return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
 
 
-@router.get("/hot_stocks_signal", response_model=list[HotStockSignalItem])
+@router.get("/hot_stocks_signal")
 async def hot_stocks_signal():
+    cache_key = "market:hot_stocks_signal"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": _build_meta("ths", cached=True)}
+    data_source = "ths"
     data = ds2.get_hot_stocks_ths()
     if data:
-        return [HotStockSignalItem(**item) for item in data]
-    data = ds2.get_hot_stocks_signal_fallback()
-    return [HotStockSignalItem(**item) for item in data]
+        result = [HotStockSignalItem(**item) for item in data]
+    else:
+        data = ds2.get_hot_stocks_signal_fallback()
+        data_source = "eastmoney"
+        result = [HotStockSignalItem(**item) for item in data]
+    cache.set(cache_key, result)
+    return {"data": result, "_meta": _build_meta(data_source, cached=False)}
 
 
-@router.get("/sector_ranking", response_model=list[SectorRankingItem])
+@router.get("/sector_ranking")
 async def sector_ranking():
+    cache_key = "market:sector_ranking"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
     data = ds2.get_sector_ranking()
-    return [SectorRankingItem(**item) for item in data]
+    result = [SectorRankingItem(**item) for item in data]
+    cache.set(cache_key, result)
+    return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
 
 
 class HeatmapItem(BaseModel):
@@ -482,8 +628,12 @@ class StockDetailResponse(BaseModel):
     kline_summary: dict
 
 
-@router.get("/heatmap", response_model=list[HeatmapItem])
+@router.get("/heatmap")
 async def market_heatmap():
+    cache_key = "market:heatmap"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
     try:
         data = ds2.get_sector_ranking()
         result: list[HeatmapItem] = []
@@ -502,13 +652,18 @@ async def market_heatmap():
                 change_pct=change_pct,
                 color=color,
             ))
-        return result
+        cache.set(cache_key, result)
+        return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
     except Exception:
-        return []
+        return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
 
 
-@router.get("/search", response_model=list[SearchResultItem])
+@router.get("/search")
 async def stock_search(q: str = Query(..., description="搜索关键词（股票代码或名称）")):
+    cache_key = f"market:search:{q}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
     try:
         data = ds2.search_stock(q)
         result: list[SearchResultItem] = []
@@ -519,12 +674,13 @@ async def stock_search(q: str = Query(..., description="搜索关键词（股票
                 price=_safe_float(item.get("price")),
                 change_pct=_safe_float(item.get("change_pct")),
             ))
-        return result
+        cache.set(cache_key, result, ttl=600)
+        return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
     except Exception:
-        return []
+        return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
 
 
-@router.get("/status", response_model=MarketStatusResponse)
+@router.get("/status")
 async def market_status():
     from zoneinfo import ZoneInfo
     tz = ZoneInfo("Asia/Shanghai")
@@ -573,19 +729,24 @@ async def market_status():
         next_day = now + _td(days=days_ahead)
         next_open_time = next_day.replace(hour=9, minute=30, second=0, microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
 
-    return MarketStatusResponse(
+    result = MarketStatusResponse(
         is_open=is_open,
         session=session,
         next_open_time=next_open_time,
         current_time=current_time,
     )
+    return {"data": result.model_dump(), "_meta": _build_meta("local", cached=False, quality_score=100.0)}
 
 
-@router.get("/stock_detail", response_model=StockDetailResponse)
+@router.get("/stock_detail")
 async def stock_detail(code: str = Query(..., description="股票代码")):
+    cache_key = f"market:stock_detail:{code}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": _build_meta("mixed", cached=True)}
     try:
         data = ds2.get_stock_detail(code)
-        return StockDetailResponse(
+        result = StockDetailResponse(
             code=_safe_str(data.get("code")),
             name=_safe_str(data.get("name")),
             quote=data.get("quote", {}),
@@ -593,10 +754,13 @@ async def stock_detail(code: str = Query(..., description="股票代码")):
             capital_flow=data.get("capital_flow", {}),
             kline_summary=data.get("kline_summary", {}),
         )
+        cache.set(cache_key, result.model_dump(), ttl=120)
+        # 计算数据质量评分
+        validator = get_data_validator()
+        vr = validator.validate_analysis_data(data)
+        return {"data": result.model_dump(), "_meta": _build_meta("mixed", cached=False, quality_score=vr.quality_score)}
     except Exception:
-        return StockDetailResponse(
-            code=code, name="", quote={}, financial={}, capital_flow={}, kline_summary={},
-        )
+        return {"data": StockDetailResponse(code=code, name="", quote={}, financial={}, capital_flow={}, kline_summary={}).model_dump(), "_meta": _build_meta("mixed", cached=False, quality_score=0.0)}
 
 
 class MarketWideStatsResponse(BaseModel):
@@ -612,30 +776,100 @@ class NorthboundFlowItem(BaseModel):
     sz_net_inflow: float = 0.0
 
 
-@router.get("/northbound", response_model=NorthboundFlowItem)
+@router.get("/northbound")
 async def northbound():
+    cache_key = "market:northbound"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
     data = ds2.get_northbound_flow_realtime()
     if not data:
-        return NorthboundFlowItem()
-    return NorthboundFlowItem(
+        return {"data": NorthboundFlowItem().model_dump(), "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
+    result = NorthboundFlowItem(
         date=_safe_str(data.get("date", "")),
         total_net_inflow=_safe_float(data.get("total_net_inflow", 0)),
         sh_net_inflow=_safe_float(data.get("sh_net_inflow", 0)),
         sz_net_inflow=_safe_float(data.get("sz_net_inflow", 0)),
     )
+    cache.set(cache_key, result.model_dump())
+    return {"data": result.model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
 
 
 @router.get("/market_sentiment")
 async def market_sentiment():
+    cache_key = "market:market_sentiment"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": _build_meta("mixed", cached=True)}
     data = ds2.get_market_sentiment()
-    return data
+    cache.set(cache_key, data)
+    return {"data": data, "_meta": _build_meta("mixed", cached=False)}
 
 
-@router.get("/market_wide_stats", response_model=MarketWideStatsResponse)
+@router.get("/market_wide_stats")
 async def market_wide_stats():
+    cache_key = "market:market_wide_stats"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": _build_meta("mixed", cached=True)}
     data = ds2.get_market_wide_stats()
-    return MarketWideStatsResponse(
+    result = MarketWideStatsResponse(
         margin_balance=_safe_float(data.get("margin_balance", 0)),
         block_trades_count=int(_safe_float(data.get("block_trades_count", 0))),
         avg_shareholder_change_pct=_safe_float(data.get("avg_shareholder_change_pct", 0)),
     )
+    cache.set(cache_key, result.model_dump(), ttl=300)
+    return {"data": result.model_dump(), "_meta": _build_meta("mixed", cached=False)}
+
+
+@router.get("/data-quality/{stock_code}")
+async def check_data_quality(stock_code: str):
+    """检查指定股票的数据质量"""
+    from src.core.data_source_v2 import get_realtime_quote_tencent, get_kline_mootdx, get_capital_flow_detail, get_financial_snapshot
+
+    data = {}
+    try:
+        quotes = get_realtime_quote_tencent([stock_code])
+        if quotes:
+            data["quote"] = quotes[0]
+    except Exception:
+        pass
+
+    try:
+        kline = get_kline_mootdx(stock_code, period="daily", count=30)
+        if kline:
+            data["kline_daily"] = kline
+    except Exception:
+        pass
+
+    try:
+        flow = get_capital_flow_detail(stock_code)
+        if flow:
+            data["capital_flow"] = flow
+    except Exception:
+        pass
+
+    try:
+        financial = get_financial_snapshot(stock_code)
+        if financial:
+            data["financial"] = financial
+    except Exception:
+        pass
+
+    validator = get_data_validator()
+    result = validator.validate_analysis_data(data)
+
+    return {
+        "stock_code": stock_code,
+        "quality_score": result.quality_score,
+        "is_valid": result.is_valid,
+        "warnings": result.warnings,
+        "criticals": result.criticals,
+        "issues_count": len(result.issues),
+        "data_dimensions": {
+            "quote": bool(data.get("quote")),
+            "kline": bool(data.get("kline_daily")),
+            "capital_flow": bool(data.get("capital_flow")),
+            "financial": bool(data.get("financial")),
+        },
+    }

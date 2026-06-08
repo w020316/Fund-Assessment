@@ -91,7 +91,9 @@ def _check_em_available() -> bool:
     return _EM_AVAILABLE
 
 
-_check_em_available()
+def _ensure_em_checked():
+    if _EM_AVAILABLE is None:
+        _check_em_available()
 
 
 def _safe_float(val: Any, default: float = 0.0) -> float:
@@ -138,7 +140,7 @@ def _em_secid(code: str) -> str:
 
 
 def em_get(url: str, params: dict[str, Any] | None = None, **kwargs: Any) -> requests.Response:
-    if "push2.eastmoney.com" in url and not _check_em_available():
+    if "push2.eastmoney.com" in url and not _ensure_em_checked():
         raise requests.ConnectionError("EastMoney push2 API unavailable (proxy blocked)")
     global _last_em_request_time
     elapsed = time.monotonic() - _last_em_request_time

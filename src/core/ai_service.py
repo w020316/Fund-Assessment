@@ -9,6 +9,8 @@ import requests
 from dotenv import load_dotenv
 from loguru import logger
 
+from src.core.data_validator import get_data_validator, ValidationResult
+
 from src.core.data_source_v2 import (
     get_capital_flow_detail,
     get_company_info,
@@ -28,9 +30,9 @@ from src.core.data_source_v2 import (
 
 load_dotenv()
 
-_TTAPI_API_KEY = os.getenv("TTAPI_API_KEY", "6a1d8d71-83e1-a29a-73bd-054f629404a0")
-_TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "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")
-_TINYFISH_API_KEY = os.getenv("TINYFISH_API_KEY", "sk-tinyfish-uc4UsT0fms_HCoYfw7q-vZXkKF5w_usf")
+_TTAPI_API_KEY = os.getenv("TTAPI_API_KEY", "")
+_TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
+_TINYFISH_API_KEY = os.getenv("TINYFISH_API_KEY", "")
 
 _TTAPI_BASE_URL = "https://ttapi.io/v1"
 _TINYFISH_BASE_URL = "https://api.tinyfish.io/v1"
@@ -38,6 +40,15 @@ _TINYFISH_BASE_URL = "https://api.tinyfish.io/v1"
 _DEFAULT_MODEL = "gpt-4o"
 _TIMEOUT = 60
 _SEARCH_TIMEOUT = 15
+
+
+def _check_api_keys() -> dict[str, bool]:
+    """检查API密钥配置状态"""
+    return {
+        "ttapi": bool(_TTAPI_API_KEY),
+        "tavily": bool(_TAVILY_API_KEY),
+        "tinyfish": bool(_TINYFISH_API_KEY),
+    }
 
 
 def _gather_stock_data(stock_code: str) -> dict[str, Any]:
@@ -380,7 +391,37 @@ def _build_analysis_prompt(stock_code: str, stock_data: dict[str, Any], search_n
     return prompt
 
 
-def _call_ttapi(messages: list[dict[str, str]], model: str = _DEFAULT_MODEL, temperature: float = 0.7, json_mode: bool = True) -> str:
+def _call_llm(messages: list[dict[str, str]], model: str = _DEFAULT_MODEL, temperature: float = 0.7, json_mode: bool = True) -> str:
+    """调用LLM，优先使用多Provider路由，降级为直接TTAPI调用"""
+    # 优先使用LLM Router
+    try:
+        from src.core.llm_router import get_llm_router
+        router = get_llm_router()
+        if router.available_providers:
+            response = router.chat(
+                messages=messages,
+                model=model if model != _DEFAULT_MODEL else None,
+                temperature=temperature,
+                json_mode=json_mode,
+            )
+            logger.debug(f"LLM Router 使用 Provider: {response.provider}, 耗时: {response.latency_ms:.0f}ms")
+            return response.content
+    except ImportError:
+        logger.debug("LLM Router 不可用，使用直接API调用")
+    except RuntimeError as e:
+        logger.warning(f"LLM Router 全部失败: {e}，降级为直接TTAPI调用")
+    except Exception as e:
+        logger.warning(f"LLM Router 异常: {e}，降级为直接TTAPI调用")
+
+    # 降级：直接调用TTAPI
+    return _call_ttapi_direct(messages, model, temperature, json_mode)
+
+
+def _call_ttapi_direct(messages: list[dict[str, str]], model: str = _DEFAULT_MODEL, temperature: float = 0.7, json_mode: bool = True) -> str:
+    """直接调用TTAPI（降级方案）"""
+    if not _TTAPI_API_KEY:
+        raise ValueError("TTAPI_API_KEY 未配置，请在 .env 文件中设置")
+
     url = f"{_TTAPI_BASE_URL}/chat/completions"
     headers = {
         "Authorization": f"Bearer {_TTAPI_API_KEY}",
@@ -715,6 +756,9 @@ def _search_tinyfish(query: str) -> list[dict]:
 
 
 def search_news(query: str) -> list[dict]:
+    if not _TAVILY_API_KEY and not _TINYFISH_API_KEY:
+        logger.warning("未配置任何新闻搜索API密钥，跳过新闻搜索")
+        return []
     results = _search_tavily(query)
     if results:
         return results
@@ -736,6 +780,14 @@ def analyze_stock(stock_code: str, mode: str = "deep") -> dict[str, Any]:
         logger.warning(f"no data gathered for {stock_code}")
         return _fallback_result(stock_code, "无法获取股票数据")
 
+    # 数据质量校验
+    validator = get_data_validator()
+    validation = validator.validate_analysis_data(stock_data)
+    if validation.criticals:
+        logger.warning(f"数据质量校验发现严重问题: {validation.criticals}")
+    if validation.quality_score < 40:
+        logger.warning(f"数据质量评分过低: {validation.quality_score}/100，分析结果可靠性不足")
+
     search_results = search_news(f"{stock_code} 股票 最新消息")
 
     prompt = _build_analysis_prompt(stock_code, stock_data, search_results, mode)
@@ -749,7 +801,7 @@ def analyze_stock(stock_code: str, mode: str = "deep") -> dict[str, Any]:
     ]
 
     try:
-        response_text = _call_ttapi(messages, temperature=0.5 if mode == "deep" else 0.3)
+        response_text = _call_llm(messages, temperature=0.5 if mode == "deep" else 0.3)
         result = _parse_analysis_response(response_text, stock_code)
         logger.info(f"analysis completed for {stock_code}: action={result['action']}, confidence={result['confidence']}")
         return result
@@ -778,7 +830,7 @@ def quick_analysis(stock_code: str) -> dict[str, Any]:
     ]
 
     try:
-        response_text = _call_ttapi(messages, temperature=0.3)
+        response_text = _call_llm(messages, temperature=0.3)
         result = _parse_analysis_response(response_text, stock_code)
         logger.info(f"quick analysis completed for {stock_code}: action={result['action']}")
         return result
@@ -808,7 +860,7 @@ def multi_analyze(stock_code: str, mode: str = "deep") -> dict[str, Any]:
     ]
 
     try:
-        response_text = _call_ttapi(messages, temperature=0.5 if mode == "deep" else 0.3)
+        response_text = _call_llm(messages, temperature=0.5 if mode == "deep" else 0.3)
         result = _parse_analysis_response(response_text, stock_code)
         result["analysis_mode"] = "multi_agent"
         result["analyst_count"] = len(result.get("agent_opinions", []))
@@ -952,7 +1004,7 @@ def analyze_portfolio(positions: list[dict]) -> dict[str, Any]:
     ]
 
     try:
-        response_text = _call_ttapi(messages, temperature=0.3)
+        response_text = _call_llm(messages, temperature=0.3)
         try:
             portfolio_result = json.loads(response_text)
         except json.JSONDecodeError:
@@ -1069,7 +1121,7 @@ def get_market_outlook() -> dict[str, Any]:
     ]
 
     try:
-        response_text = _call_ttapi(messages, temperature=0.3, json_mode=True)
+        response_text = _call_llm(messages, temperature=0.3, json_mode=True)
         try:
             outlook_result = json.loads(response_text)
         except json.JSONDecodeError:
@@ -1082,7 +1134,7 @@ def get_market_outlook() -> dict[str, Any]:
     except Exception as e:
         logger.warning(f"market outlook json_mode failed: {e}, retrying without json_mode")
         try:
-            response_text = _call_ttapi(messages, temperature=0.3, json_mode=False)
+            response_text = _call_llm(messages, temperature=0.3, json_mode=False)
             start = response_text.find("{")
             end = response_text.rfind("}") + 1
             if start >= 0 and end > start:
