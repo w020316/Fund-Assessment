@@ -1237,6 +1237,9 @@ function switchHotTab(tab) {
 async function loadHotStocks(type) {
   const data = await api('/api/market/hot_stocks');
   const body = document.getElementById('hotStockBody');
+  // 前端type到API字段名的映射
+  const typeMap = {gain: 'top_gainers', lose: 'top_losers', volume: 'top_volume'};
+  const apiKey = typeMap[type] || type;
   // 默认数据
   const defaultStocks = {
     gain: [
@@ -1279,7 +1282,17 @@ async function loadHotStocks(type) {
 
   let stocks;
   if (data && data.data) {
-    stocks = data.data[type] || data.data || defaultStocks[type];
+    const raw = data.data;
+    // hot_stocks API返回 {top_gainers, top_losers, top_volume}
+    if (raw[apiKey] && Array.isArray(raw[apiKey])) {
+      stocks = raw[apiKey];
+    } else if (raw[type] && Array.isArray(raw[type])) {
+      stocks = raw[type];
+    } else if (Array.isArray(raw)) {
+      stocks = raw;
+    } else {
+      stocks = defaultStocks[type];
+    }
   } else {
     stocks = defaultStocks[type];
   }
