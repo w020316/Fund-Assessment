@@ -85,7 +85,10 @@ class RiskManagerAgent:
             warnings.append("分析师置信度中等，建议适度控制仓位")
 
         if debate_result and debate_result.confidence < 0.2:
-            risk_level = max(risk_level, "MEDIUM") if risk_level in ("LOW", "MEDIUM") else risk_level
+            # 修复:字符串字典序比较无法表达 LOW<MEDIUM<HIGH,改用数值映射
+            _LEVEL = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "EXTREME": 4}
+            if _LEVEL.get(risk_level, 0) < 2:
+                risk_level = "MEDIUM"
             warnings.append("多空辩论分歧较大，方向不明确")
 
         conflicting = sum(1 for op in opinions if op.signal == "BULLISH") - sum(

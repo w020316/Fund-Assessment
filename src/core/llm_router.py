@@ -293,7 +293,8 @@ class LLMRouter:
         timeout: int,
     ) -> LLMResponse:
         """调用Gemini API"""
-        url = f"{provider.base_url}/models/{model}:generateContent?key={provider.api_key}"
+        # 修复:API key 从 URL query 改为 HTTP Header,避免 access log 泄露
+        url = f"{provider.base_url}/models/{model}:generateContent"
 
         # 转换消息格式
         contents = []
@@ -314,7 +315,10 @@ class LLMRouter:
             payload["generationConfig"]["responseMimeType"] = "application/json"
 
         start = time.monotonic()
-        resp = requests.post(url, json=payload, timeout=timeout)
+        resp = requests.post(
+            url, json=payload, timeout=timeout,
+            headers={"x-goog-api-key": provider.api_key},
+        )
         latency = (time.monotonic() - start) * 1000
         resp.raise_for_status()
 

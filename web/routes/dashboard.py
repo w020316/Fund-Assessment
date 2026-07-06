@@ -24,35 +24,30 @@ except ImportError:
     pass
 
 
-_MOCK_POSITIONS = [
-    {"symbol": "000001", "name": "平安银行", "quantity": 1000, "available_quantity": 1000, "cost_price": 12.50},
-    {"symbol": "600519", "name": "贵州茅台", "quantity": 10, "available_quantity": 10, "cost_price": 1680.00},
-    {"symbol": "300750", "name": "宁德时代", "quantity": 200, "available_quantity": 200, "cost_price": 195.00},
-]
-
-
 def _load_user_positions() -> list[dict]:
+    """读取用户持仓,文件缺失或异常时返回空列表(不返回 mock 数据)"""
     pos_file = os.path.join(os.path.dirname(__file__), "..", "user_positions.json")
     if os.path.exists(pos_file):
         try:
             with open(pos_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                return data.get("positions", _MOCK_POSITIONS)
+                return data.get("positions", [])
         except Exception:
             pass
-    return _MOCK_POSITIONS
+    return []
 
 
 def _load_user_cash() -> float:
+    """读取用户现金,文件缺失时返回 0(不硬编码 80 万)"""
     pos_file = os.path.join(os.path.dirname(__file__), "..", "user_positions.json")
     if os.path.exists(pos_file):
         try:
             with open(pos_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                return float(data.get("available_cash", 800000.0))
+                return float(data.get("available_cash", 0.0))
         except Exception:
             pass
-    return 800000.0
+    return 0.0
 
 
 async def _enrich_positions_with_realtime(positions: list[dict]) -> list[dict]:

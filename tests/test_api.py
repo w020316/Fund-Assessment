@@ -22,12 +22,12 @@ class TestHealthEndpoint:
         assert "akshare" in data
         assert "core_modules" in data
 
-    def test_health_has_ai_keys(self, client):
-        """测试健康检查包含AI密钥状态"""
+    def test_health_has_ai_ready(self, client):
+        """测试健康检查返回 AI 就绪状态(不泄露具体 key)"""
         resp = client.get("/api/health")
         data = resp.json()
-        assert "ai_keys" in data
-        assert "ttapi" in data["ai_keys"]
+        assert "ai_ready" in data
+        assert isinstance(data["ai_ready"], bool)
 
 
 class TestMarketEndpoints:

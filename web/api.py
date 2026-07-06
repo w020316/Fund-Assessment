@@ -74,7 +74,7 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["*"],
+    allow_headers=["Content-Type", "Authorization", "X-Admin-Token"],
 )
 
 @app.middleware("http")
@@ -122,9 +122,13 @@ async def root():
 @app.get("/api/health")
 async def health_check():
     from src.core.ai_service import _check_api_keys
+    keys = _check_api_keys()
+    # 修复:不泄露具体哪些 key 已配置,只返回布尔值
+    has_ai = any([keys.get("ttapi"), keys.get("agnes"), keys.get("tavily"),
+                  keys.get("tinyfish"), keys.get("openai_key"), keys.get("api_key")])
     return {
         "status": "ok",
         "akshare": _HAS_AKSHARE,
         "core_modules": _HAS_CORE,
-        "ai_keys": _check_api_keys(),
+        "ai_ready": has_ai,
     }

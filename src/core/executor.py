@@ -435,6 +435,15 @@ class TradeExecutor:
                 signal.symbol, signal.price, signal.quantity, signal.order_type
             )
         elif signal.side == OrderSide.SELL:
+            # 修复:在 sell 之前快照持仓,用于后续 profit 计算(sell 后持仓被削减)
+            try:
+                positions = self._broker.get_positions()
+                self._pre_sell_snapshot = {
+                    p.symbol: {"cost_price": p.cost_price, "quantity": p.quantity}
+                    for p in positions if p.symbol == signal.symbol
+                }
+            except Exception:
+                self._pre_sell_snapshot = {}
             order = self._broker.sell(
                 signal.symbol, signal.price, signal.quantity, signal.order_type
             )
@@ -452,14 +461,13 @@ class TradeExecutor:
             balance = self._broker.get_balance()
             self._risk_manager.update_position({"total_assets": balance.total_assets})
 
-            is_stop_loss = signal.reason.lower().find("止损") >= 0 if signal.reason else False
+            # 修复:中文不需要 lower(),且 SELL 后持仓已被削减,需用执行前的快照计算 profit
+            is_stop_loss = "止损" in (signal.reason or "")
             profit = 0.0
-            if signal.side == OrderSide.SELL:
-                positions = self._broker.get_positions()
-                for pos in positions:
-                    if pos.symbol == signal.symbol:
-                        profit = (order.filled_price - pos.cost_price) * order.filled_quantity
-                        break
+            if signal.side == OrderSide.SELL and hasattr(self, '_pre_sell_snapshot'):
+                prev_pos = self._pre_sell_snapshot.get(signal.symbol)
+                if prev_pos:
+                    profit = (order.filled_price - prev_pos["cost_price"]) * order.filled_quantity
 
             trade_record = TradeRecord(
                 symbol=signal.symbol,

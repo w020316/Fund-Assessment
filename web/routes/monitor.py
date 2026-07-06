@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 from datetime import datetime
 from typing import Any
 
@@ -59,10 +61,28 @@ class NorthboundResponse(BaseModel):
     top_stocks: list[dict[str, Any]]
 
 
-_mock_watchlist: dict[str, list[str]] = {
-    "000001": ["price_surge", "rsi"],
-    "600519": ["northbound_flow", "volume_price"],
-}
+# 自选股持久化(文件存储,避免内存 mock)
+_WATCHLIST_FILE = os.path.join(os.path.dirname(__file__), "..", "user_watchlist.json")
+
+
+def _load_watchlist() -> dict[str, list[str]]:
+    """读取自选股规则,文件缺失时返回空 dict"""
+    if os.path.exists(_WATCHLIST_FILE):
+        try:
+            with open(_WATCHLIST_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def _save_watchlist(data: dict[str, list[str]]) -> None:
+    """持久化自选股规则"""
+    try:
+        with open(_WATCHLIST_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
 
 
 @router.get("/alerts", response_model=list[AlertItem])
@@ -90,9 +110,15 @@ async def alerts(stock_code: str = ""):
 
 async def _generate_default_alerts() -> list[AlertItem]:
     alert_items: list[AlertItem] = []
-    watchlist_codes = list(_mock_watchlist.keys())
+    watchlist_data = _load_watchlist()
+    watchlist_codes = list(watchlist_data.keys())
     if not watchlist_codes:
-        watchlist_codes = ["000001", "600519"]
+        return [AlertItem(
+            stock_code="", alert_type="market_status",
+            severity="info",
+            message="暂无自选股,请先添加自选股",
+            detail={},
+        )]
     try:
         quotes = await asyncio.to_thread(ds2.get_realtime_quote_tencent, watchlist_codes)
     except Exception:
@@ -151,66 +177,27 @@ async def _generate_default_alerts() -> list[AlertItem]:
 
 @router.get("/watchlist", response_model=list[WatchlistItem])
 async def watchlist():
-    if not _HAS_MONITOR:
-        return [WatchlistItem(stock_code=code, rules=rules)
-                for code, rules in _mock_watchlist.items()]
-    try:
-        monitor = StockMonitor()
-        items: list[WatchlistItem] = []
-        for code, rules in monitor._watchlist.items():
-            items.append(WatchlistItem(stock_code=code, rules=[r.value for r in rules]))
-        return items
-    except Exception:
-        return [WatchlistItem(stock_code=code, rules=rules)
-                for code, rules in _mock_watchlist.items()]
+    watchlist_data = _load_watchlist()
+    return [WatchlistItem(stock_code=code, rules=rules)
+            for code, rules in watchlist_data.items()]
 
 
 @router.post("/watchlist", response_model=MessageResponse)
 async def add_watchlist(req: AddWatchlistRequest):
-    if not _HAS_MONITOR:
-        _mock_watchlist[req.stock_code] = req.rules or ["price_surge"]
-        return MessageResponse(success=True, message=f"已添加 {req.stock_code} 到自选（模拟）")
-    try:
-        monitor = StockMonitor()
-        rules = None
-        if req.rules:
-            rule_map = {r.value: r for r in AlertType}
-            rules = [rule_map[r] for r in req.rules if r in rule_map]
-        monitor.add_watch(req.stock_code, rules)
-        return MessageResponse(success=True, message=f"已添加 {req.stock_code} 到自选")
-    except Exception:
-        return MessageResponse(success=False, message="添加失败")
+    watchlist_data = _load_watchlist()
+    watchlist_data[req.stock_code] = req.rules or ["price_surge"]
+    _save_watchlist(watchlist_data)
+    return MessageResponse(success=True, message=f"已添加 {req.stock_code} 到自选")
 
 
 @router.delete("/watchlist/{stock_code}", response_model=MessageResponse)
 async def remove_watchlist(stock_code: str):
-    if not _HAS_MONITOR:
-        _mock_watchlist.pop(stock_code, None)
-        return MessageResponse(success=True, message=f"已移除 {stock_code}（模拟）")
-    try:
-        monitor = StockMonitor()
-        monitor.remove_watch(stock_code)
+    watchlist_data = _load_watchlist()
+    if stock_code in watchlist_data:
+        watchlist_data.pop(stock_code, None)
+        _save_watchlist(watchlist_data)
         return MessageResponse(success=True, message=f"已移除 {stock_code}")
-    except Exception:
-        return MessageResponse(success=False, message="移除失败")
-
-
-class RemoveWatchlistBodyRequest(BaseModel):
-    stock_code: str
-
-
-@router.delete("/watchlist", response_model=MessageResponse)
-async def remove_watchlist_by_body(req: RemoveWatchlistBodyRequest):
-    stock_code = req.stock_code
-    if not _HAS_MONITOR:
-        _mock_watchlist.pop(stock_code, None)
-        return MessageResponse(success=True, message=f"已移除 {stock_code}（模拟）")
-    try:
-        monitor = StockMonitor()
-        monitor.remove_watch(stock_code)
-        return MessageResponse(success=True, message=f"已移除 {stock_code}")
-    except Exception:
-        return MessageResponse(success=False, message="移除失败")
+    return MessageResponse(success=False, message=f"{stock_code} 不在自选列表")
 
 
 @router.get("/capital_flow", response_model=CapitalFlowResponse)

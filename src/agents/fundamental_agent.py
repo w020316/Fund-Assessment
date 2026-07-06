@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import random
-
 from src.agents.base import AgentRole, BaseAgent, AgentOpinion
 
 _HAS_FUNDAMENTAL = False
@@ -106,36 +104,11 @@ class FundamentalAgent(BaseAgent):
         )
 
     def _mock_analysis(self, stock_code: str) -> AgentOpinion:
-        pe = round(random.uniform(5, 80), 1)
-        pb = round(random.uniform(0.5, 8), 1)
-        roe = round(random.uniform(-5, 30), 1)
-        rev_growth = round(random.uniform(-20, 50), 1)
-        profit_growth = round(random.uniform(-30, 60), 1)
-
-        score = round(random.uniform(10, 90), 2)
-
-        key_points = [
-            f"PE={pe}，{'偏低' if pe < 15 else '合理' if pe < 25 else '偏高'}",
-            f"PB={pb}，{'偏低' if pb < 1 else '合理' if pb < 2 else '偏高'}",
-            f"ROE={roe}%，{'强' if roe > 15 else '一般' if roe > 8 else '弱'}",
-            f"营收增长{rev_growth}%",
-            f"净利润增长{profit_growth}%",
-        ]
-
-        if score >= 70:
-            signal = "BULLISH"
-        elif score >= 40:
-            signal = "NEUTRAL"
-        else:
-            signal = "BEARISH"
-
-        confidence = round(min(abs(score - 50) / 50, 1.0), 2)
-
         return self._create_opinion(
             stock_code=stock_code,
-            signal=signal,
-            confidence=confidence,
-            reasoning=f"[模拟] 基本面分析：PE={pe}, PB={pb}, ROE={roe}%, 营收增长{rev_growth}%, 净利润增长{profit_growth}%",
-            key_points=key_points,
-            score=score,
+            signal="NEUTRAL",
+            confidence=0.0,
+            reasoning="[降级] 基本面分析模块不可用",
+            key_points=["基本面分析模块不可用，已降级"],
+            score=50.0,
         )

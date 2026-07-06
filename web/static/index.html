@@ -7,17 +7,18 @@
 <style>
 /* ========== 全局变量与重置 ========== */
 :root {
-  --bg-primary: #0a0e17;
-  --bg-card: #111827;
-  --bg-card-hover: #1a2332;
-  --border: #1f2937;
-  --border-light: #374151;
-  --text-primary: #e2e8f0;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --accent-blue: #3b82f6;
+  --bg-primary: #0d1117;
+  --bg-card: #161b22;
+  --bg-card-hover: #1c2330;
+  --border: #30363d;
+  --border-light: #484f58;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted: #6e7681;
+  --accent: #f59e0b;
+  --accent-blue: #f59e0b;
   --accent-cyan: #06b6d4;
-  --accent-purple: #8b5cf6;
+  --accent-purple: #f59e0b;
   --color-up: #ef4444;
   --color-down: #22c55e;
   --color-flat: #94a3b8;
@@ -73,10 +74,11 @@ body {
 }
 .logo-icon {
   width:32px; height:32px;
-  background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+  background: var(--accent);
   border-radius:8px;
   display:flex; align-items:center; justify-content:center;
-  font-size:16px; font-weight:900; color:#fff;
+  font-size:15px; font-weight:700; color:#0d1117;
+  letter-spacing:0.5px;
 }
 .index-bar { display:flex; gap:16px; flex:1; justify-content:center; }
 .index-item {
@@ -115,9 +117,9 @@ body {
 }
 .nav-item:hover { background:rgba(255,255,255,0.04); color:var(--text-primary); }
 .nav-item.active {
-  color:var(--accent-blue);
-  background:rgba(59,130,246,0.08);
-  border-left-color:var(--accent-blue);
+  color:var(--accent);
+  background:rgba(245,158,11,0.08);
+  border-left-color:var(--accent);
 }
 .nav-icon { width:20px; text-align:center; font-size:16px; }
 
@@ -162,8 +164,7 @@ th {
   background:rgba(255,255,255,0.03);
   color:var(--text-secondary);
   font-weight:500; font-size:12px;
-  text-transform:uppercase;
-  letter-spacing:0.5px;
+  letter-spacing:0.3px;
   border-bottom:1px solid var(--border);
   position:sticky; top:0;
 }
@@ -193,8 +194,8 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
   transition:var(--transition); display:inline-flex;
   align-items:center; gap:6px;
 }
-.btn-primary { background:var(--accent-blue); color:#fff; }
-.btn-primary:hover { background:#2563eb; }
+.btn-primary { background:var(--accent); color:#0d1117; }
+.btn-primary:hover { background:#d97706; }
 .btn-success { background:var(--color-down); color:#fff; }
 .btn-success:hover { opacity:0.9; }
 .btn-danger { background:var(--color-up); color:#fff; }
@@ -245,16 +246,8 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 .toast-info { background:#1e3a5f; color:#93c5fd; border:1px solid #2563eb; }
 @keyframes toast-in { from { opacity:0; transform:translateX(40px); } to { opacity:1; transform:translateX(0); } }
 
-/* Loading 脉冲 */
-.pulse-loading {
-  position:relative; overflow:hidden;
-}
-.pulse-loading::after {
-  content:''; position:absolute; top:0; left:-100%; width:100%; height:100%;
-  background:linear-gradient(90deg, transparent, rgba(59,130,246,0.1), transparent);
-  animation:pulse-slide 1.5s infinite;
-}
-@keyframes pulse-slide { to { left:100%; } }
+/* Loading（静态占位，无扫光动画） */
+.pulse-loading { position:relative; }
 
 /* 迷你走势 */
 .sparkline { display:inline-block; vertical-align:middle; }
@@ -297,9 +290,9 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
   padding:16px; min-width:120px;
 }
 .debate-vs {
-  font-size:24px; font-weight:900;
-  background:linear-gradient(135deg, var(--color-up), var(--color-down));
-  -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+  font-size:14px; font-weight:700;
+  color:var(--text-muted);
+  letter-spacing:1px;
 }
 
 /* 决策卡片 */
@@ -311,7 +304,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 .decision-buy { border-color:var(--color-up); background:rgba(239,68,68,0.05); }
 .decision-sell { border-color:var(--color-down); background:rgba(34,197,94,0.05); }
 .decision-hold { border-color:var(--color-flat); background:rgba(148,163,184,0.05); }
-.decision-label { font-size:36px; font-weight:900; letter-spacing:4px; }
+.decision-label { font-size:22px; font-weight:700; letter-spacing:1px; }
 
 /* 预警项 */
 .alert-item {
@@ -370,12 +363,12 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 .llm-provider-bar {
   display:flex; align-items:center; gap:8px;
   padding:8px 14px; border-radius:8px;
-  background:rgba(139,92,246,0.08);
-  border:1px solid rgba(139,92,246,0.2);
+  background:rgba(245,158,11,0.08);
+  border:1px solid rgba(245,158,11,0.2);
   font-size:12px; margin-bottom:16px;
 }
-.llm-provider-icon { font-size:16px; }
-.llm-provider-name { color:var(--accent-purple); font-weight:600; }
+.llm-provider-icon { display:inline-flex; }
+.llm-provider-name { color:var(--accent); font-weight:600; }
 .llm-provider-status { margin-left:auto; }
 
 /* ========== 底部标签栏（移动端） ========== */
@@ -389,8 +382,11 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
   padding-bottom:env(safe-area-inset-bottom, 4px);
 }
 .bottom-tab-bar .tab-items {
-  display:flex; justify-content:space-around;
+  display:flex; justify-content:space-around; overflow-x:auto;
+  -webkit-overflow-scrolling:touch;
+  scrollbar-width:none;
 }
+.bottom-tab-bar .tab-items::-webkit-scrollbar { display:none; }
 .bottom-tab-item {
   display:flex; flex-direction:column; align-items:center;
   padding:6px 4px; cursor:pointer;
@@ -399,6 +395,10 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 }
 .bottom-tab-item .tab-icon { font-size:18px; margin-bottom:2px; }
 .bottom-tab-item.active { color:var(--accent-blue); }
+@media (max-width:360px) {
+  .bottom-tab-item { padding:6px 2px; font-size:9px; }
+  .bottom-tab-item .tab-icon { font-size:16px; }
+}
 
 /* ========== 骨架屏加载 ========== */
 .skeleton {
@@ -408,8 +408,8 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 }
 .skeleton::after {
   content:''; position:absolute; top:0; left:-100%; width:100%; height:100%;
-  background:linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent);
-  animation:skeleton-shimmer 1.5s infinite;
+  background:linear-gradient(90deg, transparent, rgba(255,255,255,0.03), transparent);
+  animation:skeleton-shimmer 2.4s infinite;
 }
 @keyframes skeleton-shimmer { to { left:100%; } }
 .skeleton-card {
@@ -493,34 +493,34 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
     <!-- ========== 左侧导航 ========== -->
     <nav class="sidebar">
       <div class="nav-item active" data-page="market" onclick="switchPage('market')">
-        <span class="nav-icon">📊</span><span>行情总览</span><span class="kbd" style="margin-left:auto;">1</span>
+        <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg></span><span>行情总览</span><span class="kbd" style="margin-left:auto;">1</span>
       </div>
       <div class="nav-item" data-page="ai" onclick="switchPage('ai')">
-        <span class="nav-icon">🧠</span><span>智能分析</span><span class="kbd" style="margin-left:auto;">2</span>
+        <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/></svg></span><span>智能分析</span><span class="kbd" style="margin-left:auto;">2</span>
       </div>
       <div class="nav-item" data-page="strategy" onclick="switchPage('strategy')">
-        <span class="nav-icon">🎯</span><span>策略中心</span><span class="kbd" style="margin-left:auto;">3</span>
+        <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg></span><span>策略中心</span><span class="kbd" style="margin-left:auto;">3</span>
       </div>
       <div class="nav-item" data-page="trade" onclick="switchPage('trade')">
-        <span class="nav-icon">💹</span><span>交易执行</span><span class="kbd" style="margin-left:auto;">4</span>
+        <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 7-7"/><path d="M17 7h4v4"/></svg></span><span>交易执行</span><span class="kbd" style="margin-left:auto;">4</span>
       </div>
       <div class="nav-item" data-page="position" onclick="switchPage('position')">
-        <span class="nav-icon">📋</span><span>持仓管理</span><span class="kbd" style="margin-left:auto;">5</span>
+        <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></svg></span><span>持仓管理</span><span class="kbd" style="margin-left:auto;">5</span>
       </div>
       <div class="nav-item" data-page="fund" onclick="switchPage('fund')">
-        <span class="nav-icon">💰</span><span>基金管理</span><span class="kbd" style="margin-left:auto;">6</span>
+        <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg></span><span>基金管理</span><span class="kbd" style="margin-left:auto;">6</span>
       </div>
       <div class="nav-item" data-page="global" onclick="switchPage('global')">
-        <span class="nav-icon">🌍</span><span>国际市场</span><span class="kbd" style="margin-left:auto;">7</span>
+        <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18"/><path d="M12 3a15 15 0 0 0 0 18"/></svg></span><span>国际市场</span><span class="kbd" style="margin-left:auto;">7</span>
       </div>
       <div class="nav-item" data-page="data" onclick="switchPage('data')">
-        <span class="nav-icon">🗄️</span><span>数据中心</span><span class="kbd" style="margin-left:auto;">8</span>
+        <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg></span><span>数据中心</span><span class="kbd" style="margin-left:auto;">8</span>
       </div>
       <div class="nav-item" data-page="monitor" onclick="switchPage('monitor')">
-        <span class="nav-icon">🔔</span><span>监控预警</span><span class="kbd" style="margin-left:auto;">9</span>
+        <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></span><span>监控预警</span><span class="kbd" style="margin-left:auto;">9</span>
       </div>
       <div class="nav-item" data-page="config" onclick="switchPage('config')">
-        <span class="nav-icon">⚙️</span><span>系统配置</span><span class="kbd" style="margin-left:auto;">0</span>
+        <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg></span><span>系统配置</span><span class="kbd" style="margin-left:auto;">0</span>
       </div>
     </nav>
 
@@ -571,7 +571,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
       <div class="page" id="page-ai">
         <!-- 分析引擎状态 -->
         <div class="llm-provider-bar" id="llmProviderBar">
-          <span class="llm-provider-icon">🧠</span>
+          <span class="llm-provider-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/></svg></span>
           <span>分析引擎：</span>
           <span class="llm-provider-name" id="llmProviderName">检测中...</span>
           <span class="llm-provider-status" id="llmProviderStatus"></span>
@@ -581,15 +581,15 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <div class="card mb-16">
           <div style="display:flex;gap:12px;align-items:center;">
             <input class="input" id="aiStockInput" placeholder="输入股票代码，如 600519" style="max-width:240px;" onkeydown="if(event.key==='Enter')runAiAnalysis()">
-            <button class="btn btn-primary" onclick="runAiAnalysis()">🧠 深度分析</button>
-            <button class="btn btn-outline" onclick="runQuickAnalysis()">⚡ 快速分析</button>
+            <button class="btn btn-primary" onclick="runAiAnalysis()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/></svg> 深度分析</button>
+            <button class="btn btn-outline" onclick="runQuickAnalysis()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9z"/></svg> 快速分析</button>
           </div>
         </div>
 
         <!-- 4个Agent卡片 -->
         <div class="grid-2 mb-16" id="agentCards">
           <div class="card" id="agent-fundamental">
-            <div class="card-title">📊 基本面分析师</div>
+            <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg> 基本面分析师</div>
             <div class="agent-content">
               <div class="skeleton-card">
                 <div class="skeleton skeleton-line w-60 h-lg"></div>
@@ -600,7 +600,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
             </div>
           </div>
           <div class="card" id="agent-technical">
-            <div class="card-title">📈 技术分析师</div>
+            <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 7-7"/><path d="M17 7h4v4"/></svg> 技术分析师</div>
             <div class="agent-content">
               <div class="skeleton-card">
                 <div class="skeleton skeleton-line w-60 h-lg"></div>
@@ -611,7 +611,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
             </div>
           </div>
           <div class="card" id="agent-sentiment">
-            <div class="card-title">💭 情绪分析师</div>
+            <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" x2="9.01" y1="9" y2="9"/><line x1="15" x2="15.01" y1="9" y2="9"/></svg> 情绪分析师</div>
             <div class="agent-content">
               <div class="skeleton-card">
                 <div class="skeleton skeleton-line w-60 h-lg"></div>
@@ -622,7 +622,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
             </div>
           </div>
           <div class="card" id="agent-news">
-            <div class="card-title">📰 新闻分析师</div>
+            <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8z"/></svg> 新闻分析师</div>
             <div class="agent-content">
               <div class="skeleton-card">
                 <div class="skeleton skeleton-line w-60 h-lg"></div>
@@ -636,10 +636,10 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 
         <!-- 多空辩论 -->
         <div class="card mb-16">
-          <div class="card-title">⚖️ 多空辩论</div>
+          <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:6px;"><path d="M12 3v18"/><path d="M5 7h14"/><path d="M7 7l-3 5a3 3 0 0 0 6 0L7 7z"/><path d="M17 7l-3 5a3 3 0 0 0 6 0l-3-5z"/></svg>多空辩论</div>
           <div class="debate-panel" id="debatePanel">
             <div class="debate-side debate-bull" id="debateBull">
-              <div style="font-weight:600;color:var(--color-up);margin-bottom:10px;">🟢 看多论点</div>
+              <div style="font-weight:600;color:var(--color-up);margin-bottom:10px;display:flex;align-items:center;gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg> 看多论点</div>
               <div id="bullPoints" style="color:var(--text-secondary);">等待分析...</div>
             </div>
             <div class="debate-center">
@@ -647,7 +647,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
               <div id="debateConsensus" style="margin-top:12px;font-size:13px;color:var(--text-muted);">—</div>
             </div>
             <div class="debate-side debate-bear" id="debateBear">
-              <div style="font-weight:600;color:var(--color-down);margin-bottom:10px;">🔴 看空论点</div>
+              <div style="font-weight:600;color:var(--color-down);margin-bottom:10px;display:flex;align-items:center;gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/></svg> 看空论点</div>
               <div id="bearPoints" style="color:var(--text-secondary);">等待分析...</div>
             </div>
           </div>
@@ -655,7 +655,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 
         <!-- 最终决策 -->
         <div class="card mb-16">
-          <div class="card-title">🎯 最终决策</div>
+          <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg> 最终决策</div>
           <div id="finalDecision">
             <div style="text-align:center;color:var(--text-muted);padding:20px;">等待分析...</div>
           </div>
@@ -663,7 +663,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 
         <!-- 话术库浏览 -->
         <div class="card mb-16">
-          <div class="card-title">💬 话术库</div>
+          <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> 话术库</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
             <select id="scriptCategorySelect" class="select" style="width:120px;" onchange="loadScriptLibrary()">
               <option value="">全部分类</option>
@@ -690,7 +690,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 
         <!-- 分析历史 -->
         <div class="card">
-          <div class="card-title">📜 分析历史</div>
+          <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg> 分析历史</div>
           <div class="table-wrap" style="max-height:300px;overflow-y:auto;">
             <table>
               <thead><tr><th>时间</th><th>股票</th><th>决策</th><th>置信度</th><th>评分</th></tr></thead>
@@ -709,7 +709,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
             <div style="display:flex;align-items:center;gap:20px;">
               <svg id="radarChart" width="280" height="280" viewBox="0 0 280 280"></svg>
               <div>
-                <div style="font-size:48px;font-weight:900;color:var(--accent-blue);" id="compositeScore">—</div>
+                <div style="font-size:30px;font-weight:700;color:var(--accent);" id="compositeScore">—</div>
                 <div style="color:var(--text-secondary);font-size:13px;">综合评分</div>
                 <div style="margin-top:12px;" id="signalLevel"></div>
               </div>
@@ -730,21 +730,21 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <div class="grid-3 mb-16">
           <div class="card" style="cursor:pointer;" onclick="runScan('limit_up')">
             <div style="text-align:center;">
-              <div style="font-size:32px;margin-bottom:8px;">🔥</div>
+              <div style="margin-bottom:8px;color:var(--color-up);"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg></div>
               <div style="font-weight:600;">涨停板扫描</div>
               <div style="color:var(--text-muted);font-size:12px;margin-top:4px;">实时监控涨停个股</div>
             </div>
           </div>
           <div class="card" style="cursor:pointer;" onclick="runScan('new_high')">
             <div style="text-align:center;">
-              <div style="font-size:32px;margin-bottom:8px;">🚀</div>
+              <div style="margin-bottom:8px;color:var(--accent);"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg></div>
               <div style="font-weight:600;">创业板新高</div>
               <div style="color:var(--text-muted);font-size:12px;margin-top:4px;">突破阶段新高个股</div>
             </div>
           </div>
           <div class="card" style="cursor:pointer;" onclick="runScan('convertible')">
             <div style="text-align:center;">
-              <div style="font-size:32px;margin-bottom:8px;">🔄</div>
+              <div style="margin-bottom:8px;color:var(--accent-cyan);"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></div>
               <div style="font-weight:600;">可转债T+0</div>
               <div style="color:var(--text-muted);font-size:12px;margin-top:4px;">日内交易机会</div>
             </div>
@@ -779,7 +779,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <div class="grid-2 mb-16">
           <!-- 买入表单 -->
           <div class="card">
-            <div class="card-title" style="color:var(--color-up);">📈 买入</div>
+            <div class="card-title" style="color:var(--color-up);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 7-7"/><path d="M17 7h4v4"/></svg> 买入</div>
             <div class="form-group">
               <label class="form-label">股票代码</label>
               <input class="input" id="buyCode" placeholder="如 600519">
@@ -805,7 +805,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
           </div>
           <!-- 卖出表单 -->
           <div class="card">
-            <div class="card-title" style="color:var(--color-down);">📉 卖出</div>
+            <div class="card-title" style="color:var(--color-down);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 6l7.5 7.5L13.5 8.5 23 18"/><path d="M17 18h6v-6"/></svg> 卖出</div>
             <div class="form-group">
               <label class="form-label">股票代码</label>
               <input class="input" id="sellCode" placeholder="如 600519">
@@ -896,7 +896,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 
         <!-- 风控状态 -->
         <div class="card">
-          <div class="card-title">🛡️ 风控状态</div>
+          <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> 风控状态</div>
           <div class="grid-3" id="riskCards"></div>
         </div>
       </div>
@@ -905,7 +905,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
       <div class="page" id="page-fund">
         <!-- 基金概览 -->
         <div class="flex-between mb-12">
-          <div style="font-size:15px;font-weight:600;">💰 我的基金</div>
+          <div style="font-size:15px;font-weight:600;display:flex;align-items:center;gap:6px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg> 我的基金</div>
           <div style="display:flex;gap:8px;">
             <button class="btn btn-sm btn-primary" onclick="loadFundData()">刷新</button>
             <button class="btn btn-sm" onclick="loadFundAdvice()">获取建议</button>
@@ -932,14 +932,14 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 
         <!-- 基金建议摘要 -->
         <div class="card mb-16" id="fundAdviceCard" style="display:none;">
-          <div class="card-title">📊 基金建议</div>
+          <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg> 基金建议</div>
           <div id="fundAdviceSummary" style="padding:8px 0;font-size:13px;color:var(--text-secondary);"></div>
           <div id="fundAdviceBody" style="margin-top:8px;"></div>
         </div>
 
         <!-- 基金话术推荐 -->
         <div class="card mb-16" id="fundScriptCard" style="display:none;">
-          <div class="card-title">💬 话术推荐</div>
+          <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> 话术推荐</div>
           <div id="fundScriptBody" style="margin-top:8px;"></div>
         </div>
 
@@ -997,7 +997,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
       <div class="page" id="page-global">
         <!-- 国际指数卡片 -->
         <div class="flex-between mb-12">
-          <div style="font-size:15px;font-weight:600;">🌍 国际指数</div>
+          <div style="font-size:15px;font-weight:600;display:flex;align-items:center;gap:6px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18"/><path d="M12 3a15 15 0 0 0 0 18"/></svg> 国际指数</div>
           <button class="btn btn-sm btn-primary" onclick="loadGlobalData()">刷新</button>
         </div>
         <div class="grid-3 mb-16" id="globalIndexCards">
@@ -1007,7 +1007,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <!-- 美股 + 港股热门 -->
         <div class="grid-2 mb-16">
           <div class="card">
-            <div class="card-title">🇺🇸 美股热门</div>
+            <div class="card-title">美股热门 <span style="font-size:11px;color:var(--text-muted);font-weight:500;border:1px solid var(--border-light);padding:1px 5px;border-radius:3px;margin-left:2px;">US</span></div>
             <div class="table-wrap" style="max-height:420px;overflow-y:auto;">
               <table>
                 <thead><tr><th>代码</th><th>名称</th><th>价格</th><th>涨跌幅</th><th>币种</th></tr></thead>
@@ -1016,7 +1016,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
             </div>
           </div>
           <div class="card">
-            <div class="card-title">🇭🇰 港股热门</div>
+            <div class="card-title">港股热门 <span style="font-size:11px;color:var(--text-muted);font-weight:500;border:1px solid var(--border-light);padding:1px 5px;border-radius:3px;margin-left:2px;">HK</span></div>
             <div class="table-wrap" style="max-height:420px;overflow-y:auto;">
               <table>
                 <thead><tr><th>代码</th><th>名称</th><th>价格</th><th>涨跌幅</th><th>币种</th></tr></thead>
@@ -1028,7 +1028,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 
         <!-- 个股查询 -->
         <div class="card mb-16">
-          <div class="card-title">🔍 国际个股查询</div>
+          <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg> 国际个股查询</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
             <select id="globalMarketSelect" class="select" style="width:120px;">
               <option value="us">美股</option>
@@ -1074,12 +1074,12 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <div class="grid-2 mb-16">
           <!-- 预警列表 -->
           <div class="card">
-            <div class="card-title">🔔 预警列表</div>
+            <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg> 预警列表</div>
             <div id="alertList" style="max-height:400px;overflow-y:auto;"></div>
           </div>
           <!-- 自选股 -->
           <div class="card">
-            <div class="card-title">⭐ 自选股</div>
+            <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg> 自选股</div>
             <div style="display:flex;gap:8px;margin-bottom:12px;">
               <input class="input" id="watchlistInput" placeholder="添加股票代码" style="max-width:160px;" onkeydown="if(event.key==='Enter')addWatchlist()">
               <button class="btn btn-sm btn-primary" onclick="addWatchlist()">添加</button>
@@ -1096,12 +1096,12 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <div class="grid-2">
           <!-- 北向资金 -->
           <div class="card">
-            <div class="card-title">🌏 北向资金</div>
+            <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg> 北向资金</div>
             <div id="northboundPanel"></div>
           </div>
           <!-- 强势股信号 -->
           <div class="card">
-            <div class="card-title">💪 强势股信号</div>
+            <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> 强势股信号</div>
             <div class="table-wrap" style="max-height:300px;overflow-y:auto;">
               <table>
                 <thead><tr><th>代码</th><th>名称</th><th>信号</th><th>强度</th></tr></thead>
@@ -1117,13 +1117,13 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <div class="grid-2 mb-16">
           <!-- 配置表单 -->
           <div class="card">
-            <div class="card-title">⚙️ 系统配置</div>
+            <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg> 系统配置</div>
             <div id="configForm"></div>
             <button class="btn btn-primary mt-16" onclick="saveConfig()" style="width:100%;">保存配置</button>
           </div>
           <!-- 风控参数 -->
           <div class="card">
-            <div class="card-title">🛡️ 风控参数</div>
+            <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> 风控参数</div>
             <div id="riskParams"></div>
             <button class="btn btn-primary mt-16" onclick="saveRiskParams()" style="width:100%;">保存参数</button>
           </div>
@@ -1132,17 +1132,17 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <div class="grid-2">
           <!-- 通知测试 -->
           <div class="card">
-            <div class="card-title">📢 通知测试</div>
+            <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg> 通知测试</div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;">
-              <button class="btn btn-sm btn-outline" onclick="testNotify('email')">📧 邮件通知</button>
-              <button class="btn btn-sm btn-outline" onclick="testNotify('wechat')">💬 微信通知</button>
-              <button class="btn btn-sm btn-outline" onclick="testNotify('ding')">🔔 钉钉通知</button>
-              <button class="btn btn-sm btn-outline" onclick="testNotify('webhook')">🔗 Webhook</button>
+              <button class="btn btn-sm btn-outline" onclick="testNotify('email')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 7L2 7"/></svg> 邮件通知</button>
+              <button class="btn btn-sm btn-outline" onclick="testNotify('wechat')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4L3 21l1.1-9A8.4 8.4 0 1 1 21 11.5z"/></svg> 微信通知</button>
+              <button class="btn btn-sm btn-outline" onclick="testNotify('ding')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg> 钉钉通知</button>
+              <button class="btn btn-sm btn-outline" onclick="testNotify('webhook')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> Webhook</button>
             </div>
           </div>
           <!-- 系统健康 -->
           <div class="card">
-            <div class="card-title">💚 系统健康</div>
+            <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.29 1.51 4.04 3 5.5l7 7Z"/></svg> 系统健康</div>
             <div id="healthPanel"></div>
           </div>
         </div>
@@ -1155,28 +1155,34 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
   <nav class="bottom-tab-bar">
     <div class="tab-items">
       <div class="bottom-tab-item active" data-page="market" onclick="switchPage('market')">
-        <span class="tab-icon">📊</span><span>行情</span>
+        <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg></span><span>行情</span>
       </div>
       <div class="bottom-tab-item" data-page="ai" onclick="switchPage('ai')">
-        <span class="tab-icon">🧠</span><span>分析</span>
+        <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/></svg></span><span>分析</span>
       </div>
       <div class="bottom-tab-item" data-page="strategy" onclick="switchPage('strategy')">
-        <span class="tab-icon">🎯</span><span>策略</span>
+        <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg></span><span>策略</span>
       </div>
       <div class="bottom-tab-item" data-page="trade" onclick="switchPage('trade')">
-        <span class="tab-icon">💹</span><span>交易</span>
+        <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 7-7"/><path d="M17 7h4v4"/></svg></span><span>交易</span>
       </div>
       <div class="bottom-tab-item" data-page="position" onclick="switchPage('position')">
-        <span class="tab-icon">📋</span><span>持仓</span>
+        <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></svg></span><span>持仓</span>
+      </div>
+      <div class="bottom-tab-item" data-page="fund" onclick="switchPage('fund')">
+        <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg></span><span>基金</span>
+      </div>
+      <div class="bottom-tab-item" data-page="global" onclick="switchPage('global')">
+        <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18"/><path d="M12 3a15 15 0 0 0 0 18"/></svg></span><span>国际</span>
       </div>
       <div class="bottom-tab-item" data-page="data" onclick="switchPage('data')">
-        <span class="tab-icon">🗄️</span><span>数据</span>
+        <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg></span><span>数据</span>
       </div>
       <div class="bottom-tab-item" data-page="monitor" onclick="switchPage('monitor')">
-        <span class="tab-icon">🔔</span><span>监控</span>
+        <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></span><span>监控</span>
       </div>
       <div class="bottom-tab-item" data-page="config" onclick="switchPage('config')">
-        <span class="tab-icon">⚙️</span><span>配置</span>
+        <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg></span><span>配置</span>
       </div>
     </div>
   </nav>
@@ -1231,6 +1237,19 @@ function changeSign(val) {
   if (val > 0) return '+';
   return '';
 }
+
+// 信号/决策中文标签映射(内部逻辑保留英文,仅展示层转中文)
+const SIGNAL_LABELS = {BULLISH:'看多', BEARISH:'看空', NEUTRAL:'中性'};
+const DECISION_LABELS = {BUY:'买入', SELL:'卖出', HOLD:'持有'};
+function signalLabel(s) { return SIGNAL_LABELS[s] || s; }
+function decisionLabel(d) { return DECISION_LABELS[d] || d; }
+
+// 预警严重程度小圆点(SVG)
+const ALERT_ICON_MAP = {
+  critical: '<svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="3" fill="#ef4444"/></svg>',
+  warning:  '<svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="3" fill="#f59e0b"/></svg>',
+  info:     '<svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="3" fill="#3b82f6"/></svg>'
+};
 
 // API请求封装
 async function api(url, options={}) {
@@ -1391,7 +1410,7 @@ async function loadGlobalIndexBar() {
   const globalHtml = list.map(idx => {
     const color = changeColor(idx.change_pct);
     const sign = changeSign(idx.change_pct);
-    const flag = idx.market === 'US' ? '🇺🇸' : idx.market === 'HK' ? '🇭🇰' : '';
+    const flag = idx.market === 'US' ? 'US ' : idx.market === 'HK' ? 'HK ' : '';
     return `<div class="index-item">
       <span class="index-name">${flag}${idx.name}</span>
       <span class="index-price" style="color:${color}">${fmtNum(idx.price)}</span>
@@ -1627,10 +1646,10 @@ async function runQuickAnalysis() {
 // 渲染Agent卡片
 function renderAgentCards(opinions, result) {
   const agents = [
-    {id:'fundamental', name:'基本面分析师', icon:'📊', key:'fundamental'},
-    {id:'technical', name:'技术分析师', icon:'📈', key:'technical'},
-    {id:'sentiment', name:'情绪分析师', icon:'💭', key:'sentiment'},
-    {id:'news', name:'新闻分析师', icon:'📰', key:'news'}
+    {id:'fundamental', name:'基本面分析师', icon:'', key:'fundamental'},
+    {id:'technical', name:'技术分析师', icon:'', key:'technical'},
+    {id:'sentiment', name:'情绪分析师', icon:'', key:'sentiment'},
+    {id:'news', name:'新闻分析师', icon:'', key:'news'}
   ];
 
   // 模拟数据（API无数据时使用）
@@ -1667,7 +1686,7 @@ function renderAgentCards(opinions, result) {
 
     el.classList.remove('pulse-loading');
     el.querySelector('.agent-content').innerHTML = `      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-        <span class="signal ${signalClass}">${opData.signal}</span>
+        <span class="signal ${signalClass}">${signalLabel(opData.signal)}</span>
         <span style="font-size:24px;font-weight:700;color:${confColor};">${opData.score}</span>
       </div>
       <div style="margin-bottom:12px;">
@@ -1730,7 +1749,7 @@ function renderFinalDecision(result) {
 
   container.innerHTML = `
     <div class="decision-card ${cls}">
-      <div class="decision-label" style="color:${labelColor};">${d.decision}</div>
+      <div class="decision-label" style="color:${labelColor};">${decisionLabel(d.decision)}</div>
       <div style="margin-top:12px;display:flex;justify-content:center;gap:32px;">
         <div><span style="color:var(--text-muted);font-size:12px;">建议仓位</span><br><span style="font-size:18px;font-weight:600;">${d.position}</span></div>
         <div><span style="color:var(--text-muted);font-size:12px;">置信度</span><br><span style="font-size:18px;font-weight:600;">${d.confidence}%</span></div>
@@ -1774,7 +1793,7 @@ async function loadAiHistory() {
     return `<tr>
       <td>${h.time}</td>
       <td style="color:var(--accent-cyan);">${h.code}</td>
-      <td><span class="signal ${cls}">${h.decision}</span></td>
+      <td><span class="signal ${cls}">${decisionLabel(h.decision)}</span></td>
       <td>${h.confidence}%</td>
       <td>${h.score}</td>
     </tr>`;
@@ -1847,7 +1866,7 @@ function drawRadarChart(scores) {
   svg.innerHTML = `
     ${gridHtml}
     ${axisHtml}
-    <polygon points="${dataPoints}" fill="rgba(59,130,246,0.15)" stroke="var(--accent-blue)" stroke-width="2"/>
+    <polygon points="${dataPoints}" fill="rgba(245,158,11,0.15)" stroke="var(--accent)" stroke-width="2"/>
     ${dims.map((d, i) => {
       const angle = startAngle + i * angleStep;
       const r = (s[d.key] / 100) * maxR;
@@ -2058,6 +2077,14 @@ async function submitBuy() {
   const strategy = document.getElementById('buyStrategy').value;
 
   if (!code || !qty) { showToast('请填写股票代码和数量', 'error'); return; }
+  if (!/^\d{6}$/.test(code)) { showToast('股票代码必须为 6 位数字', 'error'); return; }
+  const qtyNum = parseInt(qty);
+  if (!Number.isInteger(qtyNum) || qtyNum <= 0 || qtyNum % 100 !== 0) {
+    showToast('数量必须为 100 的整数倍', 'error'); return;
+  }
+  if (price !== '' && (!/^\d+(\.\d+)?$/.test(price) || parseFloat(price) <= 0)) {
+    showToast('价格必须为正数', 'error'); return;
+  }
 
   const result = await api('/api/trade/buy', {
     method: 'POST',
@@ -2068,6 +2095,8 @@ async function submitBuy() {
   document.getElementById('buyCode').value = '';
   document.getElementById('buyQty').value = '';
   document.getElementById('buyPrice').value = '';
+  loadTradeHistory();
+  loadAccountOverview();
 }
 
 async function submitSell() {
@@ -2077,6 +2106,14 @@ async function submitSell() {
   const strategy = document.getElementById('sellStrategy').value;
 
   if (!code || !qty) { showToast('请填写股票代码和数量', 'error'); return; }
+  if (!/^\d{6}$/.test(code)) { showToast('股票代码必须为 6 位数字', 'error'); return; }
+  const qtyNum = parseInt(qty);
+  if (!Number.isInteger(qtyNum) || qtyNum <= 0 || qtyNum % 100 !== 0) {
+    showToast('数量必须为 100 的整数倍', 'error'); return;
+  }
+  if (price !== '' && (!/^\d+(\.\d+)?$/.test(price) || parseFloat(price) <= 0)) {
+    showToast('价格必须为正数', 'error'); return;
+  }
 
   const result = await api('/api/trade/sell', {
     method: 'POST',
@@ -2087,6 +2124,8 @@ async function submitSell() {
   document.getElementById('sellCode').value = '';
   document.getElementById('sellQty').value = '';
   document.getElementById('sellPrice').value = '';
+  loadTradeHistory();
+  loadAccountOverview();
 }
 
 async function loadTradeHistory() {
@@ -2315,7 +2354,7 @@ async function loadScriptLibrary() {
   body.innerHTML = list.map(s => {
     const sceneLabels = {buy:'买入',sell:'卖出',hold:'持有',wait:'观望',stop_loss:'止损',dca:'定投',add:'加仓',take_profit:'止盈'};
     const sceneLabel = sceneLabels[s.scene] || s.scene;
-    const categoryLabel = s.category === 'stock' ? '🇨🇳 股市' : '💰 基金';
+    const categoryLabel = s.category === 'stock' ? '股市' : '基金';
     return `<div style="padding:10px;border-bottom:1px solid var(--border);">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
         <strong style="color:var(--accent-cyan);">${s.title || '—'}</strong>
@@ -2335,8 +2374,8 @@ async function addFundPosition() {
   const date = document.getElementById('fundDateInput').value;
   const note = document.getElementById('fundNoteInput').value.trim();
 
-  if (!code) { alert('请输入基金代码'); return; }
-  if (shares <= 0) { alert('请输入有效份额'); return; }
+  if (!code) { showToast('请输入基金代码', 'error'); return; }
+  if (shares <= 0) { showToast('请输入有效份额', 'error'); return; }
 
   const resp = await api('/api/fund/positions/add', {
     method: 'POST',
@@ -2346,7 +2385,7 @@ async function addFundPosition() {
     ['fundCodeInput','fundNameInput','fundSharesInput','fundCostInput','fundDateInput','fundNoteInput'].forEach(id => document.getElementById(id).value = '');
     loadFundData();
   } else {
-    alert((resp && resp.message) || '添加失败');
+    showToast((resp && resp.message) || '添加失败', 'error');
   }
 }
 
@@ -2356,7 +2395,7 @@ async function deleteFundPosition(code) {
   if (resp && resp.success) {
     loadFundData();
   } else {
-    alert((resp && resp.message) || '删除失败');
+    showToast((resp && resp.message) || '删除失败', 'error');
   }
 }
 
@@ -2408,7 +2447,7 @@ async function loadGlobalIndices() {
   cardsEl.innerHTML = list.map(idx => {
     const color = changeColor(idx.change_pct);
     const sign = changeSign(idx.change_pct);
-    const flag = idx.market === 'US' ? '🇺🇸' : idx.market === 'HK' ? '🇭🇰' : '🌐';
+    const flag = idx.market === 'US' ? 'US' : idx.market === 'HK' ? 'HK' : '';
     return `<div class="card" style="text-align:center;">
       <div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">${flag} ${idx.name}</div>
       <div style="font-size:20px;font-weight:700;color:${color};">${fmtNum(idx.price)}</div>
@@ -2751,22 +2790,22 @@ async function loadAlerts() {
   const container = document.getElementById('alertList');
 
   const defaultAlerts = [
-    {type:'critical',icon:'🔴',msg:'600519 跌破止损线 1800.00',time:'14:30:15'},
-    {type:'warning',icon:'🟡',msg:'002594 成交量异常放大，换手率8.5%',time:'14:15:22'},
-    {type:'info',icon:'🔵',msg:'北向资金今日净流入超50亿',time:'13:45:00'},
-    {type:'warning',icon:'🟡',msg:'持仓集中度超过30%阈值',time:'11:30:00'},
-    {type:'info',icon:'🔵',msg:'策略"动量突破"触发买入信号',time:'10:15:30'},
-    {type:'critical',icon:'🔴',msg:'账户可用资金不足，请及时补充',time:'09:35:12'}
+    {type:'critical',icon:ALERT_ICON_MAP.critical,msg:'600519 跌破止损线 1800.00',time:'14:30:15'},
+    {type:'warning',icon:ALERT_ICON_MAP.warning,msg:'002594 成交量异常放大，换手率8.5%',time:'14:15:22'},
+    {type:'info',icon:ALERT_ICON_MAP.info,msg:'北向资金今日净流入超50亿',time:'13:45:00'},
+    {type:'warning',icon:ALERT_ICON_MAP.warning,msg:'持仓集中度超过30%阈值',time:'11:30:00'},
+    {type:'info',icon:ALERT_ICON_MAP.info,msg:'策略"动量突破"触发买入信号',time:'10:15:30'},
+    {type:'critical',icon:ALERT_ICON_MAP.critical,msg:'账户可用资金不足，请及时补充',time:'09:35:12'}
   ];
 
   let alerts = defaultAlerts;
   // api()已自动解包FastAPI的{value:[...]}格式
   if (data && Array.isArray(data) && data.length > 0) {
     const severityMap = {critical:'critical',warning:'warning',info:'info'};
-    const iconMap = {critical:'🔴',warning:'🟡',info:'🔵'};
+    const iconMap = ALERT_ICON_MAP;
     alerts = data.map(a => ({
       type: severityMap[a.severity] || 'info',
-      icon: iconMap[a.severity] || '🔵',
+      icon: iconMap[a.severity] || ALERT_ICON_MAP.info,
       msg: a.message || `${a.stock_code} ${a.alert_type}`,
       time: new Date().toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit',second:'2-digit'})
     }));
@@ -3220,11 +3259,11 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  // 数字键 1-9 切换页面（不在输入框中时）
-  if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key >= '1' && e.key <= '9') {
+  // 数字键 1-9、0 切换页面（不在输入框中时，0 跳转 config）
+  if (!e.ctrlKey && !e.metaKey && !e.altKey && ((e.key >= '1' && e.key <= '9') || e.key === '0')) {
     const tag = e.target.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-    const idx = parseInt(e.key) - 1;
+    const idx = e.key === '0' ? 9 : parseInt(e.key) - 1;
     if (idx < pageKeys.length) {
       switchPage(pageKeys[idx]);
     }

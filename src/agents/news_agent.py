@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import random
-
 from src.agents.base import AgentRole, BaseAgent, AgentOpinion
 
 _HAS_NEWS = False
@@ -84,30 +82,11 @@ class NewsAgent(BaseAgent):
         )
 
     def _mock_analysis(self, stock_code: str) -> AgentOpinion:
-        score = round(random.uniform(10, 90), 2)
-        sentiment = round(random.uniform(-1.0, 1.0), 2)
-        news_count = random.randint(0, 20)
-
-        key_points = [
-            f"获取{news_count}条相关新闻",
-            f"新闻情绪值{sentiment}，{'正面' if sentiment > 0.3 else '中性' if sentiment > -0.3 else '负面'}",
-            random.choice(["热点题材活跃", "无明显热点", "题材退潮"]),
-        ]
-
-        if score >= 70:
-            signal = "BULLISH"
-        elif score >= 40:
-            signal = "NEUTRAL"
-        else:
-            signal = "BEARISH"
-
-        confidence = round(min(abs(score - 50) / 50, 1.0), 2)
-
         return self._create_opinion(
             stock_code=stock_code,
-            signal=signal,
-            confidence=confidence,
-            reasoning=f"[模拟] 新闻面分析：新闻情绪{sentiment}，评分{score}",
-            key_points=key_points,
-            score=score,
+            signal="NEUTRAL",
+            confidence=0.0,
+            reasoning="[降级] 新闻面分析模块不可用",
+            key_points=["新闻面分析模块不可用，已降级"],
+            score=50.0,
         )

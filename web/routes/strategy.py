@@ -91,7 +91,27 @@ class StrategyInfo(BaseModel):
     enabled: bool
 
 
-def _mock_analysis(stock_code: str, strategy_type: str) -> dict[str, Any]:
+def _fallback_analysis(stock_code: str, strategy_type: str, error_msg: str = "") -> dict[str, Any]:
+    """策略不可用时的降级响应(显式空值,不冒充真实评分)"""
+    return {
+        "stock_code": stock_code,
+        "strategy_type": strategy_type,
+        "scores": {
+            "technical": 0.0,
+            "capital": 0.0,
+            "fundamental": 0.0,
+            "news": 0.0,
+            "sentiment": 0.0,
+        },
+        "total_score": 0.0,
+        "signal": "N/A",
+        "recommendation": f"策略模块不可用{(':' + error_msg) if error_msg else ''},请检查依赖",
+        "available": False,
+    }
+
+
+def _lightweight_analysis(stock_code: str, strategy_type: str) -> dict[str, Any]:
+    """策略模块未启用时,用基础数据源做轻量分析(不冒充完整策略)"""
     try:
         quote = ds2.get_realtime_quote_tencent([stock_code])
         financial = ds2.get_financial_snapshot(stock_code)
@@ -152,23 +172,12 @@ def _mock_analysis(stock_code: str, strategy_type: str) -> dict[str, Any]:
             "scores": scores,
             "total_score": round(total, 1),
             "signal": signal,
-            "recommendation": f"{name}({stock_code}) 当前价{price}，综合评分{total:.1f}，信号：{signal}",
+            "recommendation": f"{name}({stock_code}) 当前价{price},综合评分{total:.1f},信号:{signal}",
+            "available": True,
+            "source": "lightweight",
         }
     except Exception as e:
-        return {
-            "stock_code": stock_code,
-            "strategy_type": strategy_type,
-            "scores": {
-                "technical": 50.0,
-                "capital": 50.0,
-                "fundamental": 50.0,
-                "news": 50.0,
-                "sentiment": 50.0,
-            },
-            "total_score": 50.0,
-            "signal": "HOLD",
-            "recommendation": f"数据获取受限({str(e)[:50]})，建议谨慎操作",
-        }
+        return _fallback_analysis(stock_code, strategy_type, str(e)[:50])
 
 
 def _normalize_analysis(result: dict) -> dict:
@@ -211,10 +220,11 @@ def _normalize_analysis(result: dict) -> dict:
 @router.post("/analyze", response_model=AnalyzeResponse)
 async def analyze(req: AnalyzeRequest):
     if not _HAS_STRATEGIES:
+        # 策略模块未启用时,用基础数据源做轻量分析(不冒充完整策略)
         return AnalyzeResponse(
             stock_code=req.stock_code,
             strategy_type=req.strategy_type,
-            result=_mock_analysis(req.stock_code, req.strategy_type),
+            result=_lightweight_analysis(req.stock_code, req.strategy_type),
         )
     try:
         match req.strategy_type:
@@ -239,7 +249,7 @@ async def analyze(req: AnalyzeRequest):
         return AnalyzeResponse(
             stock_code=req.stock_code,
             strategy_type=req.strategy_type,
-            result=_mock_analysis(req.stock_code, req.strategy_type),
+            result=_fallback_analysis(req.stock_code, req.strategy_type, str(e)[:50]),
         )
 
 

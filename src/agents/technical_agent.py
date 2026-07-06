@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import random
-
 from src.agents.base import AgentRole, BaseAgent, AgentOpinion
 
 _HAS_TECHNICAL = False
@@ -34,7 +32,14 @@ class TechnicalAgent(BaseAgent):
     def _real_analysis(self, stock_code: str) -> AgentOpinion:
         df = ak.stock_zh_a_hist(symbol=stock_code, period="daily", adjust="qfq")
         if df is None or df.empty:
-            return self._mock_analysis(stock_code)
+            return self._create_opinion(
+                stock_code=stock_code,
+                signal="NEUTRAL",
+                confidence=0.1,
+                reasoning="技术面数据获取为空，无法计算指标",
+                key_points=["行情数据为空，技术分析降级"],
+                score=50.0,
+            )
 
         df.columns = [c.strip() for c in df.columns]
         col_map = {
@@ -46,14 +51,28 @@ class TechnicalAgent(BaseAgent):
 
         required = {"open", "high", "low", "close", "volume"}
         if not required.issubset(df.columns):
-            return self._mock_analysis(stock_code)
+            return self._create_opinion(
+                stock_code=stock_code,
+                signal="NEUTRAL",
+                confidence=0.1,
+                reasoning="技术面数据字段不完整，缺少必要列",
+                key_points=["行情字段缺失，技术分析降级"],
+                score=50.0,
+            )
 
         for col in required:
             df[col] = pd.to_numeric(df[col], errors="coerce")
         df = df.dropna(subset=["close"])
 
         if len(df) < 60:
-            return self._mock_analysis(stock_code)
+            return self._create_opinion(
+                stock_code=stock_code,
+                signal="NEUTRAL",
+                confidence=0.1,
+                reasoning=f"技术面数据样本不足，仅{len(df)}条，需至少60条",
+                key_points=[f"数据样本不足（{len(df)}条），技术分析降级"],
+                score=50.0,
+            )
 
         df = df.tail(120).reset_index(drop=True)
         df_with_indicators = compute_indicators(df)
@@ -171,30 +190,11 @@ class TechnicalAgent(BaseAgent):
         )
 
     def _mock_analysis(self, stock_code: str) -> AgentOpinion:
-        score = round(random.uniform(10, 90), 2)
-
-        key_points = [
-            random.choice(["均线多头排列", "均线空头排列", "均线交织"]),
-            random.choice(["MACD金叉", "MACD死叉", "MACD红柱放大", "MACD绿柱放大"]),
-            random.choice(["KDJ超买", "KDJ超卖", "KDJ中性"]),
-            random.choice(["RSI超买", "RSI超卖", "RSI中性"]),
-            random.choice(["突破布林上轨", "跌破布林下轨", "布林带内运行"]),
-        ]
-
-        if score >= 70:
-            signal = "BULLISH"
-        elif score >= 40:
-            signal = "NEUTRAL"
-        else:
-            signal = "BEARISH"
-
-        confidence = round(min(abs(score - 50) / 50, 1.0), 2)
-
         return self._create_opinion(
             stock_code=stock_code,
-            signal=signal,
-            confidence=confidence,
-            reasoning=f"[模拟] 技术面分析：{', '.join(key_points)}",
-            key_points=key_points,
-            score=score,
+            signal="NEUTRAL",
+            confidence=0.0,
+            reasoning="[降级] 技术面分析模块不可用",
+            key_points=["技术面分析模块不可用，已降级"],
+            score=50.0,
         )

@@ -32,25 +32,7 @@ router = APIRouter()
 
 _FUND_POSITIONS_FILE = Path(__file__).resolve().parent.parent / "user_fund_positions.json"
 
-# 默认示例持仓(首次使用时展示,用户保存后覆盖)
-_DEFAULT_POSITIONS: list[dict] = [
-    {
-        "fund_code": "110022",
-        "fund_name": "易方达消费行业股票",
-        "shares": 1000.0,
-        "cost_nav": 2.5,
-        "buy_date": "2026-01-15",
-        "note": "消费主题",
-    },
-    {
-        "fund_code": "161725",
-        "fund_name": "招商中证白酒指数A",
-        "shares": 5000.0,
-        "cost_nav": 0.85,
-        "buy_date": "2026-02-20",
-        "note": "白酒指数",
-    },
-]
+# 默认空持仓(不硬编码示例数据,用户自行添加)
 
 
 # ============ 数据模型 ============
@@ -89,9 +71,7 @@ def _load_positions() -> list[dict]:
                 return data.get("positions", [])
         except Exception as e:
             logger.warning(f"load fund positions failed: {e}")
-    # 首次使用:写入默认持仓
-    _save_positions(_DEFAULT_POSITIONS)
-    return list(_DEFAULT_POSITIONS)
+    return []
 
 
 def _save_positions(positions: list[dict]) -> None:

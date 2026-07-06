@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import random
-
 from src.agents.base import AgentRole, BaseAgent, AgentOpinion
 
 _HAS_SENTIMENT = False
@@ -71,30 +69,11 @@ class SentimentAgent(BaseAgent):
         )
 
     def _mock_analysis(self, stock_code: str) -> AgentOpinion:
-        market_sentiment = round(random.uniform(20, 80), 1)
-        score = round(random.uniform(10, 90), 2)
-
-        key_points = [
-            f"市场情绪指数{market_sentiment}，{'乐观' if market_sentiment >= 60 else '中性' if market_sentiment >= 40 else '悲观'}",
-            f"个股情绪评分{score}，{'偏强' if score >= 60 else '中性' if score >= 40 else '偏弱'}",
-            random.choice(["涨跌比偏多", "涨跌比偏空", "涨跌比均衡"]),
-            random.choice(["涨停家数较多", "跌停家数较多", "涨跌停家数均衡"]),
-        ]
-
-        if score >= 70:
-            signal = "BULLISH"
-        elif score >= 40:
-            signal = "NEUTRAL"
-        else:
-            signal = "BEARISH"
-
-        confidence = round(min(abs(score - 50) / 50, 1.0), 2)
-
         return self._create_opinion(
             stock_code=stock_code,
-            signal=signal,
-            confidence=confidence,
-            reasoning=f"[模拟] 情绪面分析：市场情绪{market_sentiment}，个股评分{score}",
-            key_points=key_points,
-            score=score,
+            signal="NEUTRAL",
+            confidence=0.0,
+            reasoning="[降级] 情绪面分析模块不可用",
+            key_points=["情绪面分析模块不可用，已降级"],
+            score=50.0,
         )
