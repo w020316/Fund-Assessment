@@ -99,4 +99,4 @@ class TestStaticFiles:
         """测试index.html可访问"""
         resp = client.get("/static/index.html")
         assert resp.status_code == 200
-        assert "OpenClaw" in resp.text
+        assert "QuantFlow Pro" in resp.text

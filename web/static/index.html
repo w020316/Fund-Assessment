@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OpenClaw 量化交易系统</title>
+<title>QuantFlow Pro 量化交易系统</title>
 <style>
 /* ========== 全局变量与重置 ========== */
 :root {
@@ -475,8 +475,8 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
   <!-- ========== 顶部状态栏 ========== -->
   <header class="topbar">
     <div class="logo">
-      <div class="logo-icon">OC</div>
-      <span>OpenClaw 量化交易系统</span>
+      <div class="logo-icon">QF</div>
+      <span>QuantFlow Pro 量化交易系统</span>
     </div>
     <div class="index-bar" id="indexBar">
       <!-- 由JS动态填充 -->
@@ -496,7 +496,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <span class="nav-icon">📊</span><span>行情总览</span><span class="kbd" style="margin-left:auto;">1</span>
       </div>
       <div class="nav-item" data-page="ai" onclick="switchPage('ai')">
-        <span class="nav-icon">🤖</span><span>AI分析</span><span class="kbd" style="margin-left:auto;">2</span>
+        <span class="nav-icon">🧠</span><span>智能分析</span><span class="kbd" style="margin-left:auto;">2</span>
       </div>
       <div class="nav-item" data-page="strategy" onclick="switchPage('strategy')">
         <span class="nav-icon">🎯</span><span>策略中心</span><span class="kbd" style="margin-left:auto;">3</span>
@@ -567,12 +567,12 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         </div>
       </div>
 
-      <!-- ==================== 2. AI智能分析 ==================== -->
+      <!-- ==================== 2. 智能分析 ==================== -->
       <div class="page" id="page-ai">
-        <!-- LLM Provider 状态 -->
+        <!-- 分析引擎状态 -->
         <div class="llm-provider-bar" id="llmProviderBar">
-          <span class="llm-provider-icon">🤖</span>
-          <span>AI引擎：</span>
+          <span class="llm-provider-icon">🧠</span>
+          <span>分析引擎：</span>
           <span class="llm-provider-name" id="llmProviderName">检测中...</span>
           <span class="llm-provider-status" id="llmProviderStatus"></span>
         </div>
@@ -581,7 +581,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <div class="card mb-16">
           <div style="display:flex;gap:12px;align-items:center;">
             <input class="input" id="aiStockInput" placeholder="输入股票代码，如 600519" style="max-width:240px;" onkeydown="if(event.key==='Enter')runAiAnalysis()">
-            <button class="btn btn-primary" onclick="runAiAnalysis()">🧠 AI深度分析</button>
+            <button class="btn btn-primary" onclick="runAiAnalysis()">🧠 深度分析</button>
             <button class="btn btn-outline" onclick="runQuickAnalysis()">⚡ 快速分析</button>
           </div>
         </div>
@@ -1158,7 +1158,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <span class="tab-icon">📊</span><span>行情</span>
       </div>
       <div class="bottom-tab-item" data-page="ai" onclick="switchPage('ai')">
-        <span class="tab-icon">🤖</span><span>AI</span>
+        <span class="tab-icon">🧠</span><span>分析</span>
       </div>
       <div class="bottom-tab-item" data-page="strategy" onclick="switchPage('strategy')">
         <span class="tab-icon">🎯</span><span>策略</span>
@@ -1584,14 +1584,14 @@ async function loadGlobalNews() {
   container.innerHTML = html + html;
 }
 
-/* ========== 2. AI智能分析 ========== */
+/* ========== 2. 智能分析 ========== */
 async function runAiAnalysis() {
   const code = document.getElementById('aiStockInput').value.trim();
   if (!code) { showToast('请输入股票代码', 'error'); return; }
 
-  showToast('正在进行AI深度分析...', 'info');
+  showToast('正在进行深度分析...', 'info');
 
-  // 调用AI分析API
+  // 调用分析API
   const result = await api('/api/agent/analyze', {
     method: 'POST',
     body: JSON.stringify({stock_code: code})
@@ -2295,7 +2295,7 @@ async function loadFundScripts(advices, market) {
   }
 }
 
-/* ========== 话术库浏览(AI 页) ========== */
+/* ========== 话术库浏览(智能分析页) ========== */
 async function loadScriptLibrary() {
   const category = document.getElementById('scriptCategorySelect').value;
   const scene = document.getElementById('scriptSceneSelect').value;
@@ -3093,7 +3093,7 @@ function loadHealthStatus() {
       {name:'API服务', status:'ok', detail:'响应时间 23ms'},
       {name:'数据库', status:'ok', detail:'连接正常'},
       {name:'行情数据源', status:'ok', detail:'延迟 <100ms'},
-      {name:'AI引擎', status:'warn', detail:'GPU利用率 85%'},
+      {name:'分析引擎', status:'warn', detail:'未配置'},
       {name:'消息队列', status:'ok', detail:'积压 0'},
       {name:'磁盘空间', status:'ok', detail:'已用 42%'}
     ];
@@ -3104,12 +3104,8 @@ function loadHealthStatus() {
       checks.push({name:'AkShare', status: data.akshare ? 'ok' : 'warn', detail: data.akshare ? '已安装' : '未安装'});
       checks.push({name:'核心模块', status: data.core_modules ? 'ok' : 'warn', detail: data.core_modules ? '已加载' : '未加载'});
       if (data.ai_keys) {
-        const hasKey = data.ai_keys.ttapi || data.ai_keys.tavily || data.ai_keys.tinyfish;
-        const providers = [];
-        if (data.ai_keys.ttapi) providers.push('TTAPI');
-        if (data.ai_keys.tavily) providers.push('Tavily');
-        if (data.ai_keys.tinyfish) providers.push('Tinyfish');
-        checks.push({name:'AI引擎', status: hasKey ? 'ok' : 'warn', detail: hasKey ? providers.join('+') + ' 已配置' : '未配置API Key'});
+        const hasKey = data.ai_keys.ttapi || data.ai_keys.tavily || data.ai_keys.tinyfish || data.ai_keys.agnes;
+        checks.push({name:'分析引擎', status: hasKey ? 'ok' : 'warn', detail: hasKey ? '已就绪' : '未配置'});
       }
     }
 
@@ -3178,15 +3174,13 @@ async function loadLlmProvider() {
   const data = await api('/api/health');
   if (data && data.ai_keys) {
     const keys = data.ai_keys;
-    if (keys.provider) {
-      nameEl.textContent = keys.provider;
-      statusEl.innerHTML = '<span class="health-dot health-ok"></span> <span style="color:var(--color-down);font-size:11px;">已连接</span>';
-    } else if (keys.openai_key || keys.api_key) {
-      nameEl.textContent = 'OpenAI';
-      statusEl.innerHTML = '<span class="health-dot health-ok"></span> <span style="color:var(--color-down);font-size:11px;">已配置</span>';
+    const hasKey = keys.provider || keys.ttapi || keys.tavily || keys.tinyfish || keys.agnes || keys.openai_key || keys.api_key;
+    if (hasKey) {
+      nameEl.textContent = '已就绪';
+      statusEl.innerHTML = '<span class="health-dot health-ok"></span> <span style="color:var(--color-down);font-size:11px;">在线</span>';
     } else {
       nameEl.textContent = '未配置';
-      statusEl.innerHTML = '<span class="health-dot health-warn"></span> <span style="color:var(--color-warning);font-size:11px;">未配置API Key</span>';
+      statusEl.innerHTML = '<span class="health-dot health-warn"></span> <span style="color:var(--color-warning);font-size:11px;">未配置</span>';
     }
   } else if (data) {
     nameEl.textContent = '内置引擎';
