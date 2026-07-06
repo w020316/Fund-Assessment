@@ -14,3 +14,7 @@ data/logs/
 node_modules/
 package-lock.json
 *.traineddata
+
+# 运行时用户数据
+web/user_fund_positions.json
+web/user_*.json

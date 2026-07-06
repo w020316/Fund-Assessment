@@ -104,7 +104,7 @@ class TestLLMRouter:
         """测试Provider按优先级排序"""
         with patch.dict("os.environ", {
             "TTAPI_API_KEY": "key1",
-            "DEEPSEEK_API_KEY": "key2",
+            "AGNES_API_KEY": "key2",
         }, clear=False):
             router = LLMRouter()
             if len(router._providers) >= 2:
@@ -112,7 +112,9 @@ class TestLLMRouter:
 
     def test_chat_all_providers_fail(self):
         """测试所有Provider失败"""
-        router = LLMRouter()
+        # 隔离 env, 避免加载真实 Provider(如 agnes)导致调用成功
+        with patch.dict("os.environ", {}, clear=True):
+            router = LLMRouter()
         # 添加一个会失败的Provider
         provider = LLMProvider(
             name="fail_provider",

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+
+from src.utils.auth import require_admin
 
 router = APIRouter()
 
@@ -74,72 +76,54 @@ def _get_state(request: Request) -> dict[str, Any]:
     return app_state
 
 
-@router.post("/buy", response_model=OrderResponse)
+@router.post("/buy", response_model=OrderResponse, dependencies=[Depends(require_admin)])
 async def buy(req: BuyRequest, request: Request):
-    if not _HAS_EXECUTOR:
-        return JSONResponse(status_code=503, content={"error": "交易功能未启用", "detail": "请先配置交易模块"})
-    state = _get_state(request)
-    executor = state["executor"]
-    signal = Signal(
-        symbol=req.stock_code, side=OrderSide.BUY, price=req.price,
-        quantity=req.amount,
-        order_type=OrderType.MARKET if req.price == 0.0 else OrderType.LIMIT,
-        strategy=req.strategy,
-    )
-    order = executor.execute_signal(signal)
-    if order is None:
-        return OrderResponse(
-            order_id="", symbol=req.stock_code, side="buy",
-            price=req.price, quantity=req.amount,
-            order_type="market", status="rejected",
-            filled_price=0.0, filled_quantity=0.0,
-        )
-    return OrderResponse(
-        order_id=order.order_id, symbol=order.symbol, side=order.side.value,
-        price=order.price, quantity=order.quantity,
-        order_type=order.order_type.value, status=order.status.value,
-        filled_price=order.filled_price, filled_quantity=order.filled_quantity,
-    )
+    return _execute_order(req, OrderSide.BUY, request)
 
 
-@router.post("/sell", response_model=OrderResponse)
+@router.post("/sell", response_model=OrderResponse, dependencies=[Depends(require_admin)])
 async def sell(req: SellRequest, request: Request):
-    if not _HAS_EXECUTOR:
-        return JSONResponse(status_code=503, content={"error": "交易功能未启用", "detail": "请先配置交易模块"})
-    state = _get_state(request)
-    executor = state["executor"]
-    signal = Signal(
-        symbol=req.stock_code, side=OrderSide.SELL, price=req.price,
-        quantity=req.amount,
-        order_type=OrderType.MARKET if req.price == 0.0 else OrderType.LIMIT,
-        strategy=req.strategy,
-    )
-    order = executor.execute_signal(signal)
-    if order is None:
-        return OrderResponse(
-            order_id="", symbol=req.stock_code, side="sell",
-            price=req.price, quantity=req.amount,
-            order_type="market", status="rejected",
-            filled_price=0.0, filled_quantity=0.0,
-        )
-    return OrderResponse(
-        order_id=order.order_id, symbol=order.symbol, side=order.side.value,
-        price=order.price, quantity=order.quantity,
-        order_type=order.order_type.value, status=order.status.value,
-        filled_price=order.filled_price, filled_quantity=order.filled_quantity,
-    )
+    return _execute_order(req, OrderSide.SELL, request)
 
 
-@router.post("/cancel", response_model=MessageResponse)
+@router.post("/cancel", response_model=MessageResponse, dependencies=[Depends(require_admin)])
 async def cancel(req: CancelRequest, request: Request):
     if not _HAS_EXECUTOR:
-        return MessageResponse(success=True, message="模拟撤单成功")
+        return MessageResponse(success=False, message="交易功能未启用, 无法撤单")
     state = _get_state(request)
     broker = state["broker"]
     success = broker.cancel_order(req.order_id)
     return MessageResponse(
         success=success,
         message="撤单成功" if success else "撤单失败，订单不存在或已成交",
+    )
+
+
+def _execute_order(req: BuyRequest | SellRequest, side: OrderSide, request: Request) -> OrderResponse | JSONResponse:
+    """买入/卖出公共执行逻辑(消除 buy/sell 重复代码)。"""
+    if not _HAS_EXECUTOR:
+        return JSONResponse(status_code=503, content={"error": "交易功能未启用", "detail": "请先配置交易模块"})
+    state = _get_state(request)
+    executor = state["executor"]
+    signal = Signal(
+        symbol=req.stock_code, side=side, price=req.price,
+        quantity=req.amount,
+        order_type=OrderType.MARKET if req.price == 0.0 else OrderType.LIMIT,
+        strategy=req.strategy,
+    )
+    order = executor.execute_signal(signal)
+    if order is None:
+        return OrderResponse(
+            order_id="", symbol=req.stock_code, side=side.value,
+            price=req.price, quantity=req.amount,
+            order_type="market", status="rejected",
+            filled_price=0.0, filled_quantity=0.0,
+        )
+    return OrderResponse(
+        order_id=order.order_id, symbol=order.symbol, side=order.side.value,
+        price=order.price, quantity=order.quantity,
+        order_type=order.order_type.value, status=order.status.value,
+        filled_price=order.filled_price, filled_quantity=order.filled_quantity,
     )
 
 

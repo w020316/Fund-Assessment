@@ -12,6 +12,7 @@ from loguru import logger
 from src.core.data_validator import get_data_validator, ValidationResult
 
 from src.core.data_source_v2 import (
+    _parallel_fetch,
     get_capital_flow_detail,
     get_company_info,
     get_dragon_tiger,
@@ -33,6 +34,7 @@ load_dotenv()
 _TTAPI_API_KEY = os.getenv("TTAPI_API_KEY", "")
 _TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
 _TINYFISH_API_KEY = os.getenv("TINYFISH_API_KEY", "")
+_AGNES_API_KEY = os.getenv("AGNES_API_KEY", "")
 
 _TTAPI_BASE_URL = "https://ttapi.io/v1"
 _TINYFISH_BASE_URL = "https://api.tinyfish.io/v1"
@@ -48,96 +50,71 @@ def _check_api_keys() -> dict[str, bool]:
         "ttapi": bool(_TTAPI_API_KEY),
         "tavily": bool(_TAVILY_API_KEY),
         "tinyfish": bool(_TINYFISH_API_KEY),
+        "agnes": bool(_AGNES_API_KEY),
     }
 
 
 def _gather_stock_data(stock_code: str) -> dict[str, Any]:
+    """并行抓取股票分析所需的全部数据(原 11 次串行网络请求 → 并行)。"""
+
+    def _try(fn, key: str) -> Any:
+        try:
+            return fn()
+        except Exception as e:
+            logger.warning(f"gather {key} failed: {e}")
+            return None
+
+    fetched = _parallel_fetch([
+        ("quote", lambda: _try(lambda: get_realtime_quote_tencent([stock_code]), "quote")),
+        ("kline", lambda: _try(lambda: get_kline_mootdx(stock_code, period="daily", count=60), "kline")),
+        ("capital_flow", lambda: _try(lambda: get_capital_flow_detail(stock_code), "capital_flow")),
+        ("financial", lambda: _try(lambda: get_financial_snapshot(stock_code), "financial")),
+        ("company", lambda: _try(lambda: get_company_info(stock_code), "company")),
+        ("margin", lambda: _try(lambda: get_margin_trading(stock_code), "margin")),
+        ("shareholder", lambda: _try(lambda: get_shareholder_count(stock_code), "shareholder")),
+        ("research_reports", lambda: _try(lambda: get_research_reports(stock_code, page_size=5), "research_reports")),
+        ("news", lambda: _try(lambda: get_stock_news(stock_code, page_size=8), "news")),
+        ("dragon_tiger", lambda: _try(lambda: get_dragon_tiger(), "dragon_tiger")),
+        ("northbound", lambda: _try(lambda: get_northbound_flow_realtime(), "northbound")),
+        ("global_news", lambda: _try(lambda: get_global_news(), "global_news")),
+    ])
+
     data: dict[str, Any] = {}
 
-    try:
-        quotes = get_realtime_quote_tencent([stock_code])
-        if quotes:
-            data["quote"] = quotes[0]
-    except Exception as e:
-        logger.warning(f"gather quote failed: {e}")
+    quotes = fetched.get("quote")
+    if quotes:
+        data["quote"] = quotes[0]
 
-    try:
-        kline = get_kline_mootdx(stock_code, period="daily", count=60)
-        if kline:
-            data["kline_daily"] = kline[-30:]
-    except Exception as e:
-        logger.warning(f"gather kline failed: {e}")
+    kline = fetched.get("kline")
+    if kline:
+        data["kline_daily"] = kline[-30:]
 
-    try:
-        flow = get_capital_flow_detail(stock_code)
-        if flow:
-            data["capital_flow"] = flow
-    except Exception as e:
-        logger.warning(f"gather capital flow failed: {e}")
+    if fetched.get("capital_flow"):
+        data["capital_flow"] = fetched["capital_flow"]
+    if fetched.get("financial"):
+        data["financial"] = fetched["financial"]
+    if fetched.get("company"):
+        data["company"] = fetched["company"]
+    if fetched.get("margin"):
+        data["margin"] = fetched["margin"]
+    if fetched.get("shareholder"):
+        data["shareholder"] = fetched["shareholder"]
+    if fetched.get("research_reports"):
+        data["research_reports"] = fetched["research_reports"]
+    if fetched.get("news"):
+        data["news"] = fetched["news"]
 
-    try:
-        financial = get_financial_snapshot(stock_code)
-        if financial:
-            data["financial"] = financial
-    except Exception as e:
-        logger.warning(f"gather financial failed: {e}")
+    dragon_tiger = fetched.get("dragon_tiger")
+    if dragon_tiger:
+        stock_dt = [d for d in dragon_tiger if d.get("code") == stock_code]
+        data["dragon_tiger"] = stock_dt if stock_dt else dragon_tiger[:10]
 
-    try:
-        company = get_company_info(stock_code)
-        if company:
-            data["company"] = company
-    except Exception as e:
-        logger.warning(f"gather company info failed: {e}")
+    if fetched.get("northbound"):
+        data["northbound_flow"] = fetched["northbound"]
 
-    try:
-        margin = get_margin_trading(stock_code)
-        if margin:
-            data["margin"] = margin
-    except Exception as e:
-        logger.warning(f"gather margin failed: {e}")
-
-    try:
-        holder = get_shareholder_count(stock_code)
-        if holder:
-            data["shareholder"] = holder
-    except Exception as e:
-        logger.warning(f"gather shareholder failed: {e}")
-
-    try:
-        reports = get_research_reports(stock_code, page_size=5)
-        if reports:
-            data["research_reports"] = reports
-    except Exception as e:
-        logger.warning(f"gather research reports failed: {e}")
-
-    try:
-        news = get_stock_news(stock_code, page_size=8)
-        if news:
-            data["news"] = news
-    except Exception as e:
-        logger.warning(f"gather stock news failed: {e}")
-
-    try:
-        dragon_tiger = get_dragon_tiger()
-        if dragon_tiger:
-            stock_dt = [d for d in dragon_tiger if d.get("code") == stock_code]
-            data["dragon_tiger"] = stock_dt if stock_dt else dragon_tiger[:10]
-    except Exception as e:
-        logger.warning(f"gather dragon tiger failed: {e}")
-
-    try:
-        northbound = get_northbound_flow_realtime()
-        if northbound:
-            data["northbound_flow"] = northbound
-    except Exception as e:
-        logger.warning(f"gather northbound flow failed: {e}")
-
-    try:
-        global_news = get_global_news()
-        if global_news:
-            data["global_news"] = global_news[:10]
-    except Exception as e:
-        logger.warning(f"gather global news failed: {e}")
+    global_news = fetched.get("global_news")
+    if global_news:
+        data["global_news"] = global_news[:10]
 
     return data
 

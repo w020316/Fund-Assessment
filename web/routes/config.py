@@ -4,8 +4,10 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+
+from src.utils.auth import require_admin
 
 SENSITIVE_KEYS: set[str] = {
     "tushare_token",
@@ -103,7 +105,7 @@ async def get_settings():
     return SettingsResponse(settings=_mask_sensitive(data))
 
 
-@router.put("/settings", response_model=SettingsResponse)
+@router.put("/settings", response_model=SettingsResponse, dependencies=[Depends(require_admin)])
 async def update_settings(req: SettingsUpdateRequest):
     existing = _load_yaml("settings.yaml")
     cleaned = _strip_masked(req.settings)
@@ -118,7 +120,7 @@ async def get_strategies():
     return StrategiesResponse(strategies=data)
 
 
-@router.put("/strategies", response_model=StrategiesResponse)
+@router.put("/strategies", response_model=StrategiesResponse, dependencies=[Depends(require_admin)])
 async def update_strategies(req: StrategiesUpdateRequest):
     existing = _load_yaml("strategies.yaml")
     _deep_merge(existing, req.strategies)
@@ -183,7 +185,7 @@ class SavePositionsRequest(BaseModel):
     available_cash: float = 800000.0
 
 
-@router.post("/user_positions")
+@router.post("/user_positions", dependencies=[Depends(require_admin)])
 async def save_user_positions(req: SavePositionsRequest):
     import json, os
     pos_file = os.path.join(os.path.dirname(__file__), "..", "user_positions.json")

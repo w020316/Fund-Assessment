@@ -5,7 +5,7 @@
 ## 核心亮点
 
 - **7角色多智能体辩论**：基本面/技术面/情绪面/新闻面/政策面/游资追踪/解禁监控，多空辩论+风险辩论+组合经理决策
-- **多LLM Provider路由**：支持OpenAI/DeepSeek/Gemini/Anthropic/Ollama，自动故障切换+熔断器保护
+- **多LLM Provider路由**：支持OpenAI/Agnes/Gemini/Anthropic/Ollama，自动故障切换+熔断器保护
 - **多数据源降级架构**：东方财富/腾讯/新浪/mootdx/akshare/tushare，6源3级自动降级
 - **A股特有约束建模**：T+1交易制度、涨跌停限制(10%/20%/5%)、最小交易单位100股
 - **数据质量校验**：多维度数据质量检查(完整性/时效性/合理性/一致性)，质量评分0-100
@@ -49,7 +49,7 @@
 | 后端框架 | Python 3.12 + FastAPI + Uvicorn |
 | 数据处理 | Pandas + NumPy + pandas-ta + stockstats |
 | 数据源 | akshare, tushare, mootdx(通达信), 东方财富API, 腾讯行情API, 新浪财经API |
-| AI/LLM | 多Provider路由(OpenAI/DeepSeek/Gemini/Anthropic/Ollama), Tavily搜索 |
+| AI/LLM | 多Provider路由(OpenAI/Agnes/Gemini/Anthropic/Ollama), Tavily搜索 |
 | 任务调度 | APScheduler |
 | 数据验证 | Pydantic + 自研DataValidator |
 | 日志 | Loguru |
@@ -77,7 +77,7 @@ cp .env.example .env
 ```
 
 必填项：
-- `TTAPI_API_KEY` 或 `DEEPSEEK_API_KEY` — AI分析所需（至少配置一个LLM Provider）
+- `TTAPI_API_KEY` 或 `AGNES_API_KEY` — AI分析所需（至少配置一个LLM Provider，推荐使用免费的Agnes）
 
 可选项：
 - `TAVILY_API_KEY` — 新闻搜索增强

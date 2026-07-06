@@ -4,10 +4,13 @@ from pathlib import Path
 
 import pytest
 
-# 确保项目根目录在 sys.path 中
+# 确保项目根目录与本地依赖在 sys.path 中
 _project_root = str(Path(__file__).resolve().parent.parent)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
+_pylibs = str(Path(_project_root) / "pylibs")
+if _pylibs not in sys.path:
+    sys.path.insert(0, _pylibs)
 
 
 @pytest.fixture

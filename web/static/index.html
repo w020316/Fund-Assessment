@@ -507,14 +507,20 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
       <div class="nav-item" data-page="position" onclick="switchPage('position')">
         <span class="nav-icon">📋</span><span>持仓管理</span><span class="kbd" style="margin-left:auto;">5</span>
       </div>
+      <div class="nav-item" data-page="fund" onclick="switchPage('fund')">
+        <span class="nav-icon">💰</span><span>基金管理</span><span class="kbd" style="margin-left:auto;">6</span>
+      </div>
+      <div class="nav-item" data-page="global" onclick="switchPage('global')">
+        <span class="nav-icon">🌍</span><span>国际市场</span><span class="kbd" style="margin-left:auto;">7</span>
+      </div>
       <div class="nav-item" data-page="data" onclick="switchPage('data')">
-        <span class="nav-icon">🗄️</span><span>数据中心</span><span class="kbd" style="margin-left:auto;">6</span>
+        <span class="nav-icon">🗄️</span><span>数据中心</span><span class="kbd" style="margin-left:auto;">8</span>
       </div>
       <div class="nav-item" data-page="monitor" onclick="switchPage('monitor')">
-        <span class="nav-icon">🔔</span><span>监控预警</span><span class="kbd" style="margin-left:auto;">7</span>
+        <span class="nav-icon">🔔</span><span>监控预警</span><span class="kbd" style="margin-left:auto;">9</span>
       </div>
       <div class="nav-item" data-page="config" onclick="switchPage('config')">
-        <span class="nav-icon">⚙️</span><span>系统配置</span><span class="kbd" style="margin-left:auto;">8</span>
+        <span class="nav-icon">⚙️</span><span>系统配置</span><span class="kbd" style="margin-left:auto;">0</span>
       </div>
     </nav>
 
@@ -652,6 +658,33 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
           <div class="card-title">🎯 最终决策</div>
           <div id="finalDecision">
             <div style="text-align:center;color:var(--text-muted);padding:20px;">等待分析...</div>
+          </div>
+        </div>
+
+        <!-- 话术库浏览 -->
+        <div class="card mb-16">
+          <div class="card-title">💬 话术库</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+            <select id="scriptCategorySelect" class="select" style="width:120px;" onchange="loadScriptLibrary()">
+              <option value="">全部分类</option>
+              <option value="stock">股市</option>
+              <option value="fund">基金</option>
+            </select>
+            <select id="scriptSceneSelect" class="select" style="width:120px;" onchange="loadScriptLibrary()">
+              <option value="">全部场景</option>
+              <option value="buy">买入</option>
+              <option value="sell">卖出</option>
+              <option value="hold">持有</option>
+              <option value="wait">观望</option>
+              <option value="stop_loss">止损</option>
+              <option value="dca">定投</option>
+              <option value="add">加仓</option>
+              <option value="take_profit">止盈</option>
+            </select>
+            <span id="scriptCount" style="font-size:12px;color:var(--text-muted);align-self:center;margin-left:auto;"></span>
+          </div>
+          <div id="scriptLibraryBody" style="max-height:400px;overflow-y:auto;">
+            <div style="text-align:center;color:var(--text-muted);padding:20px;">点击加载...</div>
           </div>
         </div>
 
@@ -868,7 +901,152 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         </div>
       </div>
 
-      <!-- ==================== 6. 数据中心 ==================== -->
+      <!-- ==================== 6. 基金管理 ==================== -->
+      <div class="page" id="page-fund">
+        <!-- 基金概览 -->
+        <div class="flex-between mb-12">
+          <div style="font-size:15px;font-weight:600;">💰 我的基金</div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-sm btn-primary" onclick="loadFundData()">刷新</button>
+            <button class="btn btn-sm" onclick="loadFundAdvice()">获取建议</button>
+          </div>
+        </div>
+        <div class="grid-4 mb-16">
+          <div class="card" style="text-align:center;">
+            <div style="color:var(--text-muted);font-size:12px;margin-bottom:4px;">持仓市值</div>
+            <div style="font-size:22px;font-weight:700;" id="fundTotalValue">—</div>
+          </div>
+          <div class="card" style="text-align:center;">
+            <div style="color:var(--text-muted);font-size:12px;margin-bottom:4px;">总成本</div>
+            <div style="font-size:22px;font-weight:700;" id="fundTotalCost">—</div>
+          </div>
+          <div class="card" style="text-align:center;">
+            <div style="color:var(--text-muted);font-size:12px;margin-bottom:4px;">累计盈亏</div>
+            <div style="font-size:22px;font-weight:700;" id="fundTotalPnl">—</div>
+          </div>
+          <div class="card" style="text-align:center;">
+            <div style="color:var(--text-muted);font-size:12px;margin-bottom:4px;">持仓数量</div>
+            <div style="font-size:22px;font-weight:700;" id="fundCount">—</div>
+          </div>
+        </div>
+
+        <!-- 基金建议摘要 -->
+        <div class="card mb-16" id="fundAdviceCard" style="display:none;">
+          <div class="card-title">📊 基金建议</div>
+          <div id="fundAdviceSummary" style="padding:8px 0;font-size:13px;color:var(--text-secondary);"></div>
+          <div id="fundAdviceBody" style="margin-top:8px;"></div>
+        </div>
+
+        <!-- 基金话术推荐 -->
+        <div class="card mb-16" id="fundScriptCard" style="display:none;">
+          <div class="card-title">💬 话术推荐</div>
+          <div id="fundScriptBody" style="margin-top:8px;"></div>
+        </div>
+
+        <div class="grid-2 mb-16">
+          <!-- 基金持仓列表 -->
+          <div class="card">
+            <div class="card-title">基金持仓</div>
+            <div class="table-wrap" style="max-height:400px;overflow-y:auto;">
+              <table>
+                <thead><tr><th>代码</th><th>名称</th><th>份额</th><th>成本净值</th><th>当前净值</th><th>涨跌幅</th><th>盈亏</th><th>操作</th></tr></thead>
+                <tbody id="fundPositionBody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- 添加基金 -->
+          <div class="card">
+            <div class="card-title">添加基金</div>
+            <div style="margin-bottom:8px;">
+              <input class="input" id="fundSearchInput" placeholder="输入基金代码或名称搜索（如 110022 或 白酒）" style="width:100%;" oninput="debounceFundSearch(this.value)">
+              <div id="fundSearchResult" style="margin-top:4px;max-height:120px;overflow-y:auto;"></div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;">
+              <div>
+                <label style="font-size:11px;color:var(--text-muted);">基金代码</label>
+                <input class="input" id="fundCodeInput" placeholder="如 110022">
+              </div>
+              <div>
+                <label style="font-size:11px;color:var(--text-muted);">基金名称</label>
+                <input class="input" id="fundNameInput" placeholder="如 易方达消费">
+              </div>
+              <div>
+                <label style="font-size:11px;color:var(--text-muted);">份额</label>
+                <input class="input" id="fundSharesInput" type="number" placeholder="1000">
+              </div>
+              <div>
+                <label style="font-size:11px;color:var(--text-muted);">成本净值</label>
+                <input class="input" id="fundCostInput" type="number" step="0.001" placeholder="2.500">
+              </div>
+              <div>
+                <label style="font-size:11px;color:var(--text-muted);">买入日期</label>
+                <input class="input" id="fundDateInput" type="date">
+              </div>
+              <div>
+                <label style="font-size:11px;color:var(--text-muted);">备注</label>
+                <input class="input" id="fundNoteInput" placeholder="可选">
+              </div>
+            </div>
+            <button class="btn btn-sm btn-primary" style="width:100%;margin-top:12px;" onclick="addFundPosition()">添加持仓</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== 7. 国际市场 ==================== -->
+      <div class="page" id="page-global">
+        <!-- 国际指数卡片 -->
+        <div class="flex-between mb-12">
+          <div style="font-size:15px;font-weight:600;">🌍 国际指数</div>
+          <button class="btn btn-sm btn-primary" onclick="loadGlobalData()">刷新</button>
+        </div>
+        <div class="grid-3 mb-16" id="globalIndexCards">
+          <div class="card pulse-loading" style="text-align:center;padding:24px;">加载中...</div>
+        </div>
+
+        <!-- 美股 + 港股热门 -->
+        <div class="grid-2 mb-16">
+          <div class="card">
+            <div class="card-title">🇺🇸 美股热门</div>
+            <div class="table-wrap" style="max-height:420px;overflow-y:auto;">
+              <table>
+                <thead><tr><th>代码</th><th>名称</th><th>价格</th><th>涨跌幅</th><th>币种</th></tr></thead>
+                <tbody id="usHotBody"><tr><td colspan="5" style="text-align:center;color:var(--text-muted);">加载中...</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title">🇭🇰 港股热门</div>
+            <div class="table-wrap" style="max-height:420px;overflow-y:auto;">
+              <table>
+                <thead><tr><th>代码</th><th>名称</th><th>价格</th><th>涨跌幅</th><th>币种</th></tr></thead>
+                <tbody id="hkHotBody"><tr><td colspan="5" style="text-align:center;color:var(--text-muted);">加载中...</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- 个股查询 -->
+        <div class="card mb-16">
+          <div class="card-title">🔍 国际个股查询</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+            <select id="globalMarketSelect" class="select" style="width:120px;">
+              <option value="us">美股</option>
+              <option value="hk">港股</option>
+            </select>
+            <input id="globalCodeInput" class="input" style="flex:1;min-width:200px;" placeholder="输入代码(如 AAPL 或 00700),逗号分隔">
+            <button class="btn btn-primary" onclick="queryGlobalStock()">查询</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>代码</th><th>名称</th><th>价格</th><th>涨跌额</th><th>涨跌幅</th><th>最高</th><th>最低</th><th>币种</th></tr></thead>
+              <tbody id="globalQueryBody"><tr><td colspan="8" style="text-align:center;color:var(--text-muted);">输入代码后点击查询</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== 8. 数据中心 ==================== -->
       <div class="page" id="page-data">
         <div class="card mb-16">
           <div class="tabs" id="dataTabs">
@@ -1062,7 +1240,12 @@ async function api(url, options={}) {
       ...options
     });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    return await resp.json();
+    const data = await resp.json();
+    // FastAPI返回list时可能包装为{value:[...], Count:N}，需要解包
+    if (data && !Array.isArray(data) && data.value && Array.isArray(data.value)) {
+      return data.value;
+    }
+    return data;
   } catch(e) {
     console.error('API Error:', url, e);
     return null;
@@ -1083,12 +1266,14 @@ function switchPage(name) {
   // 切换时加载数据
   if (name === 'market') loadMarketData();
   if (name === 'position') loadPositionData();
+  if (name === 'fund') loadFundData();
+  if (name === 'global') loadGlobalData();
   if (name === 'strategy') loadStrategyData();
   if (name === 'monitor') loadMonitorData();
   if (name === 'config') loadConfigData();
   if (name === 'trade') loadTradeData();
   if (name === 'data') loadDataTab();
-  if (name === 'ai') loadLlmProvider();
+  if (name === 'ai') { loadLlmProvider(); loadScriptLibrary(); }
 }
 
 /* ========== 系统时间 ========== */
@@ -1113,6 +1298,7 @@ async function loadMarketData() {
   loadHotStocks('gain');
   loadSectorRanking();
   loadGlobalNews();
+  loadGlobalIndexBar();
   // 自动刷新
   if (marketRefreshTimer) clearInterval(marketRefreshTimer);
   marketRefreshTimer = setInterval(() => {
@@ -1193,6 +1379,28 @@ async function loadIndexData() {
   });
 }
 
+// 顶部栏追加国际指数(道琼斯/恒生等)
+async function loadGlobalIndexBar() {
+  const bar = document.getElementById('indexBar');
+  if (!bar) return;
+  const data = await api('/api/global/indices');
+  const list = (data && data.data) || [];
+  if (!list.length) return;
+  // 保留已有 A 股指数,追加国际指数
+  const existing = bar.innerHTML;
+  const globalHtml = list.map(idx => {
+    const color = changeColor(idx.change_pct);
+    const sign = changeSign(idx.change_pct);
+    const flag = idx.market === 'US' ? '🇺🇸' : idx.market === 'HK' ? '🇭🇰' : '';
+    return `<div class="index-item">
+      <span class="index-name">${flag}${idx.name}</span>
+      <span class="index-price" style="color:${color}">${fmtNum(idx.price)}</span>
+      <span class="index-change" style="color:${color}">${sign}${fmtNum(idx.change_pct)}%</span>
+    </div>`;
+  }).join('');
+  bar.innerHTML = existing + globalHtml;
+}
+
 // 迷你走势线（纯SVG）
 function drawSparkline(svgId, isUp) {
   const svg = document.getElementById(svgId);
@@ -1238,7 +1446,7 @@ async function loadHotStocks(type) {
   const data = await api('/api/market/hot_stocks');
   const body = document.getElementById('hotStockBody');
   // 前端type到API字段名的映射
-  const typeMap = {gain: 'top_gainers', lose: 'top_losers', volume: 'top_volume'};
+  const typeMap = {gain: 'top_gainers', loss: 'top_losers', volume: 'top_volume'};
   const apiKey = typeMap[type] || type;
   // 默认数据
   const defaultStocks = {
@@ -1352,19 +1560,27 @@ async function loadGlobalNews() {
   const container = document.getElementById('newsTicker');
 
   const defaultNews = [
-    '美联储维持利率不变，市场预期年内降息两次',
-    'A股三大指数集体收涨，成交额突破万亿',
-    '北向资金今日净流入超80亿元，重点加仓消费板块',
-    '半导体板块强势领涨，多只个股涨停',
-    '央行开展MLF操作，释放流动性信号',
-    '新能源车销量再创新高，产业链受益',
-    '国际油价小幅回落，OPEC+维持减产协议',
-    '科创板注册制改革深化，IPO节奏保持稳定'
+    {title:'美联储维持利率不变，市场预期年内降息两次'},
+    {title:'A股三大指数集体收涨，成交额突破万亿'},
+    {title:'北向资金今日净流入超80亿元，重点加仓消费板块'},
+    {title:'半导体板块强势领涨，多只个股涨停'},
+    {title:'央行开展MLF操作，释放流动性信号'},
+    {title:'新能源车销量再创新高，产业链受益'},
+    {title:'国际油价小幅回落，OPEC+维持减产协议'},
+    {title:'科创板注册制改革深化，IPO节奏保持稳定'}
   ];
 
-  const news = (data && data.data) ? data.data : defaultNews;
+  let news = defaultNews;
+  if (data && data.data && Array.isArray(data.data) && data.data.length > 0) {
+    news = data.data;
+  }
+
   // 重复两遍实现无缝滚动
-  const html = news.map(n => `<span class="news-item"><span class="news-dot"></span>${n}</span>`).join('');
+  const html = news.map(n => {
+    const title = typeof n === 'string' ? n : (n.title || '');
+    const source = (typeof n === 'object' && n.source) ? ` [${n.source}]` : '';
+    return `<span class="news-item"><span class="news-dot"></span>${title}${source}</span>`;
+  }).join('');
   container.innerHTML = html + html;
 }
 
@@ -1419,15 +1635,31 @@ function renderAgentCards(opinions, result) {
 
   // 模拟数据（API无数据时使用）
   const defaultOpinions = {
-    fundamental: {signal:'BULLISH', confidence:72, score:7.8, points:['营收同比增长23%','净利润率持续改善','ROE高于行业均值']},
-    technical: {signal:'BULLISH', confidence:65, score:7.2, points:['MACD金叉形成','突破20日均线','量价配合良好']},
-    sentiment: {signal:'NEUTRAL', confidence:55, score:6.0, points:['市场情绪偏中性','机构持仓变化不大','融资余额小幅增加']},
-    news: {signal:'BULLISH', confidence:68, score:7.0, points:['行业政策利好频出','公司发布正面公告','分析师上调评级']}
+    fundamental: {signal:'NEUTRAL', confidence:30, score:5.0, points:['数据获取中...']},
+    technical: {signal:'NEUTRAL', confidence:30, score:5.0, points:['数据获取中...']},
+    sentiment: {signal:'NEUTRAL', confidence:30, score:5.0, points:['数据获取中...']},
+    news: {signal:'NEUTRAL', confidence:30, score:5.0, points:['数据获取中...']}
   };
+
+  // 从API结果中提取agent意见
+  // opinions API返回 {stock_code, opinions: [{role, signal, confidence, reasoning, key_points, score}]}
+  // result (analyze)返回 {stock_code, action, agent_opinions: [...], ...}
+  let opinionsMap = {};
+  const opList = (opinions && opinions.opinions) || (result && result.agent_opinions) || [];
+  if (Array.isArray(opList) && opList.length > 0) {
+    opList.forEach(op => {
+      opinionsMap[op.role] = {
+        signal: op.signal || 'NEUTRAL',
+        confidence: Math.round((op.confidence || 0) * 100),
+        score: op.score || 50,
+        points: op.key_points || (op.reasoning ? [op.reasoning] : [])
+      };
+    });
+  }
 
   agents.forEach(agent => {
     const el = document.getElementById('agent-' + agent.id);
-    const opData = (opinions && opinions.data && opinions.data[agent.key]) || (result && result.data && result.data[agent.key]) || defaultOpinions[agent.key];
+    const opData = opinionsMap[agent.key] || defaultOpinions[agent.key];
 
     const signalClass = opData.signal === 'BULLISH' ? 'signal-bullish' : opData.signal === 'BEARISH' ? 'signal-bearish' : 'signal-neutral';
     const confColor = opData.confidence > 70 ? 'var(--color-up)' : opData.confidence > 50 ? 'var(--color-warning)' : 'var(--color-down)';
@@ -1461,19 +1693,38 @@ function renderDebate(debate, result) {
     consensus: '多方略占优势，建议逢低布局'
   };
 
-  const d = (debate && debate.data) || (result && result.data && result.data.debate) || defaultDebate;
+  // debate API返回 debate_result 内容: {topic, bull_arguments, bear_arguments, consensus, ...}
+  // result (analyze)返回完整结果，其中 debate_result 是辩论数据
+  const d = (debate && (debate.bull_arguments || debate.bear_arguments)) ? debate
+    : (result && result.debate_result) ? result.debate_result
+    : defaultDebate;
+  const bullPoints = d.bull_arguments || d.bull_points || defaultDebate.bull_points;
+  const bearPoints = d.bear_arguments || d.bear_points || defaultDebate.bear_points;
+  const consensusText = d.consensus || defaultDebate.consensus;
 
-  document.getElementById('bullPoints').innerHTML = d.bull_points.map(p => `<div style="padding:4px 0;">• ${p}</div>`).join('');
-  document.getElementById('bearPoints').innerHTML = d.bear_points.map(p => `<div style="padding:4px 0;">• ${p}</div>`).join('');
-  document.getElementById('debateConsensus').textContent = d.consensus || '—';
+  document.getElementById('bullPoints').innerHTML = bullPoints.map(p => `<div style="padding:4px 0;">• ${typeof p === 'string' ? p : (p.argument || p.point || JSON.stringify(p))}</div>`).join('');
+  document.getElementById('bearPoints').innerHTML = bearPoints.map(p => `<div style="padding:4px 0;">• ${typeof p === 'string' ? p : (p.argument || p.point || JSON.stringify(p))}</div>`).join('');
+  document.getElementById('debateConsensus').textContent = consensusText || '—';
 }
 
 // 渲染最终决策
 function renderFinalDecision(result) {
   const container = document.getElementById('finalDecision');
-  const defaultDecision = {decision:'BUY', position:'30%', confidence:68, reason:'综合多维度分析，基本面与技术面共振向上，建议适度建仓'};
+  const defaultDecision = {decision:'HOLD', position:'0%', confidence:30, reason:'等待分析结果'};
 
-  const d = (result && result.data && result.data.decision) || defaultDecision;
+  // result (analyze)返回 {stock_code, action, position_size, confidence, reasoning, ...}
+  let d = defaultDecision;
+  if (result) {
+    const action = result.action || 'HOLD';
+    const posSize = result.position_size || result.adjusted_position || 0;
+    d = {
+      decision: action,
+      position: Math.round(posSize * 100) + '%',
+      confidence: Math.round((result.confidence || 0) * 100),
+      reason: result.reasoning || ''
+    };
+  }
+
   const cls = d.decision === 'BUY' ? 'decision-buy' : d.decision === 'SELL' ? 'decision-sell' : 'decision-hold';
   const labelColor = d.decision === 'BUY' ? 'var(--color-up)' : d.decision === 'SELL' ? 'var(--color-down)' : 'var(--color-flat)';
 
@@ -1502,7 +1753,21 @@ async function loadAiHistory() {
     {time:'2025-01-13 14:20',code:'601318',decision:'HOLD',confidence:60,score:6.0}
   ];
 
-  const history = (data && data.data) ? data.data : defaultHistory;
+  let history = defaultHistory;
+  // API返回{count, history: [...]}，history项为完整分析结果对象
+  if (data && data.history && Array.isArray(data.history) && data.history.length > 0) {
+    history = data.history.map(h => {
+      const d = h.data || h;
+      const decision = d.decision || d.signal || 'HOLD';
+      return {
+        time: h.timestamp || h.created_at || new Date().toLocaleString('zh-CN'),
+        code: h.stock_code || d.stock_code || '',
+        decision: decision,
+        confidence: d.confidence || d.total_score || 0,
+        score: d.total_score || d.composite_score || 0
+      };
+    });
+  }
 
   body.innerHTML = history.map(h => {
     const cls = h.decision === 'BUY' ? 'signal-buy' : h.decision === 'SELL' ? 'signal-sell' : 'signal-hold';
@@ -1700,7 +1965,7 @@ async function runScan(type) {
   showToast('正在扫描...', 'info');
   let url = '/api/strategy/scan/limit_up';
   if (type === 'new_high') url = '/api/strategy/scan/new_high';
-  if (type === 'convertible') url = '/api/strategy/scan/new_high'; // 复用API
+  if (type === 'convertible') url = '/api/strategy/scan/cb';
 
   const data = await api(url);
   const card = document.getElementById('scanResultCard');
@@ -1715,7 +1980,19 @@ async function runScan(type) {
     {code:'000858',name:'五粮液',price:156.78,change_pct:3.89,volume:2345678901,signal:'放量'}
   ];
 
-  const results = (data && data.data) ? data.data : defaultResults;
+  let results = defaultResults;
+  if (data && Array.isArray(data) && data.length > 0) {
+    // scan/new_high返回list[NewHighItem]: stock_code, stock_name, change_pct, volume, amount
+    // scan/limit_up返回list[LimitUpItem]: stock_code, stock_name, level, reason, seal_time, open_count, seal_volume, quality_score
+    results = data.map(r => ({
+      code: r.stock_code || r.code || '',
+      name: r.stock_name || r.name || '',
+      price: r.price || 0,
+      change_pct: r.change_pct || 0,
+      volume: r.volume || 0,
+      signal: r.reason || r.level || '强势'
+    }));
+  }
 
   body.innerHTML = results.map(r => {
     const color = changeColor(r.change_pct);
@@ -1743,7 +2020,17 @@ async function loadStrategyList() {
     {name:'网格交易',type:'量化',status:'暂停',return_rate:8.9,max_drawdown:3.2}
   ];
 
-  const strategies = (data && data.data) ? data.data : defaultStrategies;
+  let strategies = defaultStrategies;
+  // API返回list[StrategyInfo]，字段: name, display_name, description, enabled
+  if (data && Array.isArray(data) && data.length > 0) {
+    strategies = data.map(s => ({
+      name: s.display_name || s.name,
+      type: s.description ? s.description.substring(0, 6) : '',
+      status: s.enabled ? '运行中' : '暂停',
+      return_rate: 0,
+      max_drawdown: 0
+    }));
+  }
 
   body.innerHTML = strategies.map(s => {
     const statusColor = s.status === '运行中' ? 'var(--color-down)' : 'var(--color-warning)';
@@ -1774,7 +2061,7 @@ async function submitBuy() {
 
   const result = await api('/api/trade/buy', {
     method: 'POST',
-    body: JSON.stringify({stock_code:code, quantity:parseInt(qty), price:price?parseFloat(price):null, strategy})
+    body: JSON.stringify({stock_code:code, amount:parseInt(qty), price:price?parseFloat(price):0, strategy})
   });
 
   showToast(result ? '买入委托已提交' : '买入委托已提交（模拟）', 'success');
@@ -1793,7 +2080,7 @@ async function submitSell() {
 
   const result = await api('/api/trade/sell', {
     method: 'POST',
-    body: JSON.stringify({stock_code:code, quantity:parseInt(qty), price:price?parseFloat(price):null, strategy})
+    body: JSON.stringify({stock_code:code, amount:parseInt(qty), price:price?parseFloat(price):0, strategy})
   });
 
   showToast(result ? '卖出委托已提交' : '卖出委托已提交（模拟）', 'success');
@@ -1820,7 +2107,19 @@ async function loadTradeHistory() {
     {time:'2025-01-15 14:32',code:'000858',direction:'卖出',qty:100,price:157.50,status:'部分成交'}
   ];
 
-  const trades = (data && data.data) ? data.data : defaultTrades;
+  let trades = defaultTrades;
+  // API返回list[TradeItem]，字段: trade_id, order_id, symbol, side, price, quantity, amount, commission, stamp_tax, net_amount, strategy, reason, created_at
+  if (data && Array.isArray(data) && data.length > 0) {
+    trades = data.map(t => ({
+      time: t.created_at || '',
+      code: t.symbol || '',
+      direction: t.side === 'buy' ? '买入' : '卖出',
+      qty: t.quantity || 0,
+      price: t.price || 0,
+      amount: t.amount || 0,
+      pnl: t.net_amount || null
+    }));
+  }
 
   body.innerHTML = trades.map(t => {
     const dirColor = t.direction === '买入' ? 'var(--color-up)' : 'var(--color-down)';
@@ -1836,18 +2135,46 @@ async function loadTradeHistory() {
     </tr>`;
   }).join('');
 
-  orderBody.innerHTML = defaultOrders.map(o => {
-    const dirColor = o.direction === '买入' ? 'var(--color-up)' : 'var(--color-down)';
-    return `<tr>
-      <td>${o.time}</td>
-      <td style="color:var(--accent-cyan);">${o.code}</td>
-      <td style="color:${dirColor};">${o.direction}</td>
-      <td>${o.qty}</td>
-      <td>${fmtNum(o.price)}</td>
-      <td><span style="color:var(--color-warning);">${o.status}</span></td>
-      <td><button class="btn btn-sm btn-outline" onclick="showToast('已撤单','info')">撤单</button></td>
-    </tr>`;
-  }).join('');
+  // 委托单 - 从trade/orders API获取
+  const orderData = await api('/api/trade/orders');
+  if (orderData && Array.isArray(orderData) && orderData.length > 0) {
+    orderBody.innerHTML = orderData.map(o => {
+      const dirColor = o.side === 'buy' ? 'var(--color-up)' : 'var(--color-down)';
+      const dirLabel = o.side === 'buy' ? '买入' : '卖出';
+      const statusMap = {pending:'待成交',partial:'部分成交',filled:'已成交',cancelled:'已撤单',rejected:'已拒绝'};
+      return `<tr>
+        <td>${o.order_id || ''}</td>
+        <td style="color:var(--accent-cyan);">${o.symbol || ''}</td>
+        <td style="color:${dirColor};">${dirLabel}</td>
+        <td>${o.quantity || 0}</td>
+        <td>${fmtNum(o.price || 0)}</td>
+        <td><span style="color:var(--color-warning);">${statusMap[o.status] || o.status || '未知'}</span></td>
+        <td><button class="btn btn-sm btn-outline" onclick="cancelOrder('${o.order_id}')">撤单</button></td>
+      </tr>`;
+    }).join('');
+  } else {
+    orderBody.innerHTML = defaultOrders.map(o => {
+      const dirColor = o.direction === '买入' ? 'var(--color-up)' : 'var(--color-down)';
+      return `<tr>
+        <td>${o.time}</td>
+        <td style="color:var(--accent-cyan);">${o.code}</td>
+        <td style="color:${dirColor};">${o.direction}</td>
+        <td>${o.qty}</td>
+        <td>${fmtNum(o.price)}</td>
+        <td><span style="color:var(--color-warning);">${o.status}</span></td>
+        <td><button class="btn btn-sm btn-outline" onclick="showToast('已撤单','info')">撤单</button></td>
+      </tr>`;
+    }).join('');
+  }
+}
+
+async function cancelOrder(orderId) {
+  await api('/api/trade/cancel', {
+    method: 'POST',
+    body: JSON.stringify({order_id: orderId})
+  });
+  showToast('撤单请求已提交', 'info');
+  loadTradeHistory();
 }
 
 /* ========== 5. 持仓管理 ========== */
@@ -1857,19 +2184,328 @@ async function loadPositionData() {
   loadRiskStatus();
 }
 
+/* ========== 6. 基金管理 ========== */
+let _fundSearchTimer = null;
+
+async function loadFundData() {
+  const data = await api('/api/fund/positions');
+  if (!data) return;
+  const positions = data.positions || [];
+  const summary = data.summary || {};
+
+  document.getElementById('fundTotalValue').textContent = fmtMoney(summary.total_market_value || 0);
+  document.getElementById('fundTotalCost').textContent = fmtMoney(summary.total_cost || 0);
+  const pnlEl = document.getElementById('fundTotalPnl');
+  const pnl = summary.total_pnl || 0;
+  pnlEl.textContent = (pnl >= 0 ? '+' : '') + fmtMoney(Math.abs(pnl));
+  pnlEl.style.color = changeColor(pnl);
+  document.getElementById('fundCount').textContent = summary.count || 0;
+
+  const body = document.getElementById('fundPositionBody');
+  if (!positions.length) {
+    body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px;">暂无基金持仓,请在右侧添加</td></tr>';
+    return;
+  }
+  body.innerHTML = positions.map(p => {
+    const pnlColor = changeColor(p.pnl_amount || 0);
+    const changeColorStr = changeColor(p.change_pct || 0);
+    return `<tr>
+      <td>${p.fund_code}</td>
+      <td>${p.fund_name || '—'}</td>
+      <td>${p.shares}</td>
+      <td>${(p.cost_nav || 0).toFixed(4)}</td>
+      <td>${(p.current_nav || 0).toFixed(4)}</td>
+      <td style="color:${changeColorStr};">${(p.change_pct || 0).toFixed(2)}%</td>
+      <td style="color:${pnlColor};">${(p.pnl_amount >= 0 ? '+' : '') + (p.pnl_amount || 0).toFixed(2)}<br><span style="font-size:11px;">(${(p.pnl_pct >= 0 ? '+' : '') + (p.pnl_pct || 0).toFixed(2)}%)</span></td>
+      <td><button class="btn btn-sm" style="color:var(--color-up);" onclick="deleteFundPosition('${p.fund_code}')">删除</button></td>
+    </tr>`;
+  }).join('');
+}
+
+async function loadFundAdvice() {
+  const data = await api('/api/fund/advice');
+  if (!data) return;
+  const card = document.getElementById('fundAdviceCard');
+  const summaryEl = document.getElementById('fundAdviceSummary');
+  const bodyEl = document.getElementById('fundAdviceBody');
+  card.style.display = 'block';
+
+  const market = data.market_signal || {};
+  summaryEl.innerHTML = `<strong>大盘信号:</strong> ${market.action || '—'} (${market.reason || '无数据'}) | <strong>整体建议:</strong> ${data.summary || '—'}`;
+
+  const advices = data.positions_advice || [];
+  if (!advices.length) {
+    bodyEl.innerHTML = '<div style="color:var(--text-muted);padding:8px;">暂无持仓建议</div>';
+    return;
+  }
+  bodyEl.innerHTML = advices.map(a => {
+    const advice = a.advice || {};
+    const actionColor = advice.signal === 'take_profit' ? 'var(--color-up)' :
+                        (advice.signal === 'add' || advice.signal === 'dca') ? 'var(--color-down)' :
+                        'var(--text-secondary)';
+    return `<div style="padding:8px 0;border-bottom:1px solid var(--border);">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <strong>${a.fund_name || a.fund_code}</strong>
+        <span style="color:${actionColor};font-weight:600;padding:2px 8px;border:1px solid ${actionColor};border-radius:4px;">${advice.action || '—'}</span>
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">${advice.reason || '无建议'}</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">当前净值: ${(a.current_nav || 0).toFixed(4)} | 成本: ${(a.cost_nav || 0).toFixed(4)} | 盈亏: ${(a.pnl_pct >= 0 ? '+' : '') + (a.pnl_pct || 0).toFixed(2)}%</div>
+    </div>`;
+  }).join('');
+
+  // 加载基金话术推荐
+  loadFundScripts(advices, market);
+}
+
+async function loadFundScripts(advices, market) {
+  const card = document.getElementById('fundScriptCard');
+  const body = document.getElementById('fundScriptBody');
+  if (!advices || !advices.length) {
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = 'block';
+  // 为每只基金匹配话术(取第一只作为示例,实际可遍历)
+  const first = advices[0];
+  // 补充 market_signal 到 advice 供话术匹配使用
+  first.market_signal = market;
+  try {
+    const resp = await fetch('/api/scripts/match/fund', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fund_advice: first }),
+    });
+    const data = await resp.json();
+    const scripts = (data && data.data) || [];
+    if (!scripts.length) {
+      body.innerHTML = '<div style="color:var(--text-muted);padding:8px;">暂无匹配话术</div>';
+      return;
+    }
+    body.innerHTML = scripts.map(s => {
+      return `<div style="padding:8px 0;border-bottom:1px solid var(--border);">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <strong style="color:var(--accent-cyan);">${s.title || '—'}</strong>
+          <span style="font-size:11px;color:var(--text-muted);">${s.dimension || ''} · ${s.scene || ''}</span>
+        </div>
+        <div style="font-size:13px;color:var(--text-primary);margin-top:4px;line-height:1.6;">${s.content || '—'}</div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    body.innerHTML = '<div style="color:var(--text-muted);padding:8px;">话术加载失败</div>';
+  }
+}
+
+/* ========== 话术库浏览(AI 页) ========== */
+async function loadScriptLibrary() {
+  const category = document.getElementById('scriptCategorySelect').value;
+  const scene = document.getElementById('scriptSceneSelect').value;
+  const body = document.getElementById('scriptLibraryBody');
+  const countEl = document.getElementById('scriptCount');
+  const params = new URLSearchParams();
+  if (category) params.set('category', category);
+  if (scene) params.set('scene', scene);
+  const url = '/api/scripts/list' + (params.toString() ? '?' + params.toString() : '');
+  const data = await api(url);
+  const list = (data && data.data) || [];
+  countEl.textContent = `共 ${list.length} 条`;
+  if (!list.length) {
+    body.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px;">暂无话术</div>';
+    return;
+  }
+  body.innerHTML = list.map(s => {
+    const sceneLabels = {buy:'买入',sell:'卖出',hold:'持有',wait:'观望',stop_loss:'止损',dca:'定投',add:'加仓',take_profit:'止盈'};
+    const sceneLabel = sceneLabels[s.scene] || s.scene;
+    const categoryLabel = s.category === 'stock' ? '🇨🇳 股市' : '💰 基金';
+    return `<div style="padding:10px;border-bottom:1px solid var(--border);">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <strong style="color:var(--accent-cyan);">${s.title || '—'}</strong>
+        <span style="font-size:11px;color:var(--text-muted);">${categoryLabel} · ${sceneLabel} · ${s.dimension || ''}</span>
+      </div>
+      <div style="font-size:12px;color:var(--text-secondary);line-height:1.6;">${s.template || '—'}</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">变量: ${(s.variables || []).join(', ')}</div>
+    </div>`;
+  }).join('');
+}
+
+async function addFundPosition() {
+  const code = document.getElementById('fundCodeInput').value.trim();
+  const name = document.getElementById('fundNameInput').value.trim();
+  const shares = parseFloat(document.getElementById('fundSharesInput').value) || 0;
+  const cost = parseFloat(document.getElementById('fundCostInput').value) || 0;
+  const date = document.getElementById('fundDateInput').value;
+  const note = document.getElementById('fundNoteInput').value.trim();
+
+  if (!code) { alert('请输入基金代码'); return; }
+  if (shares <= 0) { alert('请输入有效份额'); return; }
+
+  const resp = await api('/api/fund/positions/add', {
+    method: 'POST',
+    body: JSON.stringify({ fund_code: code, fund_name: name, shares, cost_nav: cost, buy_date: date, note })
+  });
+  if (resp && resp.success) {
+    ['fundCodeInput','fundNameInput','fundSharesInput','fundCostInput','fundDateInput','fundNoteInput'].forEach(id => document.getElementById(id).value = '');
+    loadFundData();
+  } else {
+    alert((resp && resp.message) || '添加失败');
+  }
+}
+
+async function deleteFundPosition(code) {
+  if (!confirm(`确认删除基金 ${code}?`)) return;
+  const resp = await api(`/api/fund/positions/${code}`, { method: 'DELETE' });
+  if (resp && resp.success) {
+    loadFundData();
+  } else {
+    alert((resp && resp.message) || '删除失败');
+  }
+}
+
+function debounceFundSearch(q) {
+  clearTimeout(_fundSearchTimer);
+  if (!q || q.length < 1) {
+    document.getElementById('fundSearchResult').innerHTML = '';
+    return;
+  }
+  _fundSearchTimer = setTimeout(() => fundSearch(q), 300);
+}
+
+async function fundSearch(q) {
+  const data = await api(`/api/fund/search?q=${encodeURIComponent(q)}`);
+  const el = document.getElementById('fundSearchResult');
+  if (!data || !data.data || !data.data.length) {
+    el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:4px;">无匹配基金</div>';
+    return;
+  }
+  el.innerHTML = data.data.slice(0, 8).map(item =>
+    `<div style="padding:4px 8px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background=''" onclick="selectFund('${item.code}','${item.name.replace(/'/g, '')}')">
+      <strong>${item.code}</strong> ${item.name} <span style="color:var(--text-muted);font-size:11px;">${item.type || ''}</span>
+    </div>`
+  ).join('');
+}
+
+function selectFund(code, name) {
+  document.getElementById('fundCodeInput').value = code;
+  document.getElementById('fundNameInput').value = name;
+  document.getElementById('fundSearchResult').innerHTML = '';
+  document.getElementById('fundSearchInput').value = '';
+}
+
+/* ========== 国际市场 ========== */
+async function loadGlobalData() {
+  loadGlobalIndices();
+  loadUsHot();
+  loadHkHot();
+}
+
+async function loadGlobalIndices() {
+  const cardsEl = document.getElementById('globalIndexCards');
+  const data = await api('/api/global/indices');
+  const list = (data && data.data) || [];
+  if (!list.length) {
+    cardsEl.innerHTML = '<div class="card" style="grid-column:1/-1;text-align:center;color:var(--text-muted);">暂无国际指数数据</div>';
+    return;
+  }
+  cardsEl.innerHTML = list.map(idx => {
+    const color = changeColor(idx.change_pct);
+    const sign = changeSign(idx.change_pct);
+    const flag = idx.market === 'US' ? '🇺🇸' : idx.market === 'HK' ? '🇭🇰' : '🌐';
+    return `<div class="card" style="text-align:center;">
+      <div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">${flag} ${idx.name}</div>
+      <div style="font-size:20px;font-weight:700;color:${color};">${fmtNum(idx.price)}</div>
+      <div style="font-size:12px;color:${color};margin-top:4px;">${sign}${fmtNum(idx.change)} (${sign}${fmtNum(idx.change_pct)}%)</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">${idx.currency || ''}</div>
+    </div>`;
+  }).join('');
+}
+
+async function loadUsHot() {
+  const body = document.getElementById('usHotBody');
+  const data = await api('/api/global/us_hot');
+  const list = (data && data.data) || [];
+  if (!list.length) {
+    body.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">暂无数据</td></tr>';
+    return;
+  }
+  body.innerHTML = list.map(s => {
+    const color = changeColor(s.change_pct);
+    const sign = changeSign(s.change_pct);
+    return `<tr>
+      <td style="font-family:monospace;">${s.code}</td>
+      <td>${s.name || '-'}</td>
+      <td style="font-weight:600;">${fmtNum(s.price)}</td>
+      <td style="color:${color};font-weight:500;">${sign}${fmtNum(s.change_pct)}%</td>
+      <td style="color:var(--text-muted);">${s.currency || 'USD'}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function loadHkHot() {
+  const body = document.getElementById('hkHotBody');
+  const data = await api('/api/global/hk_hot');
+  const list = (data && data.data) || [];
+  if (!list.length) {
+    body.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">暂无数据</td></tr>';
+    return;
+  }
+  body.innerHTML = list.map(s => {
+    const color = changeColor(s.change_pct);
+    const sign = changeSign(s.change_pct);
+    return `<tr>
+      <td style="font-family:monospace;">${s.code}</td>
+      <td>${s.name || '-'}</td>
+      <td style="font-weight:600;">${fmtNum(s.price)}</td>
+      <td style="color:${color};font-weight:500;">${sign}${fmtNum(s.change_pct)}%</td>
+      <td style="color:var(--text-muted);">${s.currency || 'HKD'}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function queryGlobalStock() {
+  const market = document.getElementById('globalMarketSelect').value;
+  const codes = document.getElementById('globalCodeInput').value.trim();
+  const body = document.getElementById('globalQueryBody');
+  if (!codes) {
+    body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-warning);">请输入代码</td></tr>';
+    return;
+  }
+  body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);" class="pulse-loading">查询中...</td></tr>';
+  const url = market === 'us' ? `/api/global/us_realtime?codes=${encodeURIComponent(codes)}` : `/api/global/hk_realtime?codes=${encodeURIComponent(codes)}`;
+  const data = await api(url);
+  const list = (data && data.data) || [];
+  if (!list.length) {
+    body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);">未查询到数据</td></tr>';
+    return;
+  }
+  body.innerHTML = list.map(s => {
+    const color = changeColor(s.change_pct);
+    const sign = changeSign(s.change_pct);
+    return `<tr>
+      <td style="font-family:monospace;">${s.code}</td>
+      <td>${s.name || '-'}</td>
+      <td style="font-weight:600;">${fmtNum(s.price)}</td>
+      <td style="color:${color};">${sign}${fmtNum(s.change)}</td>
+      <td style="color:${color};font-weight:500;">${sign}${fmtNum(s.change_pct)}%</td>
+      <td>${fmtNum(s.high)}</td>
+      <td>${fmtNum(s.low)}</td>
+      <td style="color:var(--text-muted);">${s.currency || ''}</td>
+    </tr>`;
+  }).join('');
+}
+
 async function loadAccountOverview() {
   const data = await api('/api/dashboard/overview');
-  const defaultOverview = {total_asset:1256780, available:356780, market_value:900000, today_pnl:12345};
+  const defaultOverview = {total_assets:1256780, available_cash:356780, market_value:900000, daily_pnl:12345};
 
-  const d = (data && data.data) ? data.data : defaultOverview;
+  const d = (data && data.data) ? data.data : (data && !data.data) ? data : defaultOverview;
 
-  document.getElementById('totalAsset').textContent = fmtMoney(d.total_asset);
-  document.getElementById('availableCash').textContent = fmtMoney(d.available);
-  document.getElementById('marketValue').textContent = fmtMoney(d.market_value);
+  document.getElementById('totalAsset').textContent = fmtMoney(d.total_assets || d.total_asset || 0);
+  document.getElementById('availableCash').textContent = fmtMoney(d.available_cash || d.available || 0);
+  document.getElementById('marketValue').textContent = fmtMoney(d.market_value || 0);
 
+  const pnl = d.daily_pnl || d.today_pnl || 0;
   const pnlEl = document.getElementById('todayPnl');
-  pnlEl.textContent = (d.today_pnl >= 0 ? '+' : '') + fmtMoney(d.today_pnl);
-  pnlEl.style.color = changeColor(d.today_pnl);
+  pnlEl.textContent = (pnl >= 0 ? '+' : '') + fmtMoney(pnl);
+  pnlEl.style.color = changeColor(pnl);
 }
 
 async function loadPositions() {
@@ -1877,25 +2513,31 @@ async function loadPositions() {
   const body = document.getElementById('positionBody');
 
   const defaultPositions = [
-    {code:'600519',name:'贵州茅台',qty:100,cost:1800.00,price:1856.00,pnl:5600,pnl_pct:3.11},
-    {code:'000858',name:'五粮液',qty:300,cost:150.00,price:156.78,pnl:2034,pnl_pct:4.52},
-    {code:'300750',name:'宁德时代',qty:200,cost:190.00,price:198.00,pnl:1600,pnl_pct:4.21},
-    {code:'002594',name:'比亚迪',qty:100,cost:270.00,price:267.80,pnl:-220,pnl_pct:-0.81},
-    {code:'601318',name:'中国平安',qty:1000,cost:50.00,price:52.34,pnl:2340,pnl_pct:4.68}
+    {symbol:'600519',name:'贵州茅台',quantity:100,cost_price:1800.00,current_price:1856.00,profit:5600,profit_pct:3.11},
+    {symbol:'000858',name:'五粮液',quantity:300,cost_price:150.00,current_price:156.78,profit:2034,profit_pct:4.52},
+    {symbol:'300750',name:'宁德时代',quantity:200,cost_price:190.00,current_price:198.00,profit:1600,profit_pct:4.21},
+    {symbol:'002594',name:'比亚迪',quantity:100,cost_price:270.00,current_price:267.80,profit:-220,profit_pct:-0.81},
+    {symbol:'601318',name:'中国平安',quantity:1000,cost_price:50.00,current_price:52.34,profit:2340,profit_pct:4.68}
   ];
 
-  const positions = (data && data.data) ? data.data : defaultPositions;
+  const positions = (data && Array.isArray(data)) ? data : (data && data.data && Array.isArray(data.data)) ? data.data : defaultPositions;
 
   body.innerHTML = positions.map(p => {
-    const color = changeColor(p.pnl_pct);
+    const code = p.symbol || p.code || '';
+    const qty = p.quantity || p.qty || 0;
+    const cost = p.cost_price || p.cost || 0;
+    const price = p.current_price || p.price || 0;
+    const profit = p.profit || p.pnl || 0;
+    const profitPct = p.profit_pct || p.pnl_pct || 0;
+    const color = changeColor(profitPct);
     return `<tr>
-      <td style="color:var(--accent-cyan);">${p.code}</td>
+      <td style="color:var(--accent-cyan);">${code}</td>
       <td>${p.name}</td>
-      <td>${p.qty}</td>
-      <td>${fmtNum(p.cost)}</td>
-      <td style="color:${color}">${fmtNum(p.price)}</td>
-      <td style="color:${color}">${changeSign(p.pnl)}${fmtMoney(p.pnl)}</td>
-      <td style="color:${color}">${changeSign(p.pnl_pct)}${fmtNum(p.pnl_pct)}%</td>
+      <td>${qty}</td>
+      <td>${fmtNum(cost)}</td>
+      <td style="color:${color}">${fmtNum(price)}</td>
+      <td style="color:${color}">${changeSign(profit)}${fmtMoney(profit)}</td>
+      <td style="color:${color}">${changeSign(profitPct)}${fmtNum(profitPct)}%</td>
     </tr>`;
   }).join('');
 
@@ -1909,14 +2551,14 @@ function drawPieChart(positions) {
   if (!svg || !positions.length) return;
 
   const cx = 150, cy = 130, R = 90, r = 55;
-  const total = positions.reduce((s, p) => s + Math.abs(p.qty * p.price), 0);
+  const total = positions.reduce((s, p) => s + Math.abs((p.quantity || p.qty || 0) * (p.current_price || p.price || 0)), 0);
   const colors = ['#3b82f6','#8b5cf6','#06b6d4','#f59e0b','#ef4444','#22c55e','#ec4899','#6366f1'];
 
   let html = '';
   let startAngle = -Math.PI / 2;
 
   positions.forEach((p, i) => {
-    const val = Math.abs(p.qty * p.price);
+    const val = Math.abs((p.quantity || p.qty || 0) * (p.current_price || p.price || 0));
     const pct = val / total;
     const angle = pct * 2 * Math.PI;
     const endAngle = startAngle + angle;
@@ -1966,7 +2608,18 @@ async function loadRiskStatus() {
     {name:'波动率风险',level:'低',value:'1.2%',desc:'组合波动率正常'}
   ];
 
-  const risks = (data && data.data) ? data.data : defaultRisk;
+  let risks = defaultRisk;
+  if (data && (data.data || data.level)) {
+    const d = data.data || data;
+    // 将API返回的风控数据转换为前端格式
+    const level = d.level || 'NORMAL';
+    const levelMap = {NORMAL:'低',WARNING:'中',DANGER:'高',CRITICAL:'高'};
+    risks = [
+      {name:'风控等级', level: levelMap[level] || '低', value: level, desc: d.message || '系统正常运行'},
+      {name:'最大回撤', level: (d.drawdown_pct || 0) >= 10 ? '高' : (d.drawdown_pct || 0) >= 5 ? '中' : '低', value: fmtNum(d.drawdown_pct || 0) + '%', desc: '账户最大回撤'},
+      {name:'今日盈亏', level: (d.daily_pnl || 0) < 0 ? '中' : '低', value: fmtMoney(d.daily_pnl || 0), desc: '当日盈亏金额'}
+    ];
+  }
 
   container.innerHTML = risks.map(r => {
     const levelColor = r.level === '低' ? 'var(--color-down)' : r.level === '中' ? 'var(--color-warning)' : 'var(--color-up)';
@@ -1998,64 +2651,81 @@ async function loadDataTab() {
     research: {
       title: '研报',
       url: code ? `/api/market/research_reports?code=${code}` : '/api/market/research_reports?code=600519',
-      headers: ['日期','标题','评级','目标价','机构'],
+      headers: ['日期','标题','评级','EPS预测','机构'],
+      // API返回: title, rating, eps_predict, org_name, publish_date
+      mapItem: (item) => [item.publish_date||'', item.title||'', item.rating||'', item.eps_predict||'—', item.org_name||''],
       default: [
-        {date:'2025-01-15',title:'贵州茅台：业绩稳健增长，维持买入评级',rating:'买入',target_price:2100,institution:'中金公司'},
-        {date:'2025-01-14',title:'白酒行业深度：消费升级驱动龙头集中',rating:'增持',target_price:2000,institution:'中信证券'},
-        {date:'2025-01-13',title:'贵州茅台：提价效应逐步显现',rating:'买入',target_price:2200,institution:'国泰君安'},
-        {date:'2025-01-12',title:'食品饮料行业周报：板块估值修复',rating:'增持',target_price:1950,institution:'华泰证券'}
+        {publish_date:'2025-01-15',title:'贵州茅台：业绩稳健增长，维持买入评级',rating:'买入',eps_predict:42.5,org_name:'中金公司'},
+        {publish_date:'2025-01-14',title:'白酒行业深度：消费升级驱动龙头集中',rating:'增持',eps_predict:40.2,org_name:'中信证券'},
+        {publish_date:'2025-01-13',title:'贵州茅台：提价效应逐步显现',rating:'买入',eps_predict:45.8,org_name:'国泰君安'},
+        {publish_date:'2025-01-12',title:'食品饮料行业周报：板块估值修复',rating:'增持',eps_predict:39.6,org_name:'华泰证券'}
       ]
     },
     dragon: {
       title: '龙虎榜',
       url: '/api/market/dragon_tiger',
       headers: ['日期','代码','名称','涨幅','买入额','卖出额','净买入'],
+      // API返回: code, name, price, change_pct, reason, buy_amount, sell_amount, net_amount, trade_date
+      mapItem: (item) => [item.trade_date||'', item.code||'', item.name||'', item.change_pct||0, item.buy_amount||0, item.sell_amount||0, item.net_amount||0],
       default: [
-        {date:'2025-01-15',code:'300999',name:'金龙鱼',change_pct:10.01,buy_amount:23456, sell_amount:12345, net_buy:11111},
-        {date:'2025-01-15',code:'688981',name:'中芯国际',change_pct:8.52,buy_amount:34567, sell_amount:23456, net_buy:11111},
-        {date:'2025-01-14',code:'002594',name:'比亚迪',change_pct:6.34,buy_amount:45678, sell_amount:34567, net_buy:11111}
+        {trade_date:'2025-01-15',code:'300999',name:'金龙鱼',change_pct:10.01,buy_amount:23456, sell_amount:12345, net_amount:11111},
+        {trade_date:'2025-01-15',code:'688981',name:'中芯国际',change_pct:8.52,buy_amount:34567, sell_amount:23456, net_amount:11111},
+        {trade_date:'2025-01-14',code:'002594',name:'比亚迪',change_pct:6.34,buy_amount:45678, sell_amount:34567, net_amount:11111}
       ]
     },
     margin: {
       title: '融资融券',
       url: code ? `/api/market/margin?code=${code}` : '/api/market/margin?code=600519',
-      headers: ['日期','融资余额','融资买入','融券余额','融券卖出','余额差'],
+      headers: ['日期','融资余额','融资买入','融券余额','融券卖出','总余额'],
+      // API返回: code, trade_date, margin_buy, margin_balance, short_sell, short_balance, total_balance
+      mapItem: (item) => [item.trade_date||'', item.margin_balance||0, item.margin_buy||0, item.short_balance||0, item.short_sell||0, item.total_balance||0],
       default: [
-        {date:'2025-01-15',margin_balance:156.78,margin_buy:12.34,short_balance:8.56,short_sell:2.34,balance_diff:148.22},
-        {date:'2025-01-14',margin_balance:155.23,margin_buy:11.89,short_balance:8.34,short_sell:2.12,balance_diff:146.89},
-        {date:'2025-01-13',margin_balance:154.56,margin_buy:10.56,short_balance:8.12,short_sell:1.98,balance_diff:146.44}
+        {trade_date:'2025-01-15',margin_balance:156.78,margin_buy:12.34,short_balance:8.56,short_sell:2.34,total_balance:148.22},
+        {trade_date:'2025-01-14',margin_balance:155.23,margin_buy:11.89,short_balance:8.34,short_sell:2.12,total_balance:146.89},
+        {trade_date:'2025-01-13',margin_balance:154.56,margin_buy:10.56,short_balance:8.12,short_sell:1.98,total_balance:146.44}
       ]
     },
     block: {
       title: '大宗交易',
       url: code ? `/api/market/block_trades?code=${code}` : '/api/market/block_trades?code=600519',
       headers: ['日期','代码','名称','成交价','成交量','成交额','折溢率'],
+      // API返回: code, name, trade_date, price, volume, amount, premium_pct, buyer, seller
+      mapItem: (item) => [item.trade_date||'', item.code||'', item.name||'', item.price||0, item.volume||0, item.amount||0, item.premium_pct||0],
       default: [
-        {date:'2025-01-15',code:'600519',name:'贵州茅台',price:1830.00,volume:500,amount:915000,premium:-1.4},
-        {date:'2025-01-14',code:'000858',name:'五粮液',price:154.00,volume:2000,amount:308000,premium:-1.8},
-        {date:'2025-01-13',code:'601318',name:'中国平安',price:51.50,volume:10000,amount:515000,premium:-1.6}
+        {trade_date:'2025-01-15',code:'600519',name:'贵州茅台',price:1830.00,volume:500,amount:915000,premium_pct:-1.4},
+        {trade_date:'2025-01-14',code:'000858',name:'五粮液',price:154.00,volume:2000,amount:308000,premium_pct:-1.8},
+        {trade_date:'2025-01-13',code:'601318',name:'中国平安',price:51.50,volume:10000,amount:515000,premium_pct:-1.6}
       ]
     },
     shareholder: {
       title: '股东户数',
       url: code ? `/api/market/shareholder?code=${code}` : '/api/market/shareholder?code=600519',
-      headers: ['报告期','股东户数','较上期变化','户均持股','筹码集中度'],
+      headers: ['报告期','股东户数','较上期变化'],
+      // API返回: code, end_date, holder_num, change_pct
+      mapItem: (item) => [item.end_date||'', item.holder_num||0, item.change_pct||0],
       default: [
-        {period:'2024Q4',count:61234,change:-3.2,avg_shares:16300,concentration:'集中'},
-        {period:'2024Q3',count:63256,change:2.1,avg_shares:15780,concentration:'一般'},
-        {period:'2024Q2',count:61950,change:-1.5,avg_shares:16120,concentration:'集中'}
+        {end_date:'2024Q4',holder_num:61234,change_pct:-3.2},
+        {end_date:'2024Q3',holder_num:63256,change_pct:2.1},
+        {end_date:'2024Q2',holder_num:61950,change_pct:-1.5}
       ]
     }
   };
 
   const cfg = configs[currentDataTab];
   const data = await api(cfg.url);
-  const items = (data && data.data) ? data.data : cfg.default;
+  let items = (data && data.data) ? data.data : cfg.default;
+  // margin和shareholder API返回单个对象而非数组，需要包装为数组
+  if (items && !Array.isArray(items)) {
+    items = [items];
+  }
+  if (!items || items.length === 0) {
+    items = cfg.default;
+  }
 
   thead.innerHTML = '<tr>' + cfg.headers.map(h => `<th>${h}</th>`).join('') + '</tr>';
 
   tbody.innerHTML = items.map(item => {
-    const cells = Object.values(item);
+    const cells = cfg.mapItem ? cfg.mapItem(item) : Object.values(item);
     return '<tr>' + cells.map((c, i) => {
       // 对涨跌幅、折溢率等数值着色
       if (typeof c === 'number' && (cfg.headers[i].includes('涨幅') || cfg.headers[i].includes('折溢率') || cfg.headers[i].includes('变化'))) {
@@ -2089,7 +2759,18 @@ async function loadAlerts() {
     {type:'critical',icon:'🔴',msg:'账户可用资金不足，请及时补充',time:'09:35:12'}
   ];
 
-  const alerts = (data && data.data) ? data.data : defaultAlerts;
+  let alerts = defaultAlerts;
+  // api()已自动解包FastAPI的{value:[...]}格式
+  if (data && Array.isArray(data) && data.length > 0) {
+    const severityMap = {critical:'critical',warning:'warning',info:'info'};
+    const iconMap = {critical:'🔴',warning:'🟡',info:'🔵'};
+    alerts = data.map(a => ({
+      type: severityMap[a.severity] || 'info',
+      icon: iconMap[a.severity] || '🔵',
+      msg: a.message || `${a.stock_code} ${a.alert_type}`,
+      time: new Date().toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit',second:'2-digit'})
+    }));
+  }
 
   container.innerHTML = alerts.map(a => {
     return `<div class="alert-item alert-${a.type}">
@@ -2113,7 +2794,37 @@ async function loadWatchlist() {
     {code:'002594',name:'比亚迪',price:267.80,change_pct:6.34}
   ];
 
-  const list = (data && data.data) ? data.data : defaultWatchlist;
+  let list = defaultWatchlist;
+  // API返回list[WatchlistItem]，字段: stock_code, rules（无价格数据）
+  if (data && Array.isArray(data) && data.length > 0) {
+    const codes = data.map(w => w.stock_code).filter(Boolean);
+    if (codes.length > 0) {
+      // 获取实时行情补充价格数据
+      const quoteData = await api(`/api/market/stock_realtime?codes=${codes.join(',')}`);
+      if (quoteData && quoteData.data && Array.isArray(quoteData.data)) {
+        const quoteMap = {};
+        quoteData.data.forEach(q => { quoteMap[q.code] = q; });
+        list = data.map(w => {
+          const q = quoteMap[w.stock_code] || {};
+          return {
+            code: w.stock_code,
+            name: q.name || w.stock_code,
+            price: q.price || 0,
+            change_pct: q.change_pct || 0,
+            rules: w.rules || []
+          };
+        });
+      } else {
+        list = data.map(w => ({
+          code: w.stock_code,
+          name: w.stock_code,
+          price: 0,
+          change_pct: 0,
+          rules: w.rules || []
+        }));
+      }
+    }
+  }
 
   body.innerHTML = list.map(w => {
     const color = changeColor(w.change_pct);
@@ -2127,21 +2838,26 @@ async function loadWatchlist() {
   }).join('');
 }
 
-function addWatchlist() {
+async function addWatchlist() {
   const code = document.getElementById('watchlistInput').value.trim();
   if (!code) return;
+  await api('/api/monitor/watchlist', {
+    method: 'POST',
+    body: JSON.stringify({stock_code: code, rules: ['price_surge']})
+  });
   showToast(`已添加 ${code} 到自选股`, 'success');
   document.getElementById('watchlistInput').value = '';
   loadWatchlist();
 }
 
-function removeWatchlist(code) {
+async function removeWatchlist(code) {
+  await api(`/api/monitor/watchlist/${code}`, {method: 'DELETE'});
   showToast(`已从自选股移除 ${code}`, 'info');
   loadWatchlist();
 }
 
 async function loadNorthbound() {
-  const data = await api('/api/monitor/northbound');
+  const data = await api('/api/market/northbound');
   const container = document.getElementById('northboundPanel');
 
   const defaultNorth = {
@@ -2151,7 +2867,26 @@ async function loadNorthbound() {
     trend: [12.3, 23.5, 34.2, 28.9, 45.6, 52.3, 61.8, 55.2, 68.9, 75.3, 80.1, 82.5]
   };
 
-  const nb = (data && data.data) ? data.data : defaultNorth;
+  let nb = defaultNorth;
+  if (data && data.data) {
+    const d = data.data;
+    // API返回字段映射到前端字段
+    const totalNet = d.total_net_inflow || 0;
+    const shNet = d.sh_net_inflow || 0;
+    const szNet = d.sz_net_inflow || 0;
+    // 将亿元转换为亿元（API返回的是元，需要转换）
+    const toYi = (v) => {
+      if (Math.abs(v) >= 1e8) return (v / 1e8).toFixed(2);
+      if (Math.abs(v) >= 1e4) return (v / 1e4).toFixed(2);
+      return v;
+    };
+    nb = {
+      today_net: parseFloat(toYi(totalNet)),
+      today_sh: parseFloat(toYi(shNet)),
+      today_sz: parseFloat(toYi(szNet)),
+      trend: defaultNorth.trend
+    };
+  }
 
   const netColor = changeColor(nb.today_net);
   container.innerHTML = `
@@ -2211,7 +2946,15 @@ async function loadHotSignals() {
     {code:'000858',name:'五粮液',signal:'量价齐升',strength:72}
   ];
 
-  const signals = (data && data.data) ? data.data : defaultSignals;
+  let signals = defaultSignals;
+  if (data && data.data && Array.isArray(data.data) && data.data.length > 0) {
+    signals = data.data.map(s => ({
+      code: s.code || '',
+      name: s.name || '',
+      signal: s.reason || s.signal || '强势',
+      strength: Math.min(100, Math.max(0, Math.round(Math.abs(s.change_pct || 0) * 10 + 50)))
+    }));
+  }
 
   body.innerHTML = signals.map(s => {
     const strengthColor = s.strength >= 80 ? 'var(--color-up)' : s.strength >= 60 ? 'var(--color-warning)' : 'var(--color-flat)';
@@ -2253,7 +2996,7 @@ async function loadSettings() {
     refresh_interval: 5
   };
 
-  currentConfig = (data && data.data) ? data.data : defaultSettings;
+  currentConfig = (data && data.settings) ? data.settings : (data && data.data) ? data.data : defaultSettings;
 
   // 配置表单
   const configForm = document.getElementById('configForm');
@@ -2311,7 +3054,7 @@ async function saveConfig() {
 
   await api('/api/config/settings', {
     method: 'PUT',
-    body: JSON.stringify(settings)
+    body: JSON.stringify({settings: settings})
   });
 
   showToast('配置已保存', 'success');
@@ -2326,21 +3069,25 @@ async function saveRiskParams() {
 
   await api('/api/config/settings', {
     method: 'PUT',
-    body: JSON.stringify(params)
+    body: JSON.stringify({settings: params})
   });
 
   showToast('风控参数已保存', 'success');
 }
 
-function testNotify(type) {
+async function testNotify(type) {
   const names = {email:'邮件',wechat:'微信',ding:'钉钉',webhook:'Webhook'};
-  showToast(`${names[type]}通知测试已发送`, 'success');
+  const result = await api('/api/config/test_notify', {method: 'POST'});
+  if (result && result.success) {
+    showToast(`${names[type] || ''}通知测试成功`, 'success');
+  } else {
+    showToast(`${names[type] || ''}通知测试失败: ${result ? result.message : '未知错误'}`, 'error');
+  }
 }
 
 function loadHealthStatus() {
   const container = document.getElementById('healthPanel');
 
-  // 先尝试从 /api/health 获取真实数据
   api('/api/health').then(data => {
     let checks = [
       {name:'API服务', status:'ok', detail:'响应时间 23ms'},
@@ -2353,23 +3100,16 @@ function loadHealthStatus() {
 
     if (data) {
       checks = [];
-      if (data.status) checks.push({name:'API服务', status: data.status === 'ok' ? 'ok' : 'err', detail: data.version ? `v${data.version}` : '运行中'});
-      if (data.database) checks.push({name:'数据库', status: data.database === 'connected' ? 'ok' : 'err', detail: data.database === 'connected' ? '连接正常' : '断开'});
-      if (data.market_source) checks.push({name:'行情数据源', status: data.market_source === 'live' ? 'ok' : 'warn', detail: data.market_source === 'live' ? '实时' : '缓存'});
+      checks.push({name:'API服务', status: data.status === 'ok' ? 'ok' : 'err', detail: '运行正常'});
+      checks.push({name:'AkShare', status: data.akshare ? 'ok' : 'warn', detail: data.akshare ? '已安装' : '未安装'});
+      checks.push({name:'核心模块', status: data.core_modules ? 'ok' : 'warn', detail: data.core_modules ? '已加载' : '未加载'});
       if (data.ai_keys) {
-        const hasKey = data.ai_keys.provider || data.ai_keys.openai_key || data.ai_keys.api_key;
-        checks.push({name:'AI引擎', status: hasKey ? 'ok' : 'warn', detail: hasKey ? (data.ai_keys.provider || 'OpenAI') + ' 已配置' : '未配置API Key'});
-      }
-      if (checks.length === 0) {
-        // fallback to defaults if data structure is unexpected
-        checks = [
-          {name:'API服务', status:'ok', detail:'响应正常'},
-          {name:'数据库', status:'ok', detail:'连接正常'},
-          {name:'行情数据源', status:'ok', detail:'延迟 <100ms'},
-          {name:'AI引擎', status:'warn', detail:'GPU利用率 85%'},
-          {name:'消息队列', status:'ok', detail:'积压 0'},
-          {name:'磁盘空间', status:'ok', detail:'已用 42%'}
-        ];
+        const hasKey = data.ai_keys.ttapi || data.ai_keys.tavily || data.ai_keys.tinyfish;
+        const providers = [];
+        if (data.ai_keys.ttapi) providers.push('TTAPI');
+        if (data.ai_keys.tavily) providers.push('Tavily');
+        if (data.ai_keys.tinyfish) providers.push('Tinyfish');
+        checks.push({name:'AI引擎', status: hasKey ? 'ok' : 'warn', detail: hasKey ? providers.join('+') + ' 已配置' : '未配置API Key'});
       }
     }
 
@@ -2458,7 +3198,7 @@ async function loadLlmProvider() {
 }
 
 /* ========== 键盘快捷键 ========== */
-const pageKeys = ['market','ai','strategy','trade','position','data','monitor','config'];
+const pageKeys = ['market','ai','strategy','trade','position','fund','global','data','monitor','config'];
 let shortcutHintTimer = null;
 
 document.addEventListener('keydown', (e) => {
@@ -2486,8 +3226,8 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  // 数字键 1-8 切换页面（不在输入框中时）
-  if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key >= '1' && e.key <= '8') {
+  // 数字键 1-9 切换页面（不在输入框中时）
+  if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key >= '1' && e.key <= '9') {
     const tag = e.target.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
     const idx = parseInt(e.key) - 1;

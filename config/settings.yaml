@@ -9,7 +9,7 @@ app:
 # AI 服务配置
 # ──────────────────────────────────────────────
 ai:
-  provider: openai                    # openai / azure / zhipu / deepseek / ollama
+  provider: openai                    # openai / azure / zhipu / agnes / ollama
   model: gpt-4o                      # 主模型
   model_mini: gpt-4o-mini            # 轻量模型（用于分类/摘要等低复杂度任务）
   base_url: ""                       # 自定义 API 端点（留空使用默认）

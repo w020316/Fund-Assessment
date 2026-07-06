@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from typing import Any
 
@@ -7,6 +8,7 @@ from fastapi import APIRouter, Body
 from pydantic import BaseModel
 
 from src.core import data_source_v2 as ds2
+from src.utils.convert import safe_float as _safe_float
 
 router = APIRouter()
 
@@ -17,15 +19,6 @@ try:
     _HAS_MONITOR = True
 except ImportError:
     pass
-
-
-def _safe_float(val: object, default: float = 0.0) -> float:
-    if val is None:
-        return default
-    try:
-        return float(val)
-    except (ValueError, TypeError):
-        return default
 
 
 class AlertItem(BaseModel):
@@ -75,7 +68,7 @@ _mock_watchlist: dict[str, list[str]] = {
 @router.get("/alerts", response_model=list[AlertItem])
 async def alerts(stock_code: str = ""):
     if not stock_code:
-        return _generate_default_alerts()
+        return await _generate_default_alerts()
     if not _HAS_MONITOR:
         return [AlertItem(
             stock_code=stock_code, alert_type="price_surge",
@@ -85,7 +78,7 @@ async def alerts(stock_code: str = ""):
         )]
     try:
         monitor = StockMonitor()
-        results = monitor.check_alerts(stock_code)
+        results = await asyncio.to_thread(monitor.check_alerts, stock_code)
         return [AlertItem(
             stock_code=a["stock_code"], alert_type=a["alert_type"],
             severity=a["severity"], message=a["message"],
@@ -95,13 +88,13 @@ async def alerts(stock_code: str = ""):
         return []
 
 
-def _generate_default_alerts() -> list[AlertItem]:
+async def _generate_default_alerts() -> list[AlertItem]:
     alert_items: list[AlertItem] = []
     watchlist_codes = list(_mock_watchlist.keys())
     if not watchlist_codes:
         watchlist_codes = ["000001", "600519"]
     try:
-        quotes = ds2.get_realtime_quote_tencent(watchlist_codes)
+        quotes = await asyncio.to_thread(ds2.get_realtime_quote_tencent, watchlist_codes)
     except Exception:
         quotes = []
     quote_map = {q.get("code", ""): q for q in quotes}
@@ -128,7 +121,7 @@ def _generate_default_alerts() -> list[AlertItem]:
                 detail={"change_pct": round(change_pct, 2), "price": float(q.get("price", 0))},
             ))
     try:
-        index_data = ds2.get_index_realtime()
+        index_data = await asyncio.to_thread(ds2.get_index_realtime)
         for idx in index_data:
             idx_change = 0.0
             try:
@@ -224,7 +217,7 @@ async def remove_watchlist_by_body(req: RemoveWatchlistBodyRequest):
 async def capital_flow(stock_code: str = ""):
     northbound_change = 0.0
     try:
-        nb_data = ds2.get_northbound_flow_realtime()
+        nb_data = await asyncio.to_thread(ds2.get_northbound_flow_realtime)
         if nb_data:
             total_nb = _safe_float(nb_data.get("total_net_inflow", 0))
             northbound_change = total_nb / 1e8 if total_nb != 0 else 0.0
@@ -236,7 +229,7 @@ async def capital_flow(stock_code: str = ""):
             small_order_ratio=0, northbound_change=round(northbound_change, 2),
         )
     try:
-        data = ds2.get_capital_flow_detail(stock_code)
+        data = await asyncio.to_thread(ds2.get_capital_flow_detail, stock_code)
         if data:
             main_net = _safe_float(data.get("main_net_inflow", 0))
             large_net = _safe_float(data.get("large_net_inflow", 0))
@@ -265,7 +258,7 @@ async def capital_flow(stock_code: str = ""):
 @router.get("/northbound", response_model=NorthboundResponse)
 async def northbound():
     try:
-        data = ds2.get_northbound_flow_realtime()
+        data = await asyncio.to_thread(ds2.get_northbound_flow_realtime)
         if data:
             top_stocks_raw = data.get("top_stocks", [])
             top_stocks = []

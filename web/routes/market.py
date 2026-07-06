@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import math
+import asyncio
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from src.core import data_source_v2 as ds2
 from src.core.cache import DataCache
 from src.core.data_validator import get_data_validator
+from src.utils.convert import safe_float as _safe_float, safe_str as _safe_str
 
 router = APIRouter()
 
@@ -117,26 +118,6 @@ class SectorFlowItem(BaseModel):
     large_order_ratio: float
 
 
-def _safe_float(val: object, default: float = 0.0) -> float:
-    if val is None:
-        return default
-    if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
-        return default
-    try:
-        result = float(val)
-        if math.isnan(result) or math.isinf(result):
-            return default
-        return result
-    except (ValueError, TypeError):
-        return default
-
-
-def _safe_str(val: object, default: str = "") -> str:
-    if val is None or (isinstance(val, float) and math.isnan(val)):
-        return default
-    return str(val)
-
-
 @router.get("/stock_realtime")
 async def stock_realtime(codes: str = Query(..., description="股票代码，逗号分隔")):
     cache_key = f"market:stock_realtime:{codes}"
@@ -144,7 +125,7 @@ async def stock_realtime(codes: str = Query(..., description="股票代码，逗
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("tencent", cached=True)}
     code_list = [c.strip() for c in codes.split(",") if c.strip()]
-    data = ds2.get_realtime_quote_tencent(code_list)
+    data = await asyncio.to_thread(ds2.get_realtime_quote_tencent, code_list)
     result: list[StockRealtimeItem] = []
     for item in data:
         price = _safe_float(item.get("price"))
@@ -188,7 +169,7 @@ async def stock_kline(
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("mootdx", cached=True)}
-    data = ds2.get_kline_mootdx(code, period=period, count=count)
+    data = await asyncio.to_thread(ds2.get_kline_mootdx, code, period=period, count=count)
     result: list[KlineItem] = []
     for item in data:
         result.append(KlineItem(
@@ -223,7 +204,7 @@ async def fund_realtime(codes: str = Query(..., description="基金代码，逗�
         try:
             for fund_code in code_list:
                 try:
-                    df = ak.fund_em_open_fund_info(fund_code, indicator="单位净值走势")
+                    df = await asyncio.to_thread(ak.fund_em_open_fund_info, fund_code, indicator="单位净值走势")
                     if df is None or df.empty:
                         continue
                     latest = df.iloc[-1]
@@ -244,7 +225,7 @@ async def fund_realtime(codes: str = Query(..., description="基金代码，逗�
         if result:
             cache.set(cache_key, result)
             return {"data": result, "_meta": _build_meta("akshare", cached=False)}
-    data = ds2.get_fund_realtime_tencent(code_list)
+    data = await asyncio.to_thread(ds2.get_fund_realtime_tencent, code_list)
     result = [FundRealtimeItem(**item) for item in data]
     data_source = "tencent"
     cache.set(cache_key, result)
@@ -263,9 +244,9 @@ async def fund_history(
     data_source = "akshare"
     if _HAS_AKSHARE:
         try:
-            df = ak.fund_em_open_fund_info(code, indicator="单位净值走势")
+            df = await asyncio.to_thread(ak.fund_em_open_fund_info, code, indicator="单位净值走势")
             if df is None or df.empty:
-                result = _fund_history_tencent_fallback(code, period)
+                result = await asyncio.to_thread(_fund_history_tencent_fallback, code, period)
                 data_source = "tencent"
                 cache.set(cache_key, result, ttl=300)
                 return {"data": result, "_meta": _build_meta(data_source, cached=False)}
@@ -292,7 +273,7 @@ async def fund_history(
             return {"data": result, "_meta": _build_meta("akshare", cached=False)}
         except Exception:
             pass
-    result = _fund_history_tencent_fallback(code, period)
+    result = await asyncio.to_thread(_fund_history_tencent_fallback, code, period)
     data_source = "tencent"
     cache.set(cache_key, result, ttl=300)
     return {"data": result, "_meta": _build_meta(data_source, cached=False)}
@@ -309,7 +290,7 @@ async def index_realtime():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
-    data = ds2.get_index_realtime()
+    data = await asyncio.to_thread(ds2.get_index_realtime)
     result: list[IndexRealtimeItem] = []
     for item in data:
         result.append(IndexRealtimeItem(
@@ -331,14 +312,12 @@ async def hot_stocks():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
-    from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        f_gainers = pool.submit(ds2.get_stock_ranking_em, "f3", 0, 10)
-        f_losers = pool.submit(ds2.get_stock_ranking_em, "f3", 1, 10)
-        f_volume = pool.submit(ds2.get_stock_ranking_em, "f6", 0, 10)
-        top_gainers_data = f_gainers.result(timeout=15)
-        top_losers_data = f_losers.result(timeout=15)
-        top_volume_data = f_volume.result(timeout=15)
+    # 三个排行并行获取(用 asyncio.to_thread 避免阻塞事件循环)
+    top_gainers_data, top_losers_data, top_volume_data = await asyncio.gather(
+        asyncio.to_thread(ds2.get_stock_ranking_em, "f3", 0, 10),
+        asyncio.to_thread(ds2.get_stock_ranking_em, "f3", 1, 10),
+        asyncio.to_thread(ds2.get_stock_ranking_em, "f6", 0, 10),
+    )
 
     def _to_item(item: dict) -> HotStocksItem:
         return HotStocksItem(
@@ -365,7 +344,7 @@ async def sector_flow():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
-    data = ds2.get_sector_ranking()
+    data = await asyncio.to_thread(ds2.get_sector_ranking)
     result: list[SectorFlowItem] = []
     for item in data:
         result.append(SectorFlowItem(
@@ -473,7 +452,7 @@ async def research_reports(
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
-    data = ds2.get_research_reports(code, page=page, page_size=page_size)
+    data = await asyncio.to_thread(ds2.get_research_reports, code, page=page, page_size=page_size)
     result = [ResearchReportItem(**item) for item in data]
     cache.set(cache_key, result, ttl=300)
     return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
@@ -485,7 +464,7 @@ async def dragon_tiger():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
-    data = ds2.get_dragon_tiger()
+    data = await asyncio.to_thread(ds2.get_dragon_tiger)
     result = [DragonTigerItem(**item) for item in data]
     cache.set(cache_key, result, ttl=300)
     return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
@@ -499,7 +478,7 @@ async def margin(code: str = Query("", description="股票代码")):
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
-    data = ds2.get_margin_trading(code)
+    data = await asyncio.to_thread(ds2.get_margin_trading, code)
     if not data:
         return {"data": MarginTradingItem(code=code, trade_date="", margin_buy=0, margin_balance=0, short_sell=0, short_balance=0, total_balance=0).model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
     result = MarginTradingItem(**data)
@@ -515,7 +494,7 @@ async def block_trades(code: str = Query("", description="股票代码")):
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
-    data = ds2.get_block_trades(code)
+    data = await asyncio.to_thread(ds2.get_block_trades, code)
     result = [BlockTradeItem(**item) for item in data]
     cache.set(cache_key, result, ttl=300)
     return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
@@ -529,7 +508,7 @@ async def shareholder(code: str = Query("", description="股票代码")):
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
-    data = ds2.get_shareholder_count(code)
+    data = await asyncio.to_thread(ds2.get_shareholder_count, code)
     if not data:
         return {"data": ShareholderItem(code=code, end_date="", holder_num=0, change_pct=0.0).model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
     result = ShareholderItem(**data)
@@ -548,10 +527,10 @@ async def news(
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
     if not code:
-        data = ds2.get_global_news()
+        data = await asyncio.to_thread(ds2.get_global_news)
         result = [NewsItem(**item) for item in data]
     else:
-        data = ds2.get_stock_news(code, page=page, page_size=page_size)
+        data = await asyncio.to_thread(ds2.get_stock_news, code, page=page, page_size=page_size)
         result = [NewsItem(**item) for item in data]
     cache.set(cache_key, result, ttl=120)
     return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
@@ -563,7 +542,7 @@ async def global_news():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
-    data = ds2.get_global_news()
+    data = await asyncio.to_thread(ds2.get_global_news)
     result = [NewsItem(**item) for item in data]
     cache.set(cache_key, result, ttl=120)
     return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
@@ -576,11 +555,11 @@ async def hot_stocks_signal():
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("ths", cached=True)}
     data_source = "ths"
-    data = ds2.get_hot_stocks_ths()
+    data = await asyncio.to_thread(ds2.get_hot_stocks_ths)
     if data:
         result = [HotStockSignalItem(**item) for item in data]
     else:
-        data = ds2.get_hot_stocks_signal_fallback()
+        data = await asyncio.to_thread(ds2.get_hot_stocks_signal_fallback)
         data_source = "eastmoney"
         result = [HotStockSignalItem(**item) for item in data]
     cache.set(cache_key, result)
@@ -593,7 +572,7 @@ async def sector_ranking():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
-    data = ds2.get_sector_ranking()
+    data = await asyncio.to_thread(ds2.get_sector_ranking)
     result = [SectorRankingItem(**item) for item in data]
     cache.set(cache_key, result)
     return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
@@ -635,7 +614,7 @@ async def market_heatmap():
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
     try:
-        data = ds2.get_sector_ranking()
+        data = await asyncio.to_thread(ds2.get_sector_ranking)
         result: list[HeatmapItem] = []
         for item in data:
             change_pct = _safe_float(item.get("change_pct"))
@@ -665,7 +644,7 @@ async def stock_search(q: str = Query(..., description="搜索关键词（股票
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
     try:
-        data = ds2.search_stock(q)
+        data = await asyncio.to_thread(ds2.search_stock, q)
         result: list[SearchResultItem] = []
         for item in data:
             result.append(SearchResultItem(
@@ -745,7 +724,7 @@ async def stock_detail(code: str = Query(..., description="股票代码")):
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("mixed", cached=True)}
     try:
-        data = ds2.get_stock_detail(code)
+        data = await asyncio.to_thread(ds2.get_stock_detail, code)
         result = StockDetailResponse(
             code=_safe_str(data.get("code")),
             name=_safe_str(data.get("name")),
@@ -782,7 +761,7 @@ async def northbound():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
-    data = ds2.get_northbound_flow_realtime()
+    data = await asyncio.to_thread(ds2.get_northbound_flow_realtime)
     if not data:
         return {"data": NorthboundFlowItem().model_dump(), "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
     result = NorthboundFlowItem(
@@ -801,7 +780,7 @@ async def market_sentiment():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("mixed", cached=True)}
-    data = ds2.get_market_sentiment()
+    data = await asyncio.to_thread(ds2.get_market_sentiment)
     cache.set(cache_key, data)
     return {"data": data, "_meta": _build_meta("mixed", cached=False)}
 
@@ -812,7 +791,7 @@ async def market_wide_stats():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("mixed", cached=True)}
-    data = ds2.get_market_wide_stats()
+    data = await asyncio.to_thread(ds2.get_market_wide_stats)
     result = MarketWideStatsResponse(
         margin_balance=_safe_float(data.get("margin_balance", 0)),
         block_trades_count=int(_safe_float(data.get("block_trades_count", 0))),

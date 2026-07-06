@@ -810,55 +810,27 @@ def get_dragon_tiger() -> list[dict]:
 
 
 def _get_dragon_tiger_sina() -> list[dict]:
-    try:
-        top = _get_stock_ranking_sina("f3", 0, 30)
-        result: list[dict] = []
-        for s in top:
-            if abs(s.get("change_pct", 0)) >= 5:
-                result.append({
-                    "code": s.get("code", ""),
-                    "name": s.get("name", ""),
-                    "price": s.get("price", 0),
-                    "change_pct": s.get("change_pct", 0),
-                    "reason": "涨幅异常" if s.get("change_pct", 0) > 0 else "跌幅异常",
-                    "buy_amount": 0,
-                    "sell_amount": 0,
-                    "net_amount": 0,
-                    "trade_date": datetime.now().strftime("%Y-%m-%d"),
-                })
-        return result[:20]
-    except Exception as e:
-        logger.warning(f"_get_dragon_tiger_sina failed: {e}")
-    return _get_dragon_tiger_from_ranking()
+    """龙虎榜数据不可用时返回空(不再用涨幅榜冒充)。
+
+    历史问题:曾用涨幅榜筛 |change_pct|>=5% 的股票冒充龙虎榜,
+    buy_amount/sell_amount/net_amount 全填 0,数据失真。
+    """
+    logger.info("dragon_tiger data unavailable from sina, returning empty list (no fabrication)")
+    return []
 
 
 def _get_dragon_tiger_from_ranking() -> list[dict]:
-    try:
-        top = _get_stock_ranking_sina("f3", 0, 20)
-        result: list[dict] = []
-        for s in top:
-            if abs(s.get("change_pct", 0)) >= 5:
-                result.append({
-                    "code": s.get("code", ""),
-                    "name": s.get("name", ""),
-                    "price": s.get("price", 0),
-                    "change_pct": s.get("change_pct", 0),
-                    "reason": "涨幅异常" if s.get("change_pct", 0) > 0 else "跌幅异常",
-                    "buy_amount": 0,
-                    "sell_amount": 0,
-                    "net_amount": 0,
-                    "trade_date": datetime.now().strftime("%Y-%m-%d"),
-                })
-        return result
-    except Exception as e:
-        logger.warning(f"_get_dragon_tiger_from_ranking failed: {e}")
-        return []
+    """龙虎榜数据不可用时返回空(不再用涨幅榜冒充)。"""
+    logger.info("dragon_tiger data unavailable, returning empty list (no fabrication)")
+    return []
 
 
 def get_sector_ranking() -> list[dict]:
     cached = _cache_get("sector_ranking")
     if cached is not None:
         return cached
+    # 优先使用行业板块(m:90+t:2),而非概念板块(m:90+t:3)
+    # 注:东财 API fs 参数, m:90+t:2=行业板块, m:90+t:3=概念板块
     url = "https://push2.eastmoney.com/api/qt/clist/get"
     params = {
         "pn": 1,
@@ -893,10 +865,41 @@ def get_sector_ranking() -> list[dict]:
                 "small_net": _safe_float(item.get("f84", 0)),
                 "small_pct": _safe_float(item.get("f87", 0)),
             })
-        _cache_set("sector_ranking", result, 30)
-        return result
+        if result:
+            _cache_set("sector_ranking", result, 30)
+            return result
     except Exception as e:
-        logger.warning(f"get_sector_ranking failed: {e}")
+        logger.warning(f"get_sector_ranking industry failed: {e}")
+    # 降级:尝试概念板块(m:90+t:3)
+    params2 = dict(params)
+    params2["fs"] = "m:90+t:3"
+    try:
+        resp = em_get(url, params=params2)
+        data = resp.json()
+        items = data.get("data", {}).get("diff", [])
+        result2: list[dict] = []
+        for item in items:
+            result2.append({
+                "code": _safe_str(item.get("f12", "")),
+                "name": _safe_str(item.get("f14", "")),
+                "change_pct": _safe_float(item.get("f3", 0)),
+                "price": _safe_float(item.get("f2", 0)),
+                "main_net_inflow": _safe_float(item.get("f62", 0)),
+                "main_inflow_pct": _safe_float(item.get("f184", 0)),
+                "super_large_net": _safe_float(item.get("f66", 0)),
+                "super_large_pct": _safe_float(item.get("f69", 0)),
+                "large_net": _safe_float(item.get("f72", 0)),
+                "large_pct": _safe_float(item.get("f75", 0)),
+                "medium_net": _safe_float(item.get("f78", 0)),
+                "medium_pct": _safe_float(item.get("f81", 0)),
+                "small_net": _safe_float(item.get("f84", 0)),
+                "small_pct": _safe_float(item.get("f87", 0)),
+            })
+        if result2:
+            _cache_set("sector_ranking", result2, 30)
+            return result2
+    except Exception as e:
+        logger.warning(f"get_sector_ranking concept fallback failed: {e}")
     result = _get_sector_ranking_sina()
     _cache_set("sector_ranking", result, 30)
     return result
@@ -1117,32 +1120,14 @@ def get_margin_trading(stock_code: str) -> dict:
 
 
 def _get_margin_trading_fallback(stock_code: str) -> dict:
-    try:
-        quotes = get_realtime_quote_tencent([stock_code])
-        if not quotes:
-            return {}
-        q = quotes[0]
-        total_mv = _safe_float(q.get("total_market_value", 0))
-        if total_mv <= 0:
-            total_mv = _safe_float(q.get("price", 0)) * 1e8
-        if total_mv <= 0:
-            return {}
-        margin_ratio = 0.012
-        short_ratio = 0.004
-        margin_balance = round(total_mv * margin_ratio, 2)
-        short_balance = round(total_mv * short_ratio, 2)
-        return {
-            "code": stock_code,
-            "trade_date": datetime.now().strftime("%Y-%m-%d"),
-            "margin_buy": round(margin_balance * 0.08, 2),
-            "margin_balance": margin_balance,
-            "short_sell": round(short_balance * 0.05, 2),
-            "short_balance": short_balance,
-            "total_balance": round(margin_balance + short_balance, 2),
-        }
-    except Exception as e:
-        logger.warning(f"_get_margin_trading_fallback failed: {e}")
-        return {}
+    """融资融券数据不可用时返回空(不再造假估算)。
+
+    原实现用 margin_ratio=0.012 硬编码比例估算融资余额, 属于伪造数据。
+    用户要求"API 返回的数据必须真实有效", 因此改为返回空 dict,
+    由调用方决定如何展示"数据不可用"状态。
+    """
+    logger.info(f"margin_trading data unavailable for {stock_code}, returning empty (no fabrication)")
+    return {}
 
 
 def get_block_trades(stock_code: str) -> list[dict]:
@@ -1232,45 +1217,13 @@ def get_shareholder_count(stock_code: str) -> dict:
 
 
 def _get_shareholder_count_fallback(stock_code: str) -> dict:
-    try:
-        quotes = get_realtime_quote_tencent([stock_code])
-        if not quotes:
-            return {}
-        q = quotes[0]
-        total_mv = _safe_float(q.get("total_market_value", 0))
-        price = _safe_float(q.get("price", 0))
-        if total_mv <= 0 and price > 0:
-            total_mv = price * 1e8
-        if total_mv <= 0:
-            return {}
-        mv_yi = total_mv
-        if mv_yi >= 1000:
-            base_holders = 500000
-        elif mv_yi >= 100:
-            base_holders = 150000
-        elif mv_yi >= 30:
-            base_holders = 30000
-        else:
-            base_holders = 6000
-        quarter_end = datetime.now()
-        month = quarter_end.month
-        if month <= 3:
-            target = quarter_end.replace(year=quarter_end.year - 1, month=12, day=31)
-        elif month <= 6:
-            target = quarter_end.replace(month=3, day=31)
-        elif month <= 9:
-            target = quarter_end.replace(month=6, day=30)
-        else:
-            target = quarter_end.replace(month=9, day=30)
-        return {
-            "code": stock_code,
-            "end_date": target.strftime("%Y-%m-%d"),
-            "holder_num": base_holders,
-            "change_pct": 0.0,
-        }
-    except Exception as e:
-        logger.warning(f"_get_shareholder_count_fallback failed: {e}")
-        return {}
+    """股东户数数据不可用时返回空(不再造假估算)。
+
+    历史问题:曾基于总市值分档硬编码 base_holders(500000/150000/30000/6000),
+    但 total_market_value 单位是元却按亿比较,导致分档完全错误,且数值本身为造假。
+    """
+    logger.info(f"shareholder_count data unavailable for {stock_code}, returning empty (no fabrication)")
+    return {}
 
 
 def get_stock_news(stock_code: str, page: int = 1, page_size: int = 10) -> list[dict]:
@@ -1317,6 +1270,7 @@ def _get_stock_news_sina(stock_code: str, page: int = 1, page_size: int = 10) ->
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Referer": "https://finance.sina.com.cn/",
         })
+        resp.encoding = "utf-8"
         data = resp.json()
         items = data.get("result", {}).get("data", [])
         result: list[dict] = []
@@ -1402,6 +1356,7 @@ def _get_global_news_sina() -> list[dict]:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Referer": "https://finance.sina.com.cn/",
         })
+        resp.encoding = "utf-8"
         data = resp.json()
         items = data.get("result", {}).get("data", [])
         result: list[dict] = []
@@ -1600,8 +1555,27 @@ def get_fund_realtime_tencent(codes: list[str]) -> list[dict]:
             estimated_nav = _safe_float(parts[2])
             nav = _safe_float(parts[5])
             acc_nav = _safe_float(parts[6])
-            change = _safe_float(parts[7])
-            change_pct = (change / (nav - change) * 100) if (nav - change) != 0 else 0.0
+            # Tencent 基金接口 parts[7] 是涨跌幅百分比(如 1.566 表示 1.566%),
+            # 不是绝对涨跌额。原代码误将其当作绝对值再除以 (nav-change) 反推百分比,
+            # 导致出现 135% 这种荒谬结果。
+            change_pct_raw = _safe_float(parts[7])
+            if abs(change_pct_raw) <= 20:
+                # 合理范围(基金单日涨跌幅不会超过 20%),parts[7] 即百分比
+                change_pct = change_pct_raw
+                # 反推绝对涨跌额: change = nav - nav/(1+pct/100)
+                if change_pct != 0:
+                    prev_nav = nav / (1 + change_pct / 100)
+                    change = round(nav - prev_nav, 4)
+                else:
+                    change = 0.0
+            else:
+                # 异常值(>20%): 可能字段格式变更,降级为绝对值再算百分比
+                change = change_pct_raw
+                prev_nav = nav - change
+                if prev_nav > 0:
+                    change_pct = change / prev_nav * 100
+                else:
+                    change_pct = 0.0
             update_time = _safe_str(parts[8])
             result.append({
                 "code": raw_code,
@@ -1950,4 +1924,253 @@ def get_market_wide_stats() -> dict:
     result["block_trades_count"] = max(fetched.get("block_trades", 0), 0)
     result["avg_shareholder_change_pct"] = fetched.get("shareholder", 0.0)
     _cache_set("market_wide_stats", result, 60)
+    return result
+
+
+# ──────────────────────────────────────────────
+# 国际股市数据(腾讯财经接口)
+# ──────────────────────────────────────────────
+# 腾讯接口代码前缀:
+#   美股: us<symbol>   (如 usAAPL, usTSLA, usMSFT)
+#   港股: hk<code>     (如 hk00700, hk09988)
+#   国际指数: usDJI/usIXIC/usINX/hkHSI/hkHSCEI
+# 字段索引(与 A 股略有不同):
+#   parts[1]=名称 parts[2]=代码 parts[3]=最新价 parts[4]=昨收 parts[5]=开盘
+#   parts[6]=成交量 parts[31]=涨跌额 parts[32]=涨跌幅
+#   parts[33]=最高 parts[34]=最低 parts[35]=币种
+
+# 国际指数代码(腾讯接口,实测可用)
+_GLOBAL_INDEX_CODES: list[tuple[str, str]] = [
+    ("usDJI", "道琼斯"),
+    ("usIXIC", "纳斯达克"),
+    ("usINX", "标普500"),
+    ("hkHSI", "恒生指数"),
+    ("hkHSCEI", "国企指数"),
+]
+
+# 美股热门个股(腾讯接口符号)
+_US_HOT_SYMBOLS: list[tuple[str, str]] = [
+    ("AAPL", "苹果"),
+    ("MSFT", "微软"),
+    ("GOOGL", "谷歌"),
+    ("AMZN", "亚马逊"),
+    ("NVDA", "英伟达"),
+    ("META", "Meta"),
+    ("TSLA", "特斯拉"),
+    ("NFLX", "奈飞"),
+    ("AMD", "AMD"),
+    ("INTC", "英特尔"),
+]
+
+# 港股热门个股
+_HK_HOT_CODES: list[tuple[str, str]] = [
+    ("00700", "腾讯控股"),
+    ("09988", "阿里巴巴"),
+    ("03690", "美团"),
+    ("01024", "快手"),
+    ("01810", "小米集团"),
+    ("09618", "京东集团"),
+    ("03888", "金山软件"),
+    ("00388", "港交所"),
+    ("00941", "中国移动"),
+    ("01299", "友邦保险"),
+]
+
+
+def _tencent_global_quote(codes: list[str]) -> list[dict]:
+    """通用:从腾讯 qt.gtimg.cn 拉取国际行情(美股/港股/国际指数)。
+
+    codes 是已带前缀的腾讯代码列表(如 usAAPL, hk00700, usDJI)。
+    返回统一字段:code/name/price/prev_close/change/change_pct/high/low/open/currency。
+    """
+    if not codes:
+        return []
+    cache_key = "global_quote_" + "_".join(sorted(codes))
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+    prefixed = ",".join(codes)
+    url = f"https://qt.gtimg.cn/q={prefixed}"
+    try:
+        resp = requests.get(url, timeout=5, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://gu.qq.com/",
+        })
+        resp.encoding = "gbk"
+        text = resp.text
+        result: list[dict] = []
+        for segment in text.split(";"):
+            segment = segment.strip()
+            if not segment or "~" not in segment:
+                continue
+            parts = segment.split("~")
+            if len(parts) < 35:
+                continue
+            name = _safe_str(parts[1])
+            code = _safe_str(parts[2])
+            price = _safe_float(parts[3])
+            prev_close = _safe_float(parts[4])
+            open_price = _safe_float(parts[5])
+            volume = _safe_float(parts[6]) if len(parts) > 6 else 0.0
+            change = _safe_float(parts[31]) if len(parts) > 31 else 0.0
+            change_pct = _safe_float(parts[32]) if len(parts) > 32 else 0.0
+            high = _safe_float(parts[33]) if len(parts) > 33 else 0.0
+            low = _safe_float(parts[34]) if len(parts) > 34 else 0.0
+            currency = _safe_str(parts[35]) if len(parts) > 35 else ""
+            # 港股指数的 parts[35] 可能是价格而非币种,数字则置空
+            try:
+                float(currency)
+                currency = ""
+            except (ValueError, TypeError):
+                pass
+            # 涨跌额兜底:接口未返回时用 price - prev_close
+            if change == 0.0 and price != 0.0 and prev_close != 0.0:
+                change = round(price - prev_close, 4)
+            if change_pct == 0.0 and prev_close != 0.0:
+                change_pct = round((price - prev_close) / prev_close * 100, 3)
+            result.append({
+                "code": code,
+                "name": name,
+                "price": price,
+                "prev_close": prev_close,
+                "open": open_price,
+                "high": high,
+                "low": low,
+                "change": change,
+                "change_pct": change_pct,
+                "volume": volume,
+                "currency": currency,
+            })
+        result = [r for r in result if r.get("code") or r.get("price")]
+        _cache_set(cache_key, result, 10)
+        return result
+    except Exception as e:
+        logger.warning(f"_tencent_global_quote failed: {e}")
+        return []
+
+
+def get_global_indices() -> list[dict]:
+    """获取国际指数实时行情(道琼斯/纳斯达克/标普500/恒生/国企)。"""
+    cached = _cache_get("global_indices")
+    if cached is not None:
+        return cached
+    codes = [code for code, _ in _GLOBAL_INDEX_CODES]
+    result = _tencent_global_quote(codes)
+    # 补全中文名 + 标记市场 + 补全币种
+    for item in result:
+        # 腾讯返回的 code 可能是 HSI/HSCEI/.DJI 等,用名称匹配请求代码
+        name = item.get("name", "")
+        for req_code, cn_name in _GLOBAL_INDEX_CODES:
+            if name == cn_name or name in cn_name or cn_name in name:
+                if not item.get("name"):
+                    item["name"] = cn_name
+                if req_code.startswith("us"):
+                    item["market"] = "US"
+                    item["currency"] = item.get("currency") or "USD"
+                elif req_code.startswith("hk"):
+                    item["market"] = "HK"
+                    item["currency"] = item.get("currency") or "HKD"
+                break
+        if not item.get("market"):
+            item["market"] = "GLOBAL"
+    _cache_set("global_indices", result, 10)
+    return result
+
+
+def get_us_stock_realtime(symbols: list[str]) -> list[dict]:
+    """获取美股实时行情。
+
+    Args:
+        symbols: 美股代码列表(如 ['AAPL', 'TSLA']),不带前缀
+    """
+    if not symbols:
+        return []
+    codes = [f"us{s.upper()}" for s in symbols]
+    result = _tencent_global_quote(codes)
+    # 统一 code 字段为大写美股代码(腾讯返回的 code 可能带交易所后缀如 AAPL.OQ)
+    for item in result:
+        raw = item.get("code", "")
+        # 去掉交易所后缀(如 AAPL.OQ → AAPL)
+        clean = raw.split(".")[0].upper()
+        if clean:
+            item["code"] = clean
+        item["market"] = "US"
+        if not item.get("currency"):
+            item["currency"] = "USD"
+    return result
+
+
+def get_hk_stock_realtime(codes: list[str]) -> list[dict]:
+    """获取港股实时行情。
+
+    Args:
+        codes: 港股代码列表(如 ['00700', '09988']),5位数字
+    """
+    if not codes:
+        return []
+    prefixed = [f"hk{c}" for c in codes]
+    result = _tencent_global_quote(prefixed)
+    # 统一 code 字段为 5 位数字
+    for item in result:
+        raw = item.get("code", "")
+        clean = raw.replace("hk", "").lstrip("0")
+        if not clean:
+            clean = "0"
+        item["code"] = clean.zfill(5)
+        item["market"] = "HK"
+        if not item.get("currency"):
+            item["currency"] = "HKD"
+    return result
+
+
+def get_us_hot_stocks() -> list[dict]:
+    """获取美股热门个股(预设 10 只科技龙头)。"""
+    cached = _cache_get("us_hot_stocks")
+    if cached is not None:
+        return cached
+    symbols = [s for s, _ in _US_HOT_SYMBOLS]
+    result = get_us_stock_realtime(symbols)
+    # 补全中文名
+    name_map = dict(_US_HOT_SYMBOLS)
+    for item in result:
+        code = item.get("code", "")
+        if code in name_map and not item.get("name"):
+            item["name"] = f"{name_map[code]} ({code})"
+    _cache_set("us_hot_stocks", result, 10)
+    return result
+
+
+def get_hk_hot_stocks() -> list[dict]:
+    """获取港股热门个股(预设 10 只蓝筹)。"""
+    cached = _cache_get("hk_hot_stocks")
+    if cached is not None:
+        return cached
+    codes = [c for c, _ in _HK_HOT_CODES]
+    result = get_hk_stock_realtime(codes)
+    # 补全中文名
+    name_map = dict(_HK_HOT_CODES)
+    for item in result:
+        code = item.get("code", "")
+        if code in name_map and not item.get("name"):
+            item["name"] = f"{name_map[code]} ({code})"
+    _cache_set("hk_hot_stocks", result, 10)
+    return result
+
+
+def get_global_market_overview() -> dict:
+    """国际市场总览:并行拉取国际指数 + 美股热门 + 港股热门。"""
+    cached = _cache_get("global_market_overview")
+    if cached is not None:
+        return cached
+    fetched = _parallel_fetch([
+        ("indices", get_global_indices),
+        ("us_hot", get_us_hot_stocks),
+        ("hk_hot", get_hk_hot_stocks),
+    ])
+    result = {
+        "indices": fetched.get("indices") or [],
+        "us_hot": fetched.get("us_hot") or [],
+        "hk_hot": fetched.get("hk_hot") or [],
+    }
+    _cache_set("global_market_overview", result, 10)
     return result

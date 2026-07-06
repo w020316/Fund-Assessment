@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 
@@ -9,6 +10,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from src.core import data_source_v2 as ds2
+from src.utils.convert import safe_float as _safe_float, safe_str as _safe_str
 
 router = APIRouter()
 
@@ -20,22 +22,6 @@ try:
     _HAS_CORE = True
 except ImportError:
     pass
-
-
-def _safe_float(val: object, default: float = 0.0) -> float:
-    if val is None:
-        return default
-    try:
-        result = float(val)
-        return result
-    except (ValueError, TypeError):
-        return default
-
-
-def _safe_str(val: object, default: str = "") -> str:
-    if val is None or (isinstance(val, float) and val != val):
-        return default
-    return str(val)
 
 
 _MOCK_POSITIONS = [
@@ -69,12 +55,12 @@ def _load_user_cash() -> float:
     return 800000.0
 
 
-def _enrich_positions_with_realtime(positions: list[dict]) -> list[dict]:
+async def _enrich_positions_with_realtime(positions: list[dict]) -> list[dict]:
     symbols = [p["symbol"] for p in positions]
     if not symbols:
         return positions
     try:
-        quotes = ds2.get_realtime_quote_tencent(symbols)
+        quotes = await asyncio.to_thread(ds2.get_realtime_quote_tencent, symbols)
     except Exception:
         quotes = []
     quote_map = {q.get("code", ""): q for q in quotes}
@@ -158,7 +144,7 @@ def _get_state(request: Request) -> dict[str, Any]:
 @router.get("/overview", response_model=OverviewResponse)
 async def overview(request: Request):
     if not _HAS_CORE:
-        enriched = _enrich_positions_with_realtime([dict(p) for p in _load_user_positions()])
+        enriched = await _enrich_positions_with_realtime([dict(p) for p in _load_user_positions()])
         market_value = sum(p.get("market_value", 0) for p in enriched)
         daily_pnl = 0.0
         try:
@@ -186,7 +172,7 @@ async def overview(request: Request):
     broker = state.get("broker")
     risk_manager = state.get("risk_manager")
     if not broker or not risk_manager:
-        enriched = _enrich_positions_with_realtime([dict(p) for p in _load_user_positions()])
+        enriched = await _enrich_positions_with_realtime([dict(p) for p in _load_user_positions()])
         market_value = sum(p.get("market_value", 0) for p in enriched)
         return OverviewResponse(
             available_cash=1_000_000.0,
@@ -198,9 +184,11 @@ async def overview(request: Request):
             risk_level="NORMAL",
             risk_message="模拟模式",
         )
-    balance = broker.get_balance()
-    positions = broker.get_positions()
-    risk_status = risk_manager.get_risk_status()
+    balance, positions, risk_status = await asyncio.gather(
+        asyncio.to_thread(broker.get_balance),
+        asyncio.to_thread(broker.get_positions),
+        asyncio.to_thread(risk_manager.get_risk_status),
+    )
     return OverviewResponse(
         available_cash=balance.available_cash,
         total_assets=balance.total_assets,
@@ -216,7 +204,7 @@ async def overview(request: Request):
 @router.get("/positions", response_model=list[PositionItem])
 async def positions(request: Request):
     if not _HAS_CORE:
-        enriched = _enrich_positions_with_realtime([dict(p) for p in _load_user_positions()])
+        enriched = await _enrich_positions_with_realtime([dict(p) for p in _load_user_positions()])
         return [
             PositionItem(
                 symbol=p["symbol"], name=p["name"], quantity=p["quantity"],
@@ -228,7 +216,7 @@ async def positions(request: Request):
         ]
     state = _get_state(request)
     broker = state["broker"]
-    pos_list = broker.get_positions()
+    pos_list = await asyncio.to_thread(broker.get_positions)
     return [
         PositionItem(
             symbol=p.symbol, name=p.name, quantity=p.quantity,
@@ -246,7 +234,7 @@ async def trades(request: Request, limit: int = 20):
         return []
     state = _get_state(request)
     executor = state["executor"]
-    history = executor.get_trade_history(limit=limit)
+    history = await asyncio.to_thread(executor.get_trade_history, limit=limit)
     return [
         TradeItem(
             trade_id=str(row.get("trade_id", "")),
@@ -270,7 +258,7 @@ async def trades(request: Request, limit: int = 20):
 @router.get("/risk", response_model=RiskResponse)
 async def risk(request: Request):
     if not _HAS_CORE:
-        enriched = _enrich_positions_with_realtime([dict(p) for p in _load_user_positions()])
+        enriched = await _enrich_positions_with_realtime([dict(p) for p in _load_user_positions()])
         market_value = sum(p.get("market_value", 0) for p in enriched)
         daily_pnl = 0.0
         try:
@@ -307,7 +295,7 @@ async def risk(request: Request):
         )
     state = _get_state(request)
     risk_manager = state["risk_manager"]
-    status = risk_manager.get_risk_status()
+    status = await asyncio.to_thread(risk_manager.get_risk_status)
     return RiskResponse(
         level=status.level.value,
         total_assets=status.total_assets,

@@ -1,7 +1,7 @@
 """多LLM Provider路由器 - 支持多模型自动故障切换
 
 参考: ZhuLinsen/daily_stock_analysis 的 LiteLLM Router 设计
-支持: OpenAI兼容(TTAPI/DeepSeek/通义千问)、Gemini、Anthropic、Ollama本地模型
+支持: OpenAI兼容(TTAPI/Agnes/通义千问)、Gemini、Anthropic、Ollama本地模型
 """
 from __future__ import annotations
 
@@ -106,15 +106,15 @@ class LLMRouter:
                 priority=0,
             ))
 
-        # DeepSeek (OpenAI兼容)
-        deepseek_key = os.getenv("DEEPSEEK_API_KEY", "")
-        if deepseek_key:
+        # Agnes (OpenAI兼容, 免费多模态, 替换原DeepSeek位置)
+        agnes_key = os.getenv("AGNES_API_KEY", "")
+        if agnes_key:
             self.add_provider(LLMProvider(
-                name="deepseek",
+                name="agnes",
                 provider_type=ProviderType.OPENAI,
-                base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"),
-                api_key=deepseek_key,
-                model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
+                base_url=os.getenv("AGNES_BASE_URL", "https://apihub.agnes-ai.com/v1"),
+                api_key=agnes_key,
+                model=os.getenv("AGNES_MODEL", "agnes-2.0-flash"),
                 priority=1,
             ))
 
