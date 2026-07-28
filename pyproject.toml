@@ -1,8 +1,8 @@
 [project]
 name = "fund-assessment"
 version = "1.0.0"
-description = "OpenClaw quantitative trading system"
-requires-python = ">=3.10"
+description = "QuantFlow Pro quantitative trading system"
+requires-python = ">=3.12"
 license = "MIT"
 dependencies = [
     "fastapi==0.115.12",
@@ -24,11 +24,10 @@ market-data = [
     "akshare==1.16.94",
     "tushare==1.4.18",
     "tdxpy==0.1.2",
-    "mootdx==0.5.10",
+    "mootdx==0.11.7",
 ]
 technical = [
-    "stockstats==0.7.0",
-    "pandas-ta==0.3.14b",
+    "pandas-ta==0.4.71b0",
 ]
 full = [
     "fund-assessment[market-data,technical]",

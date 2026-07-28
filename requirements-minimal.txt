@@ -13,7 +13,6 @@ apscheduler==3.11.0
 akshare==1.16.94
 tushare==1.4.18
 mootdx==0.11.7
-stockstats==0.7.0
-pandas-ta==0.3.14b
+pandas-ta==0.4.71b0
 httpx>=0.27.0
 json-repair>=0.25.0
