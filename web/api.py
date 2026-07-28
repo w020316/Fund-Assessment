@@ -92,8 +92,10 @@ from web.routes import config as config_route
 from web.routes import dashboard as dashboard_route
 from web.routes import fund as fund_route
 from web.routes import global_market as global_route
+from web.routes import holdings as holdings_route
 from web.routes import market as market_route
 from web.routes import monitor as monitor_route
+from web.routes import news as news_route
 from web.routes import scripts as scripts_route
 from web.routes import strategy as strategy_route
 from web.routes import trade as trade_route
@@ -108,6 +110,8 @@ app.include_router(agent_route.router, prefix="/api/agent", tags=["AI Agent"])
 app.include_router(fund_route.router, prefix="/api/fund", tags=["基金"])
 app.include_router(global_route.router, prefix="/api/global", tags=["国际市场"])
 app.include_router(scripts_route.router, prefix="/api/scripts", tags=["话术库"])
+app.include_router(news_route.router, prefix="/api/news", tags=["消息面"])
+app.include_router(holdings_route.router, prefix="/api/holdings", tags=["重仓股板块"])
 
 _static_dir = Path(__file__).resolve().parent / "static"
 if _static_dir.is_dir():

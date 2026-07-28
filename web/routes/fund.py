@@ -185,6 +185,15 @@ async def get_advice():
     return result
 
 
+@router.get("/advice-v2")
+async def get_advice_v2():
+    """获取基金建议v2(五信号融合:技术面/基本面/消息面/重仓股板块/大盘环境)。"""
+    from src.analysis.fund_advisor_v2 import generate_fund_advice_v2
+    positions = _load_positions()
+    result = await generate_fund_advice_v2(positions)
+    return result
+
+
 # ============ 基金搜索 ============
 
 @router.get("/search")

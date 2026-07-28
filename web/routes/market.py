@@ -801,6 +801,47 @@ async def market_wide_stats():
     return {"data": result.model_dump(), "_meta": _build_meta("mixed", cached=False)}
 
 
+# ===== P1-3: 大盘研判增强 =====
+
+@router.get("/thermometer")
+async def market_thermometer():
+    """大盘温度计(0-100) - 综合指数趋势/板块轮动/资金流向/市场情绪"""
+    cache_key = "market:thermometer"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": _build_meta("aggregator", cached=True)}
+    from src.analysis.market_assessment import get_market_thermometer
+    data = await get_market_thermometer()
+    cache.set(cache_key, data, ttl=60)
+    return {"data": data, "_meta": _build_meta("aggregator", cached=False)}
+
+
+@router.get("/capital-flow")
+async def capital_flow_overview():
+    """资金流向总览(北向资金 + 板块主力净流入Top5)"""
+    cache_key = "market:capital_flow"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": _build_meta("aggregator", cached=True)}
+    from src.analysis.market_assessment import get_capital_flow_overview
+    data = await get_capital_flow_overview()
+    cache.set(cache_key, data, ttl=60)
+    return {"data": data, "_meta": _build_meta("aggregator", cached=False)}
+
+
+@router.get("/assessment")
+async def market_assessment():
+    """大盘综合研判(温度计 + 资金流向 + 板块轮动信号)"""
+    cache_key = "market:assessment"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": _build_meta("aggregator", cached=True)}
+    from src.analysis.market_assessment import get_market_assessment
+    data = await get_market_assessment()
+    cache.set(cache_key, data, ttl=60)
+    return {"data": data, "_meta": _build_meta("aggregator", cached=False)}
+
+
 @router.get("/data-quality/{stock_code}")
 async def check_data_quality(stock_code: str):
     """检查指定股票的数据质量"""
