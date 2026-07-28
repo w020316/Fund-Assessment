@@ -132,3 +132,17 @@ async def health_check():
         "core_modules": _HAS_CORE,
         "ai_ready": has_ai,
     }
+
+
+@app.get("/api/health/llm")
+async def llm_health_check():
+    """LLM Provider 健康检查 - 返回各 Provider 的状态、优先级、限流配置"""
+    from src.core.llm_router import get_llm_router
+    router = get_llm_router()
+    providers = router.health_check()
+    return {
+        "status": "ok",
+        "total_providers": len(providers),
+        "available_providers": [name for name, info in providers.items() if info["available"]],
+        "providers": providers,
+    }

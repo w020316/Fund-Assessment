@@ -36,9 +36,13 @@ class LLMProvider:
     retry_delay: float = 1.0
     priority: int = 0  # 越小优先级越高
     enabled: bool = True
+    rpm: int = 0  # 每分钟请求数限制(0=不限),用于令牌桶限流
+    api_keys: list = field(default_factory=list)  # 多Key轮换(逗号分隔的多个key)
     _fail_count: int = field(default=0, repr=False)
     _last_fail_time: float = field(default=0.0, repr=False)
     _circuit_open: bool = field(default=False, repr=False)
+    _key_index: int = field(default=0, repr=False)  # Key轮换索引
+    _last_health_status: dict = field(default_factory=dict, repr=False)  # 最近健康检查结果
 
     @property
     def is_available(self) -> bool:
@@ -54,6 +58,15 @@ class LLMProvider:
             return True
         return False
 
+    @property
+    def current_api_key(self) -> str:
+        """获取当前轮换的API Key(支持多Key负载均衡)"""
+        if self.api_keys:
+            key = self.api_keys[self._key_index % len(self.api_keys)]
+            self._key_index += 1
+            return key
+        return self.api_key
+
     def record_success(self):
         """记录成功调用"""
         self._fail_count = 0
@@ -66,6 +79,48 @@ class LLMProvider:
         if self._fail_count >= 3:
             self._circuit_open = True
             logger.warning(f"LLM Provider [{self.name}] 连续失败{self._fail_count}次，熔断器开启")
+
+
+class TokenBucket:
+    """令牌桶限流器 - 按Provider配置RPM限制请求速率
+
+    原理:每分钟补充 rpm 个令牌,每次请求消耗1个令牌。
+    令牌不足时等待,避免触发429。
+    """
+
+    def __init__(self, rpm: int):
+        self.rpm = rpm
+        self._tokens = float(rpm) if rpm > 0 else float('inf')
+        self._max_tokens = float(rpm) if rpm > 0 else float('inf')
+        self._last_refill = time.monotonic()
+        self._lock = __import__('threading').Lock()
+
+    def acquire(self, timeout: float = 60.0) -> bool:
+        """获取一个令牌,超时返回False"""
+        if self.rpm <= 0:
+            return True  # 不限流
+
+        import time as _time
+        deadline = _time.monotonic() + timeout
+        while True:
+            with self._lock:
+                self._refill()
+                if self._tokens >= 1:
+                    self._tokens -= 1
+                    return True
+                wait_time = (1 - self._tokens) / (self.rpm / 60.0)
+            if _time.monotonic() + wait_time > deadline:
+                return False
+            _time.sleep(min(wait_time, 0.5))
+
+    def _refill(self):
+        """补充令牌(按时间比例)"""
+        now = time.monotonic()
+        elapsed = now - self._last_refill
+        if elapsed > 0:
+            refill = elapsed * (self.rpm / 60.0)
+            self._tokens = min(self._max_tokens, self._tokens + refill)
+            self._last_refill = now
 
 
 @dataclass
@@ -90,6 +145,7 @@ class LLMRouter:
 
     def __init__(self):
         self._providers: list[LLMProvider] = []
+        self._token_buckets: dict = {}  # {provider_name: TokenBucket}
         self._load_from_env()
 
     def _load_from_env(self):
@@ -106,7 +162,7 @@ class LLMRouter:
                 priority=0,
             ))
 
-        # Agnes (OpenAI兼容, 免费多模态, 替换原DeepSeek位置)
+        # Agnes (OpenAI兼容, 全模态永久免费)
         agnes_key = os.getenv("AGNES_API_KEY", "")
         if agnes_key:
             self.add_provider(LLMProvider(
@@ -115,7 +171,7 @@ class LLMRouter:
                 base_url=os.getenv("AGNES_BASE_URL", "https://apihub.agnes-ai.com/v1"),
                 api_key=agnes_key,
                 model=os.getenv("AGNES_MODEL", "agnes-2.0-flash"),
-                priority=1,
+                priority=90,
             ))
 
         # Gemini
@@ -154,6 +210,103 @@ class LLMRouter:
                 timeout=120,
             ))
 
+        # ===== P1 新增:免费 LLM Provider(8个,全部OpenAI兼容) =====
+
+        # 智谱 GLM (永久免费,无token上限,30并发)
+        zhipu_keys = self._parse_api_keys("ZHIPU_API_KEY", "ZHIPU_API_KEYS")
+        if zhipu_keys:
+            self.add_provider(LLMProvider(
+                name="zhipu_glm",
+                provider_type=ProviderType.OPENAI,
+                base_url=os.getenv("ZHIPU_BASE_URL", "https://open.bigmodel.cn/api/paas/v4/"),
+                api_key=zhipu_keys[0],
+                api_keys=zhipu_keys,
+                model=os.getenv("ZHIPU_MODEL", "glm-4-flash"),
+                priority=100,
+                rpm=30,  # 智谱限制30并发
+            ))
+
+        # 硅基流动 SiliconFlow (9B以下永久免费,1000 RPM)
+        siliconflow_keys = self._parse_api_keys("SILICONFLOW_API_KEY", "SILICONFLOW_API_KEYS")
+        if siliconflow_keys:
+            self.add_provider(LLMProvider(
+                name="siliconflow",
+                provider_type=ProviderType.OPENAI,
+                base_url=os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1"),
+                api_key=siliconflow_keys[0],
+                api_keys=siliconflow_keys,
+                model=os.getenv("SILICONFLOW_MODEL", "Qwen/Qwen2.5-7B-Instruct"),
+                priority=95,
+                rpm=1000,
+            ))
+
+        # 阿里云百炼 DashScope (qwen-turbo永久免费)
+        dashscope_keys = self._parse_api_keys("DASHSCOPE_API_KEY", "DASHSCOPE_API_KEYS")
+        if dashscope_keys:
+            self.add_provider(LLMProvider(
+                name="aliyun_qwen",
+                provider_type=ProviderType.OPENAI,
+                base_url=os.getenv("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+                api_key=dashscope_keys[0],
+                api_keys=dashscope_keys,
+                model=os.getenv("DASHSCOPE_MODEL", "qwen-turbo"),
+                priority=85,
+            ))
+
+        # Groq (国内可直连,极速,30 RPM)
+        groq_keys = self._parse_api_keys("GROQ_API_KEY", "GROQ_API_KEYS")
+        if groq_keys:
+            self.add_provider(LLMProvider(
+                name="groq",
+                provider_type=ProviderType.OPENAI,
+                base_url=os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
+                api_key=groq_keys[0],
+                api_keys=groq_keys,
+                model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+                priority=80,
+                rpm=30,
+            ))
+
+        # OpenRouter (聚合26+免费模型,20 RPM)
+        openrouter_keys = self._parse_api_keys("OPENROUTER_API_KEY", "OPENROUTER_API_KEYS")
+        if openrouter_keys:
+            self.add_provider(LLMProvider(
+                name="openrouter",
+                provider_type=ProviderType.OPENAI,
+                base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+                api_key=openrouter_keys[0],
+                api_keys=openrouter_keys,
+                model=os.getenv("OPENROUTER_MODEL", "qwen/qwen-3-235b:free"),
+                priority=75,
+                rpm=20,
+            ))
+
+        # DeepSeek (低价兜底)
+        deepseek_keys = self._parse_api_keys("DEEPSEEK_API_KEY", "DEEPSEEK_API_KEYS")
+        if deepseek_keys:
+            self.add_provider(LLMProvider(
+                name="deepseek",
+                provider_type=ProviderType.OPENAI,
+                base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+                api_key=deepseek_keys[0],
+                api_keys=deepseek_keys,
+                model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
+                priority=70,
+            ))
+
+        # Cloudflare Workers AI (边缘节点)
+        cf_account = os.getenv("CF_ACCOUNT_ID", "")
+        cf_token = os.getenv("CF_API_TOKEN", "")
+        if cf_account and cf_token:
+            self.add_provider(LLMProvider(
+                name="cloudflare_ai",
+                provider_type=ProviderType.OPENAI,
+                base_url=f"https://api.cloudflare.com/client/v4/accounts/{cf_account}/ai/v1",
+                api_key=cf_token,
+                model=os.getenv("CF_MODEL", "@cf/meta/llama-3.3-70b-instruct-fp8-fast"),
+                priority=65,
+            ))
+
         # 按优先级排序
         self._providers.sort(key=lambda p: p.priority)
         if self._providers:
@@ -165,6 +318,23 @@ class LLMRouter:
         """添加Provider"""
         self._providers.append(provider)
         self._providers.sort(key=lambda p: p.priority)
+        # 为配置了rpm的Provider创建令牌桶
+        if provider.rpm > 0:
+            self._token_buckets[provider.name] = TokenBucket(provider.rpm)
+
+    def _parse_api_keys(self, single_key_env: str, multi_keys_env: str) -> list:
+        """解析API Key,支持单Key和多Key(逗号分隔)
+
+        优先读取多Key环境变量(XXX_API_KEYS=key1,key2),
+        回退到单Key环境变量(XXX_API_KEY=key1)。
+        """
+        multi = os.getenv(multi_keys_env, "")
+        if multi:
+            keys = [k.strip() for k in multi.split(",") if k.strip()]
+            if keys:
+                return keys
+        single = os.getenv(single_key_env, "")
+        return [single] if single else []
 
     @property
     def available_providers(self) -> list[str]:
@@ -179,7 +349,7 @@ class LLMRouter:
         json_mode: bool = False,
         timeout: int | None = None,
     ) -> LLMResponse:
-        """发送聊天请求，自动故障切换
+        """发送聊天请求，自动故障切换 + 令牌桶限流 + 指数退避重试
 
         Args:
             messages: 消息列表
@@ -199,20 +369,33 @@ class LLMRouter:
             if not provider.is_available:
                 continue
 
-            try:
-                logger.debug(f"尝试 LLM Provider: {provider.name}")
-                response = self._call_provider(
-                    provider, messages,
-                    model=model, temperature=temperature,
-                    json_mode=json_mode, timeout=timeout,
-                )
-                provider.record_success()
-                return response
-            except Exception as e:
-                provider.record_failure()
-                last_error = e
-                logger.warning(f"LLM Provider [{provider.name}] 调用失败: {e}")
+            # 令牌桶限流:获取令牌,超时则跳过该Provider
+            bucket = self._token_buckets.get(provider.name)
+            if bucket and not bucket.acquire(timeout=10):
+                logger.warning(f"LLM Provider [{provider.name}] 令牌桶限流超时,跳过")
                 continue
+
+            # 指数退避重试(1s → 2s → 4s)
+            max_attempts = min(provider.max_retries + 1, 3)
+            for attempt in range(max_attempts):
+                try:
+                    logger.debug(f"尝试 LLM Provider: {provider.name} (第{attempt+1}次)")
+                    response = self._call_provider(
+                        provider, messages,
+                        model=model, temperature=temperature,
+                        json_mode=json_mode, timeout=timeout,
+                    )
+                    provider.record_success()
+                    return response
+                except Exception as e:
+                    last_error = e
+                    if attempt < max_attempts - 1:
+                        delay = provider.retry_delay * (2 ** attempt)
+                        logger.warning(f"LLM Provider [{provider.name}] 第{attempt+1}次失败: {e},{delay:.1f}s后重试")
+                        time.sleep(delay)
+                    else:
+                        provider.record_failure()
+                        logger.warning(f"LLM Provider [{provider.name}] 全部{max_attempts}次重试失败: {e}")
 
         raise RuntimeError(f"所有LLM Provider均不可用，最后错误: {last_error}")
 
@@ -252,7 +435,7 @@ class LLMRouter:
         """调用OpenAI兼容API"""
         url = f"{provider.base_url}/chat/completions"
         headers = {
-            "Authorization": f"Bearer {provider.api_key}",
+            "Authorization": f"Bearer {provider.current_api_key}",
             "Content-Type": "application/json",
         }
         payload: dict[str, Any] = {
@@ -428,6 +611,26 @@ class LLMRouter:
             model=model,
             latency_ms=latency,
         )
+
+    def health_check(self) -> dict:
+        """检查所有Provider的健康状态
+
+        Returns:
+            {provider_name: {"available": bool, "model": str, "priority": int, ...}}
+        """
+        result = {}
+        for provider in self._providers:
+            result[provider.name] = {
+                "available": provider.is_available,
+                "model": provider.model,
+                "priority": provider.priority,
+                "fail_count": provider._fail_count,
+                "circuit_open": provider._circuit_open,
+                "rpm": provider.rpm,
+                "has_multi_keys": len(provider.api_keys) > 1,
+                "provider_type": provider.provider_type.value,
+            }
+        return result
 
 
 # 全局单例
