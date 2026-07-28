@@ -23,6 +23,25 @@ services:
         sync: false
       - key: TINYFISH_API_KEY
         sync: false
+      # ===== P1 新增:免费 LLM Provider(任选其一即可,推荐智谱) =====
+      - key: ZHIPU_API_KEY
+        sync: false
+      - key: ZHIPU_API_KEYS
+        sync: false
+      - key: SILICONFLOW_API_KEY
+        sync: false
+      - key: DASHSCOPE_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: CF_ACCOUNT_ID
+        sync: false
+      - key: CF_API_TOKEN
+        sync: false
       # 鉴权 Token(写/交易端点保护)
       - key: ADMIN_TOKEN
         sync: false

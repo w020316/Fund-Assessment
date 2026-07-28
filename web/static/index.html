@@ -207,6 +207,68 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 .btn-outline:hover { border-color:var(--accent-blue); color:var(--accent-blue); }
 .btn-sm { padding:6px 12px; font-size:12px; }
 
+/* 弹窗 */
+.modal-mask {
+  position:fixed; top:0; left:0; right:0; bottom:0;
+  background:rgba(0,0,0,0.6); z-index:9998;
+  display:flex; align-items:center; justify-content:center;
+  padding:20px;
+}
+.modal-box {
+  background:var(--bg-card); border:1px solid var(--border);
+  border-radius:var(--radius-lg); width:100%; box-shadow:var(--shadow);
+}
+.modal-header {
+  display:flex; justify-content:space-between; align-items:center;
+  padding:14px 20px; border-bottom:1px solid var(--border);
+  font-size:15px; font-weight:600;
+}
+.modal-close { cursor:pointer; font-size:22px; color:var(--text-muted); line-height:1; padding:0 4px; }
+.modal-close:hover { color:var(--text-primary); }
+.modal-body { padding:20px; }
+
+/* 温度计组件 */
+.thermo-meter {
+  display:flex; align-items:center; gap:16px; padding:12px 0;
+}
+.thermo-bar {
+  flex:1; height:12px; border-radius:6px;
+  background:linear-gradient(to right, #22c55e 0%, #94a3b8 40%, #f59e0b 70%, #ef4444 100%);
+  position:relative; box-shadow:inset 0 1px 3px rgba(0,0,0,0.3);
+}
+.thermo-pointer {
+  position:absolute; top:-4px; width:4px; height:20px;
+  background:#fff; border-radius:2px; box-shadow:0 0 6px rgba(255,255,255,0.8);
+  transition:left 0.6s ease;
+}
+.thermo-score {
+  font-size:32px; font-weight:700; min-width:60px; text-align:right;
+}
+
+/* 分析师角色卡片 */
+.analyst-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; margin:10px 0; }
+.analyst-card {
+  padding:10px 12px; border:1px solid var(--border); border-radius:8px;
+  background:rgba(255,255,255,0.02);
+}
+.analyst-name { font-size:13px; font-weight:600; color:var(--accent); margin-bottom:4px; }
+.analyst-opinion { font-size:12px; color:var(--text-secondary); line-height:1.5; }
+
+/* 辩论区 */
+.debate-box {
+  padding:12px; border-left:3px solid var(--border); margin:8px 0;
+  background:rgba(255,255,255,0.02); border-radius:0 6px 6px 0;
+}
+.debate-bull { border-left-color:var(--color-up); }
+.debate-bear { border-left-color:var(--color-down); }
+
+/* 信号强度条 */
+.signal-row { display:flex; align-items:center; gap:8px; padding:6px 0; font-size:12px; }
+.signal-label { min-width:90px; color:var(--text-secondary); }
+.signal-bar { flex:1; height:6px; background:var(--border); border-radius:3px; overflow:hidden; }
+.signal-bar-fill { height:100%; border-radius:3px; }
+.signal-score { min-width:50px; text-align:right; font-weight:600; }
+
 /* 输入框 */
 .input, .select {
   background:var(--bg-primary); border:1px solid var(--border);
@@ -906,9 +968,11 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <!-- 基金概览 -->
         <div class="flex-between mb-12">
           <div style="font-size:15px;font-weight:600;display:flex;align-items:center;gap:6px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg> 我的基金</div>
-          <div style="display:flex;gap:8px;">
-            <button class="btn btn-sm btn-primary" onclick="loadFundData()">刷新</button>
-            <button class="btn btn-sm" onclick="loadFundAdvice()">获取建议</button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn btn-sm btn-primary" onclick="loadFundData()">刷新持仓</button>
+            <button class="btn btn-sm" onclick="loadMarketThermometer()">大盘温度</button>
+            <button class="btn btn-sm" onclick="loadNewsFeed()">消息面</button>
+            <button class="btn btn-sm" onclick="loadFundAdviceV2()">五信号建议</button>
           </div>
         </div>
         <div class="grid-4 mb-16">
@@ -930,9 +994,21 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
           </div>
         </div>
 
-        <!-- 基金建议摘要 -->
+        <!-- 大盘温度计(P1-3) -->
+        <div class="card mb-16" id="marketThermometerCard" style="display:none;">
+          <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"/></svg> 大盘温度计</div>
+          <div id="marketThermometerBody"></div>
+        </div>
+
+        <!-- 消息面聚合(P1-1) -->
+        <div class="card mb-16" id="newsFeedCard" style="display:none;">
+          <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6Z"/></svg> 消息面聚合</div>
+          <div id="newsFeedBody"></div>
+        </div>
+
+        <!-- 五信号融合建议(P1-4) -->
         <div class="card mb-16" id="fundAdviceCard" style="display:none;">
-          <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg> 基金建议</div>
+          <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg> 五信号融合建议</div>
           <div id="fundAdviceSummary" style="padding:8px 0;font-size:13px;color:var(--text-secondary);"></div>
           <div id="fundAdviceBody" style="margin-top:8px;"></div>
         </div>
@@ -946,10 +1022,10 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <div class="grid-2 mb-16">
           <!-- 基金持仓列表 -->
           <div class="card">
-            <div class="card-title">基金持仓</div>
+            <div class="card-title">基金持仓 <span style="font-size:11px;color:var(--text-muted);font-weight:500;margin-left:6px;">点击"分析"/"深度"查看P1新功能</span></div>
             <div class="table-wrap" style="max-height:400px;overflow-y:auto;">
               <table>
-                <thead><tr><th>代码</th><th>名称</th><th>份额</th><th>成本净值</th><th>当前净值</th><th>涨跌幅</th><th>盈亏</th><th>操作</th></tr></thead>
+                <thead><tr><th>代码</th><th>名称</th><th>份额</th><th>成本</th><th>现净值</th><th>涨跌幅</th><th>盈亏</th><th>操作</th></tr></thead>
                 <tbody id="fundPositionBody"></tbody>
               </table>
             </div>
@@ -990,6 +1066,28 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
             </div>
             <button class="btn btn-sm btn-primary" style="width:100%;margin-top:12px;" onclick="addFundPosition()">添加持仓</button>
           </div>
+        </div>
+      </div>
+
+      <!-- P1-2 基金重仓股分析弹窗 -->
+      <div id="holdingsModal" class="modal-mask" style="display:none;">
+        <div class="modal-box" style="max-width:900px;">
+          <div class="modal-header">
+            <span id="holdingsModalTitle">基金重仓股分析</span>
+            <span class="modal-close" onclick="document.getElementById('holdingsModal').style.display='none'">×</span>
+          </div>
+          <div class="modal-body" id="holdingsModalBody" style="max-height:70vh;overflow-y:auto;"></div>
+        </div>
+      </div>
+
+      <!-- P1-5 多智能体分析弹窗 -->
+      <div id="multiAgentModal" class="modal-mask" style="display:none;">
+        <div class="modal-box" style="max-width:1000px;">
+          <div class="modal-header">
+            <span id="multiAgentModalTitle">基金多智能体分析</span>
+            <span class="modal-close" onclick="document.getElementById('multiAgentModal').style.display='none'">×</span>
+          </div>
+          <div class="modal-body" id="multiAgentModalBody" style="max-height:75vh;overflow-y:auto;"></div>
         </div>
       </div>
 
@@ -2256,44 +2354,446 @@ async function loadFundData() {
       <td>${(p.current_nav || 0).toFixed(4)}</td>
       <td style="color:${changeColorStr};">${(p.change_pct || 0).toFixed(2)}%</td>
       <td style="color:${pnlColor};">${(p.pnl_amount >= 0 ? '+' : '') + (p.pnl_amount || 0).toFixed(2)}<br><span style="font-size:11px;">(${(p.pnl_pct >= 0 ? '+' : '') + (p.pnl_pct || 0).toFixed(2)}%)</span></td>
-      <td><button class="btn btn-sm" style="color:var(--color-up);" onclick="deleteFundPosition('${p.fund_code}')">删除</button></td>
+      <td style="white-space:nowrap;">
+        <button class="btn btn-sm" style="color:var(--accent-cyan);padding:3px 8px;" title="P1-2 重仓股板块分析" onclick="viewHoldings('${p.fund_code}','${p.fund_name || ''}')">分析</button>
+        <button class="btn btn-sm" style="color:var(--accent);padding:3px 8px;" title="P1-5 多智能体深度分析" onclick="multiAgentAnalyze('${p.fund_code}','${p.fund_name || ''}',${p.cost_nav || 0},${p.shares || 0})">深度</button>
+        <button class="btn btn-sm" style="color:var(--color-up);padding:3px 8px;" onclick="deleteFundPosition('${p.fund_code}')">删</button>
+      </td>
     </tr>`;
   }).join('');
 }
 
 async function loadFundAdvice() {
-  const data = await api('/api/fund/advice');
-  if (!data) return;
+  // 兼容旧入口:转发到 v2
+  return loadFundAdviceV2();
+}
+
+/* ========== P1-3 大盘温度计 ========== */
+async function loadMarketThermometer() {
+  const card = document.getElementById('marketThermometerCard');
+  const body = document.getElementById('marketThermometerBody');
+  card.style.display = 'block';
+  body.innerHTML = '<div style="padding:12px;color:var(--text-muted);">加载中...</div>';
+
+  const resp = await api('/api/market/thermometer');
+  const data = resp && resp.data ? resp.data : resp;
+  if (!data) {
+    body.innerHTML = '<div style="padding:12px;color:var(--text-muted);">温度计数据获取失败</div>';
+    return;
+  }
+
+  const score = data.score || 50;
+  const level = data.level || '中性';
+  const action = data.action || '—';
+  const pointerLeft = Math.min(Math.max(score, 0), 100);
+
+  const levelColor = score >= 80 ? 'var(--color-up)' :
+                     score >= 60 ? 'var(--accent)' :
+                     score >= 40 ? 'var(--color-flat)' :
+                     score >= 20 ? 'var(--accent-cyan)' :
+                     'var(--color-down)';
+
+  const components = data.components || {};
+  const compRows = [
+    { label: '指数趋势', val: components.index_trend },
+    { label: '板块轮动', val: components.sector_rotation },
+    { label: '资金流向', val: components.capital_flow },
+    { label: '市场情绪', val: components.sentiment },
+  ].map(item => {
+    const s = item.val || {};
+    const sc = s.score || 50;
+    const fillPct = Math.min(Math.max(sc, 0), 100);
+    const c = sc >= 60 ? 'var(--color-up)' : sc >= 40 ? 'var(--color-flat)' : 'var(--color-down)';
+    return `<div class="signal-row">
+      <span class="signal-label">${item.label}</span>
+      <div class="signal-bar"><div class="signal-bar-fill" style="width:${fillPct}%;background:${c};"></div></div>
+      <span class="signal-score" style="color:${c};">${sc.toFixed(1)}</span>
+    </div>`;
+  }).join('');
+
+  body.innerHTML = `
+    <div class="thermo-meter">
+      <div class="thermo-bar"><div class="thermo-pointer" style="left:calc(${pointerLeft}% - 2px);"></div></div>
+      <div class="thermo-score" style="color:${levelColor};">${score.toFixed(1)}</div>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;">
+      <div>
+        <span style="font-size:13px;color:var(--text-muted);">情绪等级:</span>
+        <span style="font-size:18px;font-weight:700;color:${levelColor};margin-left:6px;">${level}</span>
+      </div>
+      <div style="font-size:13px;color:var(--text-secondary);">${action}</div>
+    </div>
+    <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);">
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">分维度评分</div>
+      ${compRows}
+    </div>
+  `;
+}
+
+/* ========== P1-1 消息面聚合 ========== */
+async function loadNewsFeed() {
+  const card = document.getElementById('newsFeedCard');
+  const body = document.getElementById('newsFeedBody');
+  card.style.display = 'block';
+  body.innerHTML = '<div style="padding:12px;color:var(--text-muted);">加载中...</div>';
+
+  const resp = await api('/api/news/feed');
+  const data = resp && resp.data ? resp.data : resp;
+  if (!data) {
+    body.innerHTML = '<div style="padding:12px;color:var(--text-muted);">消息面数据获取失败</div>';
+    return;
+  }
+
+  const sentiment = data.sentiment_index || {};
+  const sentimentScore = sentiment.score || 50;
+  const sentimentLabel = sentiment.label || '中性';
+  const sentimentColor = sentimentScore >= 60 ? 'var(--color-up)' :
+                         sentimentScore >= 40 ? 'var(--color-flat)' :
+                         'var(--color-down)';
+
+  const hotEvents = data.hot_events || [];
+  const keyNews = data.key_news || [];
+
+  const hotHtml = hotEvents.slice(0, 8).map(n => {
+    const title = n.title || n.summary || '—';
+    const sentimentTag = n.sentiment || n.sentiment_label || '';
+    const tagColor = (sentimentTag === 'positive' || sentimentTag === '利好') ? 'var(--color-up)' :
+                     (sentimentTag === 'negative' || sentimentTag === '利空') ? 'var(--color-down)' :
+                     'var(--color-flat)';
+    const source = n.source || '';
+    const time = n.published_at || n.time || '';
+    return `<div style="padding:6px 0;border-bottom:1px solid var(--border);">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+        <span style="font-size:13px;flex:1;">${title}</span>
+        ${sentimentTag ? `<span style="font-size:11px;color:${tagColor};border:1px solid ${tagColor};padding:1px 5px;border-radius:3px;white-space:nowrap;">${sentimentTag}</span>` : ''}
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${source} ${time}</div>
+    </div>`;
+  }).join('');
+
+  body.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);margin-bottom:8px;">
+      <div>
+        <span style="font-size:13px;color:var(--text-muted);">情绪指数:</span>
+        <span style="font-size:20px;font-weight:700;color:${sentimentColor};margin-left:6px;">${sentimentScore.toFixed(1)}</span>
+        <span style="font-size:12px;color:${sentimentColor};margin-left:4px;">${sentimentLabel}</span>
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);">共 ${data.total_count || 0} 条</div>
+    </div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">热点事件</div>
+    ${hotHtml || '<div style="padding:8px;color:var(--text-muted);">暂无热点</div>'}
+  `;
+}
+
+/* ========== P1-4 五信号融合建议 ========== */
+async function loadFundAdviceV2() {
   const card = document.getElementById('fundAdviceCard');
   const summaryEl = document.getElementById('fundAdviceSummary');
   const bodyEl = document.getElementById('fundAdviceBody');
   card.style.display = 'block';
+  summaryEl.innerHTML = '<div style="padding:8px;color:var(--text-muted);">五信号融合分析中...</div>';
+  bodyEl.innerHTML = '';
 
-  const market = data.market_signal || {};
-  summaryEl.innerHTML = `<strong>大盘信号:</strong> ${market.action || '—'} (${market.reason || '无数据'}) | <strong>整体建议:</strong> ${data.summary || '—'}`;
-
-  const advices = data.positions_advice || [];
-  if (!advices.length) {
-    bodyEl.innerHTML = '<div style="color:var(--text-muted);padding:8px;">暂无持仓建议</div>';
+  const resp = await api('/api/fund/advice-v2');
+  const data = resp && resp.data ? resp.data : resp;
+  if (!data) {
+    summaryEl.innerHTML = '<div style="padding:8px;color:var(--color-up);">五信号建议获取失败</div>';
     return;
   }
-  bodyEl.innerHTML = advices.map(a => {
-    const advice = a.advice || {};
-    const actionColor = advice.signal === 'take_profit' ? 'var(--color-up)' :
-                        (advice.signal === 'add' || advice.signal === 'dca') ? 'var(--color-down)' :
-                        'var(--text-secondary)';
-    return `<div style="padding:8px 0;border-bottom:1px solid var(--border);">
-      <div style="display:flex;justify-content:space-between;align-items:center;">
-        <strong>${a.fund_name || a.fund_code}</strong>
-        <span style="color:${actionColor};font-weight:600;padding:2px 8px;border:1px solid ${actionColor};border-radius:4px;">${advice.action || '—'}</span>
+
+  const positions = data.positions_advice || [];
+  if (!positions.length) {
+    summaryEl.innerHTML = '<div style="padding:8px;color:var(--text-muted);">暂无持仓,请先添加基金</div>';
+    return;
+  }
+
+  // 计算组合综合评分(取平均)
+  const avgScore = positions.reduce((s, p) => s + ((p.five_signals || {}).final_score || 50), 0) / positions.length;
+  // 综合方向:取评分最高的基金方向
+  const topFund = positions.reduce((top, p) => {
+    const sc = (p.five_signals || {}).final_score || 50;
+    return sc > (top.five_signals?.final_score || 0) ? p : top;
+  }, positions[0]);
+  const topSignals = topFund.five_signals || {};
+  const direction = topSignals.direction || 'neutral';
+  const summary = data.summary || '—';
+
+  const dirColor = direction === 'bullish' ? 'var(--color-up)' :
+                   direction === 'bearish' ? 'var(--color-down)' :
+                   'var(--color-flat)';
+  const dirLabel = signalLabel(direction.toUpperCase());
+
+  summaryEl.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;">
+      <div>
+        <span style="font-size:13px;color:var(--text-muted);">组合均分:</span>
+        <span style="font-size:22px;font-weight:700;color:${dirColor};margin-left:6px;">${avgScore.toFixed(1)}</span>
+        <span style="font-size:13px;color:${dirColor};margin-left:6px;padding:2px 8px;border:1px solid ${dirColor};border-radius:4px;">${dirLabel}</span>
       </div>
-      <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">${advice.reason || '无建议'}</div>
-      <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">当前净值: ${(a.current_nav || 0).toFixed(4)} | 成本: ${(a.cost_nav || 0).toFixed(4)} | 盈亏: ${(a.pnl_pct >= 0 ? '+' : '') + (a.pnl_pct || 0).toFixed(2)}%</div>
+      <span style="font-size:13px;color:var(--text-secondary);">${summary}</span>
+    </div>
+    <div style="font-size:12px;color:var(--text-muted);padding:4px 0;">权重: 技术面20% / 基本面20% / 消息面25% / 重仓股板块20% / 大盘环境15%</div>
+  `;
+
+  // 每只基金的五信号明细
+  const signalNames = { technical: '技术面(20%)', fundamental: '基本面(20%)', news: '消息面(25%)', holdings: '重仓股板块(20%)', market: '大盘环境(15%)' };
+  const fundsHtml = positions.map(a => {
+    const fs = a.five_signals || {};
+    const signals = fs.signals || {};
+    const advice = a.advice || {};
+    const act = advice.action || fs.action || '—';
+    const actColor = act === '买入' ? 'var(--color-up)' :
+                     act === '卖出' ? 'var(--color-down)' : 'var(--text-secondary)';
+    const fundScore = fs.final_score || 50;
+
+    const signalRows = Object.keys(signalNames).map(key => {
+      const s = signals[key] || {};
+      const sc = s.score || 50;
+      const fillPct = Math.min(Math.max(sc, 0), 100);
+      const sig = s.signal || 'neutral';
+      const c = sig.includes('bull') ? 'var(--color-up)' :
+                sig.includes('bear') ? 'var(--color-down)' : 'var(--color-flat)';
+      const detail = s.reason || s.action || '—';
+      return `<div style="padding:4px 0;border-bottom:1px solid var(--border);">
+        <div class="signal-row">
+          <span class="signal-label">${signalNames[key]}</span>
+          <div class="signal-bar"><div class="signal-bar-fill" style="width:${fillPct}%;background:${c};"></div></div>
+          <span class="signal-score" style="color:${c};">${sc.toFixed(1)}</span>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;padding-left:90px;">${detail}</div>
+      </div>`;
+    }).join('');
+
+    return `<div style="padding:10px 0;border-bottom:1px solid var(--border);">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding-bottom:6px;">
+        <div>
+          <strong style="font-size:14px;">${a.fund_name || a.fund_code}</strong>
+          <span style="font-size:12px;color:var(--text-muted);margin-left:8px;">评分 ${fundScore.toFixed(1)}</span>
+        </div>
+        <span style="color:${actColor};font-weight:600;font-size:12px;padding:2px 8px;border:1px solid ${actColor};border-radius:3px;">${act}</span>
+      </div>
+      ${signalRows}
     </div>`;
   }).join('');
+  bodyEl.innerHTML = fundsHtml;
 
-  // 加载基金话术推荐
-  loadFundScripts(advices, market);
+  // 兼容话术推荐(用第一只基金)
+  const first = positions[0];
+  loadFundScripts([{ fund_code: first.fund_code, fund_name: first.fund_name, advice: first.advice || {}, market_signal: { action: first.advice?.action || 'HOLD', reason: first.advice?.reason || '' } }], { action: first.advice?.action || 'HOLD', reason: first.advice?.reason || '' });
+}
+
+/* ========== P1-2 基金重仓股板块分析 ========== */
+async function viewHoldings(fundCode, fundName) {
+  const modal = document.getElementById('holdingsModal');
+  const titleEl = document.getElementById('holdingsModalTitle');
+  const bodyEl = document.getElementById('holdingsModalBody');
+  titleEl.textContent = `重仓股分析 - ${fundName || fundCode} (${fundCode})`;
+  bodyEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);">加载中...</div>';
+  modal.style.display = 'flex';
+
+  const resp = await api(`/api/holdings/${fundCode}`);
+  const data = resp && resp.data ? resp.data : resp;
+  if (!data) {
+    bodyEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--color-up);">重仓股数据获取失败</div>';
+    return;
+  }
+
+  const holdings = data.top_holdings || data.holdings || [];
+  const concentration = data.concentration || {};
+  const sectorRotation = data.sector_rotation || data.sector_signal || {};
+  const navImpact = data.nav_impact || {};
+  const sectors = data.sectors || data.sector_distribution || data.sector_exposure || [];
+
+  // 重仓股表格
+  const holdingsRows = holdings.slice(0, 10).map((h, i) => {
+    const name = h.name || h.stock_name || '—';
+    const code = h.code || h.stock_code || '—';
+    const weight = (h.weight || 0) * 100;
+    const changePct = h.change_pct || 0;
+    const c = changeColor(changePct);
+    return `<tr>
+      <td>${i + 1}</td>
+      <td>${code}</td>
+      <td>${name}</td>
+      <td>${weight.toFixed(2)}%</td>
+      <td style="color:${c};">${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%</td>
+    </tr>`;
+  }).join('');
+
+  // 板块分布
+  const sectorRows = sectors.slice(0, 8).map(s => {
+    const name = s.name || s.sector || '—';
+    const weight = (s.weight || 0) * 100;
+    const changePct = s.change_pct || s.avg_change || 0;
+    const c = changeColor(changePct);
+    return `<tr>
+      <td>${name}</td>
+      <td>${weight.toFixed(2)}%</td>
+      <td style="color:${c};">${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%</td>
+    </tr>`;
+  }).join('');
+
+  bodyEl.innerHTML = `
+    <div class="grid-4" style="margin-bottom:16px;">
+      <div class="card" style="text-align:center;padding:12px;">
+        <div style="font-size:11px;color:var(--text-muted);">前5集中度</div>
+        <div style="font-size:20px;font-weight:700;color:var(--accent);">${((concentration.top5_weight || 0) * 100).toFixed(2)}%</div>
+      </div>
+      <div class="card" style="text-align:center;padding:12px;">
+        <div style="font-size:11px;color:var(--text-muted);">前10集中度</div>
+        <div style="font-size:20px;font-weight:700;color:var(--accent);">${((concentration.top10_weight || 0) * 100).toFixed(2)}%</div>
+      </div>
+      <div class="card" style="text-align:center;padding:12px;">
+        <div style="font-size:11px;color:var(--text-muted);">HHI指数</div>
+        <div style="font-size:20px;font-weight:700;color:var(--accent);">${(concentration.hhi || 0).toFixed(0)}</div>
+      </div>
+      <div class="card" style="text-align:center;padding:12px;">
+        <div style="font-size:11px;color:var(--text-muted);">集中度</div>
+        <div style="font-size:14px;font-weight:700;color:var(--accent-cyan);margin-top:4px;">${concentration.level || '—'}</div>
+      </div>
+    </div>
+
+    ${sectorRotation.signal ? `<div class="card mb-16" style="padding:12px;background:rgba(245,158,11,0.05);border:1px solid var(--accent);">
+      <div style="font-size:13px;font-weight:600;color:var(--accent);margin-bottom:4px;">板块轮动信号</div>
+      <div style="font-size:12px;color:var(--text-secondary);">${sectorRotation.signal} - ${sectorRotation.reason || sectorRotation.description || ''}</div>
+    </div>` : ''}
+
+    ${navImpact.estimated_nav_change != null ? `<div class="card mb-16" style="padding:12px;background:rgba(6,182,212,0.05);border:1px solid var(--accent-cyan);">
+      <div style="font-size:13px;font-weight:600;color:var(--accent-cyan);margin-bottom:4px;">净值影响预估</div>
+      <div style="font-size:12px;color:var(--text-secondary);">预估变动: <span style="color:${changeColor(navImpact.estimated_nav_change)};font-weight:600;">${navImpact.estimated_nav_change >= 0 ? '+' : ''}${navImpact.estimated_nav_change.toFixed(4)}</span></div>
+    </div>` : ''}
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title">前10大重仓股</div>
+        <div class="table-wrap" style="max-height:300px;overflow-y:auto;">
+          <table>
+            <thead><tr><th>#</th><th>代码</th><th>名称</th><th>权重</th><th>涨跌幅</th></tr></thead>
+            <tbody>${holdingsRows || '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">暂无数据</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">板块分布</div>
+        <div class="table-wrap" style="max-height:300px;overflow-y:auto;">
+          <table>
+            <thead><tr><th>板块</th><th>权重</th><th>平均涨跌</th></tr></thead>
+            <tbody>${sectorRows || '<tr><td colspan="3" style="text-align:center;color:var(--text-muted);">暂无数据</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* ========== P1-5 多智能体基金深度分析 ========== */
+async function multiAgentAnalyze(fundCode, fundName, costNav, shares) {
+  const modal = document.getElementById('multiAgentModal');
+  const titleEl = document.getElementById('multiAgentModalTitle');
+  const bodyEl = document.getElementById('multiAgentModalBody');
+  titleEl.textContent = `多智能体分析 - ${fundName || fundCode} (${fundCode})`;
+  bodyEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);"><div style="font-size:14px;margin-bottom:8px;">7位分析师正在会诊...</div><div style="font-size:12px;color:var(--text-muted);">P1-5 集成消息面/重仓股/大盘/五信号+多空辩论</div></div>';
+  modal.style.display = 'flex';
+
+  try {
+    const resp = await fetch('/api/agent/fund_analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fund_code: fundCode,
+        fund_name: fundName,
+        cost_nav: costNav,
+        shares: shares,
+        mode: 'deep',
+      }),
+    });
+    const data = await resp.json();
+    if (!data) {
+      bodyEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--color-up);">分析失败</div>';
+      return;
+    }
+
+    const finalRec = data.final_recommendation || {};
+    const pmDecision = data.portfolio_manager_decision || {};
+    const action = pmDecision.action || data.action || finalRec.action || 'HOLD';
+    const confidence = pmDecision.confidence || finalRec.confidence || data.confidence || 0;
+    const targetPrice = finalRec.target_price || pmDecision.target_price;
+    const stopLoss = finalRec.stop_loss || finalRec.stop_loss_price || pmDecision.stop_loss || pmDecision.stop_loss_price;
+    const positionAdvice = finalRec.position_advice || finalRec.position_sizing || pmDecision.position_advice || pmDecision.position_sizing || '—';
+    const reasoning = finalRec.reasoning || pmDecision.reasoning || '—';
+
+    // 动作归一化:中文/英文都支持
+    const actionNorm = action === 'BUY' || action === '买入' ? 'BUY' :
+                       action === 'SELL' || action === '卖出' ? 'SELL' : 'HOLD';
+    const actColor = actionNorm === 'BUY' ? 'var(--color-up)' :
+                     actionNorm === 'SELL' ? 'var(--color-down)' : 'var(--color-flat)';
+
+    // 分析师观点(字段名 agent_opinions)
+    const opinions = data.agent_opinions || data.opinions || [];
+    const opinionsHtml = opinions.map(o => {
+      const name = o.role_name || o.role || o.agent_name || '分析师';
+      const view = o.view || o.opinion || o.opinion_text || o.summary || '—';
+      const score = o.score || o.confidence || 50;
+      const stance = o.stance || o.position || 'neutral';
+      const c = stance === 'bullish' || stance === '多' ? 'var(--color-up)' :
+                stance === 'bearish' || stance === '空' ? 'var(--color-down)' : 'var(--color-flat)';
+      return `<div class="analyst-card">
+        <div class="analyst-name">${name} <span style="font-size:11px;color:${c};margin-left:4px;">${stance}</span></div>
+        <div class="analyst-opinion">${view}</div>
+        <div style="margin-top:4px;font-size:11px;color:${c};">评分: ${score}</div>
+      </div>`;
+    }).join('');
+
+    // 多空辩论
+    const debate = data.bull_bear_debate || {};
+    const bullArgs = (debate.bull_arguments || debate.bull_points || []).map(a => `<li style="margin:4px 0;font-size:12px;color:var(--text-secondary);">${typeof a === 'string' ? a : (a.point || a.argument || '—')}</li>`).join('');
+    const bearArgs = (debate.bear_arguments || debate.bear_points || []).map(a => `<li style="margin:4px 0;font-size:12px;color:var(--text-secondary);">${typeof a === 'string' ? a : (a.point || a.argument || '—')}</li>`).join('');
+
+    // 风险辩论
+    const riskDebate = data.risk_debate || {};
+    const risks = (riskDebate.risks || riskDebate.key_risks || finalRec.key_risks || []).map(r => `<li style="margin:4px 0;font-size:12px;color:var(--text-secondary);">${typeof r === 'string' ? r : (r.risk || r.description || '—')}</li>`).join('');
+
+    bodyEl.innerHTML = `
+      <div class="card mb-16" style="padding:16px;background:rgba(245,158,11,0.05);border:1px solid var(--accent);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <div style="font-size:15px;font-weight:600;color:var(--accent);">投资决策</div>
+          <div>
+            <span style="font-size:18px;font-weight:700;color:${actColor};padding:4px 12px;border:1px solid ${actColor};border-radius:4px;">${decisionLabel(actionNorm)}</span>
+            <span style="font-size:13px;color:var(--text-muted);margin-left:8px;">置信度 ${(confidence * 100).toFixed(0)}%</span>
+          </div>
+        </div>
+        <div style="font-size:13px;color:var(--text-secondary);margin-bottom:6px;">${reasoning}</div>
+        <div style="display:flex;gap:16px;font-size:12px;color:var(--text-muted);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);flex-wrap:wrap;">
+          ${targetPrice ? `<span>目标价: <strong style="color:var(--accent);">${targetPrice}</strong></span>` : ''}
+          ${stopLoss ? `<span>止损位: <strong style="color:var(--color-down);">${stopLoss}</strong></span>` : ''}
+          <span>仓位建议: <strong style="color:var(--accent-cyan);">${positionAdvice}</strong></span>
+          ${finalRec.expected_return ? `<span>预期回报: <strong style="color:var(--accent);">${finalRec.expected_return}</strong></span>` : ''}
+          ${finalRec.time_horizon ? `<span>时间维度: <strong>${finalRec.time_horizon}</strong></span>` : ''}
+        </div>
+      </div>
+
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px;">7位分析师观点</div>
+      <div class="analyst-grid">${opinionsHtml || '<div style="color:var(--text-muted);">暂无分析师观点</div>'}</div>
+
+      ${bullArgs || bearArgs ? `<div class="grid-2" style="margin-top:16px;">
+        <div class="debate-box debate-bull">
+          <div style="font-size:13px;font-weight:600;color:var(--color-up);margin-bottom:6px;">多方论据</div>
+          <ul style="list-style:disc;padding-left:20px;">${bullArgs || '<li style="color:var(--text-muted);">无</li>'}</ul>
+        </div>
+        <div class="debate-box debate-bear">
+          <div style="font-size:13px;font-weight:600;color:var(--color-down);margin-bottom:6px;">空方论据</div>
+          <ul style="list-style:disc;padding-left:20px;">${bearArgs || '<li style="color:var(--text-muted);">无</li>'}</ul>
+        </div>
+      </div>` : ''}
+
+      ${risks ? `<div class="debate-box" style="margin-top:16px;border-left-color:var(--color-warning);">
+        <div style="font-size:13px;font-weight:600;color:var(--color-warning);margin-bottom:6px;">关键风险</div>
+        <ul style="list-style:disc;padding-left:20px;">${risks}</ul>
+      </div>` : ''}
+    `;
+  } catch (e) {
+    bodyEl.innerHTML = `<div style="padding:24px;text-align:center;color:var(--color-up);">分析失败: ${e.message}</div>`;
+  }
 }
 
 async function loadFundScripts(advices, market) {
