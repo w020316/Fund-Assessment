@@ -325,6 +325,13 @@
 | BUG-DEP-009 | 部署 | Render Blueprint 需付费 | 改用 Web Service + Free 实例 | ✓ 已修复 |
 | BUG-DEP-010 | 部署 | 缺少 AGNES_API_KEY 环境变量 | 用户已在 Render Dashboard 添加,触发重新部署 | ✓ 已修复 |
 
+### 4.2.1 验收期发现并修复的问题(P0/P1)
+
+| 问题编号 | 模块 | 严重度 | 描述 | 修复方案 | commit | 状态 |
+|--------|------|--------|------|---------|--------|------|
+| BUG-AUTH-001 | web 前端 | **P0** | api() 函数未携带 Authorization header,导致所有写操作(添加/删除持仓、交易)返回 401,3 个核心场景被阻塞 | api() 自动从 localStorage 读取 admin_token 并携带 `Authorization: Bearer <token>`;系统配置页新增"管理鉴权"卡片(令牌输入框+保存/清除按钮) | 8c2ec3f | ✓ 已修复 |
+| BUG-BRAND-001 | web 前端 | P2 | 验收发现 4 处残留"AI"字样(3 处注释 + 1 处用户可见 toast 文案"多个AI模型") | 注释中性化 + toast 文案"多个AI模型"→"多个智能模型" | 519503f | ✓ 已修复 |
+
 ### 4.3 待修复问题(P3,后续迭代)
 
 | 问题编号 | 模块 | 描述 | 修复方案 | 状态 |
