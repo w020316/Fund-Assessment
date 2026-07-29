@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>QuantFlow Pro 量化交易系统</title>
+<title>QuantFlow Pro 基金投资决策辅助</title>
 <style>
 /* ========== 全局变量与重置 ========== */
 :root {
@@ -538,7 +538,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
   <header class="topbar">
     <div class="logo">
       <div class="logo-icon">QF</div>
-      <span>QuantFlow Pro 量化交易系统</span>
+      <span>QuantFlow Pro 基金投资决策辅助</span>
     </div>
     <div class="index-bar" id="indexBar">
       <!-- 由JS动态填充 -->
@@ -1026,12 +1026,12 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <div class="card mb-16" id="newsFeedCard" style="display:none;">
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
             <span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6Z"/></svg> 消息面聚合</span>
-            <span style="font-size:11px;color:var(--text-muted);">P1-1 四源聚合 + AI 检索</span>
+            <span style="font-size:11px;color:var(--text-muted);">P1-1 四源聚合 + 智能检索</span>
           </div>
           <div id="newsFeedBody"></div>
-          <!-- AI 检索（P1-1 /api/news/search） -->
+          <!-- 智能检索(P1-1 /api/news/search) -->
           <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">AI 检索（Tavily + LLM 总结）</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">智能检索(Tavily + LLM 总结)</div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;">
               <input class="input" id="newsSearchInput" placeholder="输入关键词（如 白酒板块、降准、新能源补贴）" style="flex:1;min-width:200px;" onkeydown="if(event.key==='Enter')newsAiSearch()">
               <button class="btn btn-primary" onclick="newsAiSearch()">检索</button>
@@ -1395,10 +1395,22 @@ const ALERT_ICON_MAP = {
 };
 
 // API请求封装
+// 超时映射:特定慢接口允许更长等待(AI分析/检索类)
+const API_TIMEOUT_MS = (url) => {
+  if (url.startsWith('/api/agent/') || url.includes('/fund_analyze')) return 90000; // AI多智能体 90s
+  if (url.startsWith('/api/news/search')) return 30000; // AI检索 30s
+  if (url.startsWith('/api/market/outlook') || url.startsWith('/api/scripts/ai-generate')) return 30000;
+  return 15000; // 默认 15s
+};
+
 async function api(url, options={}) {
+  const controller = new AbortController();
+  const timeoutMs = API_TIMEOUT_MS(url);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const resp = await fetch(url, {
       headers: {'Content-Type':'application/json'},
+      signal: controller.signal,
       ...options
     });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -1409,9 +1421,48 @@ async function api(url, options={}) {
     }
     return data;
   } catch(e) {
+    const isAbort = e.name === 'AbortError';
+    const msg = isAbort ? `请求超时(${timeoutMs/1000}s)` : (e.message || '网络异常');
     console.error('API Error:', url, e);
+    // 静默端点(轮询/自动刷新)不打扰用户,仅记录
+    const isPolling = url.includes('_realtime') || url.includes('/api/health');
+    if (!isPolling) showToast(`${msg}: ${url.split('?')[0]}`, 'error');
     return null;
+  } finally {
+    clearTimeout(timer);
   }
+}
+
+// 按钮loading态管理(防止重复提交)
+const _loadingButtons = new WeakSet();
+function withLoading(btn, asyncFn) {
+  if (!btn || _loadingButtons.has(btn)) return Promise.resolve(null);
+  _loadingButtons.add(btn);
+  const orig = btn.innerHTML;
+  const origDisabled = btn.disabled;
+  btn.disabled = true;
+  btn.style.opacity = '0.6';
+  btn.style.cursor = 'not-allowed';
+  // 加载指示器(文字+脉冲圆点)
+  btn.innerHTML = '<span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:6px;height:6px;border-radius:50%;background:currentColor;animation:pulse-dot 1.2s infinite;"></span>处理中...</span>';
+  return Promise.resolve(asyncFn()).finally(() => {
+    btn.innerHTML = orig;
+    btn.disabled = origDisabled;
+    btn.style.opacity = '';
+    btn.style.cursor = '';
+    _loadingButtons.delete(btn);
+  });
+}
+
+// 空状态渲染(统一引导提示)
+function renderEmpty(container, msg='暂无数据', hint='') {
+  if (typeof container === 'string') container = document.getElementById(container);
+  if (!container) return;
+  container.innerHTML = `<div style="padding:32px 16px;text-align:center;color:var(--text-muted);">
+    <div style="font-size:28px;margin-bottom:8px;opacity:0.4;">○</div>
+    <div style="font-size:13px;margin-bottom:4px;">${msg}</div>
+    ${hint ? `<div style="font-size:11px;color:var(--text-tertiary);">${hint}</div>` : ''}
+  </div>`;
 }
 
 /* ========== 页面切换 ========== */
@@ -1476,14 +1527,16 @@ async function loadIndexData() {
   // 顶部指数栏
   const bar = document.getElementById('indexBar');
 
-  // 默认指数（如果API无数据则显示占位）
-  const defaultIndices = [
-    {name:'上证指数', code:'000001.SH', price:3245.68, change:12.35, change_pct:0.38},
-    {name:'深证成指', code:'399001.SZ', price:10567.42, change:-23.56, change_pct:-0.22},
-    {name:'创业板指', code:'399006.SZ', price:2156.78, change:8.92, change_pct:0.42}
-  ];
+  // 默认指数占位(API无数据时显示加载提示,不使用mock数据)
+  const defaultIndices = null;
 
   const indices = (data && data.data) ? data.data : defaultIndices;
+
+  if (!indices || indices.length === 0) {
+    if (bar) bar.innerHTML = '<span style="color:var(--text-muted);font-size:12px;">指数加载中...</span>';
+    if (container) renderEmpty(container, '指数数据暂无', '请稍后重试或检查数据源');
+    return;
+  }
 
   // 数据质量检测
   if (data && data.data) {
@@ -1751,39 +1804,57 @@ async function runAiAnalysis() {
   const code = document.getElementById('aiStockInput').value.trim();
   if (!code) { showToast('请输入股票代码', 'error'); return; }
 
-  showToast('正在进行深度分析...', 'info');
+  const btn = event.currentTarget || document.querySelector('button[onclick="runAiAnalysis()"]');
+  await withLoading(btn, async () => {
+    showToast('正在进行深度分析,请稍候...', 'info');
 
-  // 调用分析API
-  const result = await api('/api/agent/analyze', {
-    method: 'POST',
-    body: JSON.stringify({stock_code: code})
+    // 调用分析API
+    const result = await api('/api/agent/analyze', {
+      method: 'POST',
+      body: JSON.stringify({stock_code: code})
+    });
+
+    if (!result) {
+      renderEmpty('agentCards', '分析失败', '请稍后重试或检查股票代码');
+      return;
+    }
+
+    // 调用各Agent意见
+    const opinions = await api(`/api/agent/opinions?code=${code}`);
+    // 调用多空辩论
+    const debate = await api(`/api/agent/debate?code=${code}`);
+
+    renderAgentCards(opinions, result);
+    renderDebate(debate, result);
+    renderFinalDecision(result);
+    loadAiHistory();
+    showToast('分析完成', 'success');
   });
-
-  // 调用各Agent意见
-  const opinions = await api(`/api/agent/opinions?code=${code}`);
-  // 调用多空辩论
-  const debate = await api(`/api/agent/debate?code=${code}`);
-
-  renderAgentCards(opinions, result);
-  renderDebate(debate, result);
-  renderFinalDecision(result);
-  loadAiHistory();
 }
 
 async function runQuickAnalysis() {
   const code = document.getElementById('aiStockInput').value.trim();
   if (!code) { showToast('请输入股票代码', 'error'); return; }
 
-  showToast('正在快速分析...', 'info');
+  const btn = event.currentTarget || document.querySelector('button[onclick="runQuickAnalysis()"]');
+  await withLoading(btn, async () => {
+    showToast('正在快速分析...', 'info');
 
-  const result = await api('/api/agent/quick_analysis', {
-    method: 'POST',
-    body: JSON.stringify({stock_code: code})
+    const result = await api('/api/agent/quick_analysis', {
+      method: 'POST',
+      body: JSON.stringify({stock_code: code})
+    });
+
+    if (!result) {
+      renderEmpty('agentCards', '快速分析失败', '请稍后重试');
+      return;
+    }
+
+    renderAgentCards(null, result);
+    renderDebate(null, result);
+    renderFinalDecision(result);
+    showToast('快速分析完成', 'success');
   });
-
-  renderAgentCards(null, result);
-  renderDebate(null, result);
-  renderFinalDecision(result);
 }
 
 // 渲染Agent卡片
@@ -1795,13 +1866,8 @@ function renderAgentCards(opinions, result) {
     {id:'news', name:'新闻分析师', icon:'', key:'news'}
   ];
 
-  // 模拟数据（API无数据时使用）
-  const defaultOpinions = {
-    fundamental: {signal:'NEUTRAL', confidence:30, score:5.0, points:['数据获取中...']},
-    technical: {signal:'NEUTRAL', confidence:30, score:5.0, points:['数据获取中...']},
-    sentiment: {signal:'NEUTRAL', confidence:30, score:5.0, points:['数据获取中...']},
-    news: {signal:'NEUTRAL', confidence:30, score:5.0, points:['数据获取中...']}
-  };
+  // 模拟数据已移除(API无数据时显示空状态,不冒充真实评分)
+  const defaultOpinions = null;
 
   // 从API结果中提取agent意见
   // opinions API返回 {stock_code, opinions: [{role, signal, confidence, reasoning, key_points, score}]}
@@ -1819,9 +1885,19 @@ function renderAgentCards(opinions, result) {
     });
   }
 
+  // 无任何意见时显示空状态
+  if (opList.length === 0 && !result) {
+    renderEmpty('agentCards', '分析师观点未返回', '请稍后重试');
+    return;
+  }
+
   agents.forEach(agent => {
     const el = document.getElementById('agent-' + agent.id);
-    const opData = opinionsMap[agent.key] || defaultOpinions[agent.key];
+    const opData = opinionsMap[agent.key] || defaultOpinions;
+    if (!opData) {
+      el.querySelector('.agent-content').innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px 0;">该分析师未返回观点</div>';
+      return;
+    }
 
     const signalClass = opData.signal === 'BULLISH' ? 'signal-bullish' : opData.signal === 'BEARISH' ? 'signal-bearish' : 'signal-neutral';
     const confColor = opData.confidence > 70 ? 'var(--color-up)' : opData.confidence > 50 ? 'var(--color-warning)' : 'var(--color-down)';
@@ -2227,25 +2303,19 @@ async function loadStrategyList() {
   const data = await api('/api/strategy/list');
   const body = document.getElementById('strategyListBody');
 
-  const defaultStrategies = [
-    {name:'动量突破',type:'趋势',status:'运行中',return_rate:23.5,max_drawdown:8.2},
-    {name:'均值回归',type:'统计套利',status:'运行中',return_rate:15.8,max_drawdown:5.6},
-    {name:'多因子选股',type:'因子',status:'暂停',return_rate:18.2,max_drawdown:12.3},
-    {name:'事件驱动',type:'事件',status:'运行中',return_rate:12.6,max_drawdown:6.8},
-    {name:'网格交易',type:'量化',status:'暂停',return_rate:8.9,max_drawdown:3.2}
-  ];
-
-  let strategies = defaultStrategies;
-  // API返回list[StrategyInfo]，字段: name, display_name, description, enabled
-  if (data && Array.isArray(data) && data.length > 0) {
-    strategies = data.map(s => ({
-      name: s.display_name || s.name,
-      type: s.description ? s.description.substring(0, 6) : '',
-      status: s.enabled ? '运行中' : '暂停',
-      return_rate: 0,
-      max_drawdown: 0
-    }));
+  // mock 默认策略已移除(API无数据时显示空状态)
+  if (!data || !Array.isArray(data) || data.length === 0) {
+    renderEmpty(body, '暂无运行中的策略', '策略引擎未启用或未配置');
+    return;
   }
+
+  const strategies = data.map(s => ({
+    name: s.display_name || s.name,
+    type: s.description ? s.description.substring(0, 6) : '',
+    status: s.enabled ? '运行中' : '暂停',
+    return_rate: 0,
+    max_drawdown: 0
+  }));
 
   body.innerHTML = strategies.map(s => {
     const statusColor = s.status === '运行中' ? 'var(--color-down)' : 'var(--color-warning)';
@@ -2703,7 +2773,7 @@ async function loadNewsFeed() {
   `;
 }
 
-// AI 检索（P1-1 /api/news/search）
+// 智能检索(P1-1 /api/news/search)
 async function newsAiSearch() {
   const input = document.getElementById('newsSearchInput');
   const body = document.getElementById('newsSearchBody');
@@ -2713,56 +2783,66 @@ async function newsAiSearch() {
     body.innerHTML = '<div style="color:var(--color-warning);font-size:12px;padding:4px 0;">请输入检索关键词</div>';
     return;
   }
-  body.innerHTML = '<div style="color:var(--text-muted);padding:8px 0;font-size:12px;">AI 检索中（Tavily + LLM 总结，约 10-20 秒）...</div>';
-  try {
-    const resp = await fetch('/api/news/search', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: query }),
-    });
-    const data = await resp.json();
-    const sr = data && data.data ? data.data : null;
-    if (!sr) {
-      body.innerHTML = '<div style="color:var(--color-warning);font-size:12px;padding:4px 0;">AI 检索失败</div>';
-      return;
-    }
-    const results = sr.results || [];
-    const summary = sr.summary || '—';
-    const sentiment = sr.sentiment || '中性';
-    const sentimentColor = (sentiment === '利好' || sentiment === 'positive') ? 'var(--color-up)' :
-                            (sentiment === '利空' || sentiment === 'negative') ? 'var(--color-down)' : 'var(--color-flat)';
-    let html = `<div style="padding:8px 10px;background:var(--bg-card);border-radius:6px;margin-bottom:8px;">
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">检索关键词: <strong style="color:var(--accent);">${sr.query || query}</strong> · 情绪: <span style="color:${sentimentColor};">${sentiment}</span></div>
-      <div style="font-size:13px;color:var(--text-secondary);line-height:1.6;">${summary}</div>
-    </div>`;
-    if (results.length) {
-      html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">相关消息</div>';
-      results.slice(0, 6).forEach(n => {
-        const title = n.title || '—';
-        const source = n.source || '';
-        const time = n.publish_time || n.published_date || '';
-        const sentimentTag = n.sentiment || '';
-        const tagColor = (sentimentTag === '利好' || sentimentTag === 'positive') ? 'var(--color-up)' :
-                         (sentimentTag === '利空' || sentimentTag === 'negative') ? 'var(--color-down)' : 'var(--color-flat)';
-        html += `<div style="padding:6px 0;border-bottom:1px solid var(--border);">
-          <div style="font-size:13px;">${title}</div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
-            ${sentimentTag ? `<span style="color:${tagColor};margin-right:6px;">[${sentimentTag}]</span>` : ''}
-            ${source ? `<span>${source}</span>` : ''}
-            ${time ? `<span style="margin-left:6px;">${time}</span>` : ''}
-          </div>
-        </div>`;
+  const btn = event.currentTarget;
+  await withLoading(btn, async () => {
+    body.innerHTML = '<div style="color:var(--text-muted);padding:8px 0;font-size:12px;display:flex;align-items:center;gap:6px;"><span style="width:6px;height:6px;border-radius:50%;background:var(--accent);animation:pulse-dot 1.2s infinite;"></span>智能检索中(Tavily+LLM总结,约 10-20 秒)...</div>';
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 30000);
+      const resp = await fetch('/api/news/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: query }),
+        signal: controller.signal,
       });
-    } else {
-      html += '<div style="color:var(--text-muted);font-size:12px;padding:4px 0;">未检索到相关消息</div>';
+      clearTimeout(timer);
+      const data = await resp.json();
+      const sr = data && data.data ? data.data : null;
+      if (!sr) {
+        renderEmpty(body, '智能检索失败', '请稍后重试');
+        return;
+      }
+      const results = sr.results || [];
+      const summary = sr.summary || '—';
+      const sentiment = sr.sentiment || '中性';
+      const sentimentColor = (sentiment === '利好' || sentiment === 'positive') ? 'var(--color-up)' :
+                              (sentiment === '利空' || sentiment === 'negative') ? 'var(--color-down)' : 'var(--color-flat)';
+      let html = `<div style="padding:8px 10px;background:var(--bg-card);border-radius:6px;margin-bottom:8px;">
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">检索关键词: <strong style="color:var(--accent);">${sr.query || query}</strong> · 情绪: <span style="color:${sentimentColor};">${sentiment}</span></div>
+        <div style="font-size:13px;color:var(--text-secondary);line-height:1.6;">${summary}</div>
+      </div>`;
+      if (results.length) {
+        html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">相关消息</div>';
+        results.slice(0, 6).forEach(n => {
+          const title = n.title || '—';
+          const source = n.source || '';
+          const time = n.publish_time || n.published_date || '';
+          const sentimentTag = n.sentiment || '';
+          const tagColor = (sentimentTag === '利好' || sentimentTag === 'positive') ? 'var(--color-up)' :
+                           (sentimentTag === '利空' || sentimentTag === 'negative') ? 'var(--color-down)' : 'var(--color-flat)';
+          html += `<div style="padding:6px 0;border-bottom:1px solid var(--border);">
+            <div style="font-size:13px;">${title}</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
+              ${sentimentTag ? `<span style="color:${tagColor};margin-right:6px;">[${sentimentTag}]</span>` : ''}
+              ${source ? `<span>${source}</span>` : ''}
+              ${time ? `<span style="margin-left:6px;">${time}</span>` : ''}
+            </div>
+          </div>`;
+        });
+      } else {
+        html += '<div style="padding:12px;text-align:center;color:var(--text-muted);font-size:12px;">未检索到相关消息</div>';
+      }
+      if (data._meta && data._meta.timestamp) {
+        html += `<div style="margin-top:6px;font-size:11px;color:var(--text-muted);text-align:right;">数据源: ${data._meta.data_source || ''} · ${data._meta.timestamp}</div>`;
+      }
+      body.innerHTML = html;
+      showToast('检索完成', 'success');
+    } catch (e) {
+      const isAbort = e.name === 'AbortError';
+      body.innerHTML = `<div style="padding:16px;text-align:center;color:var(--color-warning);font-size:12px;">${isAbort ? '检索超时(30s),请缩短关键词后重试' : '检索异常,请重试'}<br><button class="btn btn-sm btn-outline" style="margin-top:8px;" onclick="newsAiSearch()">重试</button></div>`;
+      showToast(isAbort ? '检索超时' : '检索异常', 'error');
     }
-    if (data._meta && data._meta.timestamp) {
-      html += `<div style="margin-top:6px;font-size:11px;color:var(--text-muted);text-align:right;">数据源: ${data._meta.data_source || ''} · ${data._meta.timestamp}</div>`;
-    }
-    body.innerHTML = html;
-  } catch (e) {
-    body.innerHTML = `<div style="color:var(--color-warning);font-size:12px;padding:4px 0;">AI 检索失败: ${e.message}</div>`;
-  }
+  });
 }
 
 /* ========== P1-4 五信号融合建议 ========== */
@@ -2972,24 +3052,48 @@ async function multiAgentAnalyze(fundCode, fundName, costNav, shares) {
   const titleEl = document.getElementById('multiAgentModalTitle');
   const bodyEl = document.getElementById('multiAgentModalBody');
   titleEl.textContent = `多智能体分析 - ${fundName || fundCode} (${fundCode})`;
-  bodyEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);"><div style="font-size:14px;margin-bottom:8px;">7位分析师正在会诊...</div><div style="font-size:12px;color:var(--text-muted);">P1-5 集成消息面/重仓股/大盘/五信号+多空辩论</div></div>';
+  bodyEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);"><div style="font-size:14px;margin-bottom:8px;">7位分析师正在会诊,预计 20-60 秒...</div><div style="display:inline-flex;gap:6px;align-items:center;font-size:12px;color:var(--text-tertiary);"><span style="width:6px;height:6px;border-radius:50%;background:var(--accent);animation:pulse-dot 1.2s infinite;"></span>分析中(请勿关闭窗口)</div></div>';
   modal.style.display = 'flex';
 
   try {
-    const resp = await fetch('/api/agent/fund_analyze', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        fund_code: fundCode,
-        fund_name: fundName,
-        cost_nav: costNav,
-        shares: shares,
-        mode: 'deep',
-      }),
-    });
+    const controller = new AbortController();
+    const timeoutMs = 90000; // 90s 超时
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const startTs = Date.now();
+
+    let resp;
+    try {
+      resp = await fetch('/api/agent/fund_analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fund_code: fundCode,
+          fund_name: fundName,
+          cost_nav: costNav,
+          shares: shares,
+          mode: 'deep',
+        }),
+        signal: controller.signal,
+      });
+    } catch(e) {
+      clearTimeout(timer);
+      const isAbort = e.name === 'AbortError';
+      const elapsed = ((Date.now() - startTs) / 1000).toFixed(0);
+      bodyEl.innerHTML = `<div style="padding:32px 24px;text-align:center;">
+        <div style="font-size:32px;margin-bottom:12px;opacity:0.5;">⚠</div>
+        <div style="font-size:15px;color:var(--color-warning);margin-bottom:8px;">${isAbort ? `分析超时(${elapsed}s)` : '网络异常'}</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">${isAbort ? '多智能体分析需要调用多个AI模型,可能因服务繁忙导致超时。' : '请检查网络连接后重试。'}</div>
+        <button class="btn btn-primary" onclick="multiAgentAnalyze('${fundCode}','${(fundName||'').replace(/'/g,'')}',${costNav||0},${shares||0})">重试分析</button>
+      </div>`;
+      showToast(isAbort ? `分析超时(${elapsed}s),请重试` : '网络异常,请重试', 'error');
+      return;
+    }
+    clearTimeout(timer);
+
     const data = await resp.json();
     if (!data) {
-      bodyEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--color-up);">分析失败</div>';
+      bodyEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--color-warning);">分析返回为空,请稍后重试</div>';
+      showToast('分析返回为空', 'error');
       return;
     }
 
@@ -3010,7 +3114,9 @@ async function multiAgentAnalyze(fundCode, fundName, costNav, shares) {
 
     // 分析师观点(字段名 agent_opinions)
     const opinions = data.agent_opinions || data.opinions || [];
-    const opinionsHtml = opinions.map(o => {
+    const opinionsHtml = opinions.length === 0
+      ? '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;">分析师观点未返回</div>'
+      : opinions.map(o => {
       const name = o.role_name || o.role || o.agent_name || '分析师';
       const view = o.view || o.opinion || o.opinion_text || o.summary || '—';
       const score = o.score || o.confidence || 50;
@@ -3170,13 +3276,41 @@ async function addFundPosition() {
 }
 
 async function deleteFundPosition(code) {
-  if (!confirm(`确认删除基金 ${code}?`)) return;
+  // 自定义确认模态(替代浏览器原生confirm,保持UI一致性)
+  if (!await customConfirm('删除基金持仓', `确认删除基金 ${code}?`)) return;
   const resp = await api(`/api/fund/positions/${code}`, { method: 'DELETE' });
   if (resp && resp.success) {
     loadFundData();
+    showToast(`已删除基金 ${code}`, 'success');
   } else {
     showToast((resp && resp.message) || '删除失败', 'error');
   }
+}
+
+// 自定义确认对话框(替代浏览器原生confirm)
+function customConfirm(title, message) {
+  return new Promise(resolve => {
+    const modal = document.createElement('div');
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center;';
+    modal.innerHTML = `<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:24px;min-width:320px;max-width:90vw;box-shadow:var(--shadow);">
+      <div style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">${title}</div>
+      <div style="font-size:13px;color:var(--text-secondary);margin-bottom:20px;">${message}</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button id="_cancelBtn" class="btn btn-sm" style="background:transparent;border:1px solid var(--border);color:var(--text-secondary);padding:6px 16px;border-radius:6px;cursor:pointer;">取消</button>
+        <button id="_okBtn" class="btn btn-sm" style="background:var(--color-up);color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:500;">确认</button>
+      </div>
+    </div>`;
+    document.body.appendChild(modal);
+    const cleanup = (val) => { modal.remove(); resolve(val); };
+    modal.querySelector('#_cancelBtn').onclick = () => cleanup(false);
+    modal.querySelector('#_okBtn').onclick = () => cleanup(true);
+    modal.onclick = (e) => { if (e.target === modal) cleanup(false); };
+    // ESC键取消
+    const escHandler = (e) => { if (e.key === 'Escape') { cleanup(false); document.removeEventListener('keydown', escHandler); } };
+    document.addEventListener('keydown', escHandler);
+    // 自动聚焦确认按钮
+    setTimeout(() => modal.querySelector('#_okBtn').focus(), 50);
+  });
 }
 
 function debounceFundSearch(q) {
