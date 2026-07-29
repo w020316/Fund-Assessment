@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pandas_ta as ta
+from src.analysis.technical import rsi as ta_rsi, macd as ta_macd
 import akshare as ak
 from enum import Enum
 from dataclasses import dataclass, field
@@ -68,7 +68,7 @@ class TradingQuant:
             score += 8.0
         elif ma5.iloc[-1] < ma20.iloc[-1]:
             score -= 8.0
-        rsi = ta.rsi(close, length=14)
+        rsi = ta_rsi(close, length=14)
         if rsi is not None and not rsi.empty:
             rsi_val = float(rsi.iloc[-1])
             if 40 <= rsi_val <= 60:
@@ -79,7 +79,7 @@ class TradingQuant:
                 score -= 15.0
             elif rsi_val < 20:
                 score += 10.0
-        macd = ta.macd(close)
+        macd = ta_macd(close)
         if macd is not None and not macd.empty:
             macd_line = macd.iloc[-1, 0]
             signal_line = macd.iloc[-1, 1]

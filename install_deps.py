@@ -26,7 +26,6 @@ PACKAGES = [
     ("apscheduler", "apscheduler"),
     ("tushare", "tushare"),
     ("stockstats", "stockstats"),
-    ("pandas-ta", "pandas_ta"),
     ("akshare", "akshare"),
     ("tdxpy", "tdxpy"),
     ("mootdx", "mootdx"),

@@ -26,11 +26,8 @@ market-data = [
     "tdxpy==0.2.7",
     "mootdx==0.9.11",
 ]
-technical = [
-    "pandas-ta==0.4.71b0",
-]
 full = [
-    "fund-assessment[market-data,technical]",
+    "fund-assessment[market-data]",
 ]
 
 [build-system]

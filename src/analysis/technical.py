@@ -1,35 +1,114 @@
+"""技术指标计算模块（纯 pandas/numpy 实现，无 pandas_ta 依赖）。
+
+所有指标实现保持与 pandas_ta 输出结构一致：
+- sma: 返回 Series
+- macd: 返回 DataFrame(macd, macd_signal, macd_hist)
+- stoch: 返回 DataFrame(stoch_k, stoch_d)
+- rsi: 返回 Series
+- bbands: 返回 DataFrame(upper, mid, lower)
+- atr: 返回 Series
+"""
 import numpy as np
 import pandas as pd
-import pandas_ta as ta
+
+
+def sma(close: pd.Series, length: int = 30) -> pd.Series:
+    """简单移动平均（兼容 pandas_ta.sma）。"""
+    return close.rolling(window=length, min_periods=length).mean()
+
+
+def ema(close: pd.Series, length: int = 12) -> pd.Series:
+    """指数移动平均。"""
+    return close.ewm(span=length, adjust=False).mean()
+
+
+def rsi(close: pd.Series, length: int = 14) -> pd.Series:
+    """相对强弱指数（兼容 pandas_ta.rsi）。"""
+    delta = close.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1 / length, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1 / length, adjust=False).mean()
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    result = 100 - (100 / (1 + rs))
+    return result.fillna(50.0)
+
+
+def macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> pd.DataFrame:
+    """MACD 指标（兼容 pandas_ta.macd）。返回 DataFrame(macd, macd_signal, macd_hist)。"""
+    ema_fast = ema(close, fast)
+    ema_slow = ema(close, slow)
+    macd_line = ema_fast - ema_slow
+    macd_signal = ema(macd_line, signal)
+    macd_hist = macd_line - macd_signal
+    return pd.DataFrame({
+        "MACD": macd_line,
+        "MACD_signal": macd_signal,
+        "MACD_hist": macd_hist,
+    })
+
+
+def stoch(high: pd.Series, low: pd.Series, close: pd.Series,
+          k: int = 14, d: int = 3) -> pd.DataFrame:
+    """随机振荡指标 KDJ（兼容 pandas_ta.stoch）。返回 DataFrame(K, D)。"""
+    low_min = low.rolling(window=k, min_periods=k).min()
+    high_max = high.rolling(window=k, min_periods=k).max()
+    denom = high_max - low_min
+    denom = denom.replace(0, np.nan)
+    rsv = (close - low_min) / denom * 100
+    rsv = rsv.fillna(50.0)
+    k_line = rsv.ewm(com=d - 1, adjust=False).mean()
+    d_line = k_line.ewm(com=d - 1, adjust=False).mean()
+    return pd.DataFrame({"K": k_line, "D": d_line})
+
+
+def bbands(close: pd.Series, length: int = 20, std: float = 2.0) -> pd.DataFrame:
+    """布林带（兼容 pandas_ta.bbands）。返回 DataFrame(upper, mid, lower)。"""
+    mid = close.rolling(window=length, min_periods=length).mean()
+    rolling_std = close.rolling(window=length, min_periods=length).std()
+    upper = mid + std * rolling_std
+    lower = mid - std * rolling_std
+    return pd.DataFrame({"upper": upper, "mid": mid, "lower": lower})
+
+
+def atr(high: pd.Series, low: pd.Series, close: pd.Series,
+        length: int = 14) -> pd.Series:
+    """真实波幅均值（兼容 pandas_ta.atr）。"""
+    prev_close = close.shift(1)
+    tr1 = high - low
+    tr2 = (high - prev_close).abs()
+    tr3 = (low - prev_close).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    return tr.ewm(alpha=1 / length, adjust=False).mean()
 
 
 def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     result = df.copy()
 
     for period in [5, 10, 20, 60]:
-        result[f"MA{period}"] = ta.sma(result["close"], length=period)
+        result[f"MA{period}"] = _sma(result["close"], length=period)
 
-    macd = ta.macd(result["close"])
+    macd = _macd(result["close"])
     if macd is not None:
-        result["MACD"] = macd.iloc[:, 0]
-        result["MACD_signal"] = macd.iloc[:, 1]
-        result["MACD_hist"] = macd.iloc[:, 2]
+        result["MACD"] = macd["MACD"]
+        result["MACD_signal"] = macd["MACD_signal"]
+        result["MACD_hist"] = macd["MACD_hist"]
 
-    stoch = ta.stoch(result["high"], result["low"], result["close"])
+    stoch = _stoch(result["high"], result["low"], result["close"])
     if stoch is not None:
-        result["KDJ_K"] = stoch.iloc[:, 0]
-        result["KDJ_D"] = stoch.iloc[:, 1]
+        result["KDJ_K"] = stoch["K"]
+        result["KDJ_D"] = stoch["D"]
         result["KDJ_J"] = 3 * result["KDJ_K"] - 2 * result["KDJ_D"]
 
-    result["RSI"] = ta.rsi(result["close"], length=14)
+    result["RSI"] = _rsi(result["close"], length=14)
 
-    boll = ta.bbands(result["close"], length=20)
+    boll = _bbands(result["close"], length=20)
     if boll is not None:
-        result["BOLL_upper"] = boll.iloc[:, 0]
-        result["BOLL_mid"] = boll.iloc[:, 1]
-        result["BOLL_lower"] = boll.iloc[:, 2]
+        result["BOLL_upper"] = boll["upper"]
+        result["BOLL_mid"] = boll["mid"]
+        result["BOLL_lower"] = boll["lower"]
 
-    result["ATR"] = ta.atr(result["high"], result["low"], result["close"], length=14)
+    result["ATR"] = _atr(result["high"], result["low"], result["close"], length=14)
 
     typical_price = (result["high"] + result["low"] + result["close"]) / 3
     cumulative_volume = result["volume"].cumsum()

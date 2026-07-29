@@ -1,9 +1,9 @@
 @echo off
 echo Installing Fund-Assessment dependencies...
-D:\dev-tools\Python312\python.exe -m pip install -i https://pypi.tuna.tsinghua.edu.cn/simple apscheduler tushare stockstats pandas-ta akshare mootdx
+D:\dev-tools\Python312\python.exe -m pip install -i https://pypi.tuna.tsinghua.edu.cn/simple apscheduler tushare stockstats akshare mootdx
 echo.
 echo Verifying installation...
-D:\dev-tools\Python312\python.exe -c "import akshare, apscheduler, tushare, pandas_ta, mootdx, stockstats; print('All dependencies installed successfully!')"
+D:\dev-tools\Python312\python.exe -c "import akshare, apscheduler, tushare, mootdx, stockstats; print('All dependencies installed successfully!')"
 echo.
 echo Press any key to start the server...
 pause

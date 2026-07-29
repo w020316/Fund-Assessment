@@ -5,7 +5,7 @@ from enum import Enum
 
 import numpy as np
 import pandas as pd
-import pandas_ta as ta
+from src.analysis.technical import rsi as ta_rsi
 import akshare as ak
 
 
@@ -182,7 +182,7 @@ class StockMonitor:
         if df.empty or len(df) < 30:
             return None
         close = df["收盘"].astype(float)
-        rsi = ta.rsi(close, length=14)
+        rsi = ta_rsi(close, length=14)
         if rsi is None or rsi.empty:
             return None
         rsi_val = float(rsi.iloc[-1])

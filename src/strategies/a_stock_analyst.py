@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
-import pandas_ta as ta
+from src.analysis.technical import rsi as ta_rsi, macd as ta_macd
 import akshare as ak
 
 
@@ -114,10 +114,10 @@ class AStockAnalyst:
         recent_high = float(high.tail(20).max())
         data.support = round(recent_low, 2)
         data.resistance = round(recent_high, 2)
-        rsi = ta.rsi(close, length=14)
+        rsi = ta_rsi(close, length=14)
         if rsi is not None and not rsi.empty:
             data.rsi = round(float(rsi.iloc[-1]), 2)
-        macd = ta.macd(close)
+        macd = ta_macd(close)
         if macd is not None and not macd.empty:
             macd_line = float(macd.iloc[-1, 0])
             signal_line = float(macd.iloc[-1, 1])
