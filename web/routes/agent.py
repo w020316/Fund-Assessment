@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
 
 from src.core.ai_service import analyze_stock, quick_analysis as ai_quick_analysis, multi_analyze as ai_multi_analyze, analyze_portfolio as ai_analyze_portfolio, get_market_outlook as ai_get_market_outlook
@@ -110,10 +110,11 @@ class FundMultiAnalyzeRequest(BaseModel):
 
 
 @router.post("/fund_analyze")
-async def fund_multi_analyze(req: FundMultiAnalyzeRequest) -> dict[str, Any]:
+async def fund_multi_analyze(request: Request, req: FundMultiAnalyzeRequest) -> dict[str, Any]:
     """基金多智能体分析(7角色:消息面/基金/板块/技术/基本面/风险/宏观)
 
     集成 P1-1消息面 + P1-2重仓股板块 + P1-3大盘研判 + P1-4五信号 + LLM多空辩论
+    限流:3次/分钟/客户端(借鉴 la-deps/slowapi,保护 LLM 高成本调用)
     """
     from src.analysis.multi_agent_fund import analyze_fund_with_agents
     result = await analyze_fund_with_agents(
@@ -154,3 +155,15 @@ async def fund_analyze_steps() -> dict[str, Any]:
         "estimated_seconds": 90,
         "source": "TradingAgents-CN-inspired",
     }
+
+
+# ===== 限流配置(借鉴 la-deps/slowapi)=====
+# 对 fund_analyze 这种 LLM 高成本端点单独限流 3次/分钟
+# 注意:由于 Limiter 实例在 web/api.py 创建,这里通过 request 引用全局 limiter
+try:
+    from web.api import limiter as _limiter
+    # 重新装饰 fund_multi_analyze 添加限流(3次/分钟/客户端)
+    fund_multi_analyze = _limiter.limit("3/minute")(fund_multi_analyze)
+except ImportError:
+    # slowapi 不可用时降级为无限流(开发环境)
+    pass

@@ -17,6 +17,9 @@ mootdx==0.9.11
 litellm>=1.40.0
 httpx>=0.27.0
 json-repair>=0.25.0
+# 借鉴 la-deps/slowapi(1.0K Star)FastAPI 限流中间件
+# 保护 LLM 高成本端点,纯Python无Rust依赖
+slowapi>=0.1.9
 # SnowNLP 为可选依赖(借鉴 isnowany/snownlp 6.5K Star 中文情感分析)
 # 纯Python但setup.py在部分环境安装慢,改为运行时可选导入
 # 代码已实现降级:未安装时自动退化为纯关键词法(news_aggregator.py)
