@@ -17,6 +17,8 @@ mootdx==0.9.11
 litellm>=1.40.0
 httpx>=0.27.0
 json-repair>=0.25.0
-# 借鉴 isnowany/snownlp(6.5K Star)中文情感分析,提升消息面情绪分类准确性
-# 纯Python实现,无Rust依赖,失败时自动降级到关键词法
-snownlp==0.12.3
+# SnowNLP 为可选依赖(借鉴 isnowany/snownlp 6.5K Star 中文情感分析)
+# 纯Python但setup.py在部分环境安装慢,改为运行时可选导入
+# 代码已实现降级:未安装时自动退化为纯关键词法(news_aggregator.py)
+# 本地开发: pip install snownlp 即可启用语义分析增强
+# Render部署: 不安装,使用关键词法(稳定优先)
