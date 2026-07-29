@@ -1024,8 +1024,20 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 
         <!-- 消息面聚合(P1-1) -->
         <div class="card mb-16" id="newsFeedCard" style="display:none;">
-          <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6Z"/></svg> 消息面聚合</div>
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+            <span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6Z"/></svg> 消息面聚合</span>
+            <span style="font-size:11px;color:var(--text-muted);">P1-1 四源聚合 + AI 检索</span>
+          </div>
           <div id="newsFeedBody"></div>
+          <!-- AI 检索（P1-1 /api/news/search） -->
+          <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">AI 检索（Tavily + LLM 总结）</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <input class="input" id="newsSearchInput" placeholder="输入关键词（如 白酒板块、降准、新能源补贴）" style="flex:1;min-width:200px;" onkeydown="if(event.key==='Enter')newsAiSearch()">
+              <button class="btn btn-primary" onclick="newsAiSearch()">检索</button>
+            </div>
+            <div id="newsSearchBody" style="margin-top:8px;"></div>
+          </div>
         </div>
 
         <!-- 五信号融合建议(P1-4) -->
@@ -2689,6 +2701,68 @@ async function loadNewsFeed() {
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">热点事件</div>
     ${hotHtml || '<div style="padding:8px;color:var(--text-muted);">暂无热点</div>'}
   `;
+}
+
+// AI 检索（P1-1 /api/news/search）
+async function newsAiSearch() {
+  const input = document.getElementById('newsSearchInput');
+  const body = document.getElementById('newsSearchBody');
+  if (!input || !body) return;
+  const query = input.value.trim();
+  if (!query) {
+    body.innerHTML = '<div style="color:var(--color-warning);font-size:12px;padding:4px 0;">请输入检索关键词</div>';
+    return;
+  }
+  body.innerHTML = '<div style="color:var(--text-muted);padding:8px 0;font-size:12px;">AI 检索中（Tavily + LLM 总结，约 10-20 秒）...</div>';
+  try {
+    const resp = await fetch('/api/news/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: query }),
+    });
+    const data = await resp.json();
+    const sr = data && data.data ? data.data : null;
+    if (!sr) {
+      body.innerHTML = '<div style="color:var(--color-warning);font-size:12px;padding:4px 0;">AI 检索失败</div>';
+      return;
+    }
+    const results = sr.results || [];
+    const summary = sr.summary || '—';
+    const sentiment = sr.sentiment || '中性';
+    const sentimentColor = (sentiment === '利好' || sentiment === 'positive') ? 'var(--color-up)' :
+                            (sentiment === '利空' || sentiment === 'negative') ? 'var(--color-down)' : 'var(--color-flat)';
+    let html = `<div style="padding:8px 10px;background:var(--bg-card);border-radius:6px;margin-bottom:8px;">
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">检索关键词: <strong style="color:var(--accent);">${sr.query || query}</strong> · 情绪: <span style="color:${sentimentColor};">${sentiment}</span></div>
+      <div style="font-size:13px;color:var(--text-secondary);line-height:1.6;">${summary}</div>
+    </div>`;
+    if (results.length) {
+      html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">相关消息</div>';
+      results.slice(0, 6).forEach(n => {
+        const title = n.title || '—';
+        const source = n.source || '';
+        const time = n.publish_time || n.published_date || '';
+        const sentimentTag = n.sentiment || '';
+        const tagColor = (sentimentTag === '利好' || sentimentTag === 'positive') ? 'var(--color-up)' :
+                         (sentimentTag === '利空' || sentimentTag === 'negative') ? 'var(--color-down)' : 'var(--color-flat)';
+        html += `<div style="padding:6px 0;border-bottom:1px solid var(--border);">
+          <div style="font-size:13px;">${title}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
+            ${sentimentTag ? `<span style="color:${tagColor};margin-right:6px;">[${sentimentTag}]</span>` : ''}
+            ${source ? `<span>${source}</span>` : ''}
+            ${time ? `<span style="margin-left:6px;">${time}</span>` : ''}
+          </div>
+        </div>`;
+      });
+    } else {
+      html += '<div style="color:var(--text-muted);font-size:12px;padding:4px 0;">未检索到相关消息</div>';
+    }
+    if (data._meta && data._meta.timestamp) {
+      html += `<div style="margin-top:6px;font-size:11px;color:var(--text-muted);text-align:right;">数据源: ${data._meta.data_source || ''} · ${data._meta.timestamp}</div>`;
+    }
+    body.innerHTML = html;
+  } catch (e) {
+    body.innerHTML = `<div style="color:var(--color-warning);font-size:12px;padding:4px 0;">AI 检索失败: ${e.message}</div>`;
+  }
 }
 
 /* ========== P1-4 五信号融合建议 ========== */
