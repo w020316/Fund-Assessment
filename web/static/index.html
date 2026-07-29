@@ -648,6 +648,17 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
           </div>
         </div>
 
+        <!-- 市场展望（大盘视角，先于个股分析） -->
+        <div class="card mb-16" id="marketOutlookCard">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+            <span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18"/><path d="M12 3a15 15 0 0 0 0 18"/></svg> 市场展望（大盘研判）</span>
+            <button class="btn btn-outline" style="padding:4px 10px;font-size:12px;" onclick="loadMarketOutlook()">刷新</button>
+          </div>
+          <div id="marketOutlookBody" style="padding:8px 0;">
+            <div style="color:var(--text-muted);text-align:center;padding:20px 0;">点击"刷新"获取市场展望</div>
+          </div>
+        </div>
+
         <!-- 4个Agent卡片 -->
         <div class="grid-2 mb-16" id="agentCards">
           <div class="card" id="agent-fundamental">
@@ -956,6 +967,17 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
           </div>
         </div>
 
+        <!-- 板块轮动总览（P1-2） -->
+        <div class="card mb-16" id="sectorRotationCard">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+            <span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg> 板块轮动总览</span>
+            <button class="btn btn-outline" style="padding:4px 10px;font-size:12px;" onclick="loadSectorRotation()">刷新</button>
+          </div>
+          <div id="sectorRotationBody" style="padding:8px 0;">
+            <div style="color:var(--text-muted);text-align:center;padding:20px 0;">点击"刷新"获取板块轮动数据</div>
+          </div>
+        </div>
+
         <!-- 风控状态 -->
         <div class="card">
           <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> 风控状态</div>
@@ -1093,6 +1115,17 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 
       <!-- ==================== 7. 国际市场 ==================== -->
       <div class="page" id="page-global">
+        <!-- 全球市场总览（P1：使用 /api/global/overview 一次性获取） -->
+        <div class="card mb-16" id="globalOverviewCard">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+            <span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15 15 0 0 1 0 20"/><path d="M12 2a15 15 0 0 0 0 20"/></svg> 全球市场总览</span>
+            <button class="btn btn-outline" style="padding:4px 10px;font-size:12px;" onclick="loadGlobalOverview()">刷新</button>
+          </div>
+          <div id="globalOverviewBody" style="padding:8px 0;">
+            <div style="color:var(--text-muted);text-align:center;padding:20px 0;">点击"刷新"获取全球市场总览</div>
+          </div>
+        </div>
+
         <!-- 国际指数卡片 -->
         <div class="flex-between mb-12">
           <div style="font-size:15px;font-weight:600;display:flex;align-items:center;gap:6px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18"/><path d="M12 3a15 15 0 0 0 0 18"/></svg> 国际指数</div>
@@ -1857,6 +1890,59 @@ function renderFinalDecision(result) {
   `;
 }
 
+// 市场展望（大盘研判）
+async function loadMarketOutlook() {
+  const body = document.getElementById('marketOutlookBody');
+  if (!body) return;
+  body.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:20px 0;">分析中，请稍候（约30秒）...</div>';
+  const data = await api('/api/agent/market_outlook');
+  if (!data || !data.outlook_analysis) {
+    body.innerHTML = '<div style="color:var(--color-warning);text-align:center;padding:20px 0;">暂无市场展望数据（分析引擎可能超时，请稍后重试）</div>';
+    return;
+  }
+  const oa = data.outlook_analysis;
+  const outlookColor = oa.outlook === 'BULLISH' ? 'var(--color-down)' : (oa.outlook === 'BEARISH' ? 'var(--color-up)' : 'var(--color-flat)');
+  const outlookText = oa.outlook === 'BULLISH' ? '看多' : (oa.outlook === 'BEARISH' ? '看空' : '中性');
+  let html = `<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+    <div style="font-size:20px;font-weight:700;color:${outlookColor};">${outlookText}</div>
+    <div style="color:var(--text-secondary);">置信度: <span style="color:var(--accent);font-weight:600;">${(oa.confidence * 100).toFixed(0)}%</span></div>
+  </div>`;
+  if (oa.summary) html += `<div style="color:var(--text-secondary);margin-bottom:12px;line-height:1.7;">${oa.summary}</div>`;
+  if (Array.isArray(oa.index_analysis) && oa.index_analysis.length) {
+    html += '<div style="margin-bottom:12px;"><div style="color:var(--text-muted);font-size:12px;margin-bottom:6px;">指数点评</div>';
+    oa.index_analysis.forEach(idx => {
+      const trendColor = idx.trend === 'UP' ? 'var(--color-down)' : (idx.trend === 'DOWN' ? 'var(--color-up)' : 'var(--color-flat)');
+      html += `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);">
+        <span>${idx.name} <span style="color:${trendColor};">${idx.change_pct >= 0 ? '+' : ''}${idx.change_pct}%</span></span>
+        <span style="color:var(--text-muted);font-size:12px;">${idx.comment || ''}</span>
+      </div>`;
+    });
+    html += '</div>';
+  }
+  if (oa.sector_rotation) {
+    html += '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;">';
+    if (Array.isArray(oa.sector_rotation.hot_sectors) && oa.sector_rotation.hot_sectors.length) {
+      html += `<div><span style="color:var(--color-down);">▲ 热门:</span> ${oa.sector_rotation.hot_sectors.join('、')}</div>`;
+    }
+    if (Array.isArray(oa.sector_rotation.cold_sectors) && oa.sector_rotation.cold_sectors.length) {
+      html += `<div><span style="color:var(--color-up);">▼ 冷门:</span> ${oa.sector_rotation.cold_sectors.join('、')}</div>`;
+    }
+    html += '</div>';
+  }
+  if (Array.isArray(oa.risk_alerts) && oa.risk_alerts.length) {
+    html += '<div style="margin-bottom:12px;"><span style="color:var(--color-warning);">⚠ 风险提示</span><ul style="margin:4px 0 0 16px;color:var(--text-secondary);">';
+    oa.risk_alerts.forEach(r => { html += `<li>${r}</li>`; });
+    html += '</ul></div>';
+  }
+  if (Array.isArray(oa.opportunities) && oa.opportunities.length) {
+    html += '<div style="margin-bottom:12px;"><span style="color:var(--color-down);">✓ 机会</span><ul style="margin:4px 0 0 16px;color:var(--text-secondary);">';
+    oa.opportunities.forEach(o => { html += `<li>${o}</li>`; });
+    html += '</ul></div>';
+  }
+  if (oa.strategy) html += `<div style="color:var(--text-secondary);padding-top:8px;border-top:1px solid var(--border);"><strong>策略建议:</strong> ${oa.strategy}</div>`;
+  body.innerHTML = html;
+}
+
 // 分析历史
 async function loadAiHistory() {
   const data = await api('/api/agent/history');
@@ -2319,6 +2405,92 @@ async function loadPositionData() {
   loadAccountOverview();
   loadPositions();
   loadRiskStatus();
+  loadSectorRotation();
+}
+
+// 板块轮动总览（P1-2）
+async function loadSectorRotation() {
+  const body = document.getElementById('sectorRotationBody');
+  if (!body) return;
+  body.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:20px 0;">加载中...</div>';
+  const data = await api('/api/holdings/sector-rotation/overview');
+  if (!data || !data.data) {
+    body.innerHTML = '<div style="color:var(--color-warning);text-align:center;padding:20px 0;">板块轮动数据获取失败</div>';
+    return;
+  }
+  const sr = data.data;
+  const topGainers = sr.top_gainers || [];
+  const topLosers = sr.top_losers || [];
+  const hotSectors = sr.hot_sectors || [];
+  let html = '<div class="grid-2 gap-16">';
+
+  // 领涨板块
+  html += '<div><div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">领涨板块</div>';
+  if (topGainers.length) {
+    topGainers.slice(0,5).forEach(s => {
+      const change = Number(s.change_pct || 0);
+      const changeColor = change >= 0 ? 'var(--color-down)' : 'var(--color-up)';
+      html += `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);">
+        <span>${s.name || ''}</span>
+        <span style="color:${changeColor};">${change >= 0 ? '+' : ''}${change.toFixed(2)}%</span>
+      </div>`;
+    });
+  } else {
+    html += '<div style="color:var(--text-muted);font-size:12px;padding:8px 0;">暂无数据</div>';
+  }
+  html += '</div>';
+
+  // 领跌板块
+  html += '<div><div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">领跌板块</div>';
+  if (topLosers.length) {
+    topLosers.slice(0,5).forEach(s => {
+      const change = Number(s.change_pct || 0);
+      const changeColor = change >= 0 ? 'var(--color-down)' : 'var(--color-up)';
+      html += `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);">
+        <span>${s.name || ''}</span>
+        <span style="color:${changeColor};">${change >= 0 ? '+' : ''}${change.toFixed(2)}%</span>
+      </div>`;
+    });
+  } else {
+    html += '<div style="color:var(--text-muted);font-size:12px;padding:8px 0;">暂无数据</div>';
+  }
+  html += '</div></div>';
+
+  // 热门板块（成交额Top5）
+  if (hotSectors.length) {
+    html += '<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">';
+    html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">热门板块（成交额Top5）</div>';
+    html += '<div style="display:flex;flex-wrap:wrap;gap:6px;">';
+    hotSectors.slice(0,5).forEach(s => {
+      const amount = Number(s.amount || 0);
+      const amountStr = amount >= 1e8 ? (amount / 1e8).toFixed(2) + '亿' : amount >= 1e4 ? (amount / 1e4).toFixed(0) + '万' : amount.toFixed(0);
+      html += `<span style="display:inline-block;padding:2px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;font-size:12px;">${s.name || ''} <span style="color:var(--text-muted);">${amountStr}</span></span>`;
+    });
+    html += '</div></div>';
+  }
+
+  // 轮动信号
+  if (sr.rotation_signal) {
+    const signalMap = {'普涨':'var(--color-down)','普跌':'var(--color-up)','分化':'var(--color-warning)'};
+    const signalColor = signalMap[sr.rotation_signal] || 'var(--accent)';
+    const gainCount = sr.gain_count || 0;
+    const fallCount = sr.fall_count || 0;
+    const totalSectors = sr.total_sectors || (gainCount + fallCount);
+    html += `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">轮动信号</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span style="color:${signalColor};font-weight:600;">${sr.rotation_signal}</span>
+        <span style="color:var(--text-muted);font-size:12px;">涨 ${gainCount} / 跌 ${fallCount} / 共 ${totalSectors}</span>
+      </div>
+    </div>`;
+  }
+
+  // 数据源信息
+  if (data._meta && data._meta.timestamp) {
+    html += `<div style="margin-top:8px;font-size:11px;color:var(--text-muted);text-align:right;">数据源: ${data._meta.data_source || ''} · ${data._meta.timestamp}</div>`;
+  }
+
+  body.innerHTML = html;
 }
 
 /* ========== 6. 基金管理 ========== */
@@ -2437,31 +2609,48 @@ async function loadNewsFeed() {
   card.style.display = 'block';
   body.innerHTML = '<div style="padding:12px;color:var(--text-muted);">加载中...</div>';
 
-  const resp = await api('/api/news/feed');
-  const data = resp && resp.data ? resp.data : resp;
-  if (!data) {
+  // 并行调用三个消息面端点：feed(聚合) + hot(热门) + sentiment(情绪指数)
+  const [feedResp, hotResp, sentimentResp] = await Promise.all([
+    api('/api/news/feed'),
+    api('/api/news/hot'),
+    api('/api/news/sentiment')
+  ]);
+
+  const data = feedResp && feedResp.data ? feedResp.data : feedResp;
+  if (!data && !hotResp && !sentimentResp) {
     body.innerHTML = '<div style="padding:12px;color:var(--text-muted);">消息面数据获取失败</div>';
     return;
   }
 
-  const sentiment = data.sentiment_index || {};
-  const sentimentScore = sentiment.score || 50;
-  const sentimentLabel = sentiment.label || '中性';
+  // 情绪指数：优先用独立 sentiment 端点（更精准），降级用 feed 内嵌
+  let sentimentScore = 50, sentimentLabel = '中性', sentimentDetail = null;
+  if (sentimentResp && sentimentResp.data) {
+    const sd = sentimentResp.data;
+    sentimentScore = sd.index || sd.score || 50;
+    sentimentLabel = sd.level || sd.label || '中性';
+    sentimentDetail = sd;
+  } else {
+    const sentiment = (data && data.sentiment_index) || {};
+    sentimentScore = sentiment.score || 50;
+    sentimentLabel = sentiment.label || '中性';
+  }
   const sentimentColor = sentimentScore >= 60 ? 'var(--color-up)' :
                          sentimentScore >= 40 ? 'var(--color-flat)' :
                          'var(--color-down)';
 
-  const hotEvents = data.hot_events || [];
-  const keyNews = data.key_news || [];
+  // 热点事件：合并 feed 自带 + 独立 hot 端点
+  const feedHot = (data && data.hot_events) || [];
+  const independentHot = (hotResp && hotResp.data) || [];
+  const hotEvents = independentHot.length ? independentHot : feedHot;
 
   const hotHtml = hotEvents.slice(0, 8).map(n => {
-    const title = n.title || n.summary || '—';
+    const title = n.title || n.summary || n.content || '—';
     const sentimentTag = n.sentiment || n.sentiment_label || '';
     const tagColor = (sentimentTag === 'positive' || sentimentTag === '利好') ? 'var(--color-up)' :
                      (sentimentTag === 'negative' || sentimentTag === '利空') ? 'var(--color-down)' :
                      'var(--color-flat)';
     const source = n.source || '';
-    const time = n.published_at || n.time || '';
+    const time = n.publish_time || n.published_at || n.time || '';
     return `<div style="padding:6px 0;border-bottom:1px solid var(--border);">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
         <span style="font-size:13px;flex:1;">${title}</span>
@@ -2471,14 +2660,31 @@ async function loadNewsFeed() {
     </div>`;
   }).join('');
 
+  // 情绪详情（独立端点的 pos/neg/neutral 计数）
+  let sentimentBreakdown = '';
+  if (sentimentDetail) {
+    const pos = sentimentDetail.positive_count || 0;
+    const neg = sentimentDetail.negative_count || 0;
+    const neu = sentimentDetail.neutral_count || 0;
+    const total = pos + neg + neu;
+    if (total > 0) {
+      sentimentBreakdown = `<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
+        <span style="color:var(--color-up);">利好 ${pos}</span> ·
+        <span style="color:var(--color-flat);">中性 ${neu}</span> ·
+        <span style="color:var(--color-down);">利空 ${neg}</span>
+      </div>`;
+    }
+  }
+
   body.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);margin-bottom:8px;">
       <div>
         <span style="font-size:13px;color:var(--text-muted);">情绪指数:</span>
         <span style="font-size:20px;font-weight:700;color:${sentimentColor};margin-left:6px;">${sentimentScore.toFixed(1)}</span>
         <span style="font-size:12px;color:${sentimentColor};margin-left:4px;">${sentimentLabel}</span>
+        ${sentimentBreakdown}
       </div>
-      <div style="font-size:12px;color:var(--text-muted);">共 ${data.total_count || 0} 条</div>
+      <div style="font-size:12px;color:var(--text-muted);">共 ${(data && data.total_count) || hotEvents.length || 0} 条</div>
     </div>
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">热点事件</div>
     ${hotHtml || '<div style="padding:8px;color:var(--text-muted);">暂无热点</div>'}
@@ -2931,9 +3137,138 @@ function selectFund(code, name) {
 
 /* ========== 国际市场 ========== */
 async function loadGlobalData() {
+  loadGlobalOverview();
   loadGlobalIndices();
   loadUsHot();
   loadHkHot();
+}
+
+// 全球市场总览（P1：一次性并行获取指数 + 美股热门 + 港股热门）
+async function loadGlobalOverview() {
+  const body = document.getElementById('globalOverviewBody');
+  if (!body) return;
+  body.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:20px 0;">加载中...</div>';
+  const data = await api('/api/global/overview');
+  if (!data || !data.data) {
+    body.innerHTML = '<div style="color:var(--color-warning);text-align:center;padding:20px 0;">全球市场总览数据获取失败</div>';
+    return;
+  }
+  const ov = data.data;
+  const indices = ov.indices || [];
+  const usHot = ov.us_hot || [];
+  const hkHot = ov.hk_hot || [];
+
+  // 统计函数
+  const stats = (arr) => {
+    if (!arr.length) return {gain:0, fall:0, flat:0, avg:0, max:null, min:null};
+    let gain=0, fall=0, flat=0, sum=0, max=null, min=null;
+    arr.forEach(s => {
+      const pct = Number(s.change_pct || 0);
+      if (pct > 0) gain++;
+      else if (pct < 0) fall++;
+      else flat++;
+      sum += pct;
+      if (!max || pct > max.change_pct) max = s;
+      if (!min || pct < min.change_pct) min = s;
+    });
+    return {gain, fall, flat, avg: sum/arr.length, max, min};
+  };
+
+  const idxStats = stats(indices);
+  const usStats = stats(usHot);
+  const hkStats = stats(hkHot);
+
+  // 综合情绪判断
+  const totalGain = idxStats.gain + usStats.gain + hkStats.gain;
+  const totalFall = idxStats.fall + usStats.fall + hkStats.fall;
+  let sentiment = '中性', sentimentColor = 'var(--color-flat)';
+  if (totalGain > totalFall * 1.5) { sentiment = '偏多'; sentimentColor = 'var(--color-down)'; }
+  else if (totalFall > totalGain * 1.5) { sentiment = '偏空'; sentimentColor = 'var(--color-up)'; }
+
+  let html = '';
+
+  // 综合情绪
+  html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;margin-bottom:12px;background:var(--bg-card);border-radius:6px;">
+    <div>
+      <span style="font-size:12px;color:var(--text-muted);">全球市场情绪</span>
+      <div style="font-size:18px;font-weight:700;color:${sentimentColor};">${sentiment}</div>
+    </div>
+    <div style="text-align:right;">
+      <span style="font-size:12px;color:var(--text-muted);">总涨跌统计</span>
+      <div style="font-size:14px;">
+        <span style="color:var(--color-down);">▲ ${totalGain}</span>
+        <span style="color:var(--text-muted);margin:0 6px;">/</span>
+        <span style="color:var(--color-up);">▼ ${totalFall}</span>
+      </div>
+    </div>
+  </div>`;
+
+  // 三大市场分栏
+  html += '<div class="grid-3 gap-12">';
+
+  // 国际指数
+  const idxAvgColor = idxStats.avg >= 0 ? 'var(--color-down)' : 'var(--color-up)';
+  html += `<div style="padding:10px;background:var(--bg-card);border-radius:6px;border-left:3px solid ${idxAvgColor};">
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">国际指数</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+      <span style="font-size:14px;font-weight:600;">${indices.length} 个指数</span>
+      <span style="color:${idxAvgColor};font-weight:600;">${idxStats.avg >= 0 ? '+' : ''}${idxStats.avg.toFixed(2)}%</span>
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);">
+      <span style="color:var(--color-down);">▲${idxStats.gain}</span>
+      <span style="color:var(--color-up);margin-left:6px;">▼${idxStats.fall}</span>
+      <span style="margin-left:6px;">平${idxStats.flat}</span>
+    </div>`;
+  if (idxStats.max) {
+    html += `<div style="margin-top:6px;font-size:11px;color:var(--text-secondary);">领涨: ${idxStats.max.name || ''} <span style="color:var(--color-down);">+${Number(idxStats.max.change_pct||0).toFixed(2)}%</span></div>`;
+  }
+  html += '</div>';
+
+  // 美股热门
+  const usAvgColor = usStats.avg >= 0 ? 'var(--color-down)' : 'var(--color-up)';
+  html += `<div style="padding:10px;background:var(--bg-card);border-radius:6px;border-left:3px solid ${usAvgColor};">
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">美股热门</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+      <span style="font-size:14px;font-weight:600;">${usHot.length} 只</span>
+      <span style="color:${usAvgColor};font-weight:600;">${usStats.avg >= 0 ? '+' : ''}${usStats.avg.toFixed(2)}%</span>
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);">
+      <span style="color:var(--color-down);">▲${usStats.gain}</span>
+      <span style="color:var(--color-up);margin-left:6px;">▼${usStats.fall}</span>
+      <span style="margin-left:6px;">平${usStats.flat}</span>
+    </div>`;
+  if (usStats.max) {
+    html += `<div style="margin-top:6px;font-size:11px;color:var(--text-secondary);">领涨: ${usStats.max.name || usStats.max.code || ''} <span style="color:var(--color-down);">+${Number(usStats.max.change_pct||0).toFixed(2)}%</span></div>`;
+  }
+  html += '</div>';
+
+  // 港股热门
+  const hkAvgColor = hkStats.avg >= 0 ? 'var(--color-down)' : 'var(--color-up)';
+  html += `<div style="padding:10px;background:var(--bg-card);border-radius:6px;border-left:3px solid ${hkAvgColor};">
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">港股热门</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+      <span style="font-size:14px;font-weight:600;">${hkHot.length} 只</span>
+      <span style="color:${hkAvgColor};font-weight:600;">${hkStats.avg >= 0 ? '+' : ''}${hkStats.avg.toFixed(2)}%</span>
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);">
+      <span style="color:var(--color-down);">▲${hkStats.gain}</span>
+      <span style="color:var(--color-up);margin-left:6px;">▼${hkStats.fall}</span>
+      <span style="margin-left:6px;">平${hkStats.flat}</span>
+    </div>`;
+  if (hkStats.max) {
+    html += `<div style="margin-top:6px;font-size:11px;color:var(--text-secondary);">领涨: ${hkStats.max.name || hkStats.max.code || ''} <span style="color:var(--color-down);">+${Number(hkStats.max.change_pct||0).toFixed(2)}%</span></div>`;
+  }
+  html += '</div>';
+
+  html += '</div>';
+
+  // 数据源信息
+  if (data._meta && data._meta.timestamp) {
+    const cachedTag = data._meta.cached ? ' · 缓存' : '';
+    html += `<div style="margin-top:8px;font-size:11px;color:var(--text-muted);text-align:right;">数据源: ${data._meta.data_source || ''}${cachedTag} · ${data._meta.timestamp}</div>`;
+  }
+
+  body.innerHTML = html;
 }
 
 async function loadGlobalIndices() {
