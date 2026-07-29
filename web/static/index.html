@@ -531,6 +531,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
   .nav-item .nav-icon { font-size:18px; }
 }
 </style>
+<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
 <div class="app">
@@ -2621,7 +2622,13 @@ async function loadFundData() {
       <td style="white-space:nowrap;">
         <button class="btn btn-sm" style="color:var(--accent-cyan);padding:3px 8px;" title="P1-2 重仓股板块分析" onclick="viewHoldings('${p.fund_code}','${p.fund_name || ''}')">分析</button>
         <button class="btn btn-sm" style="color:var(--accent);padding:3px 8px;" title="P1-5 多智能体深度分析" onclick="multiAgentAnalyze('${p.fund_code}','${p.fund_name || ''}',${p.cost_nav || 0},${p.shares || 0})">深度</button>
+        <button class="btn btn-sm" style="color:var(--text-muted);padding:3px 8px;" title="净值走势图" onclick="toggleFundChart('${p.fund_code}')">走势</button>
         <button class="btn btn-sm" style="color:var(--color-up);padding:3px 8px;" onclick="deleteFundPosition('${p.fund_code}')">删</button>
+      </td>
+    </tr>
+    <tr id="chart-row-${p.fund_code}" style="display:none;">
+      <td colspan="8" style="padding:0;border:none;">
+        <div id="fund-chart-${p.fund_code}" style="height:220px;width:100%;"></div>
       </td>
     </tr>`;
   }).join('');
@@ -2630,6 +2637,54 @@ async function loadFundData() {
 async function loadFundAdvice() {
   // 兼容旧入口:转发到 v2
   return loadFundAdviceV2();
+}
+
+const _fundCharts = {};
+async function toggleFundChart(fundCode) {
+  const row = document.getElementById(`chart-row-${fundCode}`);
+  if (!row) return;
+  if (row.style.display === 'none') {
+    row.style.display = '';
+    const container = document.getElementById(`fund-chart-${fundCode}`);
+    if (!container) return;
+    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px;">加载净值走势中...</div>';
+    try {
+      const resp = await api(`/api/fund/history?code=${fundCode}&period=1y`);
+      if (!resp || !resp.data || !resp.data.length) {
+        container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px;">暂无历史净值数据</div>';
+        return;
+      }
+      // 数据按日期升序排列(lightweight-charts要求)
+      const sorted = resp.data.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+      const chartData = sorted.map(d => ({
+        time: d.date,
+        value: parseFloat(d.nav || d.acc_nav || 0)
+      }));
+      // 销毁旧图表
+      if (_fundCharts[fundCode]) { _fundCharts[fundCode].remove(); delete _fundCharts[fundCode]; }
+      const chart = LightweightCharts.createChart(container, {
+        layout: { background: { type: 'solid', color: 'transparent' }, textColor: '#8B92A8', fontSize: 11 },
+        grid: { vertLines: { color: 'rgba(28,35,51,0.5)' }, horzLines: { color: 'rgba(28,35,51,0.5)' } },
+        rightPriceScale: { borderColor: '#2A3142' },
+        timeScale: { borderColor: '#2A3142', rightOffset: 5 },
+        crosshair: { mode: 0 },
+        handleScroll: true, handleScale: true,
+      });
+      const series = chart.addAreaSeries({
+        lineColor: '#00D9FF',
+        topColor: 'rgba(0,217,255,0.25)',
+        bottomColor: 'rgba(0,217,255,0.0)',
+        lineWidth: 2,
+      });
+      series.setData(chartData);
+      chart.timeScale().fitContent();
+      _fundCharts[fundCode] = chart;
+    } catch (e) {
+      container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px;">加载失败: ${e.message || '未知错误'}</div>`;
+    }
+  } else {
+    row.style.display = 'none';
+  }
 }
 
 /* ========== P1-3 大盘温度计 ========== */
