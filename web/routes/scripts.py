@@ -49,6 +49,16 @@ class MatchStockRequest(BaseModel):
     stock_data: dict[str, Any]
 
 
+class AIGenerateRequest(BaseModel):
+    """P3 AI建议生成请求
+
+    基于基金/个股数据用免费 LLM 生成个性化投资建议话术
+    """
+    target_type: str  # "fund" 或 "stock"
+    target_data: dict[str, Any]  # 基金/个股数据
+    scene: str = ""  # 场景提示(可选)
+
+
 @router.get("/list")
 async def list_scripts(
     category: str = Query("", description="分类:stock/fund,空则全部"),
@@ -96,3 +106,22 @@ async def match_stock(req: MatchStockRequest):
     """根据个股数据自动匹配话术"""
     result = sl.match_stock_scripts(req.stock_data)
     return {"data": result, "_meta": _build_meta(), "count": len(result)}
+
+
+@router.post("/ai-generate")
+async def ai_generate(req: AIGenerateRequest):
+    """P3 AI建议生成 - 基于基金/个股数据用免费 LLM 生成个性化投资建议话术
+
+    使用免费模型(agnes-2.0-flash / glm-4-flash),30s 超时,
+    失败时自动降级为模板话术匹配。
+    """
+    if req.target_type not in ("fund", "stock"):
+        return {"data": None, "_meta": _build_meta(), "error": "target_type 必须为 fund 或 stock"}
+
+    result = await asyncio.to_thread(
+        sl.ai_generate_script,
+        req.target_type,
+        req.target_data,
+        req.scene,
+    )
+    return {"data": result, "_meta": _build_meta(data_source=result.get("source", "ai"))}

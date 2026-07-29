@@ -7,6 +7,7 @@
 - 变量填充:模板含 {stock_name}/{cost_price}/{current_price}/{pnl_pct} 等占位符
 - 分类清晰:股市话术(技术面/基本面/资金面/情绪面)+ 基金话术(定投/止盈/加仓/择时)
 - 安全兜底:变量缺失时用「—」占位,不报错
+- AI增强:P3 AI建议生成,基于基金/个股数据用免费LLM生成个性化话术
 """
 from __future__ import annotations
 
@@ -403,3 +404,114 @@ def get_script_categories() -> dict[str, Any]:
         },
         "total": len(_ALL_SCRIPTS),
     }
+
+
+# ──────────────────────────────────────────────
+# P3: AI 建议生成(基于免费 LLM 生成个性化投资建议话术)
+# ──────────────────────────────────────────────
+
+def ai_generate_script(
+    target_type: str,
+    target_data: dict[str, Any],
+    scene: str = "",
+) -> dict[str, Any]:
+    """用免费 LLM 基于基金/个股数据生成个性化投资建议话术。
+
+    P3 AI建议生成功能:
+    - 接收基金或个股的实时数据(净值/涨跌/持仓等)
+    - 调用免费 LLM(agencies-2.0-flash / glm-4-flash)生成建议
+    - 30s 超时 + 降级回退(失败时返回模板话术)
+
+    Args:
+        target_type: "fund" 或 "stock"
+        target_data: 基金/个股数据字典
+        scene: 场景提示(如"买入"/"止盈"/"加仓"),可选
+
+    Returns:
+        {"source": "ai"|"fallback", "content": str, "scene": str, "target_type": str}
+    """
+    # 构建 LLM prompt
+    if target_type == "fund":
+        name = target_data.get("fund_name", target_data.get("name", "该基金"))
+        code = target_data.get("fund_code", target_data.get("code", ""))
+        nav = target_data.get("current_nav", target_data.get("nav", 0))
+        change_pct = target_data.get("change_pct", 0)
+        pnl_pct = target_data.get("pnl_pct", 0)
+        decision = target_data.get("decision", "")
+
+        prompt = f"""你是一位专业的基金投资顾问。基于以下基金数据,生成一段简短的投资建议话术(100-200字):
+
+基金名称: {name}({code})
+当前净值: {nav}
+当日涨跌: {change_pct}%
+持仓收益: {pnl_pct}%
+参考决策: {decision}
+场景提示: {scene or '综合分析'}
+
+要求:
+1. 语气专业但易懂,避免"AI"等词汇
+2. 结合数据给出明确建议(加仓/减仓/持有/观望)
+3. 简要说明理由(1-2点)
+4. 控制在 100-200 字
+"""
+    else:
+        name = target_data.get("stock_name", target_data.get("name", "该股票"))
+        code = target_data.get("stock_code", target_data.get("code", ""))
+        price = target_data.get("current_price", target_data.get("price", 0))
+        change_pct = target_data.get("change_pct", 0)
+        pnl_pct = target_data.get("pnl_pct", 0)
+
+        prompt = f"""你是一位专业的股票投资顾问。基于以下个股数据,生成一段简短的投资建议话术(100-200字):
+
+股票名称: {name}({code})
+当前价格: {price}
+当日涨跌: {change_pct}%
+持仓收益: {pnl_pct}%
+场景提示: {scene or '综合分析'}
+
+要求:
+1. 语气专业但易懂,避免"AI"等词汇
+2. 结合数据给出明确建议
+3. 简要说明理由(1-2点)
+4. 控制在 100-200 字
+"""
+
+    # 调用 LLM(30s 超时,失败时降级)
+    try:
+        from src.core.llm_router import get_llm_router
+        router = get_llm_router()
+        response = router.chat(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            timeout=30,
+        )
+        content = response.content.strip() if response.content else ""
+        if not content:
+            raise RuntimeError("LLM 返回空内容")
+
+        return {
+            "source": "ai",
+            "content": content,
+            "scene": scene or "综合分析",
+            "target_type": target_type,
+            "target_name": name,
+            "target_code": code,
+        }
+    except Exception as e:
+        logger.warning(f"AI 生成话术失败,降级为模板: {e}")
+        # 降级:匹配模板话术
+        if target_type == "fund":
+            fallback = match_fund_scripts(target_data)
+        else:
+            fallback = match_stock_scripts(target_data)
+        content = fallback[0]["content"] if fallback else "暂无可用话术"
+
+        return {
+            "source": "fallback",
+            "content": content,
+            "scene": scene or "综合分析",
+            "target_type": target_type,
+            "target_name": name,
+            "target_code": code,
+            "error": str(e),
+        }

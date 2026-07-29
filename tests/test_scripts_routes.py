@@ -1,12 +1,13 @@
 """话术库路由单元测试
 
-验证 web/routes/scripts.py 的 6 个端点:
+验证 web/routes/scripts.py 的 7 个端点:
 - GET /list 列表(可过滤)
 - GET /categories 分类结构
 - GET /{script_id} 单个模板
 - POST /generate 生成话术
 - POST /match/fund 基金建议匹配
 - POST /match/stock 个股数据匹配
+- POST /ai-generate P3 AI建议生成(LLM生成,失败降级)
 """
 from __future__ import annotations
 
@@ -265,3 +266,112 @@ class TestMatchStock:
         data = resp.json()
         for item in data["data"]:
             assert item["scene"] == "sell"
+
+
+class TestAIGenerate:
+    """POST /api/scripts/ai-generate
+
+    P3 AI建议生成:基于基金/个股数据用免费 LLM 生成个性化投资建议话术
+    LLM 不可用时自动降级为模板话术
+    """
+
+    def test_ai_generate_fund_success(self, client):
+        """基金 AI 生成 - LLM 可用时返回 AI 生成内容"""
+        from unittest.mock import MagicMock, patch
+        mock_response = MagicMock()
+        mock_response.content = "建议持有该基金,当前净值稳定,长期趋势向好。"
+        with patch("src.core.llm_router.get_llm_router") as mock_router:
+            mock_router.return_value.chat.return_value = mock_response
+            resp = client.post("/api/scripts/ai-generate", json={
+                "target_type": "fund",
+                "target_data": {
+                    "fund_code": "110022",
+                    "fund_name": "易方达消费",
+                    "current_nav": 2.5,
+                    "change_pct": 1.5,
+                    "pnl_pct": 8.0,
+                    "decision": "HOLD",
+                },
+                "scene": "持有",
+            })
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert data["source"] == "ai"
+        assert "持有" in data["content"]
+        assert data["target_type"] == "fund"
+        assert data["target_name"] == "易方达消费"
+
+    def test_ai_generate_stock_success(self, client):
+        """个股 AI 生成 - LLM 可用时返回 AI 生成内容"""
+        from unittest.mock import MagicMock, patch
+        mock_response = MagicMock()
+        mock_response.content = "建议观望,短期波动较大,等待回调机会。"
+        with patch("src.core.llm_router.get_llm_router") as mock_router:
+            mock_router.return_value.chat.return_value = mock_response
+            resp = client.post("/api/scripts/ai-generate", json={
+                "target_type": "stock",
+                "target_data": {
+                    "stock_code": "600519",
+                    "stock_name": "贵州茅台",
+                    "current_price": 1800.0,
+                    "change_pct": -2.0,
+                    "pnl_pct": -5.0,
+                },
+            })
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert data["source"] == "ai"
+        assert "观望" in data["content"]
+        assert data["target_type"] == "stock"
+
+    def test_ai_generate_fallback_on_llm_failure(self, client):
+        """LLM 失败时降级为模板话术"""
+        from unittest.mock import patch
+        with patch("src.core.llm_router.get_llm_router") as mock_router:
+            mock_router.return_value.chat.side_effect = RuntimeError("LLM 不可用")
+            resp = client.post("/api/scripts/ai-generate", json={
+                "target_type": "fund",
+                "target_data": {
+                    "fund_code": "110022",
+                    "fund_name": "易方达消费",
+                    "current_nav": 2.5,
+                    "change_pct": 1.5,
+                    "pnl_pct": 8.0,
+                },
+            })
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert data["source"] == "fallback"
+        assert "content" in data
+        assert "error" in data
+
+    def test_ai_generate_invalid_target_type(self, client):
+        """无效 target_type 返回错误"""
+        resp = client.post("/api/scripts/ai-generate", json={
+            "target_type": "invalid",
+            "target_data": {},
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["data"] is None
+        assert "target_type" in data["error"]
+
+    def test_ai_generate_empty_response_falls_back(self, client):
+        """LLM 返回空内容时降级"""
+        from unittest.mock import MagicMock, patch
+        mock_response = MagicMock()
+        mock_response.content = ""
+        with patch("src.core.llm_router.get_llm_router") as mock_router:
+            mock_router.return_value.chat.return_value = mock_response
+            resp = client.post("/api/scripts/ai-generate", json={
+                "target_type": "stock",
+                "target_data": {
+                    "stock_code": "600519",
+                    "stock_name": "贵州茅台",
+                    "current_price": 1800.0,
+                    "change_pct": 1.0,
+                },
+            })
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert data["source"] == "fallback"
