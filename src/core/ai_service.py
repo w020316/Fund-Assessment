@@ -31,10 +31,14 @@ from src.core.data_source_v2 import (
 
 load_dotenv()
 
-_TTAPI_API_KEY = os.getenv("TTAPI_API_KEY", "")
-_TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
-_TINYFISH_API_KEY = os.getenv("TINYFISH_API_KEY", "")
-_AGNES_API_KEY = os.getenv("AGNES_API_KEY", "")
+# 集中配置管理(借鉴 pydantic/pydantic-settings)
+# 优先用 settings 单例,降级用 os.getenv 保持向后兼容
+from src.utils.config import settings
+
+_TTAPI_API_KEY = settings.ttapi_api_key or os.getenv("TTAPI_API_KEY", "")
+_TAVILY_API_KEY = settings.tavily_api_key or os.getenv("TAVILY_API_KEY", "")
+_TINYFISH_API_KEY = settings.tinyfish_api_key or os.getenv("TINYFISH_API_KEY", "")
+_AGNES_API_KEY = settings.agnes_api_key or os.getenv("AGNES_API_KEY", "")
 
 _TTAPI_BASE_URL = "https://ttapi.io/v1"
 _TINYFISH_BASE_URL = "https://api.tinyfish.io/v1"

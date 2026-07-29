@@ -22,9 +22,21 @@ import secrets
 from fastapi import Header, HTTPException, status
 from loguru import logger
 
+from src.utils.config import settings
+
 
 def _get_admin_token() -> str:
-    return os.getenv("ADMIN_TOKEN", "").strip()
+    """获取管理员令牌
+
+    优先用 os.getenv 实时读取(确保测试 fixture patch.dict 生效),
+    settings 单例仅作为后备(模块加载时缓存,不适合测试场景)。
+    """
+    # 实时读环境变量(确保 patch.dict 测试 fixture 生效)
+    token = os.getenv("ADMIN_TOKEN", "").strip()
+    if token:
+        return token
+    # 后备:settings 单例(生产环境)
+    return settings.admin_token
 
 
 def require_admin(authorization: str | None = Header(default=None)) -> None:
