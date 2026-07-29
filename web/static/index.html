@@ -530,8 +530,38 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
   .nav-item { justify-content:center; padding:12px; }
   .nav-item .nav-icon { font-size:18px; }
 }
+/* ========== 性能优化:骨架屏占位 ========== */
+@keyframes skeleton-pulse {
+  0% { opacity: 0.4; }
+  50% { opacity: 0.8; }
+  100% { opacity: 0.4; }
+}
+.skeleton-card {
+  background: var(--bg-card);
+  border-radius: var(--radius);
+  padding: 16px;
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+.skeleton-line {
+  height: 12px;
+  background: var(--border);
+  border-radius: 4px;
+  margin-bottom: 8px;
+}
+.skeleton-line.short { width: 60%; }
+.skeleton-line.medium { width: 80%; }
+.skeleton-line.large { width: 100%; }
+.skeleton-row {
+  height: 40px;
+  background: var(--bg-card);
+  border-radius: 4px;
+  margin-bottom: 4px;
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
 </style>
-<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<!-- 性能优化:lightweight-charts 改为懒加载(仅在用户点击"走势"时加载),避免阻塞首屏 -->
+<link rel="preconnect" href="https://unpkg.com" crossorigin>
+<link rel="dns-prefetch" href="https://unpkg.com">
 </head>
 <body>
 <div class="app">
@@ -1410,6 +1440,40 @@ const API_TIMEOUT_MS = (url) => {
   return 15000; // 默认 15s
 };
 
+// 性能优化:带 localStorage 缓存的 API 调用
+// 首次调用:发起网络请求,结果写入 localStorage
+// 再次调用:先返回缓存数据(秒级),后台静默刷新最新数据
+// 适用于:首页行情/板块轮动/全球指数等"可接受短暂延迟"的数据
+const _CACHE_PREFIX = 'qf_cache_';
+function _getCached(key) {
+  try {
+    const raw = localStorage.getItem(_CACHE_PREFIX + key);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch(e) { return null; }
+}
+function _setCached(key, data, ttl = 60) {
+  try {
+    localStorage.setItem(_CACHE_PREFIX + key, JSON.stringify({ data, ts: Date.now(), ttl: ttl * 1000 }));
+  } catch(e) { /* localStorage 满或禁用,静默降级 */ }
+}
+// 带缓存的API调用:先返回缓存(秒开),后台刷新(后台刷新不阻塞UI)
+async function apiCached(url, cacheKey, ttl = 60) {
+  const cached = _getCached(cacheKey);
+  if (cached) {
+    // 有缓存:立即返回缓存数据(秒级显示)
+    // 后台静默刷新最新数据(不阻塞当前调用)
+    api(url).then(fresh => {
+      if (fresh) _setCached(cacheKey, fresh, ttl);
+    }).catch(() => {});
+    return cached.data;
+  }
+  // 无缓存:正常请求并缓存
+  const data = await api(url);
+  if (data) _setCached(cacheKey, data, ttl);
+  return data;
+}
+
 async function api(url, options={}) {
   const controller = new AbortController();
   const timeoutMs = API_TIMEOUT_MS(url);
@@ -1518,22 +1582,25 @@ updateTime();
 let marketRefreshTimer = null;
 
 async function loadMarketData() {
-  loadIndexData();
-  loadHotStocks('gain');
-  loadSectorRanking();
-  loadGlobalNews();
-  loadGlobalIndexBar();
-  // 自动刷新
+  // 性能优化:5个API并行调用(原串行约5x时间,并行仅需最慢1个时间)
+  Promise.all([
+    loadIndexData(),
+    loadHotStocks('gain'),
+    loadSectorRanking(),
+    loadGlobalNews(),
+    loadGlobalIndexBar(),
+  ]).catch(() => {});
+  // 自动刷新(改为15秒,减少请求频率,原5秒过于频繁)
   if (marketRefreshTimer) clearInterval(marketRefreshTimer);
   marketRefreshTimer = setInterval(() => {
     loadIndexData();
     loadHotStocks(currentHotTab);
-  }, 5000);
+  }, 15000);
 }
 
 // 指数数据
 async function loadIndexData() {
-  const data = await api('/api/market/index_realtime');
+  const data = await apiCached('/api/market/index_realtime', 'index_realtime', 30);
   const container = document.getElementById('indexCards');
   // 顶部指数栏
   const bar = document.getElementById('indexBar');
@@ -1609,7 +1676,7 @@ async function loadIndexData() {
 async function loadGlobalIndexBar() {
   const bar = document.getElementById('indexBar');
   if (!bar) return;
-  const data = await api('/api/global/indices');
+  const data = await apiCached('/api/global/indices', 'global_indices', 60);
   const list = (data && data.data) || [];
   if (!list.length) return;
   // 保留已有 A 股指数,追加国际指数
@@ -1669,7 +1736,7 @@ function switchHotTab(tab) {
 }
 
 async function loadHotStocks(type) {
-  const data = await api('/api/market/hot_stocks');
+  const data = await apiCached('/api/market/hot_stocks', 'hot_stocks', 30);
   const body = document.getElementById('hotStockBody');
   // 前端type到API字段名的映射
   const typeMap = {gain: 'top_gainers', loss: 'top_losers', volume: 'top_volume'};
@@ -1746,7 +1813,7 @@ async function loadHotStocks(type) {
 
 // 行业板块热力图
 async function loadSectorRanking() {
-  const data = await api('/api/market/sector_ranking');
+  const data = await apiCached('/api/market/sector_ranking', 'sector_ranking', 60);
   const container = document.getElementById('sectorHeatmap');
 
   const defaultSectors = [
@@ -1782,7 +1849,7 @@ async function loadSectorRanking() {
 
 // 全球资讯
 async function loadGlobalNews() {
-  const data = await api('/api/market/global_news');
+  const data = await apiCached('/api/market/global_news', 'global_news', 120);
   const container = document.getElementById('newsTicker');
 
   const defaultNews = [
@@ -2640,6 +2707,21 @@ async function loadFundAdvice() {
 }
 
 const _fundCharts = {};
+let _lightweightChartsLoaded = false; // lightweight-charts 库加载状态
+
+// 懒加载 lightweight-charts 库(仅在首次点击"走势"时加载,避免阻塞首屏)
+function _loadLightweightCharts() {
+  if (_lightweightChartsLoaded && window.LightweightCharts) return Promise.resolve();
+  if (window.LightweightCharts) { _lightweightChartsLoaded = true; return Promise.resolve(); }
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js';
+    script.onload = () => { _lightweightChartsLoaded = true; resolve(); };
+    script.onerror = () => reject(new Error('图表库加载失败'));
+    document.head.appendChild(script);
+  });
+}
+
 async function toggleFundChart(fundCode) {
   const row = document.getElementById(`chart-row-${fundCode}`);
   if (!row) return;
@@ -2649,7 +2731,11 @@ async function toggleFundChart(fundCode) {
     if (!container) return;
     container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px;">加载净值走势中...</div>';
     try {
-      const resp = await api(`/api/fund/history?code=${fundCode}&period=1y`);
+      // 并行:加载图表库 + 获取历史数据
+      const [_, resp] = await Promise.all([
+        _loadLightweightCharts(),
+        api(`/api/fund/history?code=${fundCode}&period=1y`),
+      ]);
       if (!resp || !resp.data || !resp.data.length) {
         container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px;">暂无历史净值数据</div>';
         return;
@@ -4466,8 +4552,30 @@ document.addEventListener('keydown', (e) => {
 });
 
 /* ========== 初始化 ========== */
+// 性能优化:首屏骨架屏占位(数据加载前显示,避免空白闪烁)
+function _renderSkeletons() {
+  // 指数卡片区域:3个骨架卡片
+  const indexCards = document.getElementById('indexCards');
+  if (indexCards && !indexCards.innerHTML.trim()) {
+    indexCards.innerHTML = Array(3).fill(0).map(() =>
+      '<div class="skeleton-card"><div class="skeleton-line short"></div><div class="skeleton-line large" style="height:28px;"></div><div class="skeleton-line medium"></div></div>'
+    ).join('');
+  }
+  // 板块热力图:骨架占位
+  const sectorHeatmap = document.getElementById('sectorHeatmap');
+  if (sectorHeatmap && !sectorHeatmap.innerHTML.trim()) {
+    sectorHeatmap.innerHTML = Array(6).fill(0).map(() => '<div class="skeleton-row"></div>').join('');
+  }
+  // 热门股票表格:骨架占位
+  const hotStockBody = document.getElementById('hotStockBody');
+  if (hotStockBody && !hotStockBody.innerHTML.trim()) {
+    hotStockBody.innerHTML = Array(5).fill(0).map(() => '<div class="skeleton-row"></div>').join('');
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
-  loadMarketData();
+  _renderSkeletons(); // 立即填充骨架屏(0ms)
+  loadMarketData();   // 后台加载数据(覆盖骨架屏)
   loadLlmProvider();
   updateFreshness();
 });
