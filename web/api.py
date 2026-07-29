@@ -127,7 +127,7 @@ async def root():
 async def health_check():
     from src.core.ai_service import _check_api_keys
     keys = _check_api_keys()
-    # 修复:不泄露具体哪些 key 已配置,只返回布尔值
+    # 返回各 key 的配置状态(布尔值,不泄露 key 本身),供前端状态展示与诊断
     has_ai = any([keys.get("ttapi"), keys.get("agnes"), keys.get("tavily"),
                   keys.get("tinyfish"), keys.get("openai_key"), keys.get("api_key")]) or bool(os.getenv("ZHIPU_API_KEY"))
     return {
@@ -135,6 +135,7 @@ async def health_check():
         "akshare": _HAS_AKSHARE,
         "core_modules": _HAS_CORE,
         "ai_ready": has_ai,
+        "ai_keys": keys,
     }
 
 
