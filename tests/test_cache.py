@@ -148,6 +148,94 @@ class TestCacheClear:
         cache.clear()
 
 
+class TestInvalidateByPrefix:
+    """invalidate_by_prefix 按前缀批量失效(借鉴 diskcache evict(tag) 设计)"""
+
+    def test_invalidates_matching_prefix(self, cache):
+        """应删除所有匹配前缀的缓存条目"""
+        cache.set("fund_110022_nav", {"nav": 1.5})
+        cache.set("fund_110022_holdings", [{"code": "600519"}])
+        cache.set("fund_161725_nav", {"nav": 2.0})
+        cache.set("sector_rotation", [{"name": "白酒"}])
+
+        deleted = cache.invalidate_by_prefix("fund_110022")
+        assert deleted == 2
+        assert cache.get("fund_110022_nav") is None
+        assert cache.get("fund_110022_holdings") is None
+        # 其他前缀不受影响
+        assert cache.get("fund_161725_nav") == {"nav": 2.0}
+        assert cache.get("sector_rotation") is not None
+
+    def test_invalidates_all_fund_prefix(self, cache):
+        """前缀 'fund_' 应匹配所有基金缓存"""
+        cache.set("fund_110022", 1)
+        cache.set("fund_161725", 2)
+        cache.set("stock_600519", 3)
+
+        deleted = cache.invalidate_by_prefix("fund_")
+        assert deleted == 2
+        assert cache.get("stock_600519") == 3
+
+    def test_empty_prefix_returns_zero(self, cache):
+        """空前缀不删除任何内容(防止误删全部)"""
+        cache.set("k1", "v1")
+        assert cache.invalidate_by_prefix("") == 0
+        assert cache.get("k1") == "v1"
+
+    def test_no_match_returns_zero(self, cache):
+        """无匹配返回 0"""
+        cache.set("k1", "v1")
+        assert cache.invalidate_by_prefix("nonexistent_prefix") == 0
+        assert cache.get("k1") == "v1"
+
+    def test_prefix_with_special_chars_safe(self, cache):
+        """含特殊字符的前缀也应安全工作(经 _safe_key 转义)"""
+        cache.set("market:stock/600519", {"price": 1688})
+        cache.set("market:stock/000001", {"price": 15})
+        cache.set("market:index/000300", {"price": 4000})
+
+        deleted = cache.invalidate_by_prefix("market:stock/")
+        assert deleted == 2
+        assert cache.get("market:stock/600519") is None
+        assert cache.get("market:index/000300") is not None
+
+    def test_partial_prefix_not_matched(self, cache):
+        """前缀匹配应精确到字符,不匹配部分前缀"""
+        cache.set("fund_110022", 1)
+        cache.set("fund_a110022", 2)  # 注意 'fund_a' 不匹配 'fund_1'
+        deleted = cache.invalidate_by_prefix("fund_1")
+        assert deleted == 1
+        assert cache.get("fund_a110022") == 2
+
+
+class TestInvalidateBySuffix:
+    """invalidate_by_suffix 按后缀批量失效"""
+
+    def test_invalidates_matching_suffix(self, cache):
+        """应删除所有匹配后缀的缓存条目"""
+        cache.set("stock_600519_realtime", {"price": 1688})
+        cache.set("stock_000001_realtime", {"price": 15})
+        cache.set("stock_600519_history", [{"nav": 1.5}])
+
+        deleted = cache.invalidate_by_suffix("_realtime")
+        assert deleted == 2
+        assert cache.get("stock_600519_realtime") is None
+        assert cache.get("stock_000001_realtime") is None
+        # history 不受影响
+        assert cache.get("stock_600519_history") is not None
+
+    def test_empty_suffix_returns_zero(self, cache):
+        """空后缀不删除任何内容"""
+        cache.set("k1", "v1")
+        assert cache.invalidate_by_suffix("") == 0
+        assert cache.get("k1") == "v1"
+
+    def test_no_match_returns_zero(self, cache):
+        """无匹配返回 0"""
+        cache.set("k1", "v1")
+        assert cache.invalidate_by_suffix("_nonexistent") == 0
+
+
 class TestSafeKey:
     """_safe_key 文件名非法字符转义"""
 
