@@ -124,3 +124,33 @@ async def fund_multi_analyze(req: FundMultiAnalyzeRequest) -> dict[str, Any]:
         mode=req.mode,
     )
     return result
+
+
+# ===== 多智能体分析进度状态(借鉴 TradingAgents-CN Streamlit 实时进度展示) =====
+# 7 步骤定义,与前端进度条联动(每 ~12s 推进一步,90s 内走完)
+_FUND_ANALYZE_STEPS = [
+    {"step": 1, "key": "data", "name": "抓取基金数据", "desc": "净值/估值/重仓股/板块轮动"},
+    {"step": 2, "key": "news", "name": "消息面分析", "desc": "情绪指数/热点事件/公告研报"},
+    {"step": 3, "key": "sector", "name": "板块趋势分析", "desc": "重仓股板块暴露/集中度"},
+    {"step": 4, "key": "technical", "name": "技术面分析", "desc": "K线形态/均线/量价"},
+    {"step": 5, "key": "fundamental", "name": "基本面分析", "desc": "重仓股PE/PB/ROE"},
+    {"step": 6, "key": "risk", "name": "风险评估", "desc": "解禁/减持/质押/融资融券"},
+    {"step": 7, "key": "debate", "name": "多空辩论与决策", "desc": "7分析师辩论+组合经理决议"},
+]
+
+
+@router.get("/fund_analyze_steps")
+async def fund_analyze_steps() -> dict[str, Any]:
+    """获取基金多智能体分析的7个步骤定义(供前端渲染进度条)。
+
+    借鉴 hsliuping/TradingAgents-CN 项目 Streamlit 实时进度展示思路:
+    前端在用户点击"深度"按钮后,先调用本端点获取步骤列表,
+    然后在等待 LLM 响应期间按时间间隔逐步推进进度条,
+    让用户知道"正在分析什么"而非空白等待。
+    """
+    return {
+        "total_steps": len(_FUND_ANALYZE_STEPS),
+        "steps": _FUND_ANALYZE_STEPS,
+        "estimated_seconds": 90,
+        "source": "TradingAgents-CN-inspired",
+    }

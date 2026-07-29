@@ -253,3 +253,55 @@ class TestFundAnalyze:
         # 验证 mode 参数默认为 deep
         _, kwargs = mock_fn.call_args
         assert kwargs["mode"] == "deep"
+
+
+class TestFundAnalyzeSteps:
+    """GET /api/agent/fund_analyze_steps
+
+    验证多智能体分析进度步骤定义端点(借鉴 TradingAgents-CN 进度展示)
+    """
+
+    def test_returns_seven_steps(self, client):
+        """应返回 7 个分析步骤"""
+        resp = client.get("/api/agent/fund_analyze_steps")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_steps"] == 7
+        assert len(data["steps"]) == 7
+
+    def test_step_structure(self, client):
+        """每个步骤应包含 step/key/name/desc 字段"""
+        resp = client.get("/api/agent/fund_analyze_steps")
+        data = resp.json()
+        for i, s in enumerate(data["steps"], 1):
+            assert s["step"] == i
+            assert "key" in s and isinstance(s["key"], str) and len(s["key"]) > 0
+            assert "name" in s and isinstance(s["name"], str) and len(s["name"]) > 0
+            assert "desc" in s and isinstance(s["desc"], str)
+
+    def test_step_keys_unique(self, client):
+        """所有步骤的 key 应唯一"""
+        resp = client.get("/api/agent/fund_analyze_steps")
+        data = resp.json()
+        keys = [s["key"] for s in data["steps"]]
+        assert len(set(keys)) == len(keys), f"步骤key有重复: {keys}"
+
+    def test_estimated_seconds_positive(self, client):
+        """预估时间应为正数"""
+        resp = client.get("/api/agent/fund_analyze_steps")
+        data = resp.json()
+        assert data["estimated_seconds"] > 0
+
+    def test_first_step_is_data_fetch(self, client):
+        """第一步应是数据抓取"""
+        resp = client.get("/api/agent/fund_analyze_steps")
+        data = resp.json()
+        assert data["steps"][0]["key"] == "data"
+        assert "抓取" in data["steps"][0]["name"] or "数据" in data["steps"][0]["name"]
+
+    def test_last_step_is_debate(self, client):
+        """最后一步应是多空辩论"""
+        resp = client.get("/api/agent/fund_analyze_steps")
+        data = resp.json()
+        assert data["steps"][-1]["key"] == "debate"
+        assert "辩论" in data["steps"][-1]["name"]

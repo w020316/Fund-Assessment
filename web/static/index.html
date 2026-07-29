@@ -1120,7 +1120,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <div class="modal-box" style="max-width:1000px;">
           <div class="modal-header">
             <span id="multiAgentModalTitle">基金多智能体分析</span>
-            <span class="modal-close" onclick="document.getElementById('multiAgentModal').style.display='none'">×</span>
+            <span class="modal-close" onclick="if(_fundAnalyzeProgressTimer){clearInterval(_fundAnalyzeProgressTimer);_fundAnalyzeProgressTimer=null;}document.getElementById('multiAgentModal').style.display='none'">×</span>
           </div>
           <div class="modal-body" id="multiAgentModalBody" style="max-height:75vh;overflow-y:auto;"></div>
         </div>
@@ -3112,36 +3112,84 @@ async function viewHoldings(fundCode, fundName) {
 }
 
 /* ========== P1-5 多智能体基金深度分析 ========== */
+// 7步分析进度定义(借鉴 hsliuping/TradingAgents-CN Streamlit 实时进度展示)
+const _FUND_ANALYZE_STEPS = [
+  {step:1, name:'抓取基金数据', desc:'净值/估值/重仓股/板块轮动'},
+  {step:2, name:'消息面分析', desc:'情绪指数/热点事件/公告研报'},
+  {step:3, name:'板块趋势分析', desc:'重仓股板块暴露/集中度'},
+  {step:4, name:'技术面分析', desc:'K线形态/均线/量价'},
+  {step:5, name:'基本面分析', desc:'重仓股PE/PB/ROE'},
+  {step:6, name:'风险评估', desc:'解禁/减持/质押/融资融券'},
+  {step:7, name:'多空辩论与决策', desc:'7分析师辩论+组合经理决议'},
+];
+let _fundAnalyzeProgressTimer = null; // 进度计时器(全局,便于清理)
+
+function _renderFundAnalyzeProgress(currentStep, elapsedSec) {
+  // 渲染进度条:已完成步骤绿色对勾,当前步骤脉冲,未开始灰色
+  const total = _FUND_ANALYZE_STEPS.length;
+  const pct = Math.min(100, Math.round((currentStep / total) * 100));
+  const stepsHtml = _FUND_ANALYZE_STEPS.map((s, i) => {
+    const idx = i + 1;
+    let icon, color, bg;
+    if (idx < currentStep) { icon = '✓'; color = 'var(--color-up)'; bg = 'rgba(0,200,83,0.12)'; }
+    else if (idx === currentStep) { icon = '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);animation:pulse-dot 1.2s infinite;"></span>'; color = 'var(--accent)'; bg = 'rgba(0,217,255,0.08)'; }
+    else { icon = idx; color = 'var(--text-tertiary)'; bg = 'transparent'; }
+    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:6px;background:${bg};margin-bottom:4px;transition:background 0.3s;">
+      <div style="width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;color:${color};border:1px solid ${color};flex-shrink:0;">${icon}</div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:12px;color:${idx <= currentStep ? 'var(--text-primary)' : 'var(--text-tertiary)'};font-weight:${idx === currentStep ? '600' : '400'};">${s.name}</div>
+        <div style="font-size:10px;color:var(--text-tertiary);margin-top:1px;">${s.desc}</div>
+      </div>
+    </div>`;
+  }).join('');
+  return `<div style="padding:20px 24px;">
+    <div style="font-size:13px;color:var(--text-primary);margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">
+      <span>7位分析师正在会诊</span>
+      <span style="font-size:11px;color:var(--text-tertiary);">${elapsedSec}s / ~90s</span>
+    </div>
+    <div style="height:4px;background:var(--bg-card);border-radius:2px;overflow:hidden;margin-bottom:14px;">
+      <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,var(--accent),var(--color-up));transition:width 0.5s ease;border-radius:2px;"></div>
+    </div>
+    <div>${stepsHtml}</div>
+    <div style="margin-top:12px;font-size:11px;color:var(--text-tertiary);text-align:center;">分析中(请勿关闭窗口)</div>
+  </div>`;
+}
+
 async function multiAgentAnalyze(fundCode, fundName, costNav, shares) {
   const modal = document.getElementById('multiAgentModal');
   const titleEl = document.getElementById('multiAgentModalTitle');
   const bodyEl = document.getElementById('multiAgentModalBody');
   titleEl.textContent = `多智能体分析 - ${fundName || fundCode} (${fundCode})`;
-  bodyEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);"><div style="font-size:14px;margin-bottom:8px;">7位分析师正在会诊,预计 20-60 秒...</div><div style="display:inline-flex;gap:6px;align-items:center;font-size:12px;color:var(--text-tertiary);"><span style="width:6px;height:6px;border-radius:50%;background:var(--accent);animation:pulse-dot 1.2s infinite;"></span>分析中(请勿关闭窗口)</div></div>';
+  // 初始渲染进度条(第1步)
+  bodyEl.innerHTML = _renderFundAnalyzeProgress(1, 0);
   modal.style.display = 'flex';
+
+  // 启动进度计时器:每 ~12s 推进一步,最多到第7步等待结果
+  const startTs = Date.now();
+  if (_fundAnalyzeProgressTimer) clearInterval(_fundAnalyzeProgressTimer);
+  _fundAnalyzeProgressTimer = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - startTs) / 1000);
+    // 每12秒推进一步,最多到第7步(不再前进,等待LLM返回)
+    const step = Math.min(7, Math.floor(elapsed / 12) + 1);
+    bodyEl.innerHTML = _renderFundAnalyzeProgress(step, elapsed);
+  }, 1000);
 
   try {
     const controller = new AbortController();
     const timeoutMs = 90000; // 90s 超时
     const timer = setTimeout(() => controller.abort(), timeoutMs);
-    const startTs = Date.now();
 
     let resp;
     try {
       resp = await fetch('/api/agent/fund_analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fund_code: fundCode,
-          fund_name: fundName,
-          cost_nav: costNav,
-          shares: shares,
-          mode: 'deep',
-        }),
+        body: JSON.stringify({fund_code: fundCode, fund_name: fundName, cost_nav: costNav, shares: shares, mode: 'deep'}),
         signal: controller.signal,
       });
     } catch(e) {
       clearTimeout(timer);
+      if (_fundAnalyzeProgressTimer) { clearInterval(_fundAnalyzeProgressTimer); _fundAnalyzeProgressTimer = null; }
       const isAbort = e.name === 'AbortError';
       const elapsed = ((Date.now() - startTs) / 1000).toFixed(0);
       bodyEl.innerHTML = `<div style="padding:32px 24px;text-align:center;">
@@ -3154,6 +3202,7 @@ async function multiAgentAnalyze(fundCode, fundName, costNav, shares) {
       return;
     }
     clearTimeout(timer);
+    if (_fundAnalyzeProgressTimer) { clearInterval(_fundAnalyzeProgressTimer); _fundAnalyzeProgressTimer = null; }
 
     const data = await resp.json();
     if (!data) {
@@ -3161,6 +3210,9 @@ async function multiAgentAnalyze(fundCode, fundName, costNav, shares) {
       showToast('分析返回为空', 'error');
       return;
     }
+    // 进度条满格(7/7 全部完成)
+    const elapsedFinal = Math.floor((Date.now() - startTs) / 1000);
+    bodyEl.innerHTML = _renderFundAnalyzeProgress(7, elapsedFinal).replace('分析中(请勿关闭窗口)', '分析完成,正在生成报告...');
 
     const finalRec = data.final_recommendation || {};
     const pmDecision = data.portfolio_manager_decision || {};
