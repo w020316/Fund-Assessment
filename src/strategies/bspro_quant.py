@@ -217,6 +217,17 @@ class BSProQuant:
         factor_combo: dict[str, float],
         period: int = 60,
     ) -> dict:
+        """基于当前因子的假设性回测(非真正历史回测)。
+
+        警告: 因子值为当前快照,无法回溯历史时点的因子值,
+        因此本回测存在"未来函数"偏差,结果仅供因子筛选参考,
+        不构成真实历史业绩。正确的历史回测需引入因子历史数据库。
+
+        修复点(2026-07-29):
+        1. 修复收益序列拼接错误:原代码把多只股票日线收益拼接成一条曲线算回撤,数值无意义
+           → 改为按等权组合计算每日组合收益,再算累计收益与回撤
+        2. 添加未来函数偏差警告标注
+        """
         result: dict = {
             "factor_combo": factor_combo,
             "period_days": period,
@@ -226,6 +237,7 @@ class BSProQuant:
             "sharpe_ratio": 0.0,
             "win_rate": 0.0,
             "trades": 0,
+            "warning": "假设性回测:因子为当前快照,存在未来函数偏差,结果仅供参考",
         }
         try:
             df = ak.stock_zh_a_spot_em()
@@ -248,35 +260,56 @@ class BSProQuant:
             scores[code] = score
         sorted_stocks = sorted(scores.items(), key=lambda x: x[1], reverse=True)
         top_stocks = [s[0] for s in sorted_stocks[:5]]
-        returns: list[float] = []
+
+        # 收集每只股票最近 period 天的日线数据(对齐日期)
+        stock_closes: dict[str, pd.Series] = {}
         for code in top_stocks:
             df_kline = self._get_kline(code, days=period + 10)
             if df_kline.empty or len(df_kline) < period:
                 continue
             close = df_kline["收盘"].astype(float)
-            ret = (close.iloc[-1] / close.iloc[-period] - 1) * 100
-            returns.append(ret)
-        if not returns:
+            # 只取最近 period 天
+            stock_closes[code] = close.iloc[-period:].reset_index(drop=True)
+
+        if not stock_closes:
             return result
+
+        # 计算每只股票的区间收益(用于 win_rate)
+        returns: list[float] = []
+        for code, close in stock_closes.items():
+            ret = (close.iloc[-1] / close.iloc[0] - 1) * 100
+            returns.append(ret)
+
         avg_return = float(np.mean(returns))
         result["total_return"] = round(avg_return, 2)
         result["annualized_return"] = round(avg_return * (252 / period), 2)
         result["win_rate"] = round(sum(1 for r in returns if r > 0) / len(returns) * 100, 2)
-        result["trades"] = len(top_stocks)
-        all_returns: list[float] = []
-        for code in top_stocks:
-            df_kline = self._get_kline(code, days=period + 10)
-            if df_kline.empty or len(df_kline) < period:
-                continue
-            close = df_kline["收盘"].astype(float)
+        result["trades"] = len(stock_closes)
+
+        # 修复:按等权组合计算每日组合收益(而非拼接所有股票的日线收益)
+        # 组合每日收益 = 各股票当日收益的等权平均
+        daily_returns_by_stock = []
+        for code, close in stock_closes.items():
             daily_ret = close.pct_change().dropna()
-            all_returns.extend(daily_ret.tolist())
-        if all_returns:
-            arr = np.array(all_returns)
-            std = float(arr.std() * np.sqrt(252))
-            mean = float(arr.mean() * 252)
+            daily_returns_by_stock.append(daily_ret)
+
+        if not daily_returns_by_stock:
+            return result
+
+        # 对齐各股票的日线收益(按日期索引对齐),取等权平均
+        combined = pd.concat(daily_returns_by_stock, axis=1)
+        portfolio_daily_ret = combined.mean(axis=1).dropna()  # 等权组合
+
+        if len(portfolio_daily_ret) > 0:
+            # 年化波动率
+            std = float(portfolio_daily_ret.std() * np.sqrt(252))
+            # 年化收益
+            mean = float(portfolio_daily_ret.mean() * 252)
             result["sharpe_ratio"] = round(mean / std if std > 0 else 0.0, 4)
-            cummax = pd.Series(all_returns).cumsum().cummax()
-            drawdown = pd.Series(all_returns).cumsum() - cummax
+            # 组合累计收益与回撤(基于组合收益,而非拼接序列)
+            cum_returns = (1 + portfolio_daily_ret).cumprod()
+            cummax = cum_returns.cummax()
+            drawdown = (cum_returns - cummax) / cummax
             result["max_drawdown"] = round(float(drawdown.min()) * 100, 2)
+
         return result

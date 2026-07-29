@@ -117,16 +117,23 @@ class StockMonitor:
                         )
             except Exception as e:
                 logger.warning(f"获取EPS预测 failed: {e}")
-            if eps > 0 and eps * 1.04 > eps:
-                growth = 4.0
-                if growth > 2:
-                    return Alert(
-                        stock_code=stock_code,
-                        alert_type=AlertType.EPS_SURPRISE,
-                        severity="medium",
-                        message=f"EPS增长{growth:.2f}%超过2%阈值",
-                        detail={"eps": eps, "growth_pct": growth},
-                )
+            # 修复(2026-07-29): 原代码 eps*1.04 > eps 永真 + growth 硬编码 4.0,逻辑错误
+            # 改为:从财报历史数据计算 EPS 同比增长率
+            if eps > 0 and len(df) >= 2:
+                try:
+                    prev_eps = float(df.iloc[1].get("每股收益", 0))
+                    if prev_eps > 0:
+                        growth = (eps - prev_eps) / prev_eps * 100
+                        if growth > 2:
+                            return Alert(
+                                stock_code=stock_code,
+                                alert_type=AlertType.EPS_SURPRISE,
+                                severity="medium",
+                                message=f"EPS同比增长{growth:.2f}%超过2%阈值",
+                                detail={"eps": eps, "prev_eps": prev_eps, "growth_pct": round(growth, 2)},
+                            )
+                except (ValueError, TypeError, KeyError) as e:
+                    logger.warning(f"计算EPS同比增长率 failed: {e}")
         except Exception as e:
             logger.warning(f"获取财务摘要 failed: {e}")
         return None

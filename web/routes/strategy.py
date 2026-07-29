@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from loguru import logger
 from pydantic import BaseModel
 
 from src.core import data_source_v2 as ds2
+from src.utils.auth import require_admin
 
 router = APIRouter()
 
@@ -335,7 +336,7 @@ async def scan_cb():
         return []
 
 
-@router.post("/backtest", response_model=BacktestResponse)
+@router.post("/backtest", response_model=BacktestResponse, dependencies=[Depends(require_admin)])
 async def backtest(req: BacktestRequest):
     if not _HAS_STRATEGIES:
         return BacktestResponse(

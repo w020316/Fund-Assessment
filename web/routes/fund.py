@@ -119,8 +119,14 @@ async def get_positions():
     total_cost = sum(e["cost_nav"] * e["shares"] for e in enriched)
     total_pnl = total_market_value - total_cost
     total_pnl_pct = (total_pnl / total_cost * 100) if total_cost > 0 else 0.0
-    today_pnl = sum(e["pnl_amount"] - (e["pnl_amount"] / (1 + e["change_pct"] / 100) if e["change_pct"] != 0 else 0)
-                    for e in enriched if e["current_nav"] > 0)
+    # 修复(2026-07-29): 原代码在 change_pct==0 时误返总盈亏(pnl_amount)
+    # 正确逻辑:当日盈亏 = 当前市值 - 昨日市值 = 当前市值 * change_pct / (100 + change_pct)
+    today_pnl = 0.0
+    for e in enriched:
+        if e["current_nav"] <= 0 or e["change_pct"] == 0:
+            continue
+        # 当日盈亏 = 市值 - 市值/(1+涨幅)
+        today_pnl += e["market_value"] - e["market_value"] / (1 + e["change_pct"] / 100)
 
     return {
         "positions": enriched,

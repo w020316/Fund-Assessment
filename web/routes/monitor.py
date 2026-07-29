@@ -6,11 +6,12 @@ import os
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, Depends
 from loguru import logger
 from pydantic import BaseModel
 
 from src.core import data_source_v2 as ds2
+from src.utils.auth import require_admin
 from src.utils.convert import safe_float as _safe_float
 
 router = APIRouter()
@@ -183,7 +184,7 @@ async def watchlist():
             for code, rules in watchlist_data.items()]
 
 
-@router.post("/watchlist", response_model=MessageResponse)
+@router.post("/watchlist", response_model=MessageResponse, dependencies=[Depends(require_admin)])
 async def add_watchlist(req: AddWatchlistRequest):
     watchlist_data = _load_watchlist()
     watchlist_data[req.stock_code] = req.rules or ["price_surge"]
@@ -191,7 +192,7 @@ async def add_watchlist(req: AddWatchlistRequest):
     return MessageResponse(success=True, message=f"已添加 {req.stock_code} 到自选")
 
 
-@router.delete("/watchlist/{stock_code}", response_model=MessageResponse)
+@router.delete("/watchlist/{stock_code}", response_model=MessageResponse, dependencies=[Depends(require_admin)])
 async def remove_watchlist(stock_code: str):
     watchlist_data = _load_watchlist()
     if stock_code in watchlist_data:

@@ -129,7 +129,7 @@ async def update_strategies(req: StrategiesUpdateRequest):
     return StrategiesResponse(strategies=existing)
 
 
-@router.post("/test_notify", response_model=NotifyTestResponse)
+@router.post("/test_notify", response_model=NotifyTestResponse, dependencies=[Depends(require_admin)])
 async def test_notify():
     try:
         from src.utils.config import get_config

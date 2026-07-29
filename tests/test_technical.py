@@ -10,9 +10,8 @@
 - compute_indicators 综合指标计算
 - score_technical 综合评分(0-100)
 
-注: 源文件 compute_indicators 内部以 _sma/_macd/_rsi 等带下划线别名调用,
-但模块只定义了 sma/macd/rsi 等。本测试通过 autouse fixture 在运行时补齐别名,
-不修改源代码;若后续源码修复别名,fixture 仍兼容(赋值幂等)。
+注: 2026-07-29 已修复 compute_indicators 中的函数名错误(原调用 _sma/_macd 等
+不存在的别名,现已改为调用 sma/macd 等)。移除了临时兼容 fixture。
 """
 from __future__ import annotations
 
@@ -20,7 +19,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.analysis import technical as _tech_mod
 from src.analysis.technical import (
     atr,
     bbands,
@@ -32,13 +30,6 @@ from src.analysis.technical import (
     sma,
     stoch,
 )
-
-
-@pytest.fixture(autouse=True)
-def _patch_aliases(monkeypatch):
-    """补齐源码中 _sma/_macd/_rsi/_stoch/_bbands/_atr 别名(源码 bug 兼容)"""
-    for name in ("sma", "macd", "rsi", "stoch", "bbands", "atr"):
-        monkeypatch.setattr(_tech_mod, f"_{name}", getattr(_tech_mod, name), raising=False)
 
 
 @pytest.fixture

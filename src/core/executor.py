@@ -347,6 +347,9 @@ class TradeExecutor:
         self._notifier = notifier or LogNotifier()
         self._db_path = db_path or _DEFAULT_DB_DIR / "trade.db"
         self._init_db()
+        # 修复(2026-07-29): 原代码未在 __init__ 初始化 _pre_sell_snapshot,
+        # 若 execute_signal 未先调用 _snapshot_positions 会抛 AttributeError
+        self._pre_sell_snapshot: dict[str, Any] = {}
 
     def _get_conn(self) -> sqlite3.Connection:
         return sqlite3.connect(self._db_path)
@@ -480,6 +483,15 @@ class TradeExecutor:
             )
             self._risk_manager.record_trade(trade_record)
 
+            # 修复(2026-07-29): 原代码 commission/stamp_tax 硬编码为 0,
+            # 导致交易记录无手续费,回测与风控统计失真。
+            # 现用模块级常量正确计算(与 SimulatedBroker._calc_commission 一致)
+            trade_amount = order.filled_price * order.filled_quantity
+            commission = max(trade_amount * _COMMISSION_RATE, _MIN_COMMISSION)
+            stamp_tax = trade_amount * _STAMP_TAX_RATE if signal.side == OrderSide.SELL else 0.0
+            # 净额 = 金额 + 佣金 + 印花税(买入)或 金额 - 佣金 - 印花税(卖出)
+            net_amount = trade_amount + commission + stamp_tax if signal.side == OrderSide.BUY else trade_amount - commission - stamp_tax
+
             trade = Trade(
                 trade_id=uuid.uuid4().hex[:16],
                 order_id=order.order_id,
@@ -487,10 +499,10 @@ class TradeExecutor:
                 side=signal.side,
                 price=order.filled_price,
                 quantity=order.filled_quantity,
-                amount=order.filled_price * order.filled_quantity,
-                commission=0.0,
-                stamp_tax=0.0,
-                net_amount=order.filled_price * order.filled_quantity,
+                amount=trade_amount,
+                commission=commission,
+                stamp_tax=stamp_tax,
+                net_amount=net_amount,
             )
             self._record_trade(trade, strategy=signal.strategy, reason=signal.reason)
 

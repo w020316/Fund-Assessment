@@ -38,22 +38,40 @@ class LimitUpAnalyzer:
         self._history: dict[str, list[dict]] = {}
 
     def _load_history(self) -> None:
-        try:
-            df = ak.stock_zt_pool_em(date=pd.Timestamp.now().strftime("%Y%m%d"))
-            if df is not None and not df.empty:
+        """加载最近 3 个交易日的涨停池数据,用于连板判定。
+
+        修复(2026-07-29): 原代码只加载当日数据,导致二板/三板永远判不出。
+        现加载最近 3 个交易日,每个交易日独立加载,任一日失败不影响其他日。
+        """
+        # 计算最近 3 个交易日(跳过周末)
+        dates: list[str] = []
+        current = pd.Timestamp.now()
+        while len(dates) < 3:
+            if current.weekday() < 5:  # 0-4 为周一至周五
+                dates.append(current.strftime("%Y%m%d"))
+            current = current - pd.Timedelta(days=1)
+
+        for date_str in dates:
+            try:
+                df = ak.stock_zt_pool_em(date=date_str)
+                if df is None or df.empty:
+                    continue
                 for _, row in df.iterrows():
                     code = str(row.get("代码", ""))
                     if code not in self._history:
                         self._history[code] = []
-                    self._history[code].append({
-                        "date": pd.Timestamp.now().strftime("%Y-%m-%d"),
-                        "change_pct": float(row.get("涨跌幅", 0)),
-                        "seal_time": str(row.get("首次封板时间", "")),
-                        "open_count": int(row.get("炸板次数", 0)),
-                        "seal_amount": float(row.get("封板资金", 0)),
-                    })
-        except Exception as e:
-            logger.warning(f"加载涨停池历史 failed: {e}")
+                    # 避免重复添加同一日期
+                    date_iso = pd.Timestamp(date_str).strftime("%Y-%m-%d")
+                    if not any(h["date"] == date_iso for h in self._history[code]):
+                        self._history[code].append({
+                            "date": date_iso,
+                            "change_pct": float(row.get("涨跌幅", 0)),
+                            "seal_time": str(row.get("首次封板时间", "")),
+                            "open_count": int(row.get("炸板次数", 0)),
+                            "seal_amount": float(row.get("封板资金", 0)),
+                        })
+            except Exception as e:
+                logger.warning(f"加载涨停池历史(date={date_str}) failed: {e}")
 
     def _determine_level(self, stock_code: str) -> LimitLevel:
         count = len(self._history.get(stock_code, []))

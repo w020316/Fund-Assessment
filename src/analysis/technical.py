@@ -86,29 +86,29 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     result = df.copy()
 
     for period in [5, 10, 20, 60]:
-        result[f"MA{period}"] = _sma(result["close"], length=period)
+        result[f"MA{period}"] = sma(result["close"], length=period)
 
-    macd = _macd(result["close"])
-    if macd is not None:
-        result["MACD"] = macd["MACD"]
-        result["MACD_signal"] = macd["MACD_signal"]
-        result["MACD_hist"] = macd["MACD_hist"]
+    macd_df = macd(result["close"])
+    if macd_df is not None:
+        result["MACD"] = macd_df["MACD"]
+        result["MACD_signal"] = macd_df["MACD_signal"]
+        result["MACD_hist"] = macd_df["MACD_hist"]
 
-    stoch = _stoch(result["high"], result["low"], result["close"])
-    if stoch is not None:
-        result["KDJ_K"] = stoch["K"]
-        result["KDJ_D"] = stoch["D"]
+    stoch_df = stoch(result["high"], result["low"], result["close"])
+    if stoch_df is not None:
+        result["KDJ_K"] = stoch_df["K"]
+        result["KDJ_D"] = stoch_df["D"]
         result["KDJ_J"] = 3 * result["KDJ_K"] - 2 * result["KDJ_D"]
 
-    result["RSI"] = _rsi(result["close"], length=14)
+    result["RSI"] = rsi(result["close"], length=14)
 
-    boll = _bbands(result["close"], length=20)
-    if boll is not None:
-        result["BOLL_upper"] = boll["upper"]
-        result["BOLL_mid"] = boll["mid"]
-        result["BOLL_lower"] = boll["lower"]
+    boll_df = bbands(result["close"], length=20)
+    if boll_df is not None:
+        result["BOLL_upper"] = boll_df["upper"]
+        result["BOLL_mid"] = boll_df["mid"]
+        result["BOLL_lower"] = boll_df["lower"]
 
-    result["ATR"] = _atr(result["high"], result["low"], result["close"], length=14)
+    result["ATR"] = atr(result["high"], result["low"], result["close"], length=14)
 
     typical_price = (result["high"] + result["low"] + result["close"]) / 3
     cumulative_volume = result["volume"].cumsum()
