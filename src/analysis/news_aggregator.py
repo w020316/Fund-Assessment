@@ -25,6 +25,15 @@ try:
 except ImportError:
     _HAS_AKSHARE = False
 
+# SnowNLP 中文情感分析(借鉴 isnowany/snownlp 开源项目)
+# 与关键词法并行使用,SnowNLP 失败时降级到纯关键词法
+try:
+    from snownlp import SnowNLP
+    _HAS_SNOWNLP = True
+except ImportError:
+    SnowNLP = None  # 占位符,便于测试 mock(用 patch.object 时模块属性必须存在)
+    _HAS_SNOWNLP = False
+
 
 # ===== 情绪分类关键词 =====
 _POSITIVE_KEYWORDS = [
@@ -41,15 +50,58 @@ _NEGATIVE_KEYWORDS = [
 
 
 def _classify_sentiment(title: str, content: str = "") -> str:
-    """基于关键词分类新闻情绪:利好/利空/中性"""
+    """基于关键词 + SnowNLP 语义融合分类新闻情绪:利好/利空/中性
+
+    决策逻辑(借鉴 isnowany/snownlp 朴素贝叶斯语义分析):
+    1. 关键词法主决策:pos_count vs neg_count(保持原行为,向后兼容)
+    2. SnowNLP 反转检测:仅在关键词法判定方向与 SnowNLP 强烈相反时覆盖
+       - 关键词法判利好,但 SnowNLP 分值<0.3 → 覆盖为利空(识别"超预期下滑"等语义反转)
+       - 关键词法判利空,但 SnowNLP 分值>0.7 → 覆盖为利好
+    3. 关键词法判中性(pos==neg)时,SnowNLP 进一步细分
+    4. SnowNLP 不可用/异常 → 退化为纯关键词法(完全向后兼容)
+    """
     text = f"{title} {content}"
     pos_count = sum(1 for kw in _POSITIVE_KEYWORDS if kw in text)
     neg_count = sum(1 for kw in _NEGATIVE_KEYWORDS if kw in text)
+
+    # SnowNLP 语义分值(None 表示不可用/失败,此时退化为纯关键词法)
+    snownlp_score = _snownlp_sentiment_score(text) if _HAS_SNOWNLP else None
+
+    # 关键词法主决策
     if pos_count > neg_count:
+        # 关键词倾向利好,SnowNLP 强烈看空则反转(语义反转检测)
+        if snownlp_score is not None and snownlp_score < 0.3:
+            return "利空"
         return "利好"
+
     if neg_count > pos_count:
+        # 关键词倾向利空,SnowNLP 强烈看多则反转
+        if snownlp_score is not None and snownlp_score > 0.7:
+            return "利好"
         return "利空"
+
+    # pos == neg(中性情况),用 SnowNLP 进一步细分
+    if snownlp_score is not None:
+        if snownlp_score > 0.6:
+            return "利好"
+        if snownlp_score < 0.4:
+            return "利空"
     return "中性"
+
+
+def _snownlp_sentiment_score(text: str) -> float | None:
+    """SnowNLP 情感分值(0~1,>0.5 偏积极),供外部调用计算板块情绪均值。
+
+    借鉴 isnowany/snownlp 项目,用于将离散三分类升级为连续分值,
+    便于"板块情绪指数"等聚合计算(连续值可求均值,离散值不可)。
+    SnowNLP 不可用/计算失败时返回 None(调用方负责降级)。
+    """
+    if not _HAS_SNOWNLP or not text.strip():
+        return None
+    try:
+        return float(SnowNLP(text[:500]).sentiments)
+    except Exception:
+        return None
 
 
 def _deduplicate(news_list: list[dict], similarity_threshold: float = 0.8) -> list[dict]:

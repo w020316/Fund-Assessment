@@ -40,7 +40,7 @@ class TestClassifySentiment:
         assert _classify_sentiment("公司发布利好公告 净利润增长") == "利好"
 
     def test_negative_classification(self):
-        """利空关键词多于利好 → 利空"""
+        """利空关键词多于利空 → 利空"""
         assert _classify_sentiment("公司遭遇利空 净利润亏损下滑") == "利空"
 
     def test_neutral_classification(self):
@@ -57,6 +57,120 @@ class TestClassifySentiment:
 
     def test_empty_text_returns_neutral(self):
         assert _classify_sentiment("", "") == "中性"
+
+
+class TestClassifySentimentWithSnowNLP:
+    """_classify_sentiment 在 SnowNLP 可用时的语义反转检测(mock)
+
+    验证借鉴 isnowany/snownlp 的反转检测逻辑:
+    - 关键词判利好,但 SnowNLP 强烈看空(<0.3)→ 覆盖为利空(识别"超预期下滑"等反转)
+    - 关键词判利空,但 SnowNLP 强烈看多(>0.7)→ 覆盖为利好
+    - 关键词判中性(pos==neg),SnowNLP 进一步细分
+    - SnowNLP 不可用 → 退化为纯关键词法
+    """
+
+    def test_snownlp_unavailable_falls_back_to_keywords(self):
+        """SnowNLP 不可用 → 完全使用关键词法(向后兼容)"""
+        with patch.object(news_aggregator, "_HAS_SNOWNLP", False):
+            # 利好关键词占优
+            assert _classify_sentiment("公司利好增长") == "利好"
+            # 利空关键词占优
+            assert _classify_sentiment("公司利空亏损") == "利空"
+            # 中性
+            assert _classify_sentiment("公司召开会议") == "中性"
+
+    def test_snownlp_reverses_positive_to_negative(self):
+        """关键词判利好,但 SnowNLP 分值<0.3 → 覆盖为利空(语义反转)"""
+        with patch.object(news_aggregator, "_HAS_SNOWNLP", True):
+            with patch.object(news_aggregator, "_snownlp_sentiment_score", return_value=0.15):
+                # "利好" 关键词命中,但 SnowNLP 强烈看空 → 利空
+                result = _classify_sentiment("公司利好公告")
+                assert result == "利空", f"应反转覆盖为利空,实际:{result}"
+
+    def test_snownlp_reverses_negative_to_positive(self):
+        """关键词判利空,但 SnowNLP 分值>0.7 → 覆盖为利好"""
+        with patch.object(news_aggregator, "_HAS_SNOWNLP", True):
+            with patch.object(news_aggregator, "_snownlp_sentiment_score", return_value=0.85):
+                # "利空" 关键词命中,但 SnowNLP 强烈看多 → 利好
+                result = _classify_sentiment("公司利空公告")
+                assert result == "利好", f"应反转覆盖为利好,实际:{result}"
+
+    def test_snownlp_keeps_positive_when_neutral(self):
+        """关键词判利好,SnowNLP 分值中性(0.3~0.7)→ 保持利好(不反转)"""
+        with patch.object(news_aggregator, "_HAS_SNOWNLP", True):
+            with patch.object(news_aggregator, "_snownlp_sentiment_score", return_value=0.5):
+                assert _classify_sentiment("公司利好公告") == "利好"
+
+    def test_snownlp_breaks_neutral_tie(self):
+        """关键词判中性(pos==neg),SnowNLP 细分:分值>0.6 → 利好"""
+        with patch.object(news_aggregator, "_HAS_SNOWNLP", True):
+            with patch.object(news_aggregator, "_snownlp_sentiment_score", return_value=0.75):
+                # "公司今日召开会议" 无关键词命中,SnowNLP 强烈看多 → 利好
+                assert _classify_sentiment("公司今日召开股东大会") == "利好"
+
+    def test_snownlp_breaks_neutral_tie_negative(self):
+        """关键词判中性(pos==neg),SnowNLP 细分:分值<0.4 → 利空"""
+        with patch.object(news_aggregator, "_HAS_SNOWNLP", True):
+            with patch.object(news_aggregator, "_snownlp_sentiment_score", return_value=0.25):
+                assert _classify_sentiment("公司今日召开股东大会") == "利空"
+
+    def test_snownlp_breaks_neutral_tie_middle(self):
+        """关键词判中性(pos==neg),SnowNLP 分值中性(0.4~0.6)→ 保持中性"""
+        with patch.object(news_aggregator, "_HAS_SNOWNLP", True):
+            with patch.object(news_aggregator, "_snownlp_sentiment_score", return_value=0.5):
+                assert _classify_sentiment("公司今日召开股东大会") == "中性"
+
+    def test_snownlp_returns_none_keeps_keyword_decision(self):
+        """SnowNLP 不可用(_snownlp_sentiment_score 返回 None)→ 关键词法决策"""
+        with patch.object(news_aggregator, "_HAS_SNOWNLP", True):
+            with patch.object(news_aggregator, "_snownlp_sentiment_score", return_value=None):
+                # 关键词判利好,None → 不反转
+                assert _classify_sentiment("公司利好增长") == "利好"
+                # 关键词判中性,None → 保持中性
+                assert _classify_sentiment("公司召开会议") == "中性"
+
+
+class TestSnownlpSentimentScore:
+    """_snownlp_sentiment_score 辅助函数(供板块情绪均值计算用)"""
+
+    def test_unavailable_returns_none(self):
+        """SnowNLP 不可用 → None"""
+        with patch.object(news_aggregator, "_HAS_SNOWNLP", False):
+            assert news_aggregator._snownlp_sentiment_score("任意文本") is None
+
+    def test_empty_text_returns_none(self):
+        """空文本 → None"""
+        with patch.object(news_aggregator, "_HAS_SNOWNLP", True):
+            assert news_aggregator._snownlp_sentiment_score("") is None
+            assert news_aggregator._snownlp_sentiment_score("   ") is None
+
+    def test_normal_text_returns_score(self):
+        """正常文本 → 返回 [0, 1] 分值"""
+        mock_snownlp = MagicMock()
+        mock_snownlp.sentiments = 0.85
+        with patch.object(news_aggregator, "_HAS_SNOWNLP", True):
+            with patch.object(news_aggregator, "SnowNLP", return_value=mock_snownlp):
+                score = news_aggregator._snownlp_sentiment_score("公司利好公告")
+                assert score == 0.85
+
+    def test_exception_returns_none(self):
+        """SnowNLP 异常 → None(降级)"""
+        with patch.object(news_aggregator, "_HAS_SNOWNLP", True):
+            with patch.object(news_aggregator, "SnowNLP", side_effect=Exception("model error")):
+                score = news_aggregator._snownlp_sentiment_score("公司利好公告")
+                assert score is None
+
+    def test_truncates_long_text(self):
+        """超过500字应截断(避免性能问题)"""
+        long_text = "利好" * 300  # 600 字
+        mock_snownlp = MagicMock()
+        mock_snownlp.sentiments = 0.7
+        with patch.object(news_aggregator, "_HAS_SNOWNLP", True):
+            with patch.object(news_aggregator, "SnowNLP", return_value=mock_snownlp) as mock_cls:
+                news_aggregator._snownlp_sentiment_score(long_text)
+                # 验证传给 SnowNLP 的文本不超过 500 字
+                actual_text = mock_cls.call_args[0][0]
+                assert len(actual_text) <= 500
 
 
 class TestDeduplicate:

@@ -17,3 +17,6 @@ mootdx==0.9.11
 litellm>=1.40.0
 httpx>=0.27.0
 json-repair>=0.25.0
+# 借鉴 isnowany/snownlp(6.5K Star)中文情感分析,提升消息面情绪分类准确性
+# 纯Python实现,无Rust依赖,失败时自动降级到关键词法
+snownlp==0.12.3

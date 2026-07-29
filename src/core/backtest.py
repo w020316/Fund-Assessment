@@ -15,6 +15,7 @@ _COMMISSION_RATE = 0.0003
 _STAMP_TAX_RATE = 0.001
 _MIN_COMMISSION = 5.0
 _RISK_FREE_RATE = 0.03
+_TRADING_DAYS_PER_YEAR = 252
 
 
 @dataclass
@@ -28,6 +29,82 @@ class BacktestResult:
     trade_count: int
     equity_curve: list[float]
     trades: list[dict]
+    # 借鉴 mementum/backtrader Analyzer 设计,补充风险调整收益指标
+    # 新字段带默认值,向后兼容旧代码(不传新字段也能构造)
+    sortino_ratio: float = 0.0  # Sortino 比率:只惩罚下行波动(下行标准差)
+    calmar_ratio: float = 0.0   # Calmar 比率:年化收益/最大回撤
+    volatility: float = 0.0     # 年化波动率:daily_returns.std * sqrt(252)
+
+
+def _calc_sortino_ratio(returns: list[float], risk_free: float = _RISK_FREE_RATE) -> float:
+    """Sortino 比率 - 只惩罚下行波动。
+
+    借鉴 mementum/backtrader TimeReturn Analyzer 设计思想:
+    与 Sharpe 的区别是分子母只用"下行波动"(负收益的标准差),
+    避免正收益也被算作风险,更符合投资者对"风险"的真实感受。
+
+    Args:
+        returns: 日收益率序列,如 [0.01, -0.02, 0.005]
+        risk_free: 年化无风险利率,默认 3%
+
+    Returns:
+        Sortino 比率,无数据返回 0.0,无下行波动返回 inf 或 0.0
+    """
+    if not returns:
+        return 0.0
+    arr = np.array(returns, dtype=float)
+    downside = arr[arr < 0]
+    if len(downside) == 0:
+        # 无下行波动:有正收益则无穷大,否则 0
+        return float("inf") if float(arr.mean()) > 0 else 0.0
+    if len(downside) < 2:
+        # 单个下行点无法可靠估计 std,视为无下行波动
+        daily_rf_single = risk_free / _TRADING_DAYS_PER_YEAR
+        return float("inf") if float(arr.mean()) > daily_rf_single else 0.0
+    downside_std = float(np.std(downside, ddof=1))
+    if downside_std == 0:
+        return 0.0
+    daily_rf = risk_free / _TRADING_DAYS_PER_YEAR
+    excess = float(arr.mean()) - daily_rf
+    return excess / downside_std * float(np.sqrt(_TRADING_DAYS_PER_YEAR))
+
+
+def _calc_calmar_ratio(annual_return: float, max_drawdown: float) -> float:
+    """Calmar 比率 - 年化收益 / 最大回撤。
+
+    借鉴 mementum/backtrader Calmar Analyzer 设计:
+    衡量"每承担 1 单位回撤风险获得的年化收益",
+    Calmar > 3 视为优秀策略,Calmar < 1 视为低质量策略。
+
+    Args:
+        annual_return: 年化收益率(小数,如 0.15 表示 15%)
+        max_drawdown: 最大回撤(正小数,如 0.10 表示 10%)
+
+    Returns:
+        Calmar 比率,max_drawdown 为 0 时返回 0.0
+    """
+    if max_drawdown == 0:
+        return 0.0
+    return float(annual_return / abs(max_drawdown))
+
+
+def _calc_volatility(returns: list[float]) -> float:
+    """年化波动率 - daily_returns.std * sqrt(252)。
+
+    借鉴 mementum/backtrader Volatility Analyzer 设计:
+    衡量收益率的波动程度,波动率越低策略越稳健。
+    一般股票年化波动率 20-30%,稳健策略应控制在 15% 以下。
+
+    Args:
+        returns: 日收益率序列
+
+    Returns:
+        年化波动率(小数,如 0.20 表示 20%),无数据返回 0.0
+    """
+    if not returns:
+        return 0.0
+    arr = np.array(returns, dtype=float)
+    return float(np.std(arr) * np.sqrt(_TRADING_DAYS_PER_YEAR))
 
 
 StrategyFunc = Callable[[date, dict, pd.DataFrame], list[Signal]]
@@ -421,11 +498,17 @@ class BacktestEngine:
         annual_return = (1 + total_return) ** (1 / years) - 1 if years > 0 else 0.0
 
         sharpe = 0.0
+        daily_returns_list: list[float] = []
         if len(equity_curve) > 1:
-            daily_returns = np.diff(equity_curve) / np.array(equity_curve[:-1])
-            std = np.std(daily_returns)
+            daily_returns_list = (np.diff(equity_curve) / np.array(equity_curve[:-1])).tolist()
+            std = np.std(daily_returns_list)
             if std > 0:
-                sharpe = float((np.mean(daily_returns) * 252 - _RISK_FREE_RATE) / (std * np.sqrt(252)))
+                sharpe = float((np.mean(daily_returns_list) * 252 - _RISK_FREE_RATE) / (std * np.sqrt(252)))
+
+        # 借鉴 mementum/backtrader Analyzer,补充风险调整收益指标
+        sortino = _calc_sortino_ratio(daily_returns_list, _RISK_FREE_RATE)
+        calmar = _calc_calmar_ratio(annual_return, max_drawdown)
+        volatility = _calc_volatility(daily_returns_list)
 
         sell_trades = [t for t in trades if t["side"] == "sell"]
         win_trades = [t for t in sell_trades if t.get("profit", 0) > 0]
@@ -447,6 +530,9 @@ class BacktestEngine:
             trade_count=len(trades),
             equity_curve=[round(v, 2) for v in equity_curve],
             trades=trades,
+            sortino_ratio=round(sortino, 4) if sortino != float("inf") else float("inf"),
+            calmar_ratio=round(calmar, 4),
+            volatility=round(volatility, 4),
         )
 
     def run_all_strategies(
