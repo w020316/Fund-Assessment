@@ -1401,10 +1401,10 @@ const ALERT_ICON_MAP = {
 };
 
 // API请求封装
-// 超时映射:特定慢接口允许更长等待(AI分析/检索类)
+// 超时映射:特定慢接口允许更长等待(智能分析/检索类)
 const API_TIMEOUT_MS = (url) => {
-  if (url.startsWith('/api/agent/') || url.includes('/fund_analyze')) return 90000; // AI多智能体 90s
-  if (url.startsWith('/api/news/search')) return 30000; // AI检索 30s
+  if (url.startsWith('/api/agent/') || url.includes('/fund_analyze')) return 90000; // 多智能体 90s
+  if (url.startsWith('/api/news/search')) return 30000; // 智能检索 30s
   if (url.startsWith('/api/market/outlook') || url.startsWith('/api/scripts/ai-generate')) return 30000;
   return 15000; // 默认 15s
 };
@@ -3092,7 +3092,7 @@ async function multiAgentAnalyze(fundCode, fundName, costNav, shares) {
       bodyEl.innerHTML = `<div style="padding:32px 24px;text-align:center;">
         <div style="font-size:32px;margin-bottom:12px;opacity:0.5;">⚠</div>
         <div style="font-size:15px;color:var(--color-warning);margin-bottom:8px;">${isAbort ? `分析超时(${elapsed}s)` : '网络异常'}</div>
-        <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">${isAbort ? '多智能体分析需要调用多个AI模型,可能因服务繁忙导致超时。' : '请检查网络连接后重试。'}</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">${isAbort ? '多智能体分析需要调用多个智能模型,可能因服务繁忙导致超时。' : '请检查网络连接后重试。'}</div>
         <button class="btn btn-primary" onclick="multiAgentAnalyze('${fundCode}','${(fundName||'').replace(/'/g,'')}',${costNav||0},${shares||0})">重试分析</button>
       </div>`;
       showToast(isAbort ? `分析超时(${elapsed}s),请重试` : '网络异常,请重试', 'error');
