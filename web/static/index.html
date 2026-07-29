@@ -1289,6 +1289,12 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
             <div id="healthPanel"></div>
           </div>
         </div>
+
+        <!-- 管理鉴权 -->
+        <div class="card mt-16">
+          <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> 管理鉴权</div>
+          <div id="authPanel"></div>
+        </div>
       </div>
 
     </main>
@@ -1408,8 +1414,12 @@ async function api(url, options={}) {
   const timeoutMs = API_TIMEOUT_MS(url);
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    // 自动携带管理鉴权token(写操作需要)
+    const headers = {'Content-Type':'application/json'};
+    const adminToken = localStorage.getItem('admin_token');
+    if (adminToken) headers['Authorization'] = `Bearer ${adminToken}`;
     const resp = await fetch(url, {
-      headers: {'Content-Type':'application/json'},
+      headers,
       signal: controller.signal,
       ...options
     });
@@ -4062,6 +4072,40 @@ let currentConfig = {};
 async function loadConfigData() {
   loadSettings();
   loadHealthStatus();
+  loadAuthStatus();
+}
+
+function loadAuthStatus() {
+  const token = localStorage.getItem('admin_token') || '';
+  const panel = document.getElementById('authPanel');
+  if (!panel) return;
+  panel.innerHTML = `
+    <div class="form-group">
+      <label class="form-label">管理令牌(ADMIN_TOKEN)</label>
+      <input class="input" id="cfg-admin-token" type="password" placeholder="${token ? '已配置(输入新值可替换)' : '请输入管理令牌'}" value="">
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <button class="btn btn-sm btn-primary" onclick="saveAdminToken()">保存令牌</button>
+      <button class="btn btn-sm btn-outline" onclick="clearAdminToken()">清除令牌</button>
+      <span style="font-size:12px;opacity:0.7;">${token ? '当前: 已配置' : '当前: 未配置'}</span>
+    </div>
+    <div style="margin-top:8px;font-size:12px;opacity:0.6;line-height:1.5;">写操作(添加/删除持仓、交易)需要管理令牌。令牌保存在浏览器本地,不会上传。</div>
+  `;
+}
+
+function saveAdminToken() {
+  const input = document.getElementById('cfg-admin-token');
+  const token = input ? input.value.trim() : '';
+  if (!token) { showToast('请输入管理令牌', 'error'); return; }
+  localStorage.setItem('admin_token', token);
+  showToast('管理令牌已保存', 'success');
+  loadAuthStatus();
+}
+
+function clearAdminToken() {
+  localStorage.removeItem('admin_token');
+  showToast('管理令牌已清除', 'success');
+  loadAuthStatus();
 }
 
 async function loadSettings() {
