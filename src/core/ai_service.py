@@ -857,6 +857,18 @@ def analyze_portfolio(positions: list[dict]) -> dict[str, Any]:
 
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
+    # P1 修复(2026-07-29):空持仓时 min(0, 4)=0 会导致 ThreadPoolExecutor 抛 ValueError
+    # 空持仓应直接返回空结构,避免无意义的线程池创建
+    if not positions:
+        return {
+            "positions": [],
+            "position_weights": {},
+            "total_value": 0.0,
+            "concentration_risk_level": "LOW",
+            "portfolio_analysis": {},
+            "timestamp": datetime.now().isoformat(),
+        }
+
     def _analyze_one(pos: dict) -> tuple[str, dict]:
         symbol = pos.get("symbol", pos.get("code", ""))
         if not symbol:

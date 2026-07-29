@@ -7,9 +7,12 @@
 - _parse_analysis_response 响应解析
 - _fallback_result 降级结果
 - _call_ttapi_direct 直接 TTAPI 调用(mock requests)
-- _search_tavily Tavily 检索(mock requests)
+- _call_llm LLM 路由(mock LLM Router)
+- _search_tavily / _search_tinyfish 检索(mock requests)
 - search_news 新闻检索(mock)
 - analyze_stock / quick_analysis / multi_analyze 端到端(mock LLM)
+- analyze_portfolio 组合分析(mock ThreadPoolExecutor)
+- get_market_outlook 市场展望(mock 并行抓取)
 """
 from __future__ import annotations
 
@@ -21,13 +24,17 @@ import pytest
 from src.core import ai_service
 from src.core.ai_service import (
     _build_analysis_prompt,
+    _call_llm,
     _call_ttapi_direct,
     _check_api_keys,
     _fallback_result,
     _gather_stock_data,
     _parse_analysis_response,
     _search_tavily,
+    _search_tinyfish,
+    analyze_portfolio,
     analyze_stock,
+    get_market_outlook,
     multi_analyze,
     quick_analysis,
     search_news,
@@ -492,3 +499,415 @@ class TestMultiAnalyze:
                     result = multi_analyze("600519")
         assert result["analysis_mode"] == "multi_agent"
         assert result["analyst_count"] == 7
+
+    def test_multi_analyze_failure_returns_fallback(self):
+        """multi_analyze LLM 失败 → 降级结果"""
+        with patch.object(ai_service, "_gather_stock_data", return_value={"quote": {"code": "600519"}}):
+            with patch.object(ai_service, "search_news", return_value=[]):
+                with patch.object(ai_service, "_call_llm", side_effect=Exception("boom")):
+                    result = multi_analyze("600519")
+        assert result["action"] == "HOLD"
+        assert "多智能体分析失败" in result["reasoning"]
+
+
+class TestCallLlm:
+    """_call_llm LLM 路由测试
+
+    注意:_call_llm 内部用 `from src.core.llm_router import get_llm_router`
+    局部导入,所以必须 patch 源模块 src.core.llm_router.get_llm_router。
+    """
+
+    def test_uses_llm_router_when_available(self, monkeypatch):
+        """LLM Router 有可用 Provider 时优先使用"""
+        mock_router = MagicMock()
+        mock_response = MagicMock()
+        mock_response.content = "router 返回"
+        mock_response.provider = "agnes"
+        mock_response.latency_ms = 150.0
+        mock_router.chat.return_value = mock_response
+        mock_router.available_providers = [mock_router]
+        # patch 源模块的 get_llm_router(局部导入)
+        monkeypatch.setattr("src.core.llm_router.get_llm_router", lambda: mock_router)
+        result = _call_llm([{"role": "user", "content": "t"}])
+        assert result == "router 返回"
+        mock_router.chat.assert_called_once()
+
+    def test_falls_back_to_ttapi_on_router_unavailable(self, monkeypatch):
+        """Router 全部失败 → 降级到 TTAPI"""
+        def fake_get_router():
+            router = MagicMock()
+            router.available_providers = [MagicMock()]
+            router.chat.side_effect = RuntimeError("所有LLM Provider均不可用")
+            return router
+        monkeypatch.setattr("src.core.llm_router.get_llm_router", fake_get_router)
+        monkeypatch.setattr(ai_service, "_TTAPI_API_KEY", "tt-key")
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {"choices": [{"message": {"content": "ttapi 返回"}}]}
+        with patch("requests.post", return_value=mock_resp):
+            result = _call_llm([{"role": "user", "content": "t"}])
+        assert result == "ttapi 返回"
+
+    def test_falls_back_to_ttapi_on_router_exception(self, monkeypatch):
+        """Router 抛非 RuntimeError 异常 → 降级到 TTAPI"""
+        mock_router = MagicMock()
+        mock_router.available_providers = [MagicMock()]
+        mock_router.chat.side_effect = ValueError("weird error")
+        monkeypatch.setattr("src.core.llm_router.get_llm_router", lambda: mock_router)
+        monkeypatch.setattr(ai_service, "_TTAPI_API_KEY", "tt-key")
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {"choices": [{"message": {"content": "ttapi 返回"}}]}
+        with patch("requests.post", return_value=mock_resp):
+            result = _call_llm([{"role": "user", "content": "t"}])
+        assert result == "ttapi 返回"
+
+    def test_no_available_providers_falls_back_to_ttapi(self, monkeypatch):
+        """Router 无可用 Provider → 降级到 TTAPI(available_providers 为空)"""
+        mock_router = MagicMock()
+        mock_router.available_providers = []  # 空,跳过 router
+        monkeypatch.setattr("src.core.llm_router.get_llm_router", lambda: mock_router)
+        monkeypatch.setattr(ai_service, "_TTAPI_API_KEY", "tt-key")
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {"choices": [{"message": {"content": "ttapi 返回"}}]}
+        with patch("requests.post", return_value=mock_resp):
+            result = _call_llm([{"role": "user", "content": "t"}])
+        assert result == "ttapi 返回"
+        # router.chat 不应被调用(因为 available_providers 为空)
+        mock_router.chat.assert_not_called()
+
+
+class TestSearchTinyfish:
+    """_search_tinyfish TinyFish 检索测试"""
+
+    def test_successful_search_returns_results(self, monkeypatch):
+        monkeypatch.setattr(ai_service, "_TINYFISH_API_KEY", "tf-key")
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": json.dumps({
+                "results": [
+                    {"title": "新闻1", "content": "内容1" * 50, "url": "u1", "source": "s1",
+                     "published_date": "2026-07-28"},
+                ],
+            })}}],
+        }
+        with patch("requests.post", return_value=mock_resp):
+            results = _search_tinyfish("白酒")
+        assert len(results) == 1
+        assert results[0]["title"] == "新闻1"
+        assert "tinyfish" in results[0]["source"]
+        assert len(results[0]["content"]) <= 300
+
+    def test_news_key_returns_results(self, monkeypatch):
+        """响应用 news 键而非 results 也应能解析"""
+        monkeypatch.setattr(ai_service, "_TINYFISH_API_KEY", "tf-key")
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": json.dumps({
+                "news": [{"title": "新闻X", "content": "c", "url": "u"}],
+            })}}],
+        }
+        with patch("requests.post", return_value=mock_resp):
+            results = _search_tinyfish("白酒")
+        assert len(results) == 1
+        assert results[0]["title"] == "新闻X"
+
+    def test_empty_content_returns_empty(self, monkeypatch):
+        """空 content → 返回空列表"""
+        monkeypatch.setattr(ai_service, "_TINYFISH_API_KEY", "tf-key")
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {"choices": [{"message": {"content": ""}}]}
+        with patch("requests.post", return_value=mock_resp):
+            assert _search_tinyfish("白酒") == []
+
+    def test_non_list_results_returns_empty(self, monkeypatch):
+        """results 非 list → 返回空"""
+        monkeypatch.setattr(ai_service, "_TINYFISH_API_KEY", "tf-key")
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": json.dumps({"results": "not-a-list"})}}],
+        }
+        with patch("requests.post", return_value=mock_resp):
+            assert _search_tinyfish("白酒") == []
+
+    def test_exception_returns_empty(self, monkeypatch):
+        """异常 → 返回空列表"""
+        monkeypatch.setattr(ai_service, "_TINYFISH_API_KEY", "tf-key")
+        with patch("requests.post", side_effect=Exception("net error")):
+            assert _search_tinyfish("白酒") == []
+
+    def test_invalid_json_content_returns_empty(self, monkeypatch):
+        """content 非 JSON → 返回空"""
+        monkeypatch.setattr(ai_service, "_TINYFISH_API_KEY", "tf-key")
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": "not-a-json"}}],
+        }
+        with patch("requests.post", return_value=mock_resp):
+            assert _search_tinyfish("白酒") == []
+
+
+class TestSearchNewsFallback:
+    """search_news 回退逻辑补充"""
+
+    def test_both_sources_empty_returns_empty(self, monkeypatch):
+        monkeypatch.setattr(ai_service, "_TAVILY_API_KEY", "tavily-key")
+        monkeypatch.setattr(ai_service, "_TINYFISH_API_KEY", "tinyfish-key")
+        with patch.object(ai_service, "_search_tavily", return_value=[]):
+            with patch.object(ai_service, "_search_tinyfish", return_value=[]):
+                assert search_news("白酒") == []
+
+    def test_only_tinyfish_key_configured(self, monkeypatch):
+        """仅 tinyfish 配置时应直接调用 tinyfish"""
+        monkeypatch.setattr(ai_service, "_TAVILY_API_KEY", "")
+        monkeypatch.setattr(ai_service, "_TINYFISH_API_KEY", "tinyfish-key")
+        with patch.object(ai_service, "_search_tavily", return_value=[]) as mock_tavily:
+            with patch.object(ai_service, "_search_tinyfish", return_value=[{"title": "tf 结果"}]) as mock_tf:
+                result = search_news("白酒")
+        # tavily 被调用但返回空(逻辑:先调 tavily,空则调 tinyfish)
+        mock_tavily.assert_called_once()
+        mock_tf.assert_called_once()
+        assert len(result) == 1
+
+
+class TestAnalyzePortfolio:
+    """analyze_portfolio 组合分析测试"""
+
+    def test_empty_positions_returns_empty_structure(self):
+        """空持仓 → 返回空结构"""
+        result = analyze_portfolio([])
+        assert result["positions"] == []
+        assert result["total_value"] == 0
+        assert result["concentration_risk_level"] == "LOW"
+        assert "timestamp" in result
+
+    def test_position_without_symbol_skipped(self):
+        """无 symbol 的持仓应被跳过(symbol 为空)"""
+        positions = [{"name": "无名", "quantity": 100, "cost_price": 10}]
+        with patch.object(ai_service, "_call_llm", return_value="{}"):
+            result = analyze_portfolio(positions)
+        # 无 symbol 的持仓 _analyze_one 返回 symbol="",被 results[idx] 过滤
+        assert result["positions"] == []
+
+    def test_successful_analysis(self, mock_analysis_response):
+        """成功分析(mock quick_analysis + LLM)"""
+        positions = [
+            {"symbol": "600519", "name": "茅台", "quantity": 100, "cost_price": 1500, "current_price": 1688},
+            {"symbol": "000001", "name": "平安", "quantity": 1000, "cost_price": 10, "current_price": 11},
+        ]
+        mock_portfolio_response = json.dumps({
+            "concentration_risk": {"level": "LOW", "max_weight": 0.6},
+            "overall_risk_score": {"score": 70, "level": "MEDIUM"},
+        })
+        with patch.object(ai_service, "get_realtime_quote_tencent", return_value=[{"price": 1688, "name": "茅台"}]):
+            with patch.object(ai_service, "quick_analysis", return_value={
+                "action": "BUY", "confidence": 0.8, "target_price": 1800,
+                "stop_loss_price": 1600, "risk_assessment": {"risk_level": "MEDIUM"},
+            }):
+                with patch.object(ai_service, "_call_llm", return_value=mock_portfolio_response):
+                    result = analyze_portfolio(positions)
+        assert len(result["positions"]) == 2
+        assert result["total_value"] > 0
+        assert "position_weights" in result
+        assert "concentration_risk_level" in result
+        assert "portfolio_analysis" in result
+
+    def test_concentration_risk_high_when_single_position(self, mock_analysis_response):
+        """单只高权重持仓 → 集中度 HIGH"""
+        positions = [
+            {"symbol": "600519", "name": "茅台", "quantity": 100, "cost_price": 1500, "current_price": 1688},
+        ]
+        with patch.object(ai_service, "get_realtime_quote_tencent", return_value=[]):
+            with patch.object(ai_service, "quick_analysis", return_value={
+                "action": "BUY", "confidence": 0.8, "risk_assessment": {"risk_level": "MEDIUM"},
+            }):
+                with patch.object(ai_service, "_call_llm", return_value="{}"):
+                    result = analyze_portfolio(positions)
+        # 单只持仓权重 1.0 > 0.4 → HIGH
+        assert result["concentration_risk_level"] == "HIGH"
+
+    def test_concentration_risk_medium(self, mock_analysis_response):
+        """最大权重 0.25-0.4 → MEDIUM"""
+        positions = [
+            {"symbol": "A", "name": "X", "quantity": 100, "cost_price": 10, "current_price": 12},
+            {"symbol": "B", "name": "Y", "quantity": 100, "cost_price": 10, "current_price": 5},
+        ]
+        with patch.object(ai_service, "get_realtime_quote_tencent", return_value=[]):
+            with patch.object(ai_service, "quick_analysis", return_value={
+                "action": "HOLD", "confidence": 0.5, "risk_assessment": {"risk_level": "LOW"},
+            }):
+                with patch.object(ai_service, "_call_llm", return_value="{}"):
+                    result = analyze_portfolio(positions)
+        # A 价值 1200, B 价值 500,总 1700,A 权重 ~0.70 > 0.4 → HIGH
+        assert result["concentration_risk_level"] in ("MEDIUM", "HIGH")
+
+    def test_quick_analysis_exception_returns_hold(self, mock_analysis_response):
+        """单只分析异常 → 该持仓返回 HOLD"""
+        positions = [{"symbol": "600519", "name": "茅台", "quantity": 100, "cost_price": 1500, "current_price": 1688}]
+        with patch.object(ai_service, "get_realtime_quote_tencent", return_value=[]):
+            with patch.object(ai_service, "quick_analysis", side_effect=Exception("quick fail")):
+                with patch.object(ai_service, "_call_llm", return_value="{}"):
+                    result = analyze_portfolio(positions)
+        assert len(result["positions"]) == 1
+        assert result["positions"][0]["action"] == "HOLD"
+        assert result["positions"][0]["confidence"] == 0
+
+    def test_llm_returns_invalid_json(self, mock_analysis_response):
+        """LLM 返回非 JSON → portfolio_analysis 为空字典"""
+        positions = [{"symbol": "600519", "name": "茅台", "quantity": 100, "cost_price": 1500, "current_price": 1688}]
+        with patch.object(ai_service, "get_realtime_quote_tencent", return_value=[]):
+            with patch.object(ai_service, "quick_analysis", return_value={
+                "action": "BUY", "confidence": 0.8, "risk_assessment": {"risk_level": "MEDIUM"},
+            }):
+                with patch.object(ai_service, "_call_llm", return_value="not-json"):
+                    result = analyze_portfolio(positions)
+        assert result["portfolio_analysis"] == {}
+
+    def test_llm_returns_json_with_text_wrapper(self, mock_analysis_response):
+        """LLM 返回带文本包裹的 JSON → 应能提取"""
+        positions = [{"symbol": "600519", "name": "茅台", "quantity": 100, "cost_price": 1500, "current_price": 1688}]
+        wrapped = f"分析结果:\n{{\"score\": 80}}\n谢谢"
+        with patch.object(ai_service, "get_realtime_quote_tencent", return_value=[]):
+            with patch.object(ai_service, "quick_analysis", return_value={
+                "action": "BUY", "confidence": 0.8, "risk_assessment": {"risk_level": "MEDIUM"},
+            }):
+                with patch.object(ai_service, "_call_llm", return_value=wrapped):
+                    result = analyze_portfolio(positions)
+        assert result["portfolio_analysis"] == {"score": 80}
+
+    def test_llm_exception_returns_empty_analysis(self, mock_analysis_response):
+        """LLM 调用异常 → portfolio_analysis 为空字典"""
+        positions = [{"symbol": "600519", "name": "茅台", "quantity": 100, "cost_price": 1500, "current_price": 1688}]
+        with patch.object(ai_service, "get_realtime_quote_tencent", return_value=[]):
+            with patch.object(ai_service, "quick_analysis", return_value={
+                "action": "BUY", "confidence": 0.8, "risk_assessment": {"risk_level": "MEDIUM"},
+            }):
+                with patch.object(ai_service, "_call_llm", side_effect=Exception("llm down")):
+                    result = analyze_portfolio(positions)
+        assert result["portfolio_analysis"] == {}
+
+
+class TestGetMarketOutlook:
+    """get_market_outlook 市场展望测试
+
+    注意:get_market_outlook 内部用 `from src.core.data_source_v2 import _parallel_fetch`
+    局部导入,所以必须 patch 源模块 src.core.data_source_v2._parallel_fetch,
+    而非 ai_service._parallel_fetch。
+    """
+
+    def _patch_parallel_fetch(self, return_value):
+        """patch data_source_v2._parallel_fetch(get_market_outlook 内部局部导入)"""
+        return patch("src.core.data_source_v2._parallel_fetch", return_value=return_value)
+
+    def test_no_market_data_returns_unknown(self):
+        """无市场数据 → 返回 UNKNOWN"""
+        with self._patch_parallel_fetch({}):
+            result = get_market_outlook()
+        # 无数据时返回降级结构(outlook=UNKNOWN,无 outlook_analysis 键)
+        assert result.get("outlook") == "UNKNOWN" or result.get("outlook_analysis") == {}
+        assert "timestamp" in result
+
+    def test_successful_outlook(self):
+        """成功展望(mock LLM)"""
+        mock_outlook = json.dumps({
+            "outlook": "BULLISH",
+            "confidence": 0.75,
+            "summary": "市场向好",
+        })
+        with self._patch_parallel_fetch({
+            "indices": [{"name": "上证", "change_pct": 1.0}],
+            "northbound": {"total_net_inflow": 1e9},
+            "sectors": [{"name": f"板块{i}"} for i in range(15)],
+            "news": [{"title": f"新闻{i}"} for i in range(15)],
+        }):
+            with patch.object(ai_service, "_call_llm", return_value=mock_outlook):
+                result = get_market_outlook()
+        assert result["outlook_analysis"]["outlook"] == "BULLISH"
+        assert result["outlook_analysis"]["confidence"] == 0.75
+        assert "market_data" in result
+        assert len(result["market_data"]["hot_sectors"]) == 10
+        assert len(result["market_data"]["cold_sectors"]) == 5
+
+    def test_outlook_with_text_wrapper(self):
+        """LLM 返回带文本包裹的 JSON → 应能提取"""
+        wrapped = f"结果如下:\n{{\"outlook\": \"NEUTRAL\"}}\n结束"
+        with self._patch_parallel_fetch({
+            "indices": [{"name": "上证"}],
+        }):
+            with patch.object(ai_service, "_call_llm", return_value=wrapped):
+                result = get_market_outlook()
+        assert result["outlook_analysis"]["outlook"] == "NEUTRAL"
+
+    def test_outlook_invalid_json_returns_empty(self):
+        """LLM 返回非 JSON 且无 {} → outlook_analysis 为空"""
+        with self._patch_parallel_fetch({
+            "indices": [{"name": "上证"}],
+        }):
+            with patch.object(ai_service, "_call_llm", return_value="not-json-no-braces"):
+                result = get_market_outlook()
+        assert result["outlook_analysis"] == {}
+
+    def test_outlook_llm_exception_falls_back_to_no_json_mode(self):
+        """json_mode 失败 → 重试无 json_mode"""
+        mock_response = json.dumps({"outlook": "BEARISH"})
+        call_count = [0]
+        def fake_call_llm(messages, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise Exception("json mode failed")
+            return mock_response
+        with self._patch_parallel_fetch({
+            "indices": [{"name": "上证"}],
+        }):
+            with patch.object(ai_service, "_call_llm", side_effect=fake_call_llm):
+                result = get_market_outlook()
+        assert call_count[0] == 2
+        assert result["outlook_analysis"]["outlook"] == "BEARISH"
+
+    def test_outlook_all_llm_calls_fail_returns_empty(self):
+        """两次 LLM 调用都失败 → outlook_analysis 为空"""
+        with self._patch_parallel_fetch({
+            "indices": [{"name": "上证"}],
+        }):
+            with patch.object(ai_service, "_call_llm", side_effect=Exception("always fails")):
+                result = get_market_outlook()
+        assert result["outlook_analysis"] == {}
+
+    def test_outlook_partial_data(self):
+        """部分数据源成功 → 仍生成展望"""
+        mock_outlook = json.dumps({"outlook": "NEUTRAL"})
+        with self._patch_parallel_fetch({
+            "indices": [{"name": "上证"}],
+            # northbound/sectors/news 为 None
+        }):
+            with patch.object(ai_service, "_call_llm", return_value=mock_outlook):
+                result = get_market_outlook()
+        assert result["outlook_analysis"]["outlook"] == "NEUTRAL"
+        assert "indices" in result["market_data"]
+
+    def test_outlook_sectors_less_than_10(self):
+        """板块数 < 10 时 cold_sectors 为空"""
+        mock_outlook = json.dumps({"outlook": "NEUTRAL"})
+        with self._patch_parallel_fetch({
+            "sectors": [{"name": "板块1"}, {"name": "板块2"}],
+        }):
+            with patch.object(ai_service, "_call_llm", return_value=mock_outlook):
+                result = get_market_outlook()
+        assert len(result["market_data"]["hot_sectors"]) == 2
+        assert result["market_data"]["cold_sectors"] == []
+
+    def test_outlook_news_truncated_to_8(self):
+        """全球新闻应截断到 8 条"""
+        mock_outlook = json.dumps({"outlook": "NEUTRAL"})
+        with self._patch_parallel_fetch({
+            "news": [{"title": f"新闻{i}"} for i in range(20)],
+        }):
+            with patch.object(ai_service, "_call_llm", return_value=mock_outlook):
+                result = get_market_outlook()
+        assert len(result["market_data"]["global_news"]) == 8

@@ -18,3 +18,12 @@ package-lock.json
 # 运行时用户数据
 web/user_fund_positions.json
 web/user_*.json
+
+# 测试产物
+.coverage
+coverage.json
+htmlcov/
+.pytest_cache/
+
+# 临时验证脚本
+verify_full.py
