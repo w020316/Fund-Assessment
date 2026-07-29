@@ -2,6 +2,7 @@ import re
 from dataclasses import dataclass
 
 import akshare as ak
+from loguru import logger
 
 
 _POSITIVE_KEYWORDS: list[str] = [
@@ -40,8 +41,8 @@ def fetch_news(stock_code: str) -> list[dict]:
                     "time": str(row.get("发布时间", row.get("时间", ""))),
                 }
                 news_list.append(item)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"fetch stock news failed: {e}")
 
     return news_list
 

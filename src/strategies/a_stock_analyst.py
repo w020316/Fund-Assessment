@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from src.analysis.technical import rsi as ta_rsi, macd as ta_macd
 import akshare as ak
+from loguru import logger
 
 
 @dataclass
@@ -57,8 +58,8 @@ class AStockAnalyst:
                 df = df.tail(days).reset_index(drop=True)
                 self._kline_cache[stock_code] = df
                 return df
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取K线数据 failed: {e}")
         return pd.DataFrame()
 
     def _analyze_fundamental(self, stock_code: str) -> FundamentalData:
@@ -70,8 +71,8 @@ class AStockAnalyst:
                 data.pe = float(latest.get("pe", 0))
                 data.pb = float(latest.get("pb", 0))
                 data.ps = float(latest.get("ps", 0))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取估值指标 failed: {e}")
         try:
             df_fin = ak.stock_financial_analysis_indicator(symbol=stock_code)
             if df_fin is not None and not df_fin.empty:
@@ -80,8 +81,8 @@ class AStockAnalyst:
                 data.gross_margin = float(latest.get("销售毛利率(%)", 0))
                 data.net_margin = float(latest.get("销售净利率(%)", 0))
                 data.debt_ratio = float(latest.get("资产负债率(%)", 0))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取财务分析指标 failed: {e}")
         try:
             df_growth = ak.stock_financial_abstract_ths(symbol=stock_code)
             if df_growth is not None and not df_growth.empty:
@@ -89,8 +90,8 @@ class AStockAnalyst:
                 data.revenue_growth = float(latest.get("营业收入同比增长(%)", 0))
                 data.profit_growth = float(latest.get("净利润同比增长(%)", 0))
                 data.eps = float(latest.get("每股收益", 0))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取财务摘要 failed: {e}")
         return data
 
     def _analyze_technical(self, stock_code: str) -> TechnicalData:
@@ -147,8 +148,8 @@ class AStockAnalyst:
                 industry_row = df_info[df_info["item"] == "行业"]
                 if not industry_row.empty:
                     data.industry = str(industry_row.iloc[0]["value"])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取个股信息 failed: {e}")
         if not data.industry:
             return data
         try:
@@ -167,10 +168,10 @@ class AStockAnalyst:
                                 rank_list = df_sorted["代码"].tolist()
                                 if stock_code in rank_list:
                                     data.rank = rank_list.index(stock_code) + 1
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+                    except Exception as e:
+                        logger.warning(f"获取行业成分股 failed: {e}")
+        except Exception as e:
+            logger.warning(f"获取行业板块 failed: {e}")
         try:
             df_policy = ak.stock_news_em(symbol=stock_code)
             if df_policy is not None and not df_policy.empty:
@@ -182,8 +183,8 @@ class AStockAnalyst:
                     data.policy_bias = "positive"
                 elif neg > pos + 2:
                     data.policy_bias = "negative"
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取新闻舆情 failed: {e}")
         if data.total_in_industry > 0:
             if data.total_in_industry > 100:
                 data.competition_level = "high"

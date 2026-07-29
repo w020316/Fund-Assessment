@@ -12,6 +12,7 @@ except ImportError:
 import pandas as pd
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
+from loguru import logger
 
 from src.core import data_source_v2 as ds2
 from src.core.cache import DataCache
@@ -220,8 +221,8 @@ async def fund_realtime(codes: str = Query(..., description="基金代码，逗�
                     ))
                 except Exception:
                     continue
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"fetch fund_realtime via akshare failed: {e}")
         if result:
             cache.set(cache_key, result)
             return {"data": result, "_meta": _build_meta("akshare", cached=False)}
@@ -271,8 +272,8 @@ async def fund_history(
                 prev_nav = nav
             cache.set(cache_key, result, ttl=300)
             return {"data": result, "_meta": _build_meta("akshare", cached=False)}
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"fetch fund_history via akshare failed: {e}")
     result = await asyncio.to_thread(_fund_history_tencent_fallback, code, period)
     data_source = "tencent"
     cache.set(cache_key, result, ttl=300)
@@ -852,29 +853,29 @@ async def check_data_quality(stock_code: str):
         quotes = get_realtime_quote_tencent([stock_code])
         if quotes:
             data["quote"] = quotes[0]
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"fetch realtime quote for data_quality failed: {e}")
 
     try:
         kline = get_kline_mootdx(stock_code, period="daily", count=30)
         if kline:
             data["kline_daily"] = kline
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"fetch kline for data_quality failed: {e}")
 
     try:
         flow = get_capital_flow_detail(stock_code)
         if flow:
             data["capital_flow"] = flow
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"fetch capital_flow for data_quality failed: {e}")
 
     try:
         financial = get_financial_snapshot(stock_code)
         if financial:
             data["financial"] = financial
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"fetch financial snapshot for data_quality failed: {e}")
 
     validator = get_data_validator()
     result = validator.validate_analysis_data(data)

@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import akshare as ak
+from loguru import logger
 
 
 def analyze_capital_flow(stock_code: str) -> dict:
@@ -31,8 +32,8 @@ def analyze_capital_flow(stock_code: str) -> dict:
                         if pd.notna(val):
                             result[key] = float(val)
                         break
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"fetch individual fund flow failed: {e}")
 
     try:
         north_df = ak.stock_hsgt_individual_em(stock=stock_code)
@@ -45,8 +46,8 @@ def analyze_capital_flow(stock_code: str) -> dict:
                     if pd.notna(val):
                         result["northbound_change"] = float(val)
                         break
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"fetch northbound holding failed: {e}")
 
     return result
 

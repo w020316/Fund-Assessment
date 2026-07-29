@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Body
+from loguru import logger
 from pydantic import BaseModel
 
 from src.core import data_source_v2 as ds2
@@ -19,8 +20,8 @@ try:
     from src.analysis.capital_flow import analyze_capital_flow
     from src.strategies.stock_monitor import AlertType, StockMonitor
     _HAS_MONITOR = True
-except ImportError:
-    pass
+except ImportError as e:
+    logger.warning(f"import monitor modules failed: {e}")
 
 
 class AlertItem(BaseModel):
@@ -71,8 +72,8 @@ def _load_watchlist() -> dict[str, list[str]]:
         try:
             with open(_WATCHLIST_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"load watchlist failed: {e}")
     return {}
 
 
@@ -81,8 +82,8 @@ def _save_watchlist(data: dict[str, list[str]]) -> None:
     try:
         with open(_WATCHLIST_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"save watchlist failed: {e}")
 
 
 @router.get("/alerts", response_model=list[AlertItem])
@@ -129,8 +130,8 @@ async def _generate_default_alerts() -> list[AlertItem]:
         change_pct = 0.0
         try:
             change_pct = float(q.get("change_pct", 0))
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError) as e:
+            logger.warning(f"parse change_pct failed: {e}")
         name = q.get("name", code)
         if abs(change_pct) >= 5:
             alert_items.append(AlertItem(
@@ -152,8 +153,8 @@ async def _generate_default_alerts() -> list[AlertItem]:
             idx_change = 0.0
             try:
                 idx_change = float(idx.get("change_pct", 0))
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as e:
+                logger.warning(f"parse index change_pct failed: {e}")
             idx_name = idx.get("name", "")
             idx_code = idx.get("code", "")
             if abs(idx_change) >= 2:
@@ -163,8 +164,8 @@ async def _generate_default_alerts() -> list[AlertItem]:
                     message=f"大盘指数 {idx_name} 涨跌幅 {idx_change:.2f}%，市场波动较大",
                     detail={"change_pct": round(idx_change, 2)},
                 ))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"fetch index_realtime for alerts failed: {e}")
     if not alert_items:
         alert_items.append(AlertItem(
             stock_code="000001", alert_type="market_status",
@@ -208,8 +209,8 @@ async def capital_flow(stock_code: str = ""):
         if nb_data:
             total_nb = _safe_float(nb_data.get("total_net_inflow", 0))
             northbound_change = total_nb / 1e8 if total_nb != 0 else 0.0
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"fetch northbound_flow_realtime failed: {e}")
     if not stock_code:
         return CapitalFlowResponse(
             main_net_inflow=0, large_order_ratio=0, medium_order_ratio=0,
@@ -234,8 +235,8 @@ async def capital_flow(stock_code: str = ""):
                 small_order_ratio=round(small_ratio, 2),
                 northbound_change=round(northbound_change, 2),
             )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"fetch capital_flow_detail failed: {e}")
     return CapitalFlowResponse(
         main_net_inflow=0, large_order_ratio=0, medium_order_ratio=0,
         small_order_ratio=0, northbound_change=round(northbound_change, 2),
@@ -259,8 +260,8 @@ async def northbound():
                 sz_net_inflow=_safe_float(data.get("sz_net_inflow", 0)),
                 top_stocks=top_stocks,
             )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"fetch northbound_flow_realtime failed: {e}")
     if not _HAS_MONITOR:
         return NorthboundResponse(
             total_net_inflow=0,

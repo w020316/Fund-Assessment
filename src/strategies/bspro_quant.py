@@ -6,6 +6,7 @@ from enum import Enum
 import numpy as np
 import pandas as pd
 import akshare as ak
+from loguru import logger
 
 
 class FactorCategory(str, Enum):
@@ -63,8 +64,8 @@ class BSProQuant:
                 df = df.tail(days).reset_index(drop=True)
                 self._kline_cache[stock_code] = df
                 return df
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取K线数据 failed: {e}")
         return pd.DataFrame()
 
     def _compute_value_factors(self, stock_code: str) -> dict[str, float]:
@@ -76,8 +77,8 @@ class BSProQuant:
                 result["pe"] = float(latest.get("pe", 0))
                 result["pb"] = float(latest.get("pb", 0))
                 result["ps"] = float(latest.get("ps", 0))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取估值指标 failed: {e}")
         try:
             df_cash = ak.stock_cash_flow_sheet_by_report_em(symbol=stock_code)
             if df_cash is not None and not df_cash.empty:
@@ -91,17 +92,17 @@ class BSProQuant:
                             market_cap = float(row.iloc[0].get("总市值", 0))
                             if net_cash != 0 and market_cap > 0:
                                 result["pcf"] = market_cap / abs(net_cash)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as e:
+                    logger.warning(f"获取市值数据 failed: {e}")
+        except Exception as e:
+            logger.warning(f"获取现金流数据 failed: {e}")
         try:
             df_val = ak.stock_a_indicator_lg(symbol=stock_code)
             if df_val is not None and not df_val.empty:
                 latest = df_val.iloc[-1]
                 result["pe_ttm"] = float(latest.get("pe_ttm", result.get("pe", 0)))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取TTM估值指标 failed: {e}")
         return result
 
     def _compute_growth_factors(self, stock_code: str) -> dict[str, float]:
@@ -121,8 +122,8 @@ class BSProQuant:
                         result["roe_change"] = 0.0
                 else:
                     result["roe_change"] = 0.0
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取财务摘要 failed: {e}")
         return result
 
     def _compute_quality_factors(self, stock_code: str) -> dict[str, float]:
@@ -136,8 +137,8 @@ class BSProQuant:
                 result["debt_ratio"] = float(latest.get("资产负债率(%)", 0))
                 result["current_ratio"] = float(latest.get("流动比率", 0))
                 result["asset_turnover"] = float(latest.get("总资产周转率(次)", 0))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取财务分析指标 failed: {e}")
         return result
 
     def _compute_momentum_factors(self, stock_code: str) -> dict[str, float]:

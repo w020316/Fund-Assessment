@@ -1282,8 +1282,8 @@ def _get_stock_news_sina(stock_code: str, page: int = 1, page_size: int = 10) ->
             if pub_time and pub_time.isdigit():
                 try:
                     pub_time = datetime.fromtimestamp(int(pub_time)).strftime("%Y-%m-%d %H:%M")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"parse news publish_time timestamp failed: {e}")
             result.append({
                 "title": title,
                 "content": _safe_str(item.get("intro", item.get("summary", "")))[:200],
@@ -1370,8 +1370,8 @@ def _get_global_news_sina() -> list[dict]:
             if pub_time and pub_time.isdigit():
                 try:
                     pub_time = datetime.fromtimestamp(int(pub_time)).strftime("%Y-%m-%d %H:%M")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"parse news publish_time timestamp failed: {e}")
             result.append({
                 "title": title,
                 "content": _safe_str(item.get("intro", item.get("summary", "")))[:200],
@@ -2021,8 +2021,8 @@ def _tencent_global_quote(codes: list[str]) -> list[dict]:
             try:
                 float(currency)
                 currency = ""
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as e:
+                logger.warning(f"parse index currency field failed: {e}")
             # 涨跌额兜底:接口未返回时用 price - prev_close
             if change == 0.0 and price != 0.0 and prev_close != 0.0:
                 change = round(price - prev_close, 4)

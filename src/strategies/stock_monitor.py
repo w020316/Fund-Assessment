@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 from src.analysis.technical import rsi as ta_rsi
 import akshare as ak
+from loguru import logger
 
 
 class AlertType(str, Enum):
@@ -54,8 +55,8 @@ class StockMonitor:
                     result["volume"] = float(r.get("成交量", 0))
                     result["turnover_rate"] = float(r.get("换手率", 0))
                     result["amount"] = float(r.get("成交额", 0))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取个股实时行情 failed: {e}")
         return result
 
     def _get_kline(self, stock_code: str, days: int = 60) -> pd.DataFrame:
@@ -63,8 +64,8 @@ class StockMonitor:
             df = ak.stock_zh_a_hist(symbol=stock_code, period="daily", adjust="qfq")
             if df is not None and not df.empty:
                 return df.tail(days).reset_index(drop=True)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取K线数据 failed: {e}")
         return pd.DataFrame()
 
     def _check_price_anomaly(self, stock_code: str) -> Alert | None:
@@ -114,8 +115,8 @@ class StockMonitor:
                             message=f"EPS超预期{surprise_pct:.2f}%, 实际{eps:.2f} vs 预期{est_eps:.2f}",
                             detail={"actual_eps": eps, "estimated_eps": est_eps, "surprise_pct": round(surprise_pct, 2)},
                         )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"获取EPS预测 failed: {e}")
             if eps > 0 and eps * 1.04 > eps:
                 growth = 4.0
                 if growth > 2:
@@ -125,9 +126,9 @@ class StockMonitor:
                         severity="medium",
                         message=f"EPS增长{growth:.2f}%超过2%阈值",
                         detail={"eps": eps, "growth_pct": growth},
-                    )
-        except Exception:
-            pass
+                )
+        except Exception as e:
+            logger.warning(f"获取财务摘要 failed: {e}")
         return None
 
     def _check_volume_price_divergence(self, stock_code: str) -> Alert | None:
@@ -173,8 +174,8 @@ class StockMonitor:
                     message=f"大宗交易{direction}{abs(premium_pct):.2f}%, 成交价{trade_price}, 市价{market_price}",
                     detail={"trade_price": trade_price, "market_price": market_price, "premium_pct": round(premium_pct, 2)},
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取大宗交易 failed: {e}")
         return None
 
     def _check_rsi_extreme(self, stock_code: str) -> Alert | None:
@@ -241,10 +242,10 @@ class StockMonitor:
                                 message=f"北向资金1日净流入{change_1d:.2f}%",
                                 detail={"hold_pct": hold_pct, "change_1d_pct": round(change_1d, 2)},
                             )
-            except Exception:
-                pass
-        except Exception:
-            pass
+            except Exception as e:
+                logger.warning(f"获取北向持股明细 failed: {e}")
+        except Exception as e:
+            logger.warning(f"获取北向持股 failed: {e}")
         return None
 
     def _check_sector_rotation(self, stock_code: str) -> Alert | None:
@@ -284,8 +285,8 @@ class StockMonitor:
                     message=f"行业资金轮动: 行业净流入{sector_net_pct:.2f}%, 个股涨幅{stock_change:.2f}%",
                     detail={"sector_net_pct": round(sector_net_pct, 2), "stock_change_pct": round(stock_change, 2)},
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取行业资金流 failed: {e}")
         return None
 
     def check_alerts(self, stock_code: str) -> list[dict]:

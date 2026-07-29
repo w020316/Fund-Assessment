@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter
+from loguru import logger
 from pydantic import BaseModel
 
 from src.core import data_source_v2 as ds2
@@ -17,8 +18,8 @@ try:
     from src.strategies.limit_up import LimitUpAnalyzer
     from src.strategies.trading_quant import TradingQuant
     _HAS_STRATEGIES = True
-except ImportError:
-    pass
+except ImportError as e:
+    logger.warning(f"import strategy modules failed: {e}")
 
 
 class AnalyzeRequest(BaseModel):
@@ -259,13 +260,13 @@ async def scan_new_high():
         top = []
         try:
             top = ds2.get_stock_ranking_em(sort_field="f3", sort_order=0, count=30)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"get_stock_ranking_em failed: {e}")
         if not top:
             try:
                 top = ds2._get_stock_ranking_sina("f3", 0, 30)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"get_stock_ranking_sina failed: {e}")
         items: list[NewHighItem] = []
         for s in top:
             if s.get("change_pct", 0) >= 3:

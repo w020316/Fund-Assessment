@@ -200,8 +200,8 @@ class DataValidator:
                                 message=f"K线数据最新日期为{latest[:10]}，已{days_old}天未更新",
                                 suggestion="检查数据源是否正常",
                             ))
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as e:
+                logger.warning(f"parse kline date for freshness check failed: {e}")
 
         return result
 

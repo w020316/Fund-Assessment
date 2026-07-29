@@ -1,21 +1,23 @@
 from __future__ import annotations
 
+from loguru import logger
+
 from src.agents.base import AgentRole, BaseAgent, AgentOpinion
 
 _HAS_TECHNICAL = False
 try:
     from src.analysis.technical import compute_indicators, score_technical
     _HAS_TECHNICAL = True
-except ImportError:
-    pass
+except ImportError as e:
+    logger.warning(f"导入技术面分析模块(src.analysis.technical) failed: {e}")
 
 _HAS_AKSHARE = False
 try:
     import akshare as ak
     import pandas as pd
     _HAS_AKSHARE = True
-except ImportError:
-    pass
+except ImportError as e:
+    logger.warning(f"导入akshare/pandas依赖 failed: {e}")
 
 
 class TechnicalAgent(BaseAgent):
@@ -25,8 +27,8 @@ class TechnicalAgent(BaseAgent):
         if _HAS_TECHNICAL and _HAS_AKSHARE:
             try:
                 return self._real_analysis(stock_code)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"技术面实时分析 failed: {e}")
         return self._mock_analysis(stock_code)
 
     def _real_analysis(self, stock_code: str) -> AgentOpinion:

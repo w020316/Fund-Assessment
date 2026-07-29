@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
+from loguru import logger
 from pydantic import BaseModel
 
 from src.utils.auth import require_admin
@@ -14,8 +15,8 @@ _HAS_EXECUTOR = False
 try:
     from src.core.executor import OrderSide, OrderType, Signal
     _HAS_EXECUTOR = True
-except ImportError:
-    pass
+except ImportError as e:
+    logger.warning(f"import src.core.executor failed: {e}")
 
 
 class BuyRequest(BaseModel):

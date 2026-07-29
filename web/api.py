@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.requests import Request
+from loguru import logger
 
 _parent_dir = str(Path(__file__).resolve().parent.parent)
 if _parent_dir not in sys.path:
@@ -22,8 +23,8 @@ _HAS_CORE = False
 try:
     import akshare
     _HAS_AKSHARE = True
-except ImportError:
-    pass
+except ImportError as e:
+    logger.warning(f"import akshare failed: {e}")
 
 try:
     from src.core.data_source import DataSourceManager
@@ -31,8 +32,8 @@ try:
     from src.core.risk_manager import RiskManager
     from src.utils.config import get_config
     _HAS_CORE = True
-except ImportError:
-    pass
+except ImportError as e:
+    logger.warning(f"import src.core failed: {e}")
 
 
 @asynccontextmanager

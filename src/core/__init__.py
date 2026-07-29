@@ -1,3 +1,5 @@
+from loguru import logger
+
 try:
     from .data_source import (
         AkShareSource,
@@ -14,8 +16,8 @@ try:
         SourceLog,
         TushareSource,
     )
-except ImportError:
-    pass
+except ImportError as e:
+    logger.warning(f"import .data_source failed: {e}")
 
 try:
     from .executor import (
@@ -34,8 +36,8 @@ try:
         Trade,
         TradeExecutor,
     )
-except ImportError:
-    pass
+except ImportError as e:
+    logger.warning(f"import .executor failed: {e}")
 
 try:
     from .backtest import (
@@ -47,20 +49,20 @@ try:
         long_value_strategy,
         new_high_strategy,
     )
-except ImportError:
-    pass
+except ImportError as e:
+    logger.warning(f"import .backtest failed: {e}")
 
 try:
     from .risk_manager import RiskLevel, RiskManager, RiskStatus, TradeRecord
-except ImportError:
-    pass
+except ImportError as e:
+    logger.warning(f"import .risk_manager failed: {e}")
 
 try:
     from .scheduler import Scheduler
-except ImportError:
-    pass
+except ImportError as e:
+    logger.warning(f"import .scheduler failed: {e}")
 
 try:
     from .data_source_v2 import *
-except ImportError:
-    pass
+except ImportError as e:
+    logger.warning(f"import .data_source_v2 failed: {e}")

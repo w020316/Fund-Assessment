@@ -901,8 +901,8 @@ def analyze_portfolio(positions: list[dict]) -> dict[str, Any]:
                 _, analysis = f.result(timeout=30)
                 if analysis.get("symbol"):
                     results[idx] = analysis
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"analyze position future result failed: {e}")
     position_analyses = [r for r in results if r is not None]
 
     total_value = sum(

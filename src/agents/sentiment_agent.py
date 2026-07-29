@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+from loguru import logger
+
 from src.agents.base import AgentRole, BaseAgent, AgentOpinion
 
 _HAS_SENTIMENT = False
 try:
     from src.analysis.sentiment import compute_market_sentiment, score_sentiment
     _HAS_SENTIMENT = True
-except ImportError:
-    pass
+except ImportError as e:
+    logger.warning(f"导入情绪面分析模块(src.analysis.sentiment) failed: {e}")
 
 
 class SentimentAgent(BaseAgent):
@@ -17,8 +19,8 @@ class SentimentAgent(BaseAgent):
         if _HAS_SENTIMENT:
             try:
                 return self._real_analysis(stock_code)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"情绪面实时分析 failed: {e}")
         return self._mock_analysis(stock_code)
 
     def _real_analysis(self, stock_code: str) -> AgentOpinion:

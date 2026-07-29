@@ -6,6 +6,7 @@ from enum import Enum
 import numpy as np
 import pandas as pd
 import akshare as ak
+from loguru import logger
 
 
 class LimitLevel(str, Enum):
@@ -51,8 +52,8 @@ class LimitUpAnalyzer:
                         "open_count": int(row.get("炸板次数", 0)),
                         "seal_amount": float(row.get("封板资金", 0)),
                     })
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"加载涨停池历史 failed: {e}")
 
     def _determine_level(self, stock_code: str) -> LimitLevel:
         count = len(self._history.get(stock_code, []))
@@ -67,8 +68,8 @@ class LimitUpAnalyzer:
             df = ak.stock_board_concept_name_em()
             if df is not None and not df.empty:
                 return LimitReason.THEME
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取题材板块 failed: {e}")
         try:
             df_fin = ak.stock_financial_abstract_ths(symbol=stock_code)
             if df_fin is not None and not df_fin.empty:
@@ -76,8 +77,8 @@ class LimitUpAnalyzer:
                 net_profit_growth = float(latest.get("净利润同比增长(%)", 0))
                 if net_profit_growth > 30:
                     return LimitReason.PERFORMANCE
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取财务摘要 failed: {e}")
         return LimitReason.CAPITAL
 
     def _calc_quality_score(
@@ -101,8 +102,8 @@ class LimitUpAnalyzer:
                     score += 5.0
                 else:
                     score -= 5.0
-            except (ValueError, IndexError):
-                pass
+            except (ValueError, IndexError) as e:
+                logger.warning(f"解析封板时间 failed: {e}")
         if open_count == 0:
             score += 15.0
         elif open_count == 1:
@@ -147,8 +148,8 @@ class LimitUpAnalyzer:
                     seal_volume=seal_volume,
                     quality_score=round(quality, 2),
                 ))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"扫描涨停列表 failed: {e}")
         return results
 
     def analyze_limit_up(self, stock_code: str) -> dict:
@@ -182,8 +183,8 @@ class LimitUpAnalyzer:
                         "seal_volume": seal_volume,
                         "quality_score": round(quality, 2),
                     })
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"分析涨停个股 failed: {e}")
         return result
 
     def predict_promotion(self, stock_code: str) -> dict:
@@ -223,10 +224,10 @@ class LimitUpAnalyzer:
                                 prob += 8.0
                             elif total_min > 660:
                                 prob -= 5.0
-                        except (ValueError, IndexError):
-                            pass
-        except Exception:
-            pass
+                        except (ValueError, IndexError) as e:
+                            logger.warning(f"解析封板时间 failed: {e}")
+        except Exception as e:
+            logger.warning(f"预测晋级概率 failed: {e}")
         try:
             df_ind = ak.stock_individual_fund_flow(
                 stock=stock_code, market="sh" if stock_code.startswith("6") else "sz"
@@ -237,8 +238,8 @@ class LimitUpAnalyzer:
                     prob += 10.0
                 elif net_pct < -5:
                     prob -= 10.0
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取个股资金流 failed: {e}")
         prob = max(0.0, min(100.0, prob))
         return {
             "stock_code": stock_code,

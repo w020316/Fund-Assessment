@@ -7,6 +7,7 @@ from typing import Generator
 import numpy as np
 import pandas as pd
 import akshare as ak
+from loguru import logger
 
 
 @dataclass
@@ -44,8 +45,8 @@ class CBT0Sniper:
                     cb_code = str(row.get("债券代码", "")).strip()
                     if stock_code and cb_code:
                         self._cb_map[stock_code] = cb_code
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"构建可转债映射 failed: {e}")
 
     def _get_limit_up_stocks(self) -> list[dict]:
         limit_ups: list[dict] = []
@@ -61,8 +62,8 @@ class CBT0Sniper:
                     "name": str(row.get("名称", "")),
                     "change_pct": float(row.get("涨跌幅", 0)),
                 })
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取涨停列表 failed: {e}")
         return limit_ups
 
     def _get_cb_detail(self, cb_code: str) -> dict | None:
@@ -79,8 +80,8 @@ class CBT0Sniper:
                         "stock_name": str(r.get("正股简称", "")),
                         "conversion_price": float(r.get("转股价", 0)),
                     }
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取可转债详情 failed: {e}")
         return None
 
     def _get_cb_price(self, cb_code: str) -> float:
@@ -90,8 +91,8 @@ class CBT0Sniper:
                 row = df[df["代码"] == cb_code]
                 if not row.empty:
                     return float(row.iloc[0].get("最新价", 0))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取可转债价格 failed: {e}")
         return 0.0
 
     def _get_stock_price(self, stock_code: str) -> float:
@@ -101,8 +102,8 @@ class CBT0Sniper:
                 row = df[df["代码"] == stock_code]
                 if not row.empty:
                     return float(row.iloc[0].get("最新价", 0))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取正股价格 failed: {e}")
         return 0.0
 
     def scan_cb_opportunities(self) -> list[CBOpportunity]:
@@ -135,8 +136,8 @@ class CBT0Sniper:
                     row = df_spot[df_spot["代码"] == cb_code]
                     if not row.empty:
                         turnover_rate = float(row.iloc[0].get("换手率", 0))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"获取可转债换手率 failed: {e}")
             opportunities.append(CBOpportunity(
                 cb_code=cb_code,
                 cb_name=detail["cb_name"],
@@ -195,6 +196,6 @@ class CBT0Sniper:
                 }
                 if signal in ("STOP_LOSS", "EXIT_PREMIUM"):
                     break
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"监控可转债 failed: {e}")
             time.sleep(interval)

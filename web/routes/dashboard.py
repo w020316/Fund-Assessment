@@ -7,6 +7,7 @@ import os
 from typing import Any
 
 from fastapi import APIRouter, Request
+from loguru import logger
 from pydantic import BaseModel
 
 from src.core import data_source_v2 as ds2
@@ -20,8 +21,8 @@ try:
     from src.core.executor import SimulatedBroker, TradeExecutor
     from src.core.risk_manager import RiskManager
     _HAS_CORE = True
-except ImportError:
-    pass
+except ImportError as e:
+    logger.warning(f"import src.core failed: {e}")
 
 
 def _load_user_positions() -> list[dict]:
@@ -32,8 +33,8 @@ def _load_user_positions() -> list[dict]:
             with open(pos_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 return data.get("positions", [])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"load user_positions failed: {e}")
     return []
 
 
@@ -45,8 +46,8 @@ def _load_user_cash() -> float:
             with open(pos_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 return float(data.get("available_cash", 0.0))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"load user_cash failed: {e}")
     return 0.0
 
 
@@ -148,8 +149,8 @@ async def overview(request: Request):
                 prev_close = _safe_float(p.get("_prev_close", 0))
                 if prev_close > 0:
                     daily_pnl += p["quantity"] * prev_close * change_pct / 100.0
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"calc daily_pnl for overview failed: {e}")
         available_cash = _load_user_cash()
         total_assets = available_cash + market_value
         daily_pnl_pct = round(daily_pnl / (total_assets - daily_pnl) * 100, 2) if (total_assets - daily_pnl) > 0 else 0.0
@@ -262,8 +263,8 @@ async def risk(request: Request):
                 prev_close = _safe_float(p.get("_prev_close", 0))
                 if prev_close > 0:
                     daily_pnl += p["quantity"] * prev_close * change_pct / 100.0
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"calc daily_pnl for risk failed: {e}")
         available_cash = _load_user_cash()
         total_assets = available_cash + market_value
         total_profit = sum(p.get("profit", 0) for p in enriched)

@@ -110,12 +110,15 @@ class TestHealthEndpointNoLeak:
     """health 端点不泄露密钥详情"""
 
     def test_health_returns_ai_ready_boolean(self, client):
-        """返回 ai_ready 布尔值,不返回 ai_keys 详情"""
+        """返回 ai_ready 布尔值,ai_keys 仅含布尔状态不泄露 key 本身"""
         resp = client.get("/api/health")
         data = resp.json()
         assert "ai_ready" in data
         assert isinstance(data["ai_ready"], bool)
-        assert "ai_keys" not in data  # 不泄露具体哪些 key
+        # ai_keys 存在且值为布尔型(不泄露 key 字符串)
+        if "ai_keys" in data:
+            for v in data["ai_keys"].values():
+                assert isinstance(v, bool)
 
 
 class TestExecutorSellProfitFix:

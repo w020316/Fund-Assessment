@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import akshare as ak
+from loguru import logger
 
 
 def _get_market_overview() -> pd.DataFrame:
@@ -179,8 +180,8 @@ def score_sentiment(stock_code: str) -> float:
                 prev_close = float(df.iloc[-2][close_col])
                 if prev_close > 0:
                     stock_change = (latest_close - prev_close) / prev_close * 100
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"fetch stock history for sentiment failed: {e}")
 
     stock_bonus = 0.0
     if stock_change > 5:

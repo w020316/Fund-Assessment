@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+from loguru import logger
+
 from src.agents.base import AgentRole, BaseAgent, AgentOpinion
 
 _HAS_FUNDAMENTAL = False
 try:
     from src.analysis.fundamental import analyze_fundamental, score_fundamental
     _HAS_FUNDAMENTAL = True
-except ImportError:
-    pass
+except ImportError as e:
+    logger.warning(f"导入基本面分析模块(src.analysis.fundamental) failed: {e}")
 
 
 class FundamentalAgent(BaseAgent):
@@ -17,8 +19,8 @@ class FundamentalAgent(BaseAgent):
         if _HAS_FUNDAMENTAL:
             try:
                 return self._real_analysis(stock_code)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"基本面实时分析 failed: {e}")
         return self._mock_analysis(stock_code)
 
     def _real_analysis(self, stock_code: str) -> AgentOpinion:

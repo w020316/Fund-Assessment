@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import akshare as ak
+from loguru import logger
 
 
 def analyze_fundamental(stock_code: str) -> dict:
@@ -29,8 +30,8 @@ def analyze_fundamental(stock_code: str) -> dict:
                     if pd.notna(val):
                         result["PB"] = float(val)
                         break
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"fetch valuation indicator (PE/PB) failed: {e}")
 
     try:
         fin_df = ak.stock_financial_analysis_indicator(symbol=stock_code)
@@ -55,8 +56,8 @@ def analyze_fundamental(stock_code: str) -> dict:
                     if pd.notna(val):
                         result["profit_growth"] = float(val)
                         break
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"fetch financial analysis indicator failed: {e}")
 
     return result
 

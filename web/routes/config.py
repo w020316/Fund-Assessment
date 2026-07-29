@@ -5,6 +5,7 @@ from typing import Any
 
 import yaml
 from fastapi import APIRouter, Depends
+from loguru import logger
 from pydantic import BaseModel
 
 from src.utils.auth import require_admin
@@ -175,8 +176,8 @@ async def get_user_positions():
         try:
             with open(pos_file, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"load user_positions failed: {e}")
     return {"positions": [], "available_cash": 800000.0}
 
 

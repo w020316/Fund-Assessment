@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from src.analysis.technical import rsi as ta_rsi, macd as ta_macd
 import akshare as ak
+from loguru import logger
 from enum import Enum
 from dataclasses import dataclass, field
 
@@ -109,8 +110,8 @@ class TradingQuant:
                     score += 10.0
                 elif net_pct < -5:
                     score -= 10.0
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取个股资金流评分 failed: {e}")
         return max(0.0, min(100.0, score))
 
     def _score_fundamental(self, stock_code: str) -> float:
@@ -133,8 +134,8 @@ class TradingQuant:
                     score += 5.0
                 elif gross_margin < 10:
                     score -= 5.0
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取财务分析指标 failed: {e}")
         try:
             df_val = ak.stock_a_indicator_lg(symbol=stock_code)
             if df_val is not None and not df_val.empty:
@@ -151,8 +152,8 @@ class TradingQuant:
                     score += 5.0
                 elif pb > 5:
                     score -= 5.0
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取估值指标 failed: {e}")
         return max(0.0, min(100.0, score))
 
     def _score_news(self, stock_code: str) -> float:
@@ -171,8 +172,8 @@ class TradingQuant:
                     if any(kw in title_str for kw in negative_keywords):
                         neg_count += 1
                 score += (pos_count - neg_count) * 5.0
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取新闻舆情 failed: {e}")
         return max(0.0, min(100.0, score))
 
     def _score_sentiment(self, stock_code: str) -> float:
@@ -194,8 +195,8 @@ class TradingQuant:
                         score += 10.0
                     elif amt > 5e8:
                         score += 5.0
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取市场行情情绪 failed: {e}")
         return max(0.0, min(100.0, score))
 
     @staticmethod
@@ -275,8 +276,8 @@ class TradingQuant:
                 result["main_net_pct"] = float(latest.get("主力净流入-净占比", 0))
                 result["retail_net_inflow"] = float(latest.get("散户净流入-净额", 0))
                 result["retail_net_pct"] = float(latest.get("散户净流入-净占比", 0))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取个股资金流 failed: {e}")
         try:
             df_detail = ak.stock_individual_fund_flow_rank(indicator="今日")
             if df_detail is not None and not df_detail.empty:
@@ -287,8 +288,8 @@ class TradingQuant:
                     result["large_net"] = float(r.get("大单净流入-净额", 0))
                     result["medium_net"] = float(r.get("中单净流入-净额", 0))
                     result["small_net"] = float(r.get("小单净流入-净额", 0))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取资金流排名 failed: {e}")
         return result
 
     def northbound_flow(self) -> dict:
@@ -303,20 +304,20 @@ class TradingQuant:
             if df is not None and not df.empty:
                 latest = df.iloc[-1]
                 result["total_net_inflow"] = float(latest.get("当日净流入", 0))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取北向资金总净流入 failed: {e}")
         try:
             df_sh = ak.stock_hsgt_north_net_flow_in_em(symbol="沪股通")
             if df_sh is not None and not df_sh.empty:
                 result["sh_net_inflow"] = float(df_sh.iloc[-1].get("当日净流入", 0))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取沪股通净流入 failed: {e}")
         try:
             df_sz = ak.stock_hsgt_north_net_flow_in_em(symbol="深股通")
             if df_sz is not None and not df_sz.empty:
                 result["sz_net_inflow"] = float(df_sz.iloc[-1].get("当日净流入", 0))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取深股通净流入 failed: {e}")
         try:
             df_top = ak.stock_hsgt_hold_stock_em(market="北向")
             if df_top is not None and not df_top.empty:
@@ -330,8 +331,8 @@ class TradingQuant:
                     }
                     for _, row in top.iterrows()
                 ]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取北向持股明细 failed: {e}")
         return result
 
     def market_anomaly(self) -> list[dict]:
@@ -365,6 +366,6 @@ class TradingQuant:
                     "turnover": round(float(row.get("换手率", 0)), 2),
                     "amount": float(row.get("成交额", 0)),
                 })
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取市场异动 failed: {e}")
         return anomalies
