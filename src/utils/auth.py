@@ -3,7 +3,9 @@
 设计:
 - 通过环境变量 ADMIN_TOKEN 配置管理员令牌
 - 客户端在请求头携带 Authorization: Bearer <token>
-- 若 ADMIN_TOKEN 未配置, 则放行但记录警告(开发模式便利)
+- 若 ADMIN_TOKEN 未配置:
+    * 生产环境(app_env=production): 拒绝服务 500, 避免裸奔
+    * 开发环境(app_env=dev): 放行但记录警告(开发便利)
 - 若已配置但请求未携带/不匹配, 返回 401
 
 应用范围:
@@ -13,6 +15,10 @@
 - POST /api/trade/buy
 - POST /api/trade/sell
 - POST /api/trade/cancel
+- POST /api/agent/* (LLM 高成本端点)
+- POST /api/scripts/* (话术生成端点)
+- POST /api/strategy/analyze (策略分析端点)
+- POST /api/news/search (AI 检索端点)
 """
 from __future__ import annotations
 
@@ -39,18 +45,41 @@ def _get_admin_token() -> str:
     return settings.admin_token
 
 
+def _is_production() -> bool:
+    """判断当前是否为生产环境。
+
+    APP_ENV != "dev" 即视为生产环境(fail-closed 默认安全)。
+    """
+    return os.getenv("APP_ENV", "production").lower() != "dev"
+
+
 def require_admin(authorization: str | None = Header(default=None)) -> None:
     """FastAPI 依赖: 校验管理员令牌。
 
     用法:
         @router.put("/settings", dependencies=[Depends(require_admin)])
         async def update_settings(...): ...
+
+    安全策略:
+    - 生产环境(APP_ENV != "dev")未配置 ADMIN_TOKEN → 抛 500(fail-closed)
+    - 开发环境(APP_ENV == "dev")未配置 ADMIN_TOKEN → 放行但 warning
+    - 已配置但请求未携带/不匹配 → 抛 401
     """
     expected = _get_admin_token()
     if not expected:
-        # 未配置 ADMIN_TOKEN 时放行, 但记录警告(开发模式)
+        if _is_production():
+            # P1 修复(2026-07-29):生产环境 fail-closed,避免裸奔
+            logger.error(
+                "ADMIN_TOKEN 未配置, 生产环境拒绝敏感端点访问。"
+                "请在 Render Dashboard 设置 ADMIN_TOKEN=<随机长字符串>"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="服务端鉴权未配置, 联系管理员设置 ADMIN_TOKEN",
+            )
+        # 开发环境放行, 但记录警告
         logger.warning(
-            "ADMIN_TOKEN 未配置, 敏感端点无鉴权保护。"
+            "ADMIN_TOKEN 未配置, 敏感端点无鉴权保护(开发模式)。"
             "生产环境请在 .env 中设置 ADMIN_TOKEN=<随机长字符串>"
         )
         return

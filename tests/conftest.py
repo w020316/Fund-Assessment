@@ -1,4 +1,5 @@
 """测试配置与公共fixtures"""
+import os
 import sys
 from pathlib import Path
 
@@ -11,6 +12,12 @@ if _project_root not in sys.path:
 _pylibs = str(Path(_project_root) / "pylibs")
 if _pylibs not in sys.path:
     sys.path.insert(0, _pylibs)
+
+# P1 修复(2026-07-29)配套:测试环境全局设为 dev 模式
+# 原因:auth.require_admin 在生产环境(APP_ENV != "dev")未配置 ADMIN_TOKEN 时抛 500(fail-closed)
+# 测试默认不配置 ADMIN_TOKEN,需设为 dev 模式才能放行
+# 单独的 test_auth.py 测试 fail-closed 行为时,会显式覆盖 APP_ENV=production
+os.environ.setdefault("APP_ENV", "dev")
 
 
 @pytest.fixture(autouse=True)

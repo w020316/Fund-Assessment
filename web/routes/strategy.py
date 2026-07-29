@@ -219,7 +219,7 @@ def _normalize_analysis(result: dict) -> dict:
     }
 
 
-@router.post("/analyze", response_model=AnalyzeResponse)
+@router.post("/analyze", response_model=AnalyzeResponse, dependencies=[Depends(require_admin)])
 async def analyze(req: AnalyzeRequest):
     if not _HAS_STRATEGIES:
         # 策略模块未启用时,用基础数据源做轻量分析(不冒充完整策略)

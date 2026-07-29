@@ -29,6 +29,10 @@ from src.core.ai_service import (
     _check_api_keys,
     _fallback_result,
     _gather_stock_data,
+    _get_agnes_api_key,
+    _get_tavily_api_key,
+    _get_tinyfish_api_key,
+    _get_ttapi_api_key,
     _parse_analysis_response,
     _search_tavily,
     _search_tinyfish,
@@ -139,6 +143,67 @@ class TestCheckApiKeys:
         result = _check_api_keys()
         for v in result.values():
             assert isinstance(v, bool)
+
+
+class TestDynamicApiKeyHotReload:
+    """动态 API Key 实时读取(支持 Render Dashboard 热更新)
+
+    P2 修复(2026-07-29):原模块级常量在 import 时固化 API Key,
+    导致 Render Dashboard 修改 key 后需重启进程才生效。
+    改为 _get_*_api_key() 实时读取函数,验证环境变量修改立即生效。
+    """
+
+    def test_ttapi_key_reads_env_var(self, monkeypatch):
+        """_get_ttapi_api_key 应实时读取 TTAPI_API_KEY 环境变量"""
+        monkeypatch.setenv("TTAPI_API_KEY", "hot-reloaded-ttapi-key")
+        assert _get_ttapi_api_key() == "hot-reloaded-ttapi-key"
+
+    def test_tavily_key_reads_env_var(self, monkeypatch):
+        """_get_tavily_api_key 应实时读取 TAVILY_API_KEY 环境变量"""
+        monkeypatch.setenv("TAVILY_API_KEY", "hot-reloaded-tavily-key")
+        assert _get_tavily_api_key() == "hot-reloaded-tavily-key"
+
+    def test_tinyfish_key_reads_env_var(self, monkeypatch):
+        """_get_tinyfish_api_key 应实时读取 TINYFISH_API_KEY 环境变量"""
+        monkeypatch.setenv("TINYFISH_API_KEY", "hot-reloaded-tf-key")
+        assert _get_tinyfish_api_key() == "hot-reloaded-tf-key"
+
+    def test_agnes_key_reads_env_var(self, monkeypatch):
+        """_get_agnes_api_key 应实时读取 AGNES_API_KEY 环境变量"""
+        monkeypatch.setenv("AGNES_API_KEY", "hot-reloaded-agnes-key")
+        assert _get_agnes_api_key() == "hot-reloaded-agnes-key"
+
+    def test_env_change_reflected_without_restart(self, monkeypatch):
+        """环境变量变更后立即生效(无需重启进程)"""
+        monkeypatch.setenv("TTAPI_API_KEY", "old-key")
+        assert _get_ttapi_api_key() == "old-key"
+        # 模拟 Render Dashboard 修改环境变量
+        monkeypatch.setenv("TTAPI_API_KEY", "new-key-after-dashboard-change")
+        assert _get_ttapi_api_key() == "new-key-after-dashboard-change"
+
+    def test_empty_env_returns_empty_string(self, monkeypatch):
+        """未配置环境变量 → 返回空字符串"""
+        monkeypatch.delenv("TTAPI_API_KEY", raising=False)
+        monkeypatch.setattr(ai_service.settings, "ttapi_api_key", "")
+        assert _get_ttapi_api_key() == ""
+
+    def test_check_api_keys_reflects_env_change(self, monkeypatch):
+        """_check_api_keys 应反映环境变量的最新状态"""
+        monkeypatch.delenv("TTAPI_API_KEY", raising=False)
+        monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+        monkeypatch.delenv("TINYFISH_API_KEY", raising=False)
+        monkeypatch.delenv("AGNES_API_KEY", raising=False)
+        monkeypatch.setattr(ai_service.settings, "ttapi_api_key", "")
+        monkeypatch.setattr(ai_service.settings, "tavily_api_key", "")
+        monkeypatch.setattr(ai_service.settings, "tinyfish_api_key", "")
+        monkeypatch.setattr(ai_service.settings, "agnes_api_key", "")
+        # 初始全部未配置
+        keys = _check_api_keys()
+        assert keys["ttapi"] is False
+        # 配置后立即反映
+        monkeypatch.setenv("TTAPI_API_KEY", "new-key")
+        keys = _check_api_keys()
+        assert keys["ttapi"] is True
 
 
 class TestGatherStockData:
@@ -331,7 +396,10 @@ class TestCallTTapiDirect:
 
     def test_no_api_key_raises(self, monkeypatch):
         """无 API Key → 抛 ValueError"""
-        monkeypatch.setattr(ai_service, "_TTAPI_API_KEY", "")
+        # P3 修复(2026-07-29):_call_ttapi_direct 改用 _get_ttapi_api_key() 动态读取,
+        # 需同时清空 env 与 settings 才能触发 "未配置" 分支
+        monkeypatch.delenv("TTAPI_API_KEY", raising=False)
+        monkeypatch.setattr(ai_service.settings, "ttapi_api_key", "")
         with pytest.raises(ValueError, match="TTAPI_API_KEY 未配置"):
             _call_ttapi_direct([{"role": "user", "content": "t"}])
 
@@ -399,8 +467,12 @@ class TestSearchNews:
 
     def test_no_api_keys_returns_empty(self, monkeypatch):
         """无任何 API Key → 返回空列表"""
-        monkeypatch.setattr(ai_service, "_TAVILY_API_KEY", "")
-        monkeypatch.setattr(ai_service, "_TINYFISH_API_KEY", "")
+        # P3 修复(2026-07-29):search_news 改用 _get_*_api_key() 动态读取(env 优先),
+        # 需同时清空 env 与 settings 才能触发 "未配置" 分支
+        monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+        monkeypatch.delenv("TINYFISH_API_KEY", raising=False)
+        monkeypatch.setattr(ai_service.settings, "tavily_api_key", "")
+        monkeypatch.setattr(ai_service.settings, "tinyfish_api_key", "")
         assert search_news("白酒") == []
 
     def test_tavily_priority_over_tinyfish(self, monkeypatch):

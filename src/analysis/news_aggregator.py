@@ -255,8 +255,15 @@ async def get_news_feed(sector: str = "", fund_code: str = "") -> dict:
                 if s.get("code")
             ]
             if stock_news_tasks:
-                stock_news_results = await asyncio.gather(*stock_news_tasks)
-                for news_list in stock_news_results:
+                # P2 修复(2026-07-29):原未传 return_exceptions=True
+                # 任一股票新闻抓取抛异常会导致整个 gather 失败,丢失其他成功结果
+                # 改为:隔离异常,仅记录失败股票,保留成功的新闻数据
+                stock_news_results = await asyncio.gather(*stock_news_tasks, return_exceptions=True)
+                for idx, news_list in enumerate(stock_news_results):
+                    if isinstance(news_list, Exception):
+                        stock_code = top_stocks[idx]["code"] if idx < len(top_stocks) else "?"
+                        logger.warning(f"消息面:重仓股 {stock_code} 新闻抓取失败: {news_list}")
+                        continue
                     all_news.extend(news_list)
         except Exception as e:
             logger.warning(f"消息面:基金重仓股新闻抓取失败: {e}")

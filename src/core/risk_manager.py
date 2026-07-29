@@ -181,7 +181,48 @@ class RiskManager:
                     ),
                 )
         except Exception as e:
-            logger.warning(f"RiskManager._save_state failed: {e}")
+            # P1 修复(2026-07-29):风控状态持久化失败属严重故障
+            # 原代码仅 warning 后继续运行,导致内存状态与磁盘不一致,
+            # 进程重启后丢失连续止损/暂停期状态,可能放过本应禁止的交易
+            # 改为:累计失败计数,连续 3 次触发紧急停止(emergency_stop)
+            self._save_fail_count = getattr(self, "_save_fail_count", 0) + 1
+            logger.error(
+                f"RiskManager._save_state failed ({self._save_fail_count}/3): {e}. "
+                f"风控状态未持久化, 进程重启后可能丢失状态"
+            )
+            if self._save_fail_count >= 3 and not self._is_emergency_stopped:
+                logger.critical(
+                    "RiskManager 持久化连续失败 3 次, 触发紧急停止以保护资产安全"
+                )
+                self._is_emergency_stopped = True
+                self._no_new_positions = True
+                # 紧急停止状态尝试持久化一次(可能仍失败,但内存已设为停止)
+                try:
+                    with self._get_conn() as conn:
+                        conn.execute(
+                            """
+                            INSERT OR REPLACE INTO risk_state
+                            (id, total_assets, peak_assets, daily_start_assets, daily_pnl,
+                             consecutive_stop_losses, is_paused, pause_until, is_emergency_stopped,
+                             no_new_positions, position_reduction, last_trade_date, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                1, self._total_assets, self._peak_assets,
+                                self._daily_start_assets, self._daily_pnl,
+                                self._consecutive_stop_losses, int(self._is_paused),
+                                self._pause_until.isoformat() if self._pause_until else None,
+                                int(self._is_emergency_stopped), int(self._no_new_positions),
+                                self._position_reduction,
+                                self._last_trade_date.isoformat() if self._last_trade_date else None,
+                                datetime.now().isoformat(),
+                            ),
+                        )
+                except Exception as e2:
+                    logger.critical(f"紧急停止状态持久化也失败: {e2}")
+        else:
+            # 持久化成功,清零失败计数
+            self._save_fail_count = 0
 
     def _check_pause_expiry(self) -> None:
         if self._is_paused and self._pause_until:
@@ -297,7 +338,9 @@ class RiskManager:
                     ),
                 )
         except Exception as e:
-            logger.warning(f"RiskManager.record_trade DB insert failed: {e}")
+            # P1 修复(2026-07-29):交易记录持久化失败也升级为 error(原 warning)
+            # 交易记录丢失会导致风控连续止损计数不准,后续 save_state 也会因状态丢失而失败
+            logger.error(f"RiskManager.record_trade DB insert failed: {e}. trade={trade}")
 
         self._save_state()
 

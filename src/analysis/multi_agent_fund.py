@@ -479,12 +479,22 @@ async def analyze_fund_with_agents(
                 logger.warning(f"multi_agent_fund: stock_quotes failed: {e}")
 
     # 3. 计算五信号(用于参考)
+    # P2 修复(2026-07-29):传入已抓取数据,避免 analyze_fund_five_signals 重复抓取 5 源数据
+    # 原代码导致同一次请求发起 2 倍网络请求,延迟翻倍
     try:
         five_signals_result = await analyze_fund_five_signals(
             fund_code=fund_code,
             fund_name=fund_name,
             cost_nav=cost_nav,
             shares=shares,
+            context={
+                "nav_history": nav_history if isinstance(nav_history, list) else [],
+                "quotes": quotes if isinstance(quotes, list) else [],
+                "holdings_data": holdings_data if isinstance(holdings_data, dict) else {},
+                "news_data": news_data if isinstance(news_data, dict) else {},
+                "thermometer": thermometer if isinstance(thermometer, dict) else {},
+                "stock_quotes": stock_quotes,
+            },
         )
         five_signals = five_signals_result.get("five_signals", {})
     except Exception as e:

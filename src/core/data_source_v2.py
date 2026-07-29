@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import math
 import random
 import re
@@ -27,6 +28,10 @@ _EM_SESSION.headers.update({
 _last_em_request_time: float = 0.0
 _EM_MIN_INTERVAL: float = 0.3
 _EM_AVAILABLE: bool | None = None
+# P2 修复(2026-07-29):原 _check_em_available 无锁保护,多线程并发首次调用时
+# 每个线程都会读到 _EM_AVAILABLE=None 并发起探测请求(2s 超时 × N 线程 = N 个探测)
+# 改为:double-checked locking 模式,仅首个线程发起探测,其他线程等待锁后读取结果
+_em_check_lock = threading.Lock()
 
 _TTLCacheEntry = dict[str, Any]
 _cache: dict[str, _TTLCacheEntry] = {}
@@ -37,6 +42,9 @@ _CACHE_MAX_SIZE = 200
 # 修复(2026-07-29):Render Free CPU 仅 0.1 核,6 线程增加上下文切换开销
 # 降为 3 线程,足够并行抓取行情/K线/资金流,且内存占用减半
 _thread_pool = ThreadPoolExecutor(max_workers=3)
+# P2 修复(2026-07-29):注册进程退出钩子,确保线程池优雅关闭
+# 原代码无 shutdown,Render Free 实例重启时可能残留线程导致资源泄漏
+atexit.register(_thread_pool.shutdown, wait=False)
 
 
 def _cache_get(key: str) -> Any | None:
@@ -75,28 +83,39 @@ def _parallel_fetch(funcs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 def _check_em_available() -> bool:
+    """检查 EastMoney push2 API 是否可用
+
+    P2 修复(2026-07-29):double-checked locking 模式
+    - 首次调用:N 个线程并发时仅 1 个发起探测请求(原为 N 个)
+    - 后续调用:直接返回缓存值,无锁竞争
+    """
     global _EM_AVAILABLE
+    # Fast path:已探测过,直接返回
     if _EM_AVAILABLE is not None:
         return _EM_AVAILABLE
-    try:
-        resp = _EM_SESSION.get(
-            "https://push2.eastmoney.com/api/qt/stock/get",
-            params={"secid": "1.000001", "fields": "f12"},
-            timeout=2,
-        )
-        if resp.status_code == 200:
-            try:
-                data = resp.json()
-                _EM_AVAILABLE = bool(data.get("data"))
-            except Exception:
+    # Slow path:加锁后再次检查(double-checked locking)
+    with _em_check_lock:
+        if _EM_AVAILABLE is not None:
+            return _EM_AVAILABLE
+        try:
+            resp = _EM_SESSION.get(
+                "https://push2.eastmoney.com/api/qt/stock/get",
+                params={"secid": "1.000001", "fields": "f12"},
+                timeout=2,
+            )
+            if resp.status_code == 200:
+                try:
+                    data = resp.json()
+                    _EM_AVAILABLE = bool(data.get("data"))
+                except Exception:
+                    _EM_AVAILABLE = False
+            else:
                 _EM_AVAILABLE = False
-        else:
+        except Exception:
             _EM_AVAILABLE = False
-    except Exception:
-        _EM_AVAILABLE = False
-    if not _EM_AVAILABLE:
-        logger.info("EastMoney push2 API unavailable, using fallback data sources")
-    return _EM_AVAILABLE
+        if not _EM_AVAILABLE:
+            logger.info("EastMoney push2 API unavailable, using fallback data sources")
+        return _EM_AVAILABLE
 
 
 def _ensure_em_checked():

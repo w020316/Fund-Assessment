@@ -6,8 +6,11 @@ import time
 from collections import deque
 from typing import Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
+
+# P1 修复(2026-07-29):LLM 高成本端点统一加 admin 鉴权,避免匿名调用耗尽免费额度
+from src.utils.auth import require_admin
 
 from src.core.ai_service import analyze_stock, quick_analysis as ai_quick_analysis, multi_analyze as ai_multi_analyze, analyze_portfolio as ai_analyze_portfolio, get_market_outlook as ai_get_market_outlook
 
@@ -89,7 +92,7 @@ class PortfolioRequest(BaseModel):
     positions: list[dict]
 
 
-@router.post("/analyze")
+@router.post("/analyze", dependencies=[Depends(require_admin)])
 async def analyze(req: AnalyzeRequest) -> dict[str, Any]:
     # P0:结果缓存(180s),相同股票深度分析命中缓存
     cache_key = _ai_cache._make_key("analyze", code=req.stock_code)
@@ -142,7 +145,7 @@ async def get_history() -> dict[str, Any]:
     }
 
 
-@router.post("/quick_analysis")
+@router.post("/quick_analysis", dependencies=[Depends(require_admin)])
 async def quick_analysis(req: QuickAnalysisRequest) -> dict[str, Any]:
     cache_key = _ai_cache._make_key("quick", code=req.stock_code)
     cached = _ai_cache.get(cache_key, _TTL_QUICK)
@@ -153,7 +156,7 @@ async def quick_analysis(req: QuickAnalysisRequest) -> dict[str, Any]:
     return result
 
 
-@router.post("/multi_analyze")
+@router.post("/multi_analyze", dependencies=[Depends(require_admin)])
 async def multi_analyze(req: MultiAnalyzeRequest) -> dict[str, Any]:
     cache_key = _ai_cache._make_key("multi", code=req.stock_code, mode=req.mode)
     cached = _ai_cache.get(cache_key, _TTL_ANALYZE)
@@ -166,7 +169,7 @@ async def multi_analyze(req: MultiAnalyzeRequest) -> dict[str, Any]:
     return result
 
 
-@router.post("/portfolio_advice")
+@router.post("/portfolio_advice", dependencies=[Depends(require_admin)])
 async def portfolio_advice(req: PortfolioRequest) -> dict[str, Any]:
     cache_key = _ai_cache._make_key("portfolio", positions_hash=hash(json.dumps(req.positions, sort_keys=True, default=str)))
     cached = _ai_cache.get(cache_key, _TTL_PORTFOLIO)
@@ -198,7 +201,7 @@ class FundMultiAnalyzeRequest(BaseModel):
     mode: str = "deep"
 
 
-@router.post("/fund_analyze")
+@router.post("/fund_analyze", dependencies=[Depends(require_admin)])
 async def fund_multi_analyze(request: Request, req: FundMultiAnalyzeRequest) -> dict[str, Any]:
     """基金多智能体分析(7角色:消息面/基金/板块/技术/基本面/风险/宏观)
 

@@ -35,10 +35,41 @@ load_dotenv()
 # 优先用 settings 单例,降级用 os.getenv 保持向后兼容
 from src.utils.config import settings
 
+# P2 修复(2026-07-29):原模块级常量在 import 时固化 API Key,
+# 导致 Render Dashboard 修改 key 后需重启进程才生效,且测试 patch.dict 无效
+# 改为:_get_*_api_key() 实时读取函数,模块级常量保留作为兼容(向旧代码 fallback)
+# 但所有实际使用点改为调用函数,确保热更新生效
+# P3 修复(2026-07-29):env 优先于 settings(与 auth._get_admin_token 一致),
+# 确保 Render Dashboard 修改环境变量后无需重启即生效(settings 在 import 时缓存)
 _TTAPI_API_KEY = settings.ttapi_api_key or os.getenv("TTAPI_API_KEY", "")
 _TAVILY_API_KEY = settings.tavily_api_key or os.getenv("TAVILY_API_KEY", "")
 _TINYFISH_API_KEY = settings.tinyfish_api_key or os.getenv("TINYFISH_API_KEY", "")
 _AGNES_API_KEY = settings.agnes_api_key or os.getenv("AGNES_API_KEY", "")
+
+
+def _get_ttapi_api_key() -> str:
+    """实时读取 TTAPI API Key(支持 Render Dashboard 热更新)
+
+    env 优先于 settings:settings 在 import 时从 .env/env 缓存,
+    Render Dashboard 修改 env 后 os.getenv 立即反映新值。
+    """
+    return os.getenv("TTAPI_API_KEY", "") or settings.ttapi_api_key
+
+
+def _get_tavily_api_key() -> str:
+    """实时读取 Tavily API Key(env 优先)"""
+    return os.getenv("TAVILY_API_KEY", "") or settings.tavily_api_key
+
+
+def _get_tinyfish_api_key() -> str:
+    """实时读取 TinyFish API Key(env 优先)"""
+    return os.getenv("TINYFISH_API_KEY", "") or settings.tinyfish_api_key
+
+
+def _get_agnes_api_key() -> str:
+    """实时读取 Agnes API Key(env 优先)"""
+    return os.getenv("AGNES_API_KEY", "") or settings.agnes_api_key
+
 
 _TTAPI_BASE_URL = "https://ttapi.io/v1"
 _TINYFISH_BASE_URL = "https://api.tinyfish.io/v1"
@@ -49,12 +80,12 @@ _SEARCH_TIMEOUT = 15
 
 
 def _check_api_keys() -> dict[str, bool]:
-    """检查API密钥配置状态"""
+    """检查API密钥配置状态(实时读取,反映最新配置)"""
     return {
-        "ttapi": bool(_TTAPI_API_KEY),
-        "tavily": bool(_TAVILY_API_KEY),
-        "tinyfish": bool(_TINYFISH_API_KEY),
-        "agnes": bool(_AGNES_API_KEY),
+        "ttapi": bool(_get_ttapi_api_key()),
+        "tavily": bool(_get_tavily_api_key()),
+        "tinyfish": bool(_get_tinyfish_api_key()),
+        "agnes": bool(_get_agnes_api_key()),
     }
 
 
@@ -400,12 +431,14 @@ def _call_llm(messages: list[dict[str, str]], model: str = _DEFAULT_MODEL, tempe
 
 def _call_ttapi_direct(messages: list[dict[str, str]], model: str = _DEFAULT_MODEL, temperature: float = 0.7, json_mode: bool = True) -> str:
     """直接调用TTAPI（降级方案）"""
-    if not _TTAPI_API_KEY:
+    # P2 修复(2026-07-29):实时读取 API Key,支持 Render Dashboard 热更新
+    ttapi_api_key = _get_ttapi_api_key()
+    if not ttapi_api_key:
         raise ValueError("TTAPI_API_KEY 未配置，请在 .env 文件中设置")
 
     url = f"{_TTAPI_BASE_URL}/chat/completions"
     headers = {
-        "Authorization": f"Bearer {_TTAPI_API_KEY}",
+        "Authorization": f"Bearer {ttapi_api_key}",
         "Content-Type": "application/json",
     }
     payload: dict[str, Any] = {
@@ -664,9 +697,11 @@ def _fallback_result(stock_code: str, reason: str) -> dict[str, Any]:
 
 
 def _search_tavily(query: str) -> list[dict]:
+    # P2 修复(2026-07-29):实时读取 API Key
+    tavily_api_key = _get_tavily_api_key()
     url = "https://api.tavily.com/search"
     payload = {
-        "api_key": _TAVILY_API_KEY,
+        "api_key": tavily_api_key,
         "query": query,
         "search_depth": "basic",
         "include_answer": False,
@@ -693,9 +728,11 @@ def _search_tavily(query: str) -> list[dict]:
 
 
 def _search_tinyfish(query: str) -> list[dict]:
+    # P2 修复(2026-07-29):实时读取 API Key
+    tinyfish_api_key = _get_tinyfish_api_key()
     url = f"{_TINYFISH_BASE_URL}/chat/completions"
     headers = {
-        "Authorization": f"Bearer {_TINYFISH_API_KEY}",
+        "Authorization": f"Bearer {tinyfish_api_key}",
         "Content-Type": "application/json",
     }
     payload = {
@@ -737,7 +774,10 @@ def _search_tinyfish(query: str) -> list[dict]:
 
 
 def search_news(query: str) -> list[dict]:
-    if not _TAVILY_API_KEY and not _TINYFISH_API_KEY:
+    # P2 修复(2026-07-29):实时读取 API Key,避免模块级常量固化
+    tavily_api_key = _get_tavily_api_key()
+    tinyfish_api_key = _get_tinyfish_api_key()
+    if not tavily_api_key and not tinyfish_api_key:
         logger.warning("未配置任何新闻搜索API密钥，跳过新闻搜索")
         return []
     results = _search_tavily(query)

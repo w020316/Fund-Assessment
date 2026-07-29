@@ -2,9 +2,8 @@ from enum import Enum
 from typing import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-import logging
-
-logger = logging.getLogger(__name__)
+# P3 修复(2026-07-29):统一改用 loguru(与全项目一致)
+from loguru import logger
 
 
 class AlertLevel(Enum):

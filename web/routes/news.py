@@ -11,8 +11,11 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
+
+# P1 修复(2026-07-29):AI 检索端点加 admin 鉴权,触发 LLM 调用属高成本写操作
+from src.utils.auth import require_admin
 
 from src.analysis.news_aggregator import (
     get_news_feed,
@@ -80,7 +83,7 @@ class SearchRequest(BaseModel):
     query: str
 
 
-@router.post("/search")
+@router.post("/search", dependencies=[Depends(require_admin)])
 async def news_search(req: SearchRequest):
     """AI检索(Tavily+LLM总结)"""
     # AI检索不缓存(实时性要求高)

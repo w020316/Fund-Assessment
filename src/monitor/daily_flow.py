@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import logging
+# P3 修复(2026-07-29):统一改用 loguru(与全项目一致)
+from loguru import logger
 from enum import Enum
 from typing import Callable, Any
 from dataclasses import dataclass
-
-logger = logging.getLogger(__name__)
 
 
 class TradingPhase(Enum):

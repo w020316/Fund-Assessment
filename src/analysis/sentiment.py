@@ -1,4 +1,4 @@
-import numpy as np
+# P3 修复(2026-07-29):删除未使用的 import numpy(全文件无 np. 调用)
 import pandas as pd
 import akshare as ak
 from loguru import logger

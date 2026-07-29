@@ -10,7 +10,8 @@
 """
 from __future__ import annotations
 
-from unittest.mock import patch
+import threading
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -209,3 +210,179 @@ class TestParallelFetch:
         elapsed = _time.monotonic() - start
         # 串行执行需 0.6s, 并行应 < 0.5s(留余量)
         assert elapsed < 0.5, f"并行执行耗时 {elapsed:.2f}s, 期望 < 0.5s"
+
+
+class TestCheckEmAvailableLocking:
+    """_check_em_available double-checked locking 线程安全测试
+
+    P2 修复(2026-07-29):原实现无锁保护,多线程并发首次调用时
+    每个线程都会读到 _EM_AVAILABLE=None 并发起探测请求(2s 超时 × N 线程)。
+    修复后采用 double-checked locking,仅首个线程发起探测。
+    """
+
+    def setup_method(self):
+        """每个测试前重置全局 _EM_AVAILABLE 状态,避免测试间污染"""
+        ds2._EM_AVAILABLE = None
+
+    def teardown_method(self):
+        """测试后再次清理,防止状态泄漏到其他测试"""
+        ds2._EM_AVAILABLE = None
+
+    def test_returns_cached_value_without_network_call(self):
+        """已探测过(_EM_AVAILABLE 非 None)时直接返回,不发网络请求"""
+        ds2._EM_AVAILABLE = True
+        with patch.object(ds2._EM_SESSION, "get") as mock_get:
+            assert ds2._check_em_available() is True
+            mock_get.assert_not_called()
+
+    def test_cached_false_skips_network_call(self):
+        """缓存值为 False 时同样不发网络请求"""
+        ds2._EM_AVAILABLE = False
+        with patch.object(ds2._EM_SESSION, "get") as mock_get:
+            assert ds2._check_em_available() is False
+            mock_get.assert_not_called()
+
+    def test_concurrent_calls_single_network_request(self):
+        """N 个线程并发首次调用时仅发起 1 次探测请求
+
+        这是 double-checked locking 的核心目标:避免 N 个探测请求。
+        """
+        call_count = 0
+        count_lock = threading.Lock()
+        original_get = ds2._EM_SESSION.get
+
+        def _counting_get(*args, **kwargs):
+            nonlocal call_count
+            with count_lock:
+                call_count += 1
+            # 模拟网络延迟,放大竞态窗口
+            import time as _time
+            _time.sleep(0.05)
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.json.return_value = {"data": {"f12": "000001"}}
+            return mock_resp
+
+        with patch.object(ds2._EM_SESSION, "get", side_effect=_counting_get):
+            n_threads = 8
+            results: list[bool] = []
+            results_lock = threading.Lock()
+
+            def worker():
+                r = ds2._check_em_available()
+                with results_lock:
+                    results.append(r)
+
+            threads = [threading.Thread(target=worker) for _ in range(n_threads)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+        # 所有线程应得到一致结果
+        assert all(r is True for r in results), f"结果不一致: {results}"
+        # 网络探测仅应发起 1 次(double-checked locking 生效)
+        assert call_count == 1, f"探测请求 {call_count} 次, 期望 1 次"
+
+    def test_available_api_sets_true(self):
+        """EastMoney API 返回正常数据 → _EM_AVAILABLE=True"""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"data": {"f12": "000001"}}
+        with patch.object(ds2._EM_SESSION, "get", return_value=mock_resp):
+            assert ds2._check_em_available() is True
+        assert ds2._EM_AVAILABLE is True
+
+    def test_empty_data_sets_false(self):
+        """API 200 但 data 为空 → _EM_AVAILABLE=False"""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"data": None}
+        with patch.object(ds2._EM_SESSION, "get", return_value=mock_resp):
+            assert ds2._check_em_available() is False
+        assert ds2._EM_AVAILABLE is False
+
+    def test_non_200_status_sets_false(self):
+        """非 200 状态码 → _EM_AVAILABLE=False"""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 503
+        with patch.object(ds2._EM_SESSION, "get", return_value=mock_resp):
+            assert ds2._check_em_available() is False
+        assert ds2._EM_AVAILABLE is False
+
+    def test_network_exception_sets_false(self):
+        """网络异常 → _EM_AVAILABLE=False(降级到备用数据源)"""
+        with patch.object(ds2._EM_SESSION, "get", side_effect=Exception("timeout")):
+            assert ds2._check_em_available() is False
+        assert ds2._EM_AVAILABLE is False
+
+    def test_json_decode_exception_sets_false(self):
+        """响应非 JSON → _EM_AVAILABLE=False"""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.side_effect = ValueError("not json")
+        with patch.object(ds2._EM_SESSION, "get", return_value=mock_resp):
+            assert ds2._check_em_available() is False
+        assert ds2._EM_AVAILABLE is False
+
+    def test_ensure_em_checked_triggers_probe_when_none(self):
+        """_EM_AVAILABLE=None 时 _ensure_em_checked 应触发探测"""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"data": {"f12": "000001"}}
+        with patch.object(ds2._EM_SESSION, "get", return_value=mock_resp) as mock_get:
+            ds2._ensure_em_checked()
+            mock_get.assert_called_once()
+        assert ds2._EM_AVAILABLE is True
+
+    def test_ensure_em_checked_skips_when_cached(self):
+        """_EM_AVAILABLE 已有值时 _ensure_em_checked 不应触发探测"""
+        ds2._EM_AVAILABLE = True
+        with patch.object(ds2._EM_SESSION, "get") as mock_get:
+            ds2._ensure_em_checked()
+            mock_get.assert_not_called()
+
+
+class TestCacheSizeLimit:
+    """缓存上限保护测试(LRU 淘汰,防止 512MB 实例 OOM)"""
+
+    def setup_method(self):
+        """每个测试前清空缓存"""
+        ds2._cache.clear()
+
+    def teardown_method(self):
+        ds2._cache.clear()
+
+    def test_cache_set_and_get(self):
+        """基本缓存写入与读取"""
+        ds2._cache_set("k1", "v1", ttl=10)
+        assert ds2._cache_get("k1") == "v1"
+
+    def test_cache_expired_returns_none(self):
+        """过期缓存应返回 None"""
+        ds2._cache_set("k1", "v1", ttl=0)
+        # ttl=0 立即过期
+        import time as _time
+        _time.sleep(0.01)
+        assert ds2._cache_get("k1") is None
+
+    def test_cache_evicts_oldest_when_full(self):
+        """超过 _CACHE_MAX_SIZE 时应淘汰最早条目(FIFO)"""
+        for i in range(ds2._CACHE_MAX_SIZE + 5):
+            ds2._cache_set(f"key_{i}", f"val_{i}", ttl=60)
+        # 缓存大小不应超过上限
+        assert len(ds2._cache) <= ds2._CACHE_MAX_SIZE
+        # 最早的条目应被淘汰
+        assert ds2._cache_get("key_0") is None
+        # 最新的条目应存在
+        assert ds2._cache_get(f"key_{ds2._CACHE_MAX_SIZE + 4}") == f"val_{ds2._CACHE_MAX_SIZE + 4}"
+
+    def test_cache_update_existing_key_no_eviction(self):
+        """更新已存在的 key 不应触发淘汰"""
+        ds2._cache_set("existing", "v1", ttl=60)
+        # 填满到上限
+        for i in range(ds2._CACHE_MAX_SIZE - 1):
+            ds2._cache_set(f"key_{i}", f"val_{i}", ttl=60)
+        # 更新已存在的 key
+        ds2._cache_set("existing", "v2", ttl=60)
+        assert ds2._cache_get("existing") == "v2"

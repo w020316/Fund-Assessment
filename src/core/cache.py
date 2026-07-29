@@ -7,6 +7,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
 from pydantic import BaseModel
 
 
@@ -198,8 +199,10 @@ class DataCache:
             try:
                 f.unlink(missing_ok=True)
                 deleted += 1
-            except Exception:
-                pass
+            except Exception as e:
+                # P2 修复(2026-07-29):原 except:pass 完全静默,缓存清理失败时运维无法发现
+                # 改为 debug 级别日志(降级返回值不变,仅记录失败原因)
+                logger.debug(f"cache invalidate_by_prefix unlink failed: file={f}, err={e}")
         return deleted
 
     def invalidate_by_suffix(self, suffix: str) -> int:
@@ -228,6 +231,7 @@ class DataCache:
             try:
                 f.unlink(missing_ok=True)
                 deleted += 1
-            except Exception:
-                pass
+            except Exception as e:
+                # P2 修复(2026-07-29):原 except:pass 完全静默,改为 debug 级别日志
+                logger.debug(f"cache invalidate_by_suffix unlink failed: file={f}, err={e}")
         return deleted

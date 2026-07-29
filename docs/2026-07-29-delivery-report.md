@@ -837,3 +837,103 @@ v1.2 在 v1.1 基础上完成测试覆盖率专项提升,**核心收益**:
 5. **整体覆盖率**:63% → 71% → **74%**(+11pp 累计)
 
 项目保持**可交付状态**,核心业务逻辑质量与可测试性显著提升,后续迭代聚焦在 I/O 聚合层与兼容模块的渐进式覆盖。
+
+---
+
+## 附录 F:安全加固与并发修复批次(2026-07-29 v1.3)
+
+### F.1 更新背景
+
+v1.2 完成覆盖率扩展后,本轮聚焦于**安全加固、并发安全与配置热更新**三个维度的深度测试覆盖与缺陷修复。针对前批次引入的鉴权 fail-closed、double-checked locking、动态 API key 等改动补充测试,同时修复了因动态化改造引入的 2 处测试回归。
+
+### F.2 改进清单
+
+#### F.2.1 安全鉴权 fail-closed 测试(test_auth.py +4 用例)
+
+| 测试 | 验证点 |
+|------|--------|
+| `test_production_no_token_returns_500_fail_closed` | 生产环境未配置 ADMIN_TOKEN → 抛 500(fail-closed) |
+| `test_production_with_valid_token_passes` | 生产环境配置令牌后正常鉴权 |
+| `test_production_with_invalid_token_returns_401` | 生产环境令牌不匹配仍返回 401 |
+| `test_is_production_env_variants` | `_is_production()` 对 APP_ENV 各种取值的判定(大小写不敏感) |
+
+#### F.2.2 double-checked locking 线程安全测试(test_data_fabrication_fix.py +10 用例)
+
+| 测试 | 验证点 |
+|------|--------|
+| `test_returns_cached_value_without_network_call` | 已探测(True)时跳过网络请求 |
+| `test_cached_false_skips_network_call` | 缓存 False 时同样跳过 |
+| `test_concurrent_calls_single_network_request` | **8 线程并发仅 1 次探测请求**(核心目标) |
+| `test_available_api_sets_true` | API 200 + data 非空 → True |
+| `test_empty_data_sets_false` | API 200 但 data 为空 → False |
+| `test_non_200_status_sets_false` | 非 200 状态码 → False |
+| `test_network_exception_sets_false` | 网络异常 → False(降级备用源) |
+| `test_json_decode_exception_sets_false` | 响应非 JSON → False |
+| `test_ensure_em_checked_triggers_probe_when_none` | None 时触发探测 |
+| `test_ensure_em_checked_skips_when_cached` | 已缓存时不触发 |
+
+#### F.2.3 缓存上限保护测试(test_data_fabrication_fix.py +4 用例)
+
+| 测试 | 验证点 |
+|------|--------|
+| `test_cache_set_and_get` | 基本写入/读取 |
+| `test_cache_expired_returns_none` | TTL 过期返回 None |
+| `test_cache_evicts_oldest_when_full` | 超过 200 条上限时 FIFO 淘汰最早条目(防 OOM) |
+| `test_cache_update_existing_key_no_eviction` | 更新已存在 key 不触发淘汰 |
+
+#### F.2.4 动态 API Key 热更新测试(test_ai_service.py +7 用例)
+
+| 测试 | 验证点 |
+|------|--------|
+| `test_ttapi_key_reads_env_var` | `_get_ttapi_api_key()` 实时读取环境变量 |
+| `test_tavily_key_reads_env_var` | Tavily key 热更新 |
+| `test_tinyfish_key_reads_env_var` | TinyFish key 热更新 |
+| `test_agnes_key_reads_env_var` | Agnes key 热更新 |
+| `test_env_change_reflected_without_restart` | 环境变量变更无需重启即生效 |
+| `test_empty_env_returns_empty_string` | 未配置返回空字符串 |
+| `test_check_api_keys_reflects_env_change` | `_check_api_keys()` 反映最新状态 |
+
+### F.3 关键 Bug 修复(本批次)
+
+#### P3:动态 API key 优先级修复(ai_service.py)
+
+**问题**:`_get_*_api_key()` 函数原为 `settings.x or os.getenv(x)`,settings 在 import 时从 .env 缓存,导致 Render Dashboard 修改环境变量后无法热更新(与 fail-closed 鉴权的 `_get_admin_token` env 优先模式不一致)。
+
+**修复**:统一为 `os.getenv(x) or settings.x`(env 优先,与 `auth._get_admin_token` 一致),确保 Dashboard 修改即生效。
+
+#### P3:测试回归修复(2 处)
+
+| 测试文件 | 失败用例 | 根因 | 修复 |
+|----------|----------|------|------|
+| test_ai_service.py | `test_no_api_key_raises` | `_call_ttapi_direct` 改用 `_get_ttapi_api_key()`,原测试仅 patch 模块常量无效 | 同时 `delenv` + `setattr(settings, ...)` 清空 |
+| test_ai_service.py | `test_no_api_keys_returns_empty` | `search_news` 改用动态函数,env 有 .env 值导致未进入"未配置"分支 | 同上,清空 env + settings |
+
+### F.4 测试与覆盖率更新
+
+| 指标 | v1.2 | v1.3 | 变化 |
+|------|------|------|------|
+| 测试用例总数 | 1395 | **1420** | +25 |
+| 失败数 | 0 | **0** | — |
+| 安全鉴权覆盖 | 部分(仅 dev 放行) | **完整**(含 fail-closed/生产模式) | +4 |
+| 并发安全覆盖 | 无 | **double-checked locking 完整** | +14 |
+| 热更新覆盖 | 无 | **4 个 API key 全覆盖** | +7 |
+
+### F.5 新增/修改文件清单
+
+| 文件 | 变更类型 | 说明 |
+|------|----------|------|
+| `tests/test_auth.py` | 修改 | +4 用例(fail-closed + _is_production) |
+| `tests/test_data_fabrication_fix.py` | 修改 | +14 用例(double-checked locking + 缓存上限) |
+| `tests/test_ai_service.py` | 修改 | +7 用例(动态 API key)+ 2 回归修复 |
+| `src/core/ai_service.py` | 修改 | `_get_*_api_key()` 优先级改为 env 优先 |
+
+### F.6 增量结论
+
+v1.3 在 v1.2 基础上完成**安全加固与并发修复**专项,**核心收益**:
+1. **安全鉴权全覆盖**:从仅测 dev 放行扩展到生产 fail-closed(500)、令牌校验、`_is_production` 判定,安全模型完整验证
+2. **并发竞态消除验证**:8 线程并发测试证实 double-checked locking 将 N 次探测请求收敛为 1 次
+3. **配置热更新生效**:env 优先策略统一后,Render Dashboard 修改环境变量无需重启即生效
+4. **缓存 OOM 防护验证**:200 条 FIFO 上限与淘汰机制经测试确认
+5. **测试用例规模**:1395 → **1420**(+25),0 失败
+
+项目保持**可交付状态**,安全性与稳定性经深度测试验证。

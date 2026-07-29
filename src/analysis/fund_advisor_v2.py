@@ -430,6 +430,7 @@ async def analyze_fund_five_signals(
     fund_name: str = "",
     cost_nav: float = 0.0,
     shares: float = 0.0,
+    context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """单只基金五信号分析
 
@@ -438,6 +439,9 @@ async def analyze_fund_five_signals(
         fund_name: 基金名称
         cost_nav: 持仓成本净值
         shares: 持有份额
+        context: 调用方已抓取的数据(可选,P2 优化避免重复抓取)
+            支持键:nav_history/quotes/holdings_data/news_data/thermometer/stock_quotes
+            任一缺失则本函数自行抓取该键,存在则直接复用
 
     Returns:
         {
@@ -447,12 +451,16 @@ async def analyze_fund_five_signals(
             "advice": {...}
         }
     """
+    # P2 修复(2026-07-29):允许调用方传入已抓取数据,避免重复网络请求
+    # multi_agent_fund 已抓取 5 源数据,本函数原再次抓取相同数据导致延迟翻倍
+    ctx = context or {}
+
     # 延迟导入避免循环依赖
     from src.analysis.fund_holdings import analyze_fund_holdings
     from src.analysis.market_assessment import get_market_thermometer
     from src.analysis.news_aggregator import get_news_feed
 
-    # 并行抓取5源数据
+    # 并行抓取 5 源数据(若 context 已提供则跳过对应抓取)
     async def _fetch_nav_history():
         return await asyncio.to_thread(ds2.get_fund_history_tencent, fund_code, "1y")
 
@@ -468,14 +476,35 @@ async def analyze_fund_five_signals(
     async def _fetch_market():
         return await get_market_thermometer()
 
-    nav_history, quotes, holdings_data, news_data, thermometer = await asyncio.gather(
-        _fetch_nav_history(),
-        _fetch_realtime(),
-        _fetch_holdings(),
-        _fetch_news(),
-        _fetch_market(),
-        return_exceptions=True,
-    )
+    # 仅抓取 context 中缺失的数据
+    pending_fetches = []
+    pending_keys = []
+    if "nav_history" not in ctx:
+        pending_fetches.append(_fetch_nav_history())
+        pending_keys.append("nav_history")
+    if "quotes" not in ctx:
+        pending_fetches.append(_fetch_realtime())
+        pending_keys.append("quotes")
+    if "holdings_data" not in ctx:
+        pending_fetches.append(_fetch_holdings())
+        pending_keys.append("holdings_data")
+    if "news_data" not in ctx:
+        pending_fetches.append(_fetch_news())
+        pending_keys.append("news_data")
+    if "thermometer" not in ctx:
+        pending_fetches.append(_fetch_market())
+        pending_keys.append("thermometer")
+
+    fetched: list = []
+    if pending_fetches:
+        fetched = await asyncio.gather(*pending_fetches, return_exceptions=True)
+    fetched_map = dict(zip(pending_keys, fetched))
+
+    nav_history = ctx.get("nav_history", fetched_map.get("nav_history"))
+    quotes = ctx.get("quotes", fetched_map.get("quotes"))
+    holdings_data = ctx.get("holdings_data", fetched_map.get("holdings_data"))
+    news_data = ctx.get("news_data", fetched_map.get("news_data"))
+    thermometer = ctx.get("thermometer", fetched_map.get("thermometer"))
 
     # 处理异常
     if isinstance(nav_history, Exception):
@@ -500,8 +529,9 @@ async def analyze_fund_five_signals(
         current_nav = float(quotes[0].get("nav", 0) or 0)
 
     # 重仓股实时行情(用于基本面信号)
-    stock_quotes: list[dict] = []
-    if holdings_data and holdings_data.get("holdings"):
+    # P2:若 context 已提供 stock_quotes,直接复用避免重复抓取
+    stock_quotes: list[dict] = ctx.get("stock_quotes", [])
+    if not stock_quotes and holdings_data and holdings_data.get("holdings"):
         stock_codes = [h["code"] for h in holdings_data["holdings"] if h.get("code")]
         if stock_codes:
             try:

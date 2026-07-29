@@ -8,8 +8,11 @@ import asyncio
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
+
+# P1 修复(2026-07-29):话术写端点加 admin 鉴权,匹配/生成属业务写操作
+from src.utils.auth import require_admin
 
 from src.analysis import script_library as sl
 from src.utils.convert import safe_float as _safe_float, safe_str as _safe_str
@@ -85,7 +88,7 @@ async def get_script(script_id: str):
     return {"data": result, "_meta": _build_meta()}
 
 
-@router.post("/generate")
+@router.post("/generate", dependencies=[Depends(require_admin)])
 async def generate_script(req: GenerateRequest):
     """根据模板 ID + 变量生成话术"""
     result = sl.generate_script(req.script_id, req.variables)
@@ -94,21 +97,21 @@ async def generate_script(req: GenerateRequest):
     return {"data": result, "_meta": _build_meta()}
 
 
-@router.post("/match/fund")
+@router.post("/match/fund", dependencies=[Depends(require_admin)])
 async def match_fund(req: MatchFundRequest):
     """根据基金建议自动匹配话术"""
     result = sl.match_fund_scripts(req.fund_advice)
     return {"data": result, "_meta": _build_meta(), "count": len(result)}
 
 
-@router.post("/match/stock")
+@router.post("/match/stock", dependencies=[Depends(require_admin)])
 async def match_stock(req: MatchStockRequest):
     """根据个股数据自动匹配话术"""
     result = sl.match_stock_scripts(req.stock_data)
     return {"data": result, "_meta": _build_meta(), "count": len(result)}
 
 
-@router.post("/ai-generate")
+@router.post("/ai-generate", dependencies=[Depends(require_admin)])
 async def ai_generate(req: AIGenerateRequest):
     """P3 AI建议生成 - 基于基金/个股数据用免费 LLM 生成个性化投资建议话术
 

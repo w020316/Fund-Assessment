@@ -60,7 +60,12 @@ class DingTalkNotifier(Notifier):
             resp = requests.post(url, json=body, timeout=10)
             result = resp.json()
             if result.get("errcode") != 0:
-                logger.error(f"DingTalk send failed: {result}")
+                # P3 修复(2026-07-29):原日志输出完整响应体可能泄露敏感字段
+                # 改为:仅记录 errcode/errmsg 关键字段
+                logger.error(
+                    f"DingTalk send failed: errcode={result.get('errcode')}, "
+                    f"errmsg={result.get('errmsg')}"
+                )
                 return False
             logger.info(f"DingTalk send success: {title}")
             return True
@@ -88,7 +93,11 @@ class WeComNotifier(Notifier):
             resp = requests.post(self._webhook, json=body, timeout=10)
             result = resp.json()
             if result.get("errcode") != 0:
-                logger.error(f"WeCom send failed: {result}")
+                # P3 修复(2026-07-29):仅记录 errcode/errmsg 关键字段
+                logger.error(
+                    f"WeCom send failed: errcode={result.get('errcode')}, "
+                    f"errmsg={result.get('errmsg')}"
+                )
                 return False
             logger.info(f"WeCom send success: {title}")
             return True

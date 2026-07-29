@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+import os
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -29,8 +30,15 @@ def client():
 
 
 @pytest.fixture(autouse=True)
-def clear_decision_history():
-    """每个测试前清空 agent 路由的决策历史,避免状态泄漏"""
+def clear_decision_history(monkeypatch):
+    """每个测试前清空 agent 路由的决策历史,避免状态泄漏
+
+    P1 修复(2026-07-29)配套:agent.py 5 个 LLM 端点已加 Depends(require_admin),
+    生产环境 fail-closed(未配置 ADMIN_TOKEN 时抛 500),测试环境设为 dev 模式放行。
+    """
+    # P1 配套:测试环境设为 dev 模式,放行未配置 ADMIN_TOKEN 的鉴权
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.delenv("ADMIN_TOKEN", raising=False)
     from web.routes import agent
     agent._decision_history.clear()
     yield
