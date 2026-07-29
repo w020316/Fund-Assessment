@@ -14,7 +14,6 @@ akshare==1.16.94
 tushare==1.4.18
 tdxpy==0.2.7
 mootdx==0.9.11
-pandas-ta==0.4.71b0
 litellm>=1.40.0
 httpx>=0.27.0
 json-repair>=0.25.0
