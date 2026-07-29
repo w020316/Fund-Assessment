@@ -172,6 +172,7 @@ class LLMRouter:
                 api_key=agnes_key,
                 model=os.getenv("AGNES_MODEL", "agnes-2.0-flash"),
                 priority=90,
+                timeout=30,
             ))
 
         # Gemini
@@ -224,6 +225,7 @@ class LLMRouter:
                 model=os.getenv("ZHIPU_MODEL", "glm-4-flash"),
                 priority=100,
                 rpm=30,  # 智谱限制30并发
+                timeout=30,  # 快速失败,避免 Render 免费实例超时
             ))
 
         # 硅基流动 SiliconFlow (9B以下永久免费,1000 RPM)
