@@ -13,6 +13,37 @@ if _pylibs not in sys.path:
     sys.path.insert(0, _pylibs)
 
 
+@pytest.fixture(autouse=True)
+def _clear_global_caches():
+    """每个测试前清理全局缓存,避免测试间状态共享
+
+    P0 新增:LLM 响应缓存(_llm_cache)和 AI 端点缓存(_ai_cache)是全局单例,
+    若不清理会导致测试间相互污染(如 test_chat_with_retries 命中前一个测试的缓存)。
+    """
+    try:
+        from src.core.llm_router import _llm_cache
+        _llm_cache.clear()
+    except Exception:
+        pass
+    try:
+        from web.routes.agent import _ai_cache
+        _ai_cache.clear()
+    except Exception:
+        pass
+    yield
+    # 测试后也清理(防止副作用泄露到下一个测试)
+    try:
+        from src.core.llm_router import _llm_cache
+        _llm_cache.clear()
+    except Exception:
+        pass
+    try:
+        from web.routes.agent import _ai_cache
+        _ai_cache.clear()
+    except Exception:
+        pass
+
+
 @pytest.fixture
 def sample_quote():
     """示例行情数据"""

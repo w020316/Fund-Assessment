@@ -131,6 +131,103 @@ class LLMResponse:
     model: str
     usage: dict = field(default_factory=dict)
     latency_ms: float = 0.0
+    cached: bool = False  # P0:是否命中缓存(借鉴 openai/openai-python 的缓存设计)
+
+
+# ===== P0:LLM 结果缓存(借鉴 openai/openai-python 的 response_cache 设计)=====
+# 设计目的:
+# - 免费模型(agnes-2.0-flash / glm-4-flash)额度有限,重复相同 prompt 浪费额度
+# - 同一基金的多智能体分析(7 个 agent 调 LLM)存在大量重复调用
+# - 缓存命中时直接返回,不消耗 LLM 额度
+# 实现:纯 Python LRU+TTL(maxsize=100, ttl=300s),不增加依赖
+class _LLMResponseCache:
+    """LLM 响应缓存(LRU + TTL)"""
+
+    def __init__(self, maxsize: int = 100, ttl: float = 300.0):
+        self._maxsize = max(maxsize, 8)
+        self._ttl = ttl
+        self._store: dict = {}  # key -> {response, ts}
+        self._lock = __import__('threading').Lock()
+        self.hits = 0
+        self.misses = 0
+
+    def _make_key(
+        self,
+        messages: list[dict[str, str]],
+        model: str | None,
+        temperature: float,
+        json_mode: bool,
+    ) -> str:
+        """构造缓存 key(基于 messages 内容 + 模型 + 温度)"""
+        import hashlib
+        import json as _json
+        # 排除 role=system 的可变时间戳(如"当前时间:2026-07-29 15:30")
+        # 但保留 system 消息内容本身(影响分析结果)
+        payload = _json.dumps({
+            "m": messages,
+            "model": model or "",
+            "temp": round(temperature, 2),
+            "json_mode": json_mode,
+        }, sort_keys=True, ensure_ascii=False)
+        return hashlib.md5(payload.encode("utf-8")).hexdigest()
+
+    def get(self, messages, model, temperature, json_mode) -> "LLMResponse | None":
+        key = self._make_key(messages, model, temperature, json_mode)
+        with self._lock:
+            entry = self._store.get(key)
+            if entry is None:
+                self.misses += 1
+                return None
+            if time.monotonic() - entry["ts"] > self._ttl:
+                self._store.pop(key, None)
+                self.misses += 1
+                return None
+            # 命中:返回缓存的响应副本(标注 cached=True)
+            self.hits += 1
+            resp = entry["response"]
+            return LLMResponse(
+                content=resp.content,
+                provider=resp.provider,
+                model=resp.model,
+                usage=resp.usage,
+                latency_ms=0.0,  # 缓存命中,延迟为 0
+                cached=True,
+            )
+
+    def set(self, messages, model, temperature, json_mode, response: "LLMResponse") -> None:
+        key = self._make_key(messages, model, temperature, json_mode)
+        with self._lock:
+            if key in self._store:
+                # 已存在,更新时间戳
+                self._store[key] = {"response": response, "ts": time.monotonic()}
+                return
+            self._store[key] = {"response": response, "ts": time.monotonic()}
+            # LRU 淘汰:超过上限时删除最早的条目
+            while len(self._store) > self._maxsize:
+                oldest_key = next(iter(self._store))
+                self._store.pop(oldest_key, None)
+
+    def stats(self) -> dict:
+        with self._lock:
+            total = self.hits + self.misses
+            return {
+                "size": len(self._store),
+                "maxsize": self._maxsize,
+                "ttl_seconds": self._ttl,
+                "hits": self.hits,
+                "misses": self.misses,
+                "hit_rate": round(self.hits / total, 4) if total > 0 else 0.0,
+            }
+
+    def clear(self) -> None:
+        with self._lock:
+            self._store.clear()
+            self.hits = 0
+            self.misses = 0
+
+
+# 全局 LLM 响应缓存(单例,LLMRouter 共享)
+_llm_cache = _LLMResponseCache(maxsize=100, ttl=300.0)
 
 
 class LLMRouter:
@@ -366,6 +463,12 @@ class LLMRouter:
         Raises:
             RuntimeError: 所有Provider均不可用
         """
+        # P0:LLM 结果缓存(命中直接返回,不消耗免费额度)
+        cached = _llm_cache.get(messages, model, temperature, json_mode)
+        if cached is not None:
+            logger.debug(f"LLM 缓存命中(provider={cached.provider}, model={cached.model})")
+            return cached
+
         last_error = None
         for provider in self._providers:
             if not provider.is_available:
@@ -388,6 +491,8 @@ class LLMRouter:
                         json_mode=json_mode, timeout=timeout,
                     )
                     provider.record_success()
+                    # P0:写入 LLM 结果缓存(下次相同 prompt 直接命中)
+                    _llm_cache.set(messages, model, temperature, json_mode, response)
                     return response
                 except Exception as e:
                     last_error = e

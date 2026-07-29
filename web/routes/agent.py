@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import time
+from collections import deque
 from typing import Any
 
 from fastapi import APIRouter, Query, Request
@@ -10,7 +13,62 @@ from src.core.ai_service import analyze_stock, quick_analysis as ai_quick_analys
 
 router = APIRouter()
 
-_decision_history: list[dict[str, Any]] = []
+# 修复(2026-07-29):原 list.pop(0) 是 O(n),改用 deque(maxlen=100) 自动淘汰
+_decision_history: deque[dict[str, Any]] = deque(maxlen=100)
+
+
+# ===== P0:AI 端点结果缓存(借鉴 httpx-cache 的 LRU+TTL 设计)=====
+# 设计目的:
+# - LLM 调用成本高(免费额度有限),相同股票/基金重复分析浪费额度
+# - 8 个 AI 端点添加 60-600s 缓存,命中时直接返回,不调用 LLM
+# - 缓存 key 包含请求参数,避免不同参数误命中
+# 实现:纯 Python dict + TTL,无依赖
+class _AIResponseCache:
+    """AI 响应缓存(TTL,线程安全)"""
+
+    def __init__(self, maxsize: int = 50):
+        self._maxsize = maxsize
+        self._store: dict[str, dict[str, Any]] = {}
+        self._lock = __import__('threading').Lock()
+
+    def _make_key(self, prefix: str, **kwargs) -> str:
+        """构造缓存 key"""
+        payload = json.dumps(kwargs, sort_keys=True, ensure_ascii=False, default=str)
+        return f"{prefix}:{payload}"
+
+    def get(self, key: str, ttl: float) -> Any | None:
+        with self._lock:
+            entry = self._store.get(key)
+            if entry is None:
+                return None
+            if time.monotonic() - entry["ts"] > ttl:
+                self._store.pop(key, None)
+                return None
+            return entry["val"]
+
+    def set(self, key: str, val: Any) -> None:
+        with self._lock:
+            if key in self._store:
+                self._store[key] = {"val": val, "ts": time.monotonic()}
+                return
+            self._store[key] = {"val": val, "ts": time.monotonic()}
+            while len(self._store) > self._maxsize:
+                oldest = next(iter(self._store))
+                self._store.pop(oldest, None)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._store.clear()
+
+
+_ai_cache = _AIResponseCache(maxsize=50)
+
+# TTL 配置(秒):分析类 180s,快速分析 60s,组合建议 300s,市场研判 600s
+_TTL_ANALYZE = 180
+_TTL_QUICK = 60
+_TTL_PORTFOLIO = 300
+_TTL_OUTLOOK = 600
+_TTL_FUND_MULTI = 300
 
 
 class AnalyzeRequest(BaseModel):
@@ -33,26 +91,37 @@ class PortfolioRequest(BaseModel):
 
 @router.post("/analyze")
 async def analyze(req: AnalyzeRequest) -> dict[str, Any]:
+    # P0:结果缓存(180s),相同股票深度分析命中缓存
+    cache_key = _ai_cache._make_key("analyze", code=req.stock_code)
+    cached = _ai_cache.get(cache_key, _TTL_ANALYZE)
+    if cached is not None:
+        return cached
     result = await asyncio.to_thread(analyze_stock, req.stock_code, "deep")
     _decision_history.append(result)
-    if len(_decision_history) > 100:
-        _decision_history.pop(0)
+    _ai_cache.set(cache_key, result)
     return result
 
 
 @router.get("/opinions")
 async def get_opinions(code: str = Query(..., description="股票代码")) -> dict[str, Any]:
+    cache_key = _ai_cache._make_key("opinions", code=code)
+    cached = _ai_cache.get(cache_key, _TTL_QUICK)
+    if cached is not None:
+        return cached
     result = await asyncio.to_thread(ai_quick_analysis, code)
-    return {
-        "stock_code": code,
-        "opinions": result.get("agent_opinions", []),
-    }
+    payload = {"stock_code": code, "opinions": result.get("agent_opinions", [])}
+    _ai_cache.set(cache_key, payload)
+    return payload
 
 
 @router.get("/debate")
 async def get_debate(code: str = Query(..., description="股票代码")) -> dict[str, Any]:
+    cache_key = _ai_cache._make_key("debate", code=code)
+    cached = _ai_cache.get(cache_key, _TTL_ANALYZE)
+    if cached is not None:
+        return cached
     result = await asyncio.to_thread(analyze_stock, code, "quick")
-    return result.get("debate_result", {
+    payload = result.get("debate_result", {
         "topic": f"{code}多空辩论",
         "bull_arguments": [],
         "bear_arguments": [],
@@ -61,41 +130,61 @@ async def get_debate(code: str = Query(..., description="股票代码")) -> dict
         "consensus": "NEUTRAL",
         "confidence": 0.1,
     })
+    _ai_cache.set(cache_key, payload)
+    return payload
 
 
 @router.get("/history")
 async def get_history() -> dict[str, Any]:
     return {
         "count": len(_decision_history),
-        "history": _decision_history[-20:],
+        "history": list(_decision_history)[-20:],
     }
 
 
 @router.post("/quick_analysis")
 async def quick_analysis(req: QuickAnalysisRequest) -> dict[str, Any]:
+    cache_key = _ai_cache._make_key("quick", code=req.stock_code)
+    cached = _ai_cache.get(cache_key, _TTL_QUICK)
+    if cached is not None:
+        return cached
     result = await asyncio.to_thread(ai_quick_analysis, req.stock_code)
+    _ai_cache.set(cache_key, result)
     return result
 
 
 @router.post("/multi_analyze")
 async def multi_analyze(req: MultiAnalyzeRequest) -> dict[str, Any]:
+    cache_key = _ai_cache._make_key("multi", code=req.stock_code, mode=req.mode)
+    cached = _ai_cache.get(cache_key, _TTL_ANALYZE)
+    if cached is not None:
+        return cached
     result = await asyncio.to_thread(ai_multi_analyze, req.stock_code, req.mode)
     _decision_history.append(result)
-    if len(_decision_history) > 100:
-        _decision_history.pop(0)
     result["selected_agents"] = req.agents
+    _ai_cache.set(cache_key, result)
     return result
 
 
 @router.post("/portfolio_advice")
 async def portfolio_advice(req: PortfolioRequest) -> dict[str, Any]:
+    cache_key = _ai_cache._make_key("portfolio", positions_hash=hash(json.dumps(req.positions, sort_keys=True, default=str)))
+    cached = _ai_cache.get(cache_key, _TTL_PORTFOLIO)
+    if cached is not None:
+        return cached
     result = await asyncio.to_thread(ai_analyze_portfolio, req.positions)
+    _ai_cache.set(cache_key, result)
     return result
 
 
 @router.get("/market_outlook")
 async def market_outlook() -> dict[str, Any]:
+    cache_key = _ai_cache._make_key("outlook")
+    cached = _ai_cache.get(cache_key, _TTL_OUTLOOK)
+    if cached is not None:
+        return cached
     result = await asyncio.to_thread(ai_get_market_outlook)
+    _ai_cache.set(cache_key, result)
     return result
 
 
@@ -115,7 +204,22 @@ async def fund_multi_analyze(request: Request, req: FundMultiAnalyzeRequest) -> 
 
     集成 P1-1消息面 + P1-2重仓股板块 + P1-3大盘研判 + P1-4五信号 + LLM多空辩论
     限流:3次/分钟/客户端(借鉴 la-deps/slowapi,保护 LLM 高成本调用)
+    P0:结果缓存(300s),相同基金相同参数命中缓存不重复调用 LLM
     """
+    # P0:结果缓存(300s)
+    cache_key = _ai_cache._make_key(
+        "fund_multi",
+        code=req.fund_code,
+        name=req.fund_name,
+        cost=req.cost_nav,
+        shares=req.shares,
+        mode=req.mode,
+    )
+    cached = _ai_cache.get(cache_key, _TTL_FUND_MULTI)
+    if cached is not None:
+        cached = dict(cached)  # 返回副本,避免被修改
+        cached["_cached"] = True
+        return cached
     from src.analysis.multi_agent_fund import analyze_fund_with_agents
     result = await analyze_fund_with_agents(
         fund_code=req.fund_code,
@@ -124,6 +228,7 @@ async def fund_multi_analyze(request: Request, req: FundMultiAnalyzeRequest) -> 
         shares=req.shares,
         mode=req.mode,
     )
+    _ai_cache.set(cache_key, result)
     return result
 
 

@@ -39,3 +39,21 @@ include = ["src*", "web*", "config*"]
 
 [tool.setuptools.package-data]
 config = ["*.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+# 排除第三方库(pylibs/)和文档目录的测试
+norecursedirs = ["pylibs", "docs", ".git", "data", "node_modules"]
+# 添加标记
+markers = [
+    "slow: 标记慢测试(>1s)",
+    "integration: 集成测试(需要外部服务)",
+]
+# 避免测试收集时的警告
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]

@@ -31,7 +31,12 @@ _EM_AVAILABLE: bool | None = None
 _TTLCacheEntry = dict[str, Any]
 _cache: dict[str, _TTLCacheEntry] = {}
 _cache_lock = threading.Lock()
-_thread_pool = ThreadPoolExecutor(max_workers=6)
+# 修复(2026-07-29):原 _cache 无大小上限,长期运行后内存泄漏导致 512MB 实例 OOM
+# 改为 200 条上限,约 50MB 内存占用,足够覆盖实时行情/资金流向等热数据
+_CACHE_MAX_SIZE = 200
+# 修复(2026-07-29):Render Free CPU 仅 0.1 核,6 线程增加上下文切换开销
+# 降为 3 线程,足够并行抓取行情/K线/资金流,且内存占用减半
+_thread_pool = ThreadPoolExecutor(max_workers=3)
 
 
 def _cache_get(key: str) -> Any | None:
@@ -47,6 +52,9 @@ def _cache_get(key: str) -> Any | None:
 
 def _cache_set(key: str, val: Any, ttl: float) -> None:
     with _cache_lock:
+        # LRU 淘汰:超过上限时删除最早的条目(简单 FIFO,避免 OrderedDict 开销)
+        if len(_cache) >= _CACHE_MAX_SIZE and key not in _cache:
+            _cache.pop(next(iter(_cache)), None)
         _cache[key] = {"val": val, "ts": time.monotonic(), "ttl": ttl}
 
 
