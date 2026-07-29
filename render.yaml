@@ -2,7 +2,7 @@ services:
   - type: web
     name: fund-assessment
     runtime: python
-    buildCommand: pip install numba==0.66.0 && pip install --pre --no-deps pandas-ta==0.4.71b0 && pip install -r requirements.txt
+    buildCommand: pip install --pre --no-deps numba==0.66.0 pandas-ta==0.4.71b0 && pip install -r requirements.txt && python -c "import pandas_ta; import numba; print('OK pandas_ta', pandas_ta.version, 'numba', numba.__version__)"
     startCommand: uvicorn web.api:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
     envVars:
