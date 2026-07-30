@@ -140,7 +140,9 @@ def _score_volatility_index(market_df: pd.DataFrame) -> float:
     if changes.empty:
         return 10.0
 
-    market_vol = changes.std()
+    # P3-5 修复(2026-07-30):显式 ddof=1(样本标准差),与 backtest 统一。
+    # 原默认 ddof=1 但未显式声明,易被误改为 ddof=0。
+    market_vol = changes.std(ddof=1)
 
     if market_vol < 1.0:
         return 20.0

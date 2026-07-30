@@ -10,11 +10,26 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
-import akshare as ak
 import numpy as np
 import pandas as pd
-import tushare as ts
 from loguru import logger
+
+# P3-17 修复(2026-07-30):原模块级 import akshare/tushare 是硬依赖,
+# 若未安装会 ImportError 导致整个模块无法加载,影响其他不依赖它们的功能。
+# 改为 try/except 导入,使用时再检查是否可用。
+try:
+    import akshare as ak
+    _HAS_AKSHARE = True
+except ImportError:
+    ak = None  # type: ignore[assignment]
+    _HAS_AKSHARE = False
+
+try:
+    import tushare as ts
+    _HAS_TUSHARE = True
+except ImportError:
+    ts = None  # type: ignore[assignment]
+    _HAS_TUSHARE = False
 
 _DEFAULT_DB_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 

@@ -14,7 +14,17 @@ def analyze_capital_flow(stock_code: str) -> dict:
     }
 
     try:
-        flow_df = ak.stock_individual_fund_flow(stock=stock_code, market="sh" if stock_code.startswith("6") else "sz")
+        # P3-3 修复(2026-07-30):原 "sh" if startswith("6") else "sz" 漏掉北交所,
+        # 6xx→sh, 0xx/3xx→sz, 8xx/4xx/920xxx→bj
+        if stock_code.startswith("6"):
+            market = "sh"
+        elif stock_code.startswith(("0", "3")):
+            market = "sz"
+        elif stock_code.startswith(("8", "4", "920")):
+            market = "bj"
+        else:
+            market = "sz"  # 兜底
+        flow_df = ak.stock_individual_fund_flow(stock=stock_code, market=market)
         if flow_df is not None and not flow_df.empty:
             latest = flow_df.iloc[-1]
             col_map = {c: c.strip() for c in flow_df.columns}

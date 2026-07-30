@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -93,7 +94,9 @@ class TokenBucket:
         self._tokens = float(rpm) if rpm > 0 else float('inf')
         self._max_tokens = float(rpm) if rpm > 0 else float('inf')
         self._last_refill = time.monotonic()
-        self._lock = __import__('threading').Lock()
+        # P3-11 修复(2026-07-30):原 __import__('threading').Lock() 反模式,
+        # 改为顶部 import threading,直接 threading.Lock()
+        self._lock = threading.Lock()
 
     def acquire(self, timeout: float = 60.0) -> bool:
         """获取一个令牌,超时返回False"""
@@ -147,7 +150,9 @@ class _LLMResponseCache:
         self._maxsize = max(maxsize, 8)
         self._ttl = ttl
         self._store: dict = {}  # key -> {response, ts}
-        self._lock = __import__('threading').Lock()
+        # P3-11 修复(2026-07-30):原 __import__('threading').Lock() 反模式,
+        # 改为顶部 import threading,直接 threading.Lock()
+        self._lock = threading.Lock()
         self.hits = 0
         self.misses = 0
 

@@ -321,11 +321,15 @@ def generate_script(script_id: str, variables: dict[str, Any]) -> dict[str, Any]
     }
 
 
-def match_fund_scripts(fund_advice: dict[str, Any]) -> list[dict[str, Any]]:
+def match_fund_scripts(fund_advice: dict[str, Any], market_signal: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """根据基金建议自动匹配话术。
 
     Args:
         fund_advice: generate_fund_advice 返回的单只基金 advice 项(含 advice.signal/advice.action)
+        market_signal: 可选,大盘信号(generate_fund_advice 返回顶层的 market_signal 字段)。
+            P3-14 修复(2026-07-30):原代码从 fund_advice.get("market_signal") 读取,
+            但 fund_advice 是 positions_advice 列表中的单个元素,不含 market_signal,
+            导致 index_name/index_change_pct 变量永远为空。
 
     Returns:
         匹配的话术列表(已填充变量)
@@ -338,8 +342,8 @@ def match_fund_scripts(fund_advice: dict[str, Any]) -> list[dict[str, Any]]:
         "cost_nav": fund_advice.get("cost_nav", 0),
         "pnl_pct": fund_advice.get("pnl_pct", 0),
     }
-    # 从 market_signal 补充大盘变量
-    market = fund_advice.get("market_signal", {})
+    # P3-14 修复(2026-07-30):从传入的 market_signal 参数补充大盘变量
+    market = market_signal or {}
     variables["index_name"] = market.get("index_name", "")
     variables["index_change_pct"] = market.get("change_pct", 0)
 
