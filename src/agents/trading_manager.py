@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import random
+# P3-2 修复(2026-07-30):删除未使用的 import random(全文件无 random. 调用)
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Any

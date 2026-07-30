@@ -86,7 +86,10 @@ class DataValidator:
                 ))
 
         price = quote.get("price", 0)
-        if price and not (self.PRICE_RANGE[0] <= price <= self.PRICE_RANGE[1]):
+        # P3-15 修复(2026-07-30):原 "if price" 在 price=0 时跳过校验,
+        # 但 price=0 本身就是异常数据(正常股票不可能为 0),应触发告警。
+        # 改为显式 None 检查,仅 None 时跳过(必填字段检查已捕获缺失)。
+        if price is not None and not (self.PRICE_RANGE[0] <= price <= self.PRICE_RANGE[1]):
             result.add_issue(QualityIssue(
                 field_name="price",
                 level=QualityLevel.WARNING,

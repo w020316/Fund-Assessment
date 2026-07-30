@@ -14,6 +14,26 @@ _TZ = ZoneInfo("Asia/Shanghai")
 _DEFAULT_JOB_TIMEOUT = 300
 
 
+def _is_trading_hours(now: datetime | None = None) -> bool:
+    """判断当前是否为 A 股交易时段。
+
+    P3-16 修复(2026-07-30):原盘中任务无交易时段守卫,
+    - intraday_bond_monitor 用 IntervalTrigger(30s) 全天 24h 运行,非交易时段浪费资源
+    - intraday_limit_up_monitor/capital_flow 虽用 CronTrigger(hour="9-11,13-15")
+      但未排除周末,周六日仍会触发
+
+    交易时段:周一至周五 9:25-11:30, 13:00-15:05(含集合竞价与收盘前)
+    """
+    if now is None:
+        now = datetime.now(_TZ)
+    # 周末不运行(周一=0, 周日=6)
+    if now.weekday() >= 5:
+        return False
+    t = now.hour * 100 + now.minute
+    # 上午 9:25-11:30 或 下午 13:00-15:05
+    return (925 <= t <= 1130) or (1300 <= t <= 1505)
+
+
 class Scheduler:
     def __init__(self, job_timeout: int = _DEFAULT_JOB_TIMEOUT):
         self._scheduler = BackgroundScheduler(timezone=_TZ, job_defaults={
@@ -32,6 +52,17 @@ class Scheduler:
             logger.info(f"调度任务完成: {job_name}")
         except Exception as e:
             logger.error(f"调度任务异常: {job_name} - {e}")
+
+    def _safe_run_intraday(self, job_name: str, func: Callable[..., None]) -> None:
+        """盘中任务专用 wrapper:非交易时段直接跳过,避免无效执行。
+
+        P3-16 修复(2026-07-30):intraday_bond_monitor(30s 间隔)全天运行,
+        intraday_limit_up_monitor/capital_flow 未排除周末。
+        用此 wrapper 包裹后,非交易时段直接 return,节省资源。
+        """
+        if not _is_trading_hours():
+            return
+        self._safe_run(job_name, func)
 
     def _register_default_jobs(self) -> None:
         self._callbacks = {
@@ -62,20 +93,20 @@ class Scheduler:
         )
 
         self._scheduler.add_job(
-            lambda: self._safe_run("盘中-可转债监控", self._callbacks["intraday_bond_monitor"]),
+            lambda: self._safe_run_intraday("盘中-可转债监控", self._callbacks["intraday_bond_monitor"]),
             IntervalTrigger(seconds=30, timezone=_TZ),
             id="intraday_bond_monitor",
             name="盘中-可转债监控(30秒)",
             start_date="2024-01-01 09:30:00",
         )
         self._scheduler.add_job(
-            lambda: self._safe_run("盘中-涨停监控", self._callbacks["intraday_limit_up_monitor"]),
+            lambda: self._safe_run_intraday("盘中-涨停监控", self._callbacks["intraday_limit_up_monitor"]),
             CronTrigger(hour="9-11,13-15", minute="*/1", timezone=_TZ),
             id="intraday_limit_up_monitor",
             name="盘中-涨停监控",
         )
         self._scheduler.add_job(
-            lambda: self._safe_run("盘中-资金流向", self._callbacks["intraday_capital_flow"]),
+            lambda: self._safe_run_intraday("盘中-资金流向", self._callbacks["intraday_capital_flow"]),
             CronTrigger(hour="9-11,13-15", minute="*/5", timezone=_TZ),
             id="intraday_capital_flow",
             name="盘中-资金流向(5分钟)",

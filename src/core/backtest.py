@@ -48,19 +48,20 @@ def _calc_sortino_ratio(returns: list[float], risk_free: float = _RISK_FREE_RATE
         risk_free: 年化无风险利率,默认 3%
 
     Returns:
-        Sortino 比率,无数据返回 0.0,无下行波动返回 inf 或 0.0
+        Sortino 比率,无数据返回 0.0,无下行波动返回 99.0(表示无下行风险)
     """
     if not returns:
         return 0.0
     arr = np.array(returns, dtype=float)
     downside = arr[arr < 0]
     if len(downside) == 0:
-        # 无下行波动:有正收益则无穷大,否则 0
-        return float("inf") if float(arr.mean()) > 0 else 0.0
+        # P3-7 修复(2026-07-30):原返回 inf 不利于 JSON 序列化(json.dumps 默认不允许 inf),
+        # 前端 JSON.parse 会报错。改为有限大数 99.0 表示"无下行风险"。
+        return 99.0 if float(arr.mean()) > 0 else 0.0
     if len(downside) < 2:
         # 单个下行点无法可靠估计 std,视为无下行波动
         daily_rf_single = risk_free / _TRADING_DAYS_PER_YEAR
-        return float("inf") if float(arr.mean()) > daily_rf_single else 0.0
+        return 99.0 if float(arr.mean()) > daily_rf_single else 0.0
     downside_std = float(np.std(downside, ddof=1))
     if downside_std == 0:
         return 0.0
@@ -104,7 +105,8 @@ def _calc_volatility(returns: list[float]) -> float:
     if not returns:
         return 0.0
     arr = np.array(returns, dtype=float)
-    return float(np.std(arr) * np.sqrt(_TRADING_DAYS_PER_YEAR))
+    # P3-6 修复(2026-07-30):统一 ddof=1(样本标准差),与 Sharpe/Sortino 保持一致
+    return float(np.std(arr, ddof=1) * np.sqrt(_TRADING_DAYS_PER_YEAR)) if len(arr) > 1 else 0.0
 
 
 StrategyFunc = Callable[[date, dict, pd.DataFrame], list[Signal]]
@@ -501,7 +503,9 @@ class BacktestEngine:
         daily_returns_list: list[float] = []
         if len(equity_curve) > 1:
             daily_returns_list = (np.diff(equity_curve) / np.array(equity_curve[:-1])).tolist()
-            std = np.std(daily_returns_list)
+            # P3-6 修复(2026-07-30):统一为 ddof=1(样本标准差),与 Sortino 计算保持一致。
+            # 原代码默认 ddof=0(总体标准差),与 Sortino 的 ddof=1 不统一,影响绝对值解读。
+            std = np.std(daily_returns_list, ddof=1) if len(daily_returns_list) > 1 else np.std(daily_returns_list)
             if std > 0:
                 sharpe = float((np.mean(daily_returns_list) * 252 - _RISK_FREE_RATE) / (std * np.sqrt(252)))
 
