@@ -4122,6 +4122,23 @@ async function loadAccountOverview() {
   const pnlEl = document.getElementById('todayPnl');
   pnlEl.textContent = (pnl >= 0 ? '+' : '') + fmtMoney(pnl);
   pnlEl.style.color = changeColor(pnl);
+  // P2-6 收尾(2026-07-30):后端 OverviewResponse.data_quality=degraded 表示
+  // 当日盈亏因实时行情缺失/计算异常而降级为 0,前端显示提示避免用户误以为"当日无盈亏"。
+  // 复用 var(--accent-blue) 警示色,不引入新 CSS,不改变原布局。
+  const dq = d.data_quality || 'normal';
+  let badge = document.getElementById('todayPnlBadge');
+  if (dq === 'degraded') {
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.id = 'todayPnlBadge';
+      badge.style.cssText = 'margin-left:8px;font-size:11px;color:var(--accent-blue);border:1px solid var(--accent-blue);padding:1px 6px;border-radius:3px;';
+      pnlEl.parentNode.insertBefore(badge, pnlEl.nextSibling);
+    }
+    badge.textContent = '行情降级';
+    badge.title = '实时行情数据缺失或计算异常,当日盈亏已降级为 0';
+  } else if (badge) {
+    badge.remove();
+  }
 }
 
 async function loadPositions() {
@@ -4146,8 +4163,14 @@ async function loadPositions() {
     const profit = p.profit || p.pnl || 0;
     const profitPct = p.profit_pct || p.pnl_pct || 0;
     const color = changeColor(profitPct);
-    return `<tr>
-      <td style="color:var(--accent-cyan);">${code}</td>
+    // P2-5/6 收尾(2026-07-30):后端 _enrich_positions_with_realtime 失败时给持仓项
+    // 标记 data_quality=degraded,前端在该行代码后追加 ⚠ 标识,鼠标悬停显示原因。
+    const degraded = (p.data_quality === 'degraded');
+    const warnIcon = degraded
+      ? ` <span title="实时行情获取失败,当前价/盈亏可能不准确" style="color:var(--accent-blue);font-size:11px;cursor:help;">⚠</span>`
+      : '';
+    return `<tr${degraded ? ' style="opacity:0.85;"' : ''}>
+      <td style="color:var(--accent-cyan);">${code}${warnIcon}</td>
       <td>${p.name}</td>
       <td>${qty}</td>
       <td>${fmtNum(cost)}</td>
@@ -4505,7 +4528,14 @@ async function loadNorthbound() {
   }
 
   const netColor = changeColor(nb.today_net);
+  // P2-5 收尾(2026-07-30):后端 NorthboundResponse.data_quality=degraded 表示
+  // 北向资金数据源不可达,前端在面板顶部显示提示条,避免用户误以为"北向无流入"。
+  const nbDq = (data && data.data && data.data.data_quality) || 'normal';
+  const nbBanner = nbDq === 'degraded'
+    ? `<div style="margin-bottom:12px;padding:6px 10px;font-size:11px;color:var(--accent-blue);border:1px solid var(--accent-blue);border-radius:4px;background:rgba(245,158,11,0.06);">⚠ 北向资金数据源不可达,当前数值为兜底 0,请稍后重试</div>`
+    : '';
   container.innerHTML = `
+    ${nbBanner}
     <div style="display:flex;gap:24px;margin-bottom:16px;">
       <div style="text-align:center;">
         <div style="color:var(--text-muted);font-size:12px;">今日净流入</div>
