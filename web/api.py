@@ -16,6 +16,7 @@ from loguru import logger
 # 借鉴 la-deps/slowapi(1.0K Star)FastAPI 限流中间件
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 
 # 借鉴 prometheus/client_python(4.2K Star)指标设计的轻量级监控
@@ -89,6 +90,10 @@ app = FastAPI(
 limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"])
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+# P1 修复(2026-07-30):缺失 SlowAPIMiddleware 注册,
+# 导致所有 @limiter.limit 装饰器(包括 /api/agent/fund_analyze、/api/holdings/upload)静默失效,
+# LLM 高成本端点可被无限调用耗尽免费额度
+app.add_middleware(SlowAPIMiddleware)
 
 # ===== GZip 响应压缩(借鉴 encode/starlette 10.5K Star 内置中间件)=====
 # 压缩大于 1KB 的 JSON 响应(基金净值/K线数据体积大),Render 带宽节省 70%+

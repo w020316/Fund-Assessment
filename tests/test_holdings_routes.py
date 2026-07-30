@@ -217,6 +217,27 @@ class TestUploadHoldingsFile:
         assert resp.status_code == 200
         assert resp.json()["holdings"][0]["code"] == "161725"
 
+    def test_rate_limit_triggered_after_3_requests(self, client, auth_headers):
+        """P1 回归:验证 SlowAPIMiddleware 注册后限流真实生效
+
+        背景(2026-07-30 端到端测试发现):
+        - web/api.py 创建了 limiter 并 add_exception_handler,
+          但未 add_middleware(SlowAPIMiddleware)
+        - 导致所有 @limiter.limit 装饰器(含 /api/agent/fund_analyze、/api/holdings/upload)
+          静默失效,LLM 高成本端点可被无限调用
+        - 修复:补充 app.add_middleware(SlowAPIMiddleware)
+        本用例连续 4 次调用,第 4 次应被 429 拒绝
+        """
+        csv_content = b"code,name,weight\n161725,fund_a,35.5"
+        files = {"file": ("test.csv", csv_content, "text/csv")}
+        # 前 3 次应成功(3/minute 限流)
+        for i in range(3):
+            resp = client.post("/api/holdings/upload", files=files, headers=auth_headers)
+            assert resp.status_code == 200, f"请求 {i+1} 应成功,实际 {resp.status_code}"
+        # 第 4 次应被限流拒绝(slowapi 抛 RateLimitExceeded → 429)
+        resp4 = client.post("/api/holdings/upload", files=files, headers=auth_headers)
+        assert resp4.status_code == 429, f"第4次应被限流(429),实际 {resp4.status_code}"
+
 
 class TestRecognizeHoldingsImage:
     """recognize_holdings_from_image 单元测试(mock agnes vision)"""
