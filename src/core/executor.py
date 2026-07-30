@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -132,6 +133,11 @@ class BrokerAPI(ABC):
 
 class SimulatedBroker(BrokerAPI):
     def __init__(self, initial_cash: float = 1_000_000.0):
+        # P2 修复(2026-07-30):新增 _lock 保护 _cash/_positions/_orders/_trades,
+        # 避免并发执行 buy/sell 时资金超扣、持仓超卖、成本价计算错误。
+        # buy 中 "if total_cost > self._cash" 检查与 "self._cash -= total_cost" 更新非原子,
+        # 多策略并发执行信号会导致竞态。
+        self._lock = threading.Lock()
         self._cash: float = initial_cash
         self._initial_cash: float = initial_cash
         self._positions: dict[str, dict[str, Any]] = {}
@@ -147,114 +153,118 @@ class SimulatedBroker(BrokerAPI):
         return commission, stamp_tax
 
     def buy(self, symbol: str, price: float, quantity: float, order_type: OrderType = OrderType.MARKET) -> Order:
-        order_id = self._gen_id()
-        order = Order(
-            order_id=order_id,
-            symbol=symbol,
-            side=OrderSide.BUY,
-            price=price,
-            quantity=quantity,
-            order_type=order_type,
-        )
-        self._orders[order_id] = order
+        # P2 修复(2026-07-30):整段 buy 加锁,确保资金检查与扣减原子操作
+        with self._lock:
+            order_id = self._gen_id()
+            order = Order(
+                order_id=order_id,
+                symbol=symbol,
+                side=OrderSide.BUY,
+                price=price,
+                quantity=quantity,
+                order_type=order_type,
+            )
+            self._orders[order_id] = order
 
-        filled_price = price
-        amount = filled_price * quantity
-        commission, stamp_tax = self._calc_commission(amount, OrderSide.BUY)
-        total_cost = amount + commission + stamp_tax
+            filled_price = price
+            amount = filled_price * quantity
+            commission, stamp_tax = self._calc_commission(amount, OrderSide.BUY)
+            total_cost = amount + commission + stamp_tax
 
-        if total_cost > self._cash:
-            order.status = OrderStatus.REJECTED
+            if total_cost > self._cash:
+                order.status = OrderStatus.REJECTED
+                order.updated_at = datetime.now()
+                logger.warning(f"SimulatedBroker: 买入被拒绝，资金不足 (需要 {total_cost:.2f}, 可用 {self._cash:.2f})")
+                return order
+
+            self._cash -= total_cost
+            order.status = OrderStatus.FILLED
+            order.filled_price = filled_price
+            order.filled_quantity = quantity
             order.updated_at = datetime.now()
-            logger.warning(f"SimulatedBroker: 买入被拒绝，资金不足 (需要 {total_cost:.2f}, 可用 {self._cash:.2f})")
+
+            if symbol in self._positions:
+                pos = self._positions[symbol]
+                total_qty = pos["quantity"] + quantity
+                pos["cost_price"] = (pos["cost_price"] * pos["quantity"] + filled_price * quantity) / total_qty
+                pos["quantity"] = total_qty
+                pos["available_quantity"] = total_qty
+            else:
+                self._positions[symbol] = {
+                    "symbol": symbol,
+                    "name": symbol,
+                    "quantity": quantity,
+                    "available_quantity": quantity,
+                    "cost_price": filled_price,
+                    "current_price": filled_price,
+                }
+
+            trade = Trade(
+                trade_id=self._gen_id(),
+                order_id=order_id,
+                symbol=symbol,
+                side=OrderSide.BUY,
+                price=filled_price,
+                quantity=quantity,
+                amount=amount,
+                commission=commission,
+                stamp_tax=stamp_tax,
+                net_amount=total_cost,
+            )
+            self._trades.append(trade)
             return order
-
-        self._cash -= total_cost
-        order.status = OrderStatus.FILLED
-        order.filled_price = filled_price
-        order.filled_quantity = quantity
-        order.updated_at = datetime.now()
-
-        if symbol in self._positions:
-            pos = self._positions[symbol]
-            total_qty = pos["quantity"] + quantity
-            pos["cost_price"] = (pos["cost_price"] * pos["quantity"] + filled_price * quantity) / total_qty
-            pos["quantity"] = total_qty
-            pos["available_quantity"] = total_qty
-        else:
-            self._positions[symbol] = {
-                "symbol": symbol,
-                "name": symbol,
-                "quantity": quantity,
-                "available_quantity": quantity,
-                "cost_price": filled_price,
-                "current_price": filled_price,
-            }
-
-        trade = Trade(
-            trade_id=self._gen_id(),
-            order_id=order_id,
-            symbol=symbol,
-            side=OrderSide.BUY,
-            price=filled_price,
-            quantity=quantity,
-            amount=amount,
-            commission=commission,
-            stamp_tax=stamp_tax,
-            net_amount=total_cost,
-        )
-        self._trades.append(trade)
-        return order
 
     def sell(self, symbol: str, price: float, quantity: float, order_type: OrderType = OrderType.MARKET) -> Order:
-        order_id = self._gen_id()
-        order = Order(
-            order_id=order_id,
-            symbol=symbol,
-            side=OrderSide.SELL,
-            price=price,
-            quantity=quantity,
-            order_type=order_type,
-        )
-        self._orders[order_id] = order
+        # P2 修复(2026-07-30):整段 sell 加锁,确保持仓检查与扣减原子操作
+        with self._lock:
+            order_id = self._gen_id()
+            order = Order(
+                order_id=order_id,
+                symbol=symbol,
+                side=OrderSide.SELL,
+                price=price,
+                quantity=quantity,
+                order_type=order_type,
+            )
+            self._orders[order_id] = order
 
-        pos = self._positions.get(symbol)
-        if pos is None or pos["available_quantity"] < quantity:
-            order.status = OrderStatus.REJECTED
+            pos = self._positions.get(symbol)
+            if pos is None or pos["available_quantity"] < quantity:
+                order.status = OrderStatus.REJECTED
+                order.updated_at = datetime.now()
+                logger.warning(f"SimulatedBroker: 卖出被拒绝，持仓不足")
+                return order
+
+            filled_price = price
+            amount = filled_price * quantity
+            commission, stamp_tax = self._calc_commission(amount, OrderSide.SELL)
+            net_proceeds = amount - commission - stamp_tax
+
+            self._cash += net_proceeds
+            order.status = OrderStatus.FILLED
+            order.filled_price = filled_price
+            order.filled_quantity = quantity
             order.updated_at = datetime.now()
-            logger.warning(f"SimulatedBroker: 卖出被拒绝，持仓不足")
+
+            pos["quantity"] -= quantity
+            pos["available_quantity"] -= quantity
+            if pos["quantity"] <= 0:
+                del self._positions[symbol]
+
+            trade = Trade(
+                trade_id=self._gen_id(),
+                order_id=order_id,
+                symbol=symbol,
+                side=OrderSide.SELL,
+                price=filled_price,
+                quantity=quantity,
+                amount=amount,
+                commission=commission,
+                stamp_tax=stamp_tax,
+                net_amount=net_proceeds,
+            )
+            self._trades.append(trade)
             return order
-
-        filled_price = price
-        amount = filled_price * quantity
-        commission, stamp_tax = self._calc_commission(amount, OrderSide.SELL)
-        net_proceeds = amount - commission - stamp_tax
-
-        self._cash += net_proceeds
-        order.status = OrderStatus.FILLED
-        order.filled_price = filled_price
-        order.filled_quantity = quantity
-        order.updated_at = datetime.now()
-
-        pos["quantity"] -= quantity
-        pos["available_quantity"] -= quantity
-        if pos["quantity"] <= 0:
-            del self._positions[symbol]
-
-        trade = Trade(
-            trade_id=self._gen_id(),
-            order_id=order_id,
-            symbol=symbol,
-            side=OrderSide.SELL,
-            price=filled_price,
-            quantity=quantity,
-            amount=amount,
-            commission=commission,
-            stamp_tax=stamp_tax,
-            net_amount=net_proceeds,
-        )
-        self._trades.append(trade)
-        return order
 
     def cancel_order(self, order_id: str) -> bool:
         order = self._orders.get(order_id)
@@ -385,31 +395,65 @@ class TradeExecutor:
             )
 
     def _record_trade(self, trade: Trade, strategy: str = "", reason: str = "") -> None:
-        try:
-            with self._get_conn() as conn:
-                conn.execute(
-                    """
-                    INSERT INTO trades (trade_id, order_id, symbol, side, price, quantity,
-                                        amount, commission, stamp_tax, net_amount, strategy, reason)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        trade.trade_id,
-                        trade.order_id,
-                        trade.symbol,
-                        trade.side.value,
-                        trade.price,
-                        trade.quantity,
-                        trade.amount,
-                        trade.commission,
-                        trade.stamp_tax,
-                        trade.net_amount,
-                        strategy,
-                        reason,
-                    ),
+        # P2 修复(2026-07-30):原代码异常时仅 warning 静默吞掉,交易记录持久化失败
+        # 会导致后续风控/统计/回测数据缺失。改为:
+        # 1) error 级别日志,便于监控告警
+        # 2) SQLite SQLITE_BUSY 时简单重试 3 次(避免并发写锁竞争直接放弃)
+        # 3) 全部失败后抛出,由上层 execute_signal 决定是否回滚内存状态
+        max_retries = 3
+        last_error: Optional[Exception] = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                with self._get_conn() as conn:
+                    conn.execute(
+                        """
+                        INSERT INTO trades (trade_id, order_id, symbol, side, price, quantity,
+                                            amount, commission, stamp_tax, net_amount, strategy, reason)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            trade.trade_id,
+                            trade.order_id,
+                            trade.symbol,
+                            trade.side.value,
+                            trade.price,
+                            trade.quantity,
+                            trade.amount,
+                            trade.commission,
+                            trade.stamp_tax,
+                            trade.net_amount,
+                            strategy,
+                            reason,
+                        ),
+                    )
+                return
+            except sqlite3.OperationalError as e:
+                last_error = e
+                if "locked" in str(e).lower() or "busy" in str(e).lower():
+                    logger.warning(
+                        f"_record_trade retry {attempt}/{max_retries} (db locked): {e}"
+                    )
+                    if attempt < max_retries:
+                        import time as _time
+                        _time.sleep(0.05 * attempt)
+                    continue
+                logger.error(
+                    f"_record_trade sqlite error (attempt {attempt}): {e} | trade={trade.trade_id} {trade.symbol} {trade.side.value}"
                 )
-        except Exception as e:
-            logger.warning(f"TradeExecutor._record_trade failed: {e}")
+                raise
+            except Exception as e:
+                last_error = e
+                logger.error(
+                    f"_record_trade unexpected error (attempt {attempt}): {type(e).__name__}: {e} | "
+                    f"trade={trade.trade_id} {trade.symbol} {trade.side.value}"
+                )
+                raise
+        # 重试耗尽:记录 error 并抛出,避免静默丢失
+        logger.error(
+            f"_record_trade failed after {max_retries} retries: {last_error} | "
+            f"trade={trade.trade_id} {trade.symbol} {trade.side.value} amount={trade.amount}"
+        )
+        raise RuntimeError(f"交易记录持久化失败,已重试 {max_retries} 次: {last_error}")
 
     def execute_signal(self, signal: Signal) -> Optional[Order]:
         order_dict: dict[str, Any] = {
@@ -504,7 +548,21 @@ class TradeExecutor:
                 stamp_tax=stamp_tax,
                 net_amount=net_amount,
             )
-            self._record_trade(trade, strategy=signal.strategy, reason=signal.reason)
+            # P2 修复(2026-07-30):_record_trade 失败时不应让 execute_signal 崩溃,
+            # 否则订单已成交但调用方误以为失败可能重复下单。
+            # 改为捕获后通知用户人工核对,订单状态仍正常返回。
+            try:
+                self._record_trade(trade, strategy=signal.strategy, reason=signal.reason)
+            except Exception as record_err:
+                logger.error(
+                    f"order filled but trade record persistence failed: {record_err} | "
+                    f"order={order.order_id} {signal.symbol} {signal.side.value} qty={order.filled_quantity}"
+                )
+                self._notifier.notify(
+                    "成交记录持久化失败",
+                    f"订单 {order.order_id} ({signal.symbol} {signal.side.value} "
+                    f"{order.filled_quantity}@{order.filled_price:.2f}) 已成交,但数据库写入失败,请人工核对。原因: {type(record_err).__name__}",
+                )
 
             self._notifier.notify(
                 "订单成交",

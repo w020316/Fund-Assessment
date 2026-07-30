@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import re
 import time
 from pathlib import Path
@@ -21,14 +20,22 @@ from fastapi import APIRouter, Depends, Query
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from src.core.cache import DataCache
 from src.core.data_source_v2 import (
     get_fund_history_tencent,
     get_fund_realtime_tencent,
 )
 from src.utils.auth import require_admin
 from src.utils.convert import safe_float as _safe_float, safe_str as _safe_str
+from src.utils.file_io import atomic_write_json, safe_read_json
 
 router = APIRouter()
+
+# P2-4 修复(2026-07-30):为 fund GET 端点添加进程内短缓存,
+# 避免前端轮询/重复点击触发后端重复请求东方财富/腾讯接口(被反爬封禁风险)。
+# TTL 策略:search 60s(基金列表变化慢),realtime 10s(实时性优先),
+#          history 300s(历史净值日级更新,5分钟足够)。
+_fund_cache = DataCache(default_ttl=60)
 
 _FUND_POSITIONS_FILE = Path(__file__).resolve().parent.parent / "user_fund_positions.json"
 
@@ -38,12 +45,13 @@ _FUND_POSITIONS_FILE = Path(__file__).resolve().parent.parent / "user_fund_posit
 # ============ 数据模型 ============
 
 class FundPosition(BaseModel):
-    fund_code: str = Field(..., description="基金代码(6位数字)")
-    fund_name: str = Field("", description="基金名称")
-    shares: float = Field(0.0, description="持有份额")
-    cost_nav: float = Field(0.0, description="成本净值")
+    # P0 修复(2026-07-30):shares/cost_nav 增加 ge=0 校验,防止负数持仓
+    fund_code: str = Field(..., min_length=6, max_length=6, pattern=r"^[0-9]{6}$", description="基金代码(6位数字)")
+    fund_name: str = Field("", max_length=50, description="基金名称")
+    shares: float = Field(0.0, ge=0, description="持有份额,不能为负")
+    cost_nav: float = Field(0.0, ge=0, description="成本净值,不能为负")
     buy_date: str = Field("", description="买入日期 YYYY-MM-DD")
-    note: str = Field("", description="备注")
+    note: str = Field("", max_length=200, description="备注")
 
 
 class SaveFundPositionsRequest(BaseModel):
@@ -64,25 +72,30 @@ class MessageResponse(BaseModel):
 # ============ 持仓 CRUD ============
 
 def _load_positions() -> list[dict]:
-    if _FUND_POSITIONS_FILE.exists():
-        try:
-            with open(_FUND_POSITIONS_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                return data.get("positions", [])
-        except Exception as e:
-            logger.warning(f"load fund positions failed: {e}")
-    return []
+    # P0 修复(2026-07-30):改用 safe_read_json,主文件损坏时自动回退 .bak 备份
+    data = safe_read_json(_FUND_POSITIONS_FILE, default={"positions": []})
+    if data is None:
+        return []
+    return data.get("positions", []) if isinstance(data, dict) else []
 
 
-def _save_positions(positions: list[dict]) -> None:
+def _save_positions(positions: list[dict]) -> bool:
+    # P0 修复(2026-07-30):改用 atomic_write_json
+    # 1. 写 .tmp + fsync 落盘 → os.replace 原子替换,防止崩溃时数据损坏
+    # 2. 写入前自动备份到 .bak,损坏时可恢复
+    # 3. 路径粒度 threading.Lock 保护并发写
+    # P1 修复(2026-07-30):原代码 except Exception 后 logger.warning 但仍返回 None,
+    # 调用方 save_positions/add_position/delete_position 仍返回 {"success": True},
+    # 用户以为保存成功但实际数据丢失,无法追溯。改为返回 bool,调用方按结果返回正确 success。
     try:
-        with open(_FUND_POSITIONS_FILE, "w", encoding="utf-8") as f:
-            json.dump({"positions": positions}, f, ensure_ascii=False, indent=2)
+        atomic_write_json(_FUND_POSITIONS_FILE, {"positions": positions})
+        return True
     except Exception as e:
-        logger.warning(f"save fund positions failed: {e}")
+        logger.error(f"save fund positions failed: {e}")
+        return False
 
 
-@router.get("/positions")
+@router.get("/positions", dependencies=[Depends(require_admin)])
 async def get_positions():
     """获取基金持仓(含实时净值与盈亏)。"""
     positions = _load_positions()
@@ -145,17 +158,19 @@ async def get_positions():
 async def save_positions(req: SaveFundPositionsRequest):
     """保存基金持仓(全量覆盖)。"""
     positions = [p.model_dump() for p in req.positions]
-    _save_positions(positions)
-    return {"success": True, "message": f"已保存 {len(positions)} 只基金持仓"}
+    # P1 修复(2026-07-30):根据 _save_positions 真实结果返回 success,避免静默吞异常误导用户
+    ok = _save_positions(positions)
+    return {"success": ok, "message": f"已保存 {len(positions)} 只基金持仓" if ok else "保存失败,请查看日志或重试"}
 
 
 class AddPositionRequest(BaseModel):
-    fund_code: str
-    fund_name: str = ""
-    shares: float = 0.0
-    cost_nav: float = 0.0
-    buy_date: str = ""
-    note: str = ""
+    # P0 修复(2026-07-30):同 FundPosition,增加 ge=0 与代码格式校验
+    fund_code: str = Field(..., min_length=6, max_length=6, pattern=r"^[0-9]{6}$")
+    fund_name: str = Field("", max_length=50)
+    shares: float = Field(0.0, ge=0)
+    cost_nav: float = Field(0.0, ge=0)
+    buy_date: str = Field("")
+    note: str = Field("", max_length=200)
 
 
 @router.post("/positions/add", dependencies=[Depends(require_admin)])
@@ -165,8 +180,8 @@ async def add_position(req: AddPositionRequest):
     # 同代码覆盖
     positions = [p for p in positions if p.get("fund_code") != req.fund_code]
     positions.append(req.model_dump())
-    _save_positions(positions)
-    return {"success": True, "message": f"已添加 {req.fund_code}"}
+    ok = _save_positions(positions)
+    return {"success": ok, "message": f"已添加 {req.fund_code}" if ok else "添加失败,请重试"}
 
 
 @router.delete("/positions/{fund_code}", dependencies=[Depends(require_admin)])
@@ -175,9 +190,11 @@ async def delete_position(fund_code: str):
     positions = _load_positions()
     before = len(positions)
     positions = [p for p in positions if p.get("fund_code") != fund_code]
-    _save_positions(positions)
     removed = before - len(positions)
-    return {"success": removed > 0, "message": f"已删除 {fund_code}" if removed else f"未找到 {fund_code}"}
+    if removed == 0:
+        return {"success": False, "message": f"未找到 {fund_code}"}
+    ok = _save_positions(positions)
+    return {"success": ok, "message": f"已删除 {fund_code}" if ok else "删除失败,请重试"}
 
 
 # ============ 基金建议 ============
@@ -207,6 +224,12 @@ async def search_fund(q: str = Query(..., min_length=1, description="基金代�
     """按名称/代码模糊搜索基金(数据源:东方财富基金搜索)。"""
     if not q.strip():
         return {"data": [], "query": q}
+
+    # P2-4 修复(2026-07-30):搜索结果缓存 60s,避免重复请求东方财富
+    cache_key = f"fund_search:{q.strip()}"
+    cached = _fund_cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "query": q, "_meta": {"cached": True}}
 
     url = "https://fundsuggest.eastmoney.com/FundSearch/api/FundSearchAPI.ashx"
     params = {
@@ -246,7 +269,10 @@ async def search_fund(q: str = Query(..., min_length=1, description="基金代�
                 "name": name,
                 "type": fund_type,
             })
-        return {"data": result[:20], "query": q, "count": len(result)}
+        # P2-4 修复:命中缓存(仅缓存非空结果,空结果不缓存避免错误持久化)
+        if result:
+            _fund_cache.set(cache_key, result[:20], ttl=60)
+        return {"data": result[:20], "query": q, "count": len(result), "_meta": {"cached": False}}
     except Exception as e:
         logger.warning(f"fund search failed: {e}")
         return {"data": [], "query": q, "error": str(e)}
@@ -260,8 +286,15 @@ async def fund_realtime(codes: str = Query(..., description="基金代码,逗号
     code_list = [c.strip() for c in codes.split(",") if c.strip()]
     if not code_list:
         return {"data": []}
+    # P2-4 修复:实时行情缓存 10s(实时性优先,但避免 1s 内多次刷新打爆腾讯接口)
+    cache_key = f"fund_realtime:{codes.strip()}"
+    cached = _fund_cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": {"cached": True}}
     quotes = await asyncio.to_thread(get_fund_realtime_tencent, code_list)
-    return {"data": quotes}
+    if quotes:
+        _fund_cache.set(cache_key, quotes, ttl=10)
+    return {"data": quotes, "_meta": {"cached": False}}
 
 
 # ============ 基金历史净值 ============
@@ -269,5 +302,12 @@ async def fund_realtime(codes: str = Query(..., description="基金代码,逗号
 @router.get("/history")
 async def fund_history(code: str = Query(...), period: str = Query("1y")):
     """基金历史净值。"""
+    # P2-4 修复:历史净值缓存 300s(日级更新数据,5分钟足够,避免重复拉取)
+    cache_key = f"fund_history:{code}:{period}"
+    cached = _fund_cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "code": code, "period": period, "_meta": {"cached": True}}
     data = await asyncio.to_thread(get_fund_history_tencent, code, period)
-    return {"data": data, "code": code, "period": period}
+    if data:
+        _fund_cache.set(cache_key, data, ttl=300)
+    return {"data": data, "code": code, "period": period, "_meta": {"cached": False}}

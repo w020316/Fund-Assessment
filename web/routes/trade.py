@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
+import asyncio
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.utils.auth import require_admin
 
@@ -20,17 +22,19 @@ except ImportError as e:
 
 
 class BuyRequest(BaseModel):
-    stock_code: str
-    amount: float
-    price: float = 0.0
-    strategy: str = ""
+    # P0 修复(2026-07-30):amount/price 增加范围校验,防止前端绕过校验提交负数
+    stock_code: str = Field(..., min_length=6, max_length=6, pattern=r"^[0-9]{6}$")
+    amount: float = Field(..., gt=0, description="交易数量,必须为正数")
+    price: float = Field(0.0, ge=0, description="限价价格,0表示市价")
+    strategy: str = Field("", max_length=200, description="策略备注,限200字符")
 
 
 class SellRequest(BaseModel):
-    stock_code: str
-    amount: float
-    price: float = 0.0
-    strategy: str = ""
+    # P0 修复(2026-07-30):同 BuyRequest,增加范围校验
+    stock_code: str = Field(..., min_length=6, max_length=6, pattern=r"^[0-9]{6}$")
+    amount: float = Field(..., gt=0, description="交易数量,必须为正数")
+    price: float = Field(0.0, ge=0, description="限价价格,0表示市价")
+    strategy: str = Field("", max_length=200, description="策略备注,限200字符")
 
 
 class CancelRequest(BaseModel):
@@ -79,12 +83,14 @@ def _get_state(request: Request) -> dict[str, Any]:
 
 @router.post("/buy", response_model=OrderResponse, dependencies=[Depends(require_admin)])
 async def buy(req: BuyRequest, request: Request):
-    return _execute_order(req, OrderSide.BUY, request)
+    # P1 修复(2026-07-30):_execute_order 内含 broker IO,用 asyncio.to_thread 包裹避免阻塞事件循环
+    return await asyncio.to_thread(_execute_order, req, OrderSide.BUY, request)
 
 
 @router.post("/sell", response_model=OrderResponse, dependencies=[Depends(require_admin)])
 async def sell(req: SellRequest, request: Request):
-    return _execute_order(req, OrderSide.SELL, request)
+    # P1 修复(2026-07-30):同 buy
+    return await asyncio.to_thread(_execute_order, req, OrderSide.SELL, request)
 
 
 @router.post("/cancel", response_model=MessageResponse, dependencies=[Depends(require_admin)])
@@ -93,7 +99,8 @@ async def cancel(req: CancelRequest, request: Request):
         return MessageResponse(success=False, message="交易功能未启用, 无法撤单")
     state = _get_state(request)
     broker = state["broker"]
-    success = broker.cancel_order(req.order_id)
+    # P1 修复(2026-07-30):broker.cancel_order 同步方法,包裹到线程池
+    success = await asyncio.to_thread(broker.cancel_order, req.order_id)
     return MessageResponse(
         success=success,
         message="撤单成功" if success else "撤单失败，订单不存在或已成交",
@@ -128,7 +135,7 @@ def _execute_order(req: BuyRequest | SellRequest, side: OrderSide, request: Requ
     )
 
 
-@router.get("/orders", response_model=list[OrderResponse])
+@router.get("/orders", response_model=list[OrderResponse], dependencies=[Depends(require_admin)])
 async def orders(request: Request):
     if not _HAS_EXECUTOR:
         return []
@@ -136,7 +143,8 @@ async def orders(request: Request):
     broker = state.get("broker")
     if broker is None:
         return []
-    order_list = broker.get_orders()
+    # P1 修复(2026-07-30):broker.get_orders 可能含 IO,包裹到线程池
+    order_list = await asyncio.to_thread(broker.get_orders)
     return [
         OrderResponse(
             order_id=o.order_id, symbol=o.symbol, side=o.side.value,
@@ -148,7 +156,7 @@ async def orders(request: Request):
     ]
 
 
-@router.get("/history", response_model=list[TradeHistoryItem])
+@router.get("/history", response_model=list[TradeHistoryItem], dependencies=[Depends(require_admin)])
 async def history(request: Request, symbol: str = "", limit: int = 50):
     if not _HAS_EXECUTOR:
         return []
@@ -157,7 +165,8 @@ async def history(request: Request, symbol: str = "", limit: int = 50):
     if executor is None:
         return []
     stock_code = symbol if symbol else None
-    records = executor.get_trade_history(symbol=stock_code, limit=limit)
+    # P1 修复(2026-07-30):executor.get_trade_history 可能含 IO,包裹到线程池
+    records = await asyncio.to_thread(executor.get_trade_history, symbol=stock_code, limit=limit)
     return [
         TradeHistoryItem(
             trade_id=str(row.get("trade_id", "")),

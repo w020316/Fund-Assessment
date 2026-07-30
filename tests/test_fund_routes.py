@@ -96,7 +96,8 @@ class TestSavePositions:
 
     def test_save_positions_calls_save(self, client):
         """保存持仓调用 _save_positions 并返回成功"""
-        with patch("web.routes.fund._save_positions") as mock_save:
+        # P1 修复(2026-07-30):_save_positions 现返回 bool,mock 需显式 return_value=True
+        with patch("web.routes.fund._save_positions", return_value=True) as mock_save:
             resp = client.post("/api/fund/positions", json={
                 "positions": [
                     {"fund_code": "161725", "fund_name": "招商白酒",
@@ -116,8 +117,9 @@ class TestDeletePosition:
 
     def test_delete_existing_position(self, client):
         """删除已存在的持仓返回成功"""
+        # P1 修复(2026-07-30):_save_positions 现返回 bool,mock 需显式 return_value=True
         with patch("web.routes.fund._load_positions", return_value=list(_MOCK_POSITIONS)), \
-             patch("web.routes.fund._save_positions") as mock_save:
+             patch("web.routes.fund._save_positions", return_value=True) as mock_save:
             resp = client.delete("/api/fund/positions/110022")
         assert resp.status_code == 200
         assert resp.json()["success"] is True
@@ -133,6 +135,19 @@ class TestDeletePosition:
             resp = client.delete("/api/fund/positions/999999")
         assert resp.status_code == 200
         assert resp.json()["success"] is False
+
+    def test_save_positions_failure_returns_false(self, client):
+        """P1 回归:_save_positions 失败时返回 success=False(避免静默吞异常误导用户)"""
+        with patch("web.routes.fund._save_positions", return_value=False):
+            resp = client.post("/api/fund/positions", json={
+                "positions": [
+                    {"fund_code": "161725", "fund_name": "招商白酒",
+                     "shares": 5000.0, "cost_nav": 0.85, "buy_date": "2026-02-20", "note": ""}
+                ]
+            })
+        assert resp.status_code == 200
+        assert resp.json()["success"] is False
+        assert "保存失败" in resp.json()["message"]
 
 
 class TestFundAdvice:

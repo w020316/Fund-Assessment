@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import asyncio
+
 from fastapi import APIRouter, Depends
 from loguru import logger
 from pydantic import BaseModel
@@ -232,22 +234,25 @@ async def analyze(req: AnalyzeRequest):
         match req.strategy_type:
             case "comprehensive":
                 analyst = AStockAnalyst()
-                result = analyst.comprehensive_analysis(req.stock_code)
+                # P1 修复(2026-07-30):同步重型方法包裹到线程池,避免阻塞事件循环
+                result = await asyncio.to_thread(analyst.comprehensive_analysis, req.stock_code)
             case "trading_quant":
                 quant = TradingQuant()
-                result = quant.stock_analysis(req.stock_code)
+                result = await asyncio.to_thread(quant.stock_analysis, req.stock_code)
             case "bspro_quant":
                 quant = BSProQuant()
-                result = quant.compute_factors(req.stock_code)
+                result = await asyncio.to_thread(quant.compute_factors, req.stock_code)
             case _:
                 analyst = AStockAnalyst()
-                result = analyst.comprehensive_analysis(req.stock_code)
+                result = await asyncio.to_thread(analyst.comprehensive_analysis, req.stock_code)
         return AnalyzeResponse(
             stock_code=req.stock_code,
             strategy_type=req.strategy_type,
             result=_normalize_analysis(result),
         )
     except Exception as e:
+        # P2 修复(2026-07-30):补 logger.exception 保留完整堆栈,便于排查
+        logger.exception(f"analyze {req.stock_code} ({req.strategy_type}) failed")
         return AnalyzeResponse(
             stock_code=req.stock_code,
             strategy_type=req.strategy_type,
@@ -260,12 +265,13 @@ async def scan_new_high():
     if not _HAS_STRATEGIES:
         top = []
         try:
-            top = ds2.get_stock_ranking_em(sort_field="f3", sort_order=0, count=30)
+            # P1 修复(2026-07-30):ds2 同步调用包裹到线程池
+            top = await asyncio.to_thread(ds2.get_stock_ranking_em, sort_field="f3", sort_order=0, count=30)
         except Exception as e:
             logger.warning(f"get_stock_ranking_em failed: {e}")
         if not top:
             try:
-                top = ds2._get_stock_ranking_sina("f3", 0, 30)
+                top = await asyncio.to_thread(ds2._get_stock_ranking_sina, "f3", 0, 30)
             except Exception as e:
                 logger.warning(f"get_stock_ranking_sina failed: {e}")
         items: list[NewHighItem] = []
@@ -284,7 +290,8 @@ async def scan_new_high():
     try:
         import akshare as ak
         items: list[NewHighItem] = []
-        df = ak.stock_zh_a_spot_em()
+        # P1 修复(2026-07-30):akshare 同步调用包裹到线程池
+        df = await asyncio.to_thread(ak.stock_zh_a_spot_em)
         if df is not None and not df.empty:
             df["涨跌幅"] = df["涨跌幅"].astype(float)
             df["成交额"] = df["成交额"].astype(float)
@@ -299,6 +306,8 @@ async def scan_new_high():
                 ))
         return items
     except Exception:
+        # P2 修复(2026-07-30):补日志,避免静默吞异常无法排查
+        logger.exception("scan_new_high akshare path failed")
         return []
 
 
@@ -308,13 +317,16 @@ async def scan_limit_up():
         return []
     try:
         analyzer = LimitUpAnalyzer()
-        results = analyzer.scan_limit_up()
+        # P1 修复(2026-07-30):同步方法包裹到线程池
+        results = await asyncio.to_thread(analyzer.scan_limit_up)
         return [LimitUpItem(
             stock_code=r.stock_code, stock_name=r.stock_name, level=r.level.value,
             reason=r.reason.value, seal_time=r.seal_time, open_count=r.open_count,
             seal_volume=r.seal_volume, quality_score=r.quality_score,
         ) for r in results]
     except Exception:
+        # P2 修复(2026-07-30):补日志
+        logger.exception("scan_limit_up failed")
         return []
 
 
@@ -324,7 +336,8 @@ async def scan_cb():
         return []
     try:
         sniper = CBT0Sniper()
-        results = sniper.scan_cb_opportunities()
+        # P1 修复(2026-07-30):同步方法包裹到线程池
+        results = await asyncio.to_thread(sniper.scan_cb_opportunities)
         return [CBItem(
             cb_code=r.cb_code, cb_name=r.cb_name, stock_code=r.stock_code,
             stock_name=r.stock_name, cb_price=r.cb_price, stock_price=r.stock_price,
@@ -333,6 +346,8 @@ async def scan_cb():
             volume_ratio=r.volume_ratio, turnover_rate=r.turnover_rate,
         ) for r in results]
     except Exception:
+        # P2 修复(2026-07-30):补日志
+        logger.exception("scan_cb failed")
         return []
 
 
@@ -347,7 +362,11 @@ async def backtest(req: BacktestRequest):
     try:
         quant = BSProQuant()
         factor_combo = {"pe": -0.2, "roe_change": 0.3, "return_3m": 0.3, "sharpe": 0.2}
-        result = quant.backtest_strategy(factor_combo=factor_combo, period=60)
+        # P1 修复(2026-07-30):
+        # (1) 同步方法包裹到线程池
+        # (2) 原代码异常时静默返回全零,用户无法区分"回测结果恰好全零"与"回测彻底失败",
+        #     可能据此做出错误投资决策。改为抛 HTTPException 503 明确告知失败。
+        result = await asyncio.to_thread(quant.backtest_strategy, factor_combo=factor_combo, period=60)
         return BacktestResponse(
             strategy=req.strategy, stock_code=req.stock_code,
             total_return=result["total_return"],
@@ -357,12 +376,10 @@ async def backtest(req: BacktestRequest):
             win_rate=result["win_rate"],
             trades=result["trades"],
         )
-    except Exception:
-        return BacktestResponse(
-            strategy=req.strategy, stock_code=req.stock_code,
-            total_return=0, annualized_return=0, max_drawdown=0,
-            sharpe_ratio=0, win_rate=0, trades=0,
-        )
+    except Exception as e:
+        logger.exception(f"backtest {req.strategy} failed")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail=f"回测执行失败: {type(e).__name__}: {str(e)[:100]}")
 
 
 @router.get("/list", response_model=list[StrategyInfo])

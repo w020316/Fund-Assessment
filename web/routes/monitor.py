@@ -54,6 +54,9 @@ class CapitalFlowResponse(BaseModel):
     medium_order_ratio: float
     small_order_ratio: float
     northbound_change: float
+    # P2-5 修复(2026-07-30):新增 data_quality 字段,
+    # 标记资金流数据是否因接口失败而用 0 兜底,避免用户误以为"无主力资金动向"。
+    data_quality: str = "normal"  # normal | degraded
 
 
 class NorthboundResponse(BaseModel):
@@ -61,6 +64,8 @@ class NorthboundResponse(BaseModel):
     sh_net_inflow: float
     sz_net_inflow: float
     top_stocks: list[dict[str, Any]]
+    # P2-5 修复(2026-07-30):同上,标记北向资金数据是否降级
+    data_quality: str = "normal"  # normal | degraded
 
 
 # 自选股持久化(文件存储,避免内存 mock)
@@ -106,8 +111,16 @@ async def alerts(stock_code: str = ""):
             severity=a["severity"], message=a["message"],
             detail=a.get("detail", {}),
         ) for a in results]
-    except Exception:
-        return []
+    except Exception as e:
+        # P1 修复(2026-07-30):原静默返回空列表,用户以为"无告警"但实际是系统故障。
+        # 改为日志记录 + 返回错误告警项,前端可明确区分"无告警"与"获取失败"。
+        logger.warning(f"check_alerts {stock_code} failed: {e}")
+        return [AlertItem(
+            stock_code=stock_code, alert_type="system_error",
+            severity="warning",
+            message=f"{stock_code} 告警检查失败,请稍后重试",
+            detail={"error": str(e)},
+        )]
 
 
 async def _generate_default_alerts() -> list[AlertItem]:
@@ -123,7 +136,9 @@ async def _generate_default_alerts() -> list[AlertItem]:
         )]
     try:
         quotes = await asyncio.to_thread(ds2.get_realtime_quote_tencent, watchlist_codes)
-    except Exception:
+    except Exception as e:
+        # P1 修复(2026-07-30):记录日志,避免静默掩盖接口故障
+        logger.warning(f"_generate_default_alerts: 行情接口失败,告警检查降级: {e}")
         quotes = []
     quote_map = {q.get("code", ""): q for q in quotes}
     for code in watchlist_codes:
@@ -177,7 +192,7 @@ async def _generate_default_alerts() -> list[AlertItem]:
     return alert_items
 
 
-@router.get("/watchlist", response_model=list[WatchlistItem])
+@router.get("/watchlist", response_model=list[WatchlistItem], dependencies=[Depends(require_admin)])
 async def watchlist():
     watchlist_data = _load_watchlist()
     return [WatchlistItem(stock_code=code, rules=rules)
@@ -204,18 +219,24 @@ async def remove_watchlist(stock_code: str):
 
 @router.get("/capital_flow", response_model=CapitalFlowResponse)
 async def capital_flow(stock_code: str = ""):
+    # P2-5 修复(2026-07-30):跟踪数据获取是否失败,失败时标记 degraded
     northbound_change = 0.0
+    nb_degraded = False
     try:
         nb_data = await asyncio.to_thread(ds2.get_northbound_flow_realtime)
         if nb_data:
             total_nb = _safe_float(nb_data.get("total_net_inflow", 0))
             northbound_change = total_nb / 1e8 if total_nb != 0 else 0.0
+        else:
+            nb_degraded = True
     except Exception as e:
         logger.warning(f"fetch northbound_flow_realtime failed: {e}")
+        nb_degraded = True
     if not stock_code:
         return CapitalFlowResponse(
             main_net_inflow=0, large_order_ratio=0, medium_order_ratio=0,
             small_order_ratio=0, northbound_change=round(northbound_change, 2),
+            data_quality="degraded" if nb_degraded else "normal",
         )
     try:
         data = await asyncio.to_thread(ds2.get_capital_flow_detail, stock_code)
@@ -235,17 +256,22 @@ async def capital_flow(stock_code: str = ""):
                 medium_order_ratio=round(medium_ratio, 2),
                 small_order_ratio=round(small_ratio, 2),
                 northbound_change=round(northbound_change, 2),
+                data_quality="degraded" if nb_degraded else "normal",
             )
     except Exception as e:
         logger.warning(f"fetch capital_flow_detail failed: {e}")
-    return CapitalFlowResponse(
-        main_net_inflow=0, large_order_ratio=0, medium_order_ratio=0,
-        small_order_ratio=0, northbound_change=round(northbound_change, 2),
-    )
+        # capital_flow_detail 失败也算降级(主力资金明细缺失)
+        return CapitalFlowResponse(
+            main_net_inflow=0, large_order_ratio=0, medium_order_ratio=0,
+            small_order_ratio=0, northbound_change=round(northbound_change, 2),
+            data_quality="degraded",
+        )
 
 
 @router.get("/northbound", response_model=NorthboundResponse)
 async def northbound():
+    # P2-5 修复(2026-07-30):原代码失败时静默返回 0,用户误以为"北向无流入"。
+    # 改为标记 data_quality=degraded,前端据此显示"数据源不可达"提示。
     try:
         data = await asyncio.to_thread(ds2.get_northbound_flow_realtime)
         if data:
@@ -269,6 +295,7 @@ async def northbound():
             sh_net_inflow=0,
             sz_net_inflow=0,
             top_stocks=[],
+            data_quality="degraded",
         )
     try:
         from src.strategies.trading_quant import TradingQuant
@@ -289,4 +316,5 @@ async def northbound():
     except Exception:
         return NorthboundResponse(
             total_net_inflow=0, sh_net_inflow=0, sz_net_inflow=0, top_stocks=[],
+            data_quality="degraded",
         )

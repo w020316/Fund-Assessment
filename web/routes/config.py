@@ -9,6 +9,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from src.utils.auth import require_admin
+from src.utils.file_io import atomic_write_json, safe_read_json
 
 SENSITIVE_KEYS: set[str] = {
     "tushare_token",
@@ -168,17 +169,16 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     return base
 
 
-@router.get("/user_positions")
+_USER_POSITIONS_FILE = Path(__file__).resolve().parent.parent / "user_positions.json"
+
+
+@router.get("/user_positions", dependencies=[Depends(require_admin)])
 async def get_user_positions():
-    import json, os
-    pos_file = os.path.join(os.path.dirname(__file__), "..", "user_positions.json")
-    if os.path.exists(pos_file):
-        try:
-            with open(pos_file, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            logger.warning(f"load user_positions failed: {e}")
-    return {"positions": [], "available_cash": 800000.0}
+    # P0 修复(2026-07-30):改用 safe_read_json,主文件损坏时自动回退 .bak 备份
+    data = safe_read_json(_USER_POSITIONS_FILE, default={"positions": [], "available_cash": 800000.0})
+    if data is None:
+        return {"positions": [], "available_cash": 800000.0}
+    return data
 
 
 class SavePositionsRequest(BaseModel):
@@ -188,11 +188,15 @@ class SavePositionsRequest(BaseModel):
 
 @router.post("/user_positions", dependencies=[Depends(require_admin)])
 async def save_user_positions(req: SavePositionsRequest):
-    import json, os
-    pos_file = os.path.join(os.path.dirname(__file__), "..", "user_positions.json")
+    # P0 修复(2026-07-30):改用 atomic_write_json
+    # 1. 写 .tmp + fsync → os.replace 原子替换,防止崩溃时数据损坏
+    # 2. 自动备份到 .bak,损坏时可恢复
+    # 3. 路径粒度 threading.Lock 保护并发写
     try:
-        with open(pos_file, "w", encoding="utf-8") as f:
-            json.dump({"positions": req.positions, "available_cash": req.available_cash}, f, ensure_ascii=False, indent=2)
+        atomic_write_json(
+            _USER_POSITIONS_FILE,
+            {"positions": req.positions, "available_cash": req.available_cash},
+        )
         return {"success": True, "message": "持仓已保存"}
     except Exception as e:
         return {"success": False, "message": f"保存失败: {e}"}

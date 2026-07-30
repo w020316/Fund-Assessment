@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import os
+from pathlib import Path
 
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from loguru import logger
 from pydantic import BaseModel
 
 from src.core import data_source_v2 as ds2
+from src.utils.auth import require_admin
 from src.utils.convert import safe_float as _safe_float, safe_str as _safe_str
+from src.utils.file_io import safe_read_json
 
 router = APIRouter()
 
@@ -25,40 +26,44 @@ except ImportError as e:
     logger.warning(f"import src.core failed: {e}")
 
 
+_USER_POSITIONS_FILE = Path(__file__).resolve().parent.parent / "user_positions.json"
+
+
 def _load_user_positions() -> list[dict]:
-    """读取用户持仓,文件缺失或异常时返回空列表(不返回 mock 数据)"""
-    pos_file = os.path.join(os.path.dirname(__file__), "..", "user_positions.json")
-    if os.path.exists(pos_file):
-        try:
-            with open(pos_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                return data.get("positions", [])
-        except Exception as e:
-            logger.warning(f"load user_positions failed: {e}")
-    return []
+    """读取用户持仓,文件缺失或损坏时返回空列表(不返回 mock 数据)
+
+    P0 修复(2026-07-30):改用 safe_read_json,主文件损坏自动回退 .bak 备份
+    """
+    data = safe_read_json(_USER_POSITIONS_FILE, default={"positions": []})
+    if data is None or not isinstance(data, dict):
+        return []
+    return data.get("positions", [])
 
 
 def _load_user_cash() -> float:
     """读取用户现金,文件缺失时返回 0(不硬编码 80 万)"""
-    pos_file = os.path.join(os.path.dirname(__file__), "..", "user_positions.json")
-    if os.path.exists(pos_file):
-        try:
-            with open(pos_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                return float(data.get("available_cash", 0.0))
-        except Exception as e:
-            logger.warning(f"load user_cash failed: {e}")
-    return 0.0
+    data = safe_read_json(_USER_POSITIONS_FILE, default={"available_cash": 0.0})
+    if data is None or not isinstance(data, dict):
+        return 0.0
+    try:
+        return float(data.get("available_cash", 0.0))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 async def _enrich_positions_with_realtime(positions: list[dict]) -> list[dict]:
     symbols = [p["symbol"] for p in positions]
     if not symbols:
         return positions
+    # P1 修复(2026-07-30):原代码 except Exception 后 quotes=[] 静默吞异常,
+    # 用户会看到错误的市值/盈亏(用成本价计算)。改为日志记录,并在 positions 上标记 data_quality。
     try:
         quotes = await asyncio.to_thread(ds2.get_realtime_quote_tencent, symbols)
-    except Exception:
+    except Exception as e:
+        logger.warning(f"_enrich_positions_with_realtime: 行情接口失败,降级用成本价: {e}")
         quotes = []
+        for p in positions:
+            p["data_quality"] = "degraded"  # 标记行情数据降级,前端可显示提示
     quote_map = {q.get("code", ""): q for q in quotes}
     for p in positions:
         q = quote_map.get(p["symbol"], {})
@@ -84,6 +89,10 @@ class OverviewResponse(BaseModel):
     position_count: int
     risk_level: str
     risk_message: str
+    # P2-6 修复(2026-07-30):新增 data_quality 字段,
+    # 标记 daily_pnl 是否因实时行情缺失/计算异常而降级为 0。
+    # 前端据此显示"盈亏数据降级"提示,避免用户误以为当日无盈亏。
+    data_quality: str = "normal"  # normal | degraded
 
 
 class PositionItem(BaseModel):
@@ -137,20 +146,29 @@ def _get_state(request: Request) -> dict[str, Any]:
     return app_state
 
 
-@router.get("/overview", response_model=OverviewResponse)
+@router.get("/overview", response_model=OverviewResponse, dependencies=[Depends(require_admin)])
 async def overview(request: Request):
     if not _HAS_CORE:
         enriched = await _enrich_positions_with_realtime([dict(p) for p in _load_user_positions()])
         market_value = sum(p.get("market_value", 0) for p in enriched)
         daily_pnl = 0.0
+        # P2-6 修复(2026-07-30):标记 daily_pnl 计算是否降级。
+        # 触发降级的情形:1) 实时行情获取失败(_change_pct/_prev_close 缺失)
+        #                 2) 计算过程异常。前端据此显示"盈亏降级"提示。
+        daily_pnl_degraded = False
         try:
             for p in enriched:
                 change_pct = _safe_float(p.get("_change_pct", 0))
                 prev_close = _safe_float(p.get("_prev_close", 0))
                 if prev_close > 0:
                     daily_pnl += p["quantity"] * prev_close * change_pct / 100.0
+                else:
+                    # 有持仓但缺 prev_close → 行情数据不完整 → 降级
+                    if p.get("quantity", 0) > 0:
+                        daily_pnl_degraded = True
         except Exception as e:
             logger.warning(f"calc daily_pnl for overview failed: {e}")
+            daily_pnl_degraded = True
         available_cash = _load_user_cash()
         total_assets = available_cash + market_value
         daily_pnl_pct = round(daily_pnl / (total_assets - daily_pnl) * 100, 2) if (total_assets - daily_pnl) > 0 else 0.0
@@ -163,6 +181,7 @@ async def overview(request: Request):
             position_count=len(enriched),
             risk_level="NORMAL",
             risk_message="系统正常运行",
+            data_quality="degraded" if daily_pnl_degraded else "normal",
         )
     state = _get_state(request)
     broker = state.get("broker")
@@ -197,7 +216,7 @@ async def overview(request: Request):
     )
 
 
-@router.get("/positions", response_model=list[PositionItem])
+@router.get("/positions", response_model=list[PositionItem], dependencies=[Depends(require_admin)])
 async def positions(request: Request):
     if not _HAS_CORE:
         enriched = await _enrich_positions_with_realtime([dict(p) for p in _load_user_positions()])
@@ -224,7 +243,7 @@ async def positions(request: Request):
     ]
 
 
-@router.get("/trades", response_model=list[TradeItem])
+@router.get("/trades", response_model=list[TradeItem], dependencies=[Depends(require_admin)])
 async def trades(request: Request, limit: int = 20):
     if not _HAS_CORE:
         return []
@@ -251,7 +270,7 @@ async def trades(request: Request, limit: int = 20):
     ]
 
 
-@router.get("/risk", response_model=RiskResponse)
+@router.get("/risk", response_model=RiskResponse, dependencies=[Depends(require_admin)])
 async def risk(request: Request):
     if not _HAS_CORE:
         enriched = await _enrich_positions_with_realtime([dict(p) for p in _load_user_positions()])

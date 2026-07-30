@@ -1251,7 +1251,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <div class="modal-box" style="max-width:600px;">
           <div class="modal-header">
             <span>上传持仓识别</span>
-            <span class="modal-close" onclick="document.getElementById('uploadModal').style.display='none'">×</span>
+            <span class="modal-close" onclick="closeUploadModal()">×</span>
           </div>
           <div class="modal-body" style="max-height:75vh;overflow-y:auto;">
             <div style="padding:16px;">
@@ -1274,7 +1274,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <div class="modal-box" style="max-width:1000px;">
           <div class="modal-header">
             <span id="multiAgentModalTitle">基金多智能体分析</span>
-            <span class="modal-close" onclick="if(_fundAnalyzeProgressTimer){clearInterval(_fundAnalyzeProgressTimer);_fundAnalyzeProgressTimer=null;}document.getElementById('multiAgentModal').style.display='none'">×</span>
+            <span class="modal-close" onclick="closeMultiAgentModal()">×</span>
           </div>
           <div class="modal-body" id="multiAgentModalBody" style="max-height:75vh;overflow-y:auto;"></div>
         </div>
@@ -1599,9 +1599,17 @@ async function apiCached(url, cacheKey, ttl = 60) {
 }
 
 async function api(url, options={}) {
+  // P2-3 修复(2026-07-30):支持外部传入 signal 以便主动取消上传。
+  // 外部 signal 触发 abort 时,内部 timeout timer 仍会清理;两者任一触发均中止请求。
+  const externalSignal = options.signal;
   const controller = new AbortController();
   const timeoutMs = API_TIMEOUT_MS(url);
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  // 外部取消 → 同步 abort 内部 controller
+  if (externalSignal) {
+    if (externalSignal.aborted) controller.abort();
+    else externalSignal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
   try {
     // 自动携带管理鉴权token(写操作需要)
     // FormData 上传时不能预设 Content-Type,由浏览器自动设 multipart boundary
@@ -1609,10 +1617,13 @@ async function api(url, options={}) {
     const headers = isFormData ? {} : {'Content-Type':'application/json'};
     const adminToken = localStorage.getItem('admin_token');
     if (adminToken) headers['Authorization'] = `Bearer ${adminToken}`;
+    // 移除外部 signal,改用内部 controller.signal(避免 fetch 报错 "signal already used")
+    const opts = { ...options };
+    delete opts.signal;
     const resp = await fetch(url, {
       headers,
       signal: controller.signal,
-      ...options
+      ...opts
     });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
@@ -1668,6 +1679,14 @@ function renderEmpty(container, msg='暂无数据', hint='') {
 
 /* ========== 页面切换 ========== */
 function switchPage(name) {
+  // P2-1 修复(2026-07-30):离开 market 页面时清理 marketRefreshTimer,
+  // 避免后台持续 15s 轮询占用带宽与 API 配额(原代码只在 loadMarketData 内
+  // clearInterval 重建,切走后旧 timer 仍持续运行)。
+  // 注意:这里只在切到非 market 页时清理,切回 market 时由 loadMarketData 重建。
+  if (name !== 'market' && marketRefreshTimer) {
+    clearInterval(marketRefreshTimer);
+    marketRefreshTimer = null;
+  }
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.querySelectorAll('.bottom-tab-item').forEach(n => n.classList.remove('active'));
@@ -2561,7 +2580,14 @@ async function submitBuy() {
     body: JSON.stringify({stock_code:code, amount:parseInt(qty), price:price?parseFloat(price):0, strategy})
   });
 
-  showToast(result ? '买入委托已提交' : '买入委托已提交（模拟）', 'success');
+  // P0 修复(2026-07-30):原代码在 api() 返回 null(网络/鉴权/超时)时仍弹 success toast 误导用户
+  // 现按 result.status 区分:rejected→错误提示;正常→success;null→api()已弹错误 toast,直接返回
+  if (!result) return;
+  if (result.status === 'rejected') {
+    showToast('买入委托被拒:订单未成交(可能余额不足或限价未触发)', 'error');
+    return;
+  }
+  showToast('买入委托已提交', 'success');
   document.getElementById('buyCode').value = '';
   document.getElementById('buyQty').value = '';
   document.getElementById('buyPrice').value = '';
@@ -2590,7 +2616,13 @@ async function submitSell() {
     body: JSON.stringify({stock_code:code, amount:parseInt(qty), price:price?parseFloat(price):0, strategy})
   });
 
-  showToast(result ? '卖出委托已提交' : '卖出委托已提交（模拟）', 'success');
+  // P0 修复(2026-07-30):同 submitBuy,统一按 result.status 判断避免误导
+  if (!result) return;
+  if (result.status === 'rejected') {
+    showToast('卖出委托被拒:订单未成交(可能持仓不足或限价未触发)', 'error');
+    return;
+  }
+  showToast('卖出委托已提交', 'success');
   document.getElementById('sellCode').value = '';
   document.getElementById('sellQty').value = '';
   document.getElementById('sellPrice').value = '';
@@ -3064,19 +3096,15 @@ async function newsAiSearch() {
   await withLoading(btn, async () => {
     body.innerHTML = '<div style="color:var(--text-muted);padding:8px 0;font-size:12px;display:flex;align-items:center;gap:6px;"><span style="width:6px;height:6px;border-radius:50%;background:var(--accent);animation:pulse-dot 1.2s infinite;"></span>智能检索中(Tavily+LLM总结,约 10-20 秒)...</div>';
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 30000);
-      const resp = await fetch('/api/news/search', {
+      // P0 修复(2026-07-30):原裸 fetch 未携带 Authorization 头,后端 require_admin 必返回 401
+      // 改用 api() 封装,自动注入 admin_token;失败返回 null(已弹 toast)
+      const data = await api('/api/news/search', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: query }),
-        signal: controller.signal,
       });
-      clearTimeout(timer);
-      const data = await resp.json();
       const sr = data && data.data ? data.data : null;
       if (!sr) {
-        renderEmpty(body, '智能检索失败', '请稍后重试');
+        renderEmpty(body, '智能检索失败', '请稍后重试或检查Token配置');
         return;
       }
       const results = sr.results || [];
@@ -3221,11 +3249,29 @@ async function loadFundAdviceV2() {
 
 /* ========== 上传持仓识别(CSV/Excel/图片 vision) ========== */
 let _uploadedHoldings = [];
+// P2-3 修复(2026-07-30):新增上传 AbortController,支持用户主动取消上传
+let _uploadAbortController = null;
+
 function openUploadModal() {
   document.getElementById('uploadModal').style.display = 'flex';
   document.getElementById('uploadResult').style.display = 'none';
   document.getElementById('uploadFileInput').value = '';
+  // P2-2 修复(2026-07-30):打开时也重置,避免上次残留数据污染本次
   _uploadedHoldings = [];
+}
+
+// P2-2/P2-3 修复(2026-07-30):统一关闭函数,清理状态并取消正在进行的上传
+function closeUploadModal() {
+  // 取消正在进行的上传请求(若有),避免后端继续耗 LLM token
+  if (_uploadAbortController) {
+    try { _uploadAbortController.abort(); } catch(e) {}
+    _uploadAbortController = null;
+  }
+  // 重置上传状态,避免下次打开残留上次数据
+  _uploadedHoldings = [];
+  const fileInput = document.getElementById('uploadFileInput');
+  if (fileInput) fileInput.disabled = false;
+  document.getElementById('uploadModal').style.display = 'none';
 }
 
 async function handleUploadFile(file) {
@@ -3248,16 +3294,25 @@ async function handleUploadFile(file) {
     return;
   }
   const isImage = file.type.startsWith('image/');
+  // P2-3 修复(2026-07-30):新建 AbortController 用于取消上传,并在 UI 中显示取消按钮
+  _uploadAbortController = new AbortController();
   resultEl.style.display = 'block';
-  resultEl.innerHTML = `<div style="padding:12px;text-align:center;color:var(--text-muted);">识别中... ${file.name} (${sizeMb}MB)<br><span style="font-size:11px;">${isImage ? '调用AI视觉识别,约10-20秒' : '解析表格中'}</span></div>`;
+  resultEl.innerHTML = `<div style="padding:12px;text-align:center;color:var(--text-muted);">识别中... ${file.name} (${sizeMb}MB)<br><span style="font-size:11px;">${isImage ? '调用AI视觉识别,约10-20秒' : '解析表格中'}</span><br><button class="btn btn-sm" style="margin-top:8px;" onclick="cancelUpload()">取消上传</button></div>`;
   // 上传中禁用文件选择,避免重复提交(api()已用 AbortController 但 UI 也需反馈)
   fileInput.disabled = true;
 
   const formData = new FormData();
   formData.append('file', file);
-  const resp = await api('/api/holdings/upload', { method: 'POST', body: formData });
+  // 将外部 signal 传给 api(),由 api() 内部桥接到 fetch
+  const resp = await api('/api/holdings/upload', { method: 'POST', body: formData, signal: _uploadAbortController.signal });
+  _uploadAbortController = null;
   fileInput.disabled = false;
-  if (!resp || !resp.holdings) {
+  // 用户主动取消时静默返回,不显示错误
+  if (!resp) {
+    resultEl.style.display = 'none';
+    return;
+  }
+  if (!resp.holdings) {
     // 区分错误类型:api()已通过 showToast 提示,这里给出可操作的下一步建议
     resultEl.innerHTML = `<div style="padding:12px;color:var(--color-up);">识别失败,请检查:<br>1. 管理Token是否正确(设置页)<br>2. 是否触发限流(3次/分钟,请1分钟后重试)<br>3. 网络是否正常</div>`;
     return;
@@ -3291,22 +3346,59 @@ async function handleUploadFile(file) {
     <button class="btn btn-sm btn-primary" style="width:100%;margin-top:12px;" onclick="importUploadedToPositions()">一键导入到持仓列表</button>`;
 }
 
+// P2-3 修复(2026-07-30):用户主动取消上传
+function cancelUpload() {
+  if (_uploadAbortController) {
+    try { _uploadAbortController.abort(); } catch(e) {}
+    _uploadAbortController = null;
+  }
+  const fileInput = document.getElementById('uploadFileInput');
+  if (fileInput) fileInput.disabled = false;
+  const resultEl = document.getElementById('uploadResult');
+  if (resultEl) {
+    resultEl.style.display = 'block';
+    resultEl.innerHTML = `<div style="padding:12px;text-align:center;color:var(--text-muted);">已取消上传</div>`;
+  }
+}
+
 async function importUploadedToPositions() {
   if (!_uploadedHoldings.length) return;
-  const positions = _uploadedHoldings.map(h => ({
-    fund_code: h.code || '',
+  // P0 修复(2026-07-30):原代码写入 /api/config/user_positions(股票端点)会覆盖用户股票持仓数据
+  // 正确做法:写入 /api/fund/positions(基金端点),且需先读取现有持仓再合并去重,避免覆盖
+  const uploaded = _uploadedHoldings.map(h => ({
+    fund_code: (h.code || '').toString().trim(),
     fund_name: h.name || '',
     shares: 0,
     cost_nav: 0,
     buy_date: '',
-    note: '上传识别导入'
-  }));
-  const resp = await api('/api/config/user_positions', {
+    note: `上传识别导入(占比${h.weight || 0}%${h.amount ? `,市值${h.amount}元` : ''})`
+  })).filter(p => p.fund_code);
+
+  // 1. 读取现有基金持仓(避免覆盖)
+  const existing = await api('/api/fund/positions');
+  const existingPositions = (existing && existing.positions) || [];
+  // 2. 合并:同 fund_code 以上传为准(覆盖),其余保留原数据
+  const uploadedCodes = new Set(uploaded.map(p => p.fund_code));
+  const merged = [
+    ...existingPositions
+      .filter(p => !uploadedCodes.has(p.fund_code))
+      .map(p => ({
+        fund_code: p.fund_code || '',
+        fund_name: p.fund_name || '',
+        shares: p.shares || 0,
+        cost_nav: p.cost_nav || 0,
+        buy_date: p.buy_date || '',
+        note: p.note || ''
+      })),
+    ...uploaded
+  ];
+  // 3. 写入基金持仓端点
+  const resp = await api('/api/fund/positions', {
     method: 'POST',
-    body: JSON.stringify({ positions, available_cash: 800000.0 })
+    body: JSON.stringify({ positions: merged })
   });
   if (resp && resp.success) {
-    showToast(`成功导入 ${positions.length} 条持仓`, 'success');
+    showToast(`成功导入 ${uploaded.length} 条基金持仓(已合并去重,共 ${merged.length} 条)`, 'success');
     document.getElementById('uploadModal').style.display = 'none';
     if (typeof loadPositions === 'function') loadPositions();
   } else {
@@ -3430,6 +3522,20 @@ const _FUND_ANALYZE_STEPS = [
   {step:7, name:'多空辩论与决策', desc:'7分析师辩论+组合经理决议'},
 ];
 let _fundAnalyzeProgressTimer = null; // 进度计时器(全局,便于清理)
+// P1 修复(2026-07-30):原 controller/timer 为 multiAgentAnalyze 局部变量,
+// 模态框 × 关闭时无法 abort,导致:(1) 后端 LLM 请求继续运行耗 token;(2) 90s 后 abort 触发的 catch 写已隐藏 DOM;
+// (3) 连续点击 N 次会堆积 N 个并发请求。提升为模块级,统一在 closeMultiAgentModal 清理。
+let _fundAnalyzeAbortController = null; // 当前分析请求的 AbortController(便于外部 abort)
+let _fundAnalyzeTimeoutTimer = null;    // 90s 超时定时器(便于外部 clearTimeout)
+
+function closeMultiAgentModal() {
+  // 统一关闭入口:清理进度计时器 + 超时定时器 + abort 当前请求
+  if (_fundAnalyzeProgressTimer) { clearInterval(_fundAnalyzeProgressTimer); _fundAnalyzeProgressTimer = null; }
+  if (_fundAnalyzeTimeoutTimer) { clearTimeout(_fundAnalyzeTimeoutTimer); _fundAnalyzeTimeoutTimer = null; }
+  if (_fundAnalyzeAbortController) { try { _fundAnalyzeAbortController.abort(); } catch(e) {} _fundAnalyzeAbortController = null; }
+  const modal = document.getElementById('multiAgentModal');
+  if (modal) modal.style.display = 'none';
+}
 
 function _renderFundAnalyzeProgress(currentStep, elapsedSec) {
   // 渲染进度条:已完成步骤绿色对勾,当前步骤脉冲,未开始灰色
@@ -3482,39 +3588,43 @@ async function multiAgentAnalyze(fundCode, fundName, costNav, shares) {
   }, 1000);
 
   try {
-    const controller = new AbortController();
+    // P1 修复(2026-07-30):controller/timer 提升为模块级,在 closeMultiAgentModal 中可被 abort/clear
+    // 避免模态框关闭后后端请求继续运行耗 LLM token
+    _fundAnalyzeAbortController = new AbortController();
     const timeoutMs = 90000; // 90s 超时
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    _fundAnalyzeTimeoutTimer = setTimeout(() => _fundAnalyzeAbortController.abort(), timeoutMs);
 
-    let resp;
+    let data;
     try {
-      resp = await fetch('/api/agent/fund_analyze', {
+      // P0 修复(2026-07-30):原裸 fetch 未携带 Authorization 头,后端 require_admin 必返回 401
+      // 改用 api() 封装,自动注入 admin_token;失败时返回 null(已弹 toast)
+      data = await api('/api/agent/fund_analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({fund_code: fundCode, fund_name: fundName, cost_nav: costNav, shares: shares, mode: 'deep'}),
-        signal: controller.signal,
       });
     } catch(e) {
-      clearTimeout(timer);
+      if (_fundAnalyzeTimeoutTimer) { clearTimeout(_fundAnalyzeTimeoutTimer); _fundAnalyzeTimeoutTimer = null; }
       if (_fundAnalyzeProgressTimer) { clearInterval(_fundAnalyzeProgressTimer); _fundAnalyzeProgressTimer = null; }
-      const isAbort = e.name === 'AbortError';
       const elapsed = ((Date.now() - startTs) / 1000).toFixed(0);
       bodyEl.innerHTML = `<div style="padding:32px 24px;text-align:center;">
         <div style="font-size:32px;margin-bottom:12px;opacity:0.5;">⚠</div>
-        <div style="font-size:15px;color:var(--color-warning);margin-bottom:8px;">${isAbort ? `分析超时(${elapsed}s)` : '网络异常'}</div>
-        <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">${isAbort ? '多智能体分析需要调用多个智能模型,可能因服务繁忙导致超时。' : '请检查网络连接后重试。'}</div>
+        <div style="font-size:15px;color:var(--color-warning);margin-bottom:8px;">网络异常</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">请检查网络连接后重试。若未配置管理Token,请在"设置"页填写。</div>
         <button class="btn btn-primary" onclick="multiAgentAnalyze('${fundCode}','${(fundName||'').replace(/'/g,'')}',${costNav||0},${shares||0})">重试分析</button>
       </div>`;
-      showToast(isAbort ? `分析超时(${elapsed}s),请重试` : '网络异常,请重试', 'error');
       return;
     }
-    clearTimeout(timer);
+    if (_fundAnalyzeTimeoutTimer) { clearTimeout(_fundAnalyzeTimeoutTimer); _fundAnalyzeTimeoutTimer = null; }
     if (_fundAnalyzeProgressTimer) { clearInterval(_fundAnalyzeProgressTimer); _fundAnalyzeProgressTimer = null; }
 
-    const data = await resp.json();
     if (!data) {
-      bodyEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--color-warning);">分析返回为空,请稍后重试</div>';
-      showToast('分析返回为空', 'error');
+      const elapsed = ((Date.now() - startTs) / 1000).toFixed(0);
+      bodyEl.innerHTML = `<div style="padding:32px 24px;text-align:center;">
+        <div style="font-size:32px;margin-bottom:12px;opacity:0.5;">⚠</div>
+        <div style="font-size:15px;color:var(--color-warning);margin-bottom:8px;">分析失败</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">可能原因:1.未配置管理Token 2.触发限流(3次/分钟) 3.LLM服务繁忙</div>
+        <button class="btn btn-primary" onclick="multiAgentAnalyze('${fundCode}','${(fundName||'').replace(/'/g,'')}',${costNav||0},${shares||0})">重试分析</button>
+      </div>`;
       return;
     }
     // 进度条满格(7/7 全部完成)
@@ -3619,12 +3729,12 @@ async function loadFundScripts(advices, market) {
   // 补充 market_signal 到 advice 供话术匹配使用
   first.market_signal = market;
   try {
-    const resp = await fetch('/api/scripts/match/fund', {
+    // P0 修复(2026-07-30):原裸 fetch 未携带 Authorization 头,后端 require_admin 必返回 401
+    // 改用 api() 封装,自动注入 admin_token
+    const data = await api('/api/scripts/match/fund', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fund_advice: first }),
     });
-    const data = await resp.json();
     const scripts = (data && data.data) || [];
     if (!scripts.length) {
       body.innerHTML = '<div style="color:var(--text-muted);padding:8px;">暂无匹配话术</div>';

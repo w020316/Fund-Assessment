@@ -4,9 +4,11 @@ import asyncio
 import json
 import time
 from collections import deque
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 from fastapi import APIRouter, Depends, Query, Request
+from loguru import logger
 from pydantic import BaseModel
 
 # P1 修复(2026-07-29):LLM 高成本端点统一加 admin 鉴权,避免匿名调用耗尽免费额度
@@ -17,6 +19,47 @@ from web.rate_limiter import limiter
 from src.core.ai_service import analyze_stock, quick_analysis as ai_quick_analysis, multi_analyze as ai_multi_analyze, analyze_portfolio as ai_analyze_portfolio, get_market_outlook as ai_get_market_outlook
 
 router = APIRouter()
+
+
+# ===== P0 修复(2026-07-30):AI 路由结构化日志可观测性 =====
+# 背景:原代码 8 个 AI 端点无任何日志,生产环境无法观测:
+#   - 不知道哪些端点被调用、调用频率、命中率
+#   - 不知道 LLM 调用耗时、失败原因
+#   - 缓存是否生效完全黑盒
+# 实现:统一通过 _ai_operation 上下文管理器记录 start/ok/error + 耗时
+@contextmanager
+def _ai_operation(op_name: str, **params: Any) -> Iterator[None]:
+    """AI 操作上下文管理器:统一记录结构化日志
+
+    用法:
+        with _ai_operation("analyze", code="600519"):
+            result = analyze_stock(...)
+
+    日志格式:
+        - start: ai.{op_name}.start params={...}
+        - ok:    ai.{op_name}.ok duration_ms=1234
+        - error: ai.{op_name}.error duration_ms=500 error=... (含 traceback)
+    """
+    # 脱敏:不记录完整 positions/holdings(可能很大),只记 hash 与长度
+    safe_params = {}
+    for k, v in params.items():
+        if isinstance(v, (list, dict)):
+            safe_params[k] = f"<{type(v).__name__} len={len(v)}>"
+        elif isinstance(v, str) and len(v) > 100:
+            safe_params[k] = f"<str len={len(v)}>"
+        else:
+            safe_params[k] = v
+    logger.info(f"ai.{op_name}.start params={safe_params}")
+    start = time.monotonic()
+    try:
+        yield
+    except Exception as e:
+        duration_ms = int((time.monotonic() - start) * 1000)
+        logger.error(f"ai.{op_name}.error duration_ms={duration_ms} error={type(e).__name__}: {e}")
+        raise
+    else:
+        duration_ms = int((time.monotonic() - start) * 1000)
+        logger.info(f"ai.{op_name}.ok duration_ms={duration_ms}")
 
 # 修复(2026-07-29):原 list.pop(0) 是 O(n),改用 deque(maxlen=100) 自动淘汰
 _decision_history: deque[dict[str, Any]] = deque(maxlen=100)
@@ -101,34 +144,40 @@ async def analyze(request: Request, req: AnalyzeRequest) -> dict[str, Any]:
     cache_key = _ai_cache._make_key("analyze", code=req.stock_code)
     cached = _ai_cache.get(cache_key, _TTL_ANALYZE)
     if cached is not None:
+        logger.info(f"ai.analyze.cache_hit code={req.stock_code}")
         return cached
-    result = await asyncio.to_thread(analyze_stock, req.stock_code, "deep")
+    with _ai_operation("analyze", code=req.stock_code):
+        result = await asyncio.to_thread(analyze_stock, req.stock_code, "deep")
     _decision_history.append(result)
     _ai_cache.set(cache_key, result)
     return result
 
 
-@router.get("/opinions")
+@router.get("/opinions", dependencies=[Depends(require_admin)])
 @limiter.limit("3/minute")
 async def get_opinions(request: Request, code: str = Query(..., description="股票代码")) -> dict[str, Any]:
     cache_key = _ai_cache._make_key("opinions", code=code)
     cached = _ai_cache.get(cache_key, _TTL_QUICK)
     if cached is not None:
+        logger.info(f"ai.opinions.cache_hit code={code}")
         return cached
-    result = await asyncio.to_thread(ai_quick_analysis, code)
+    with _ai_operation("opinions", code=code):
+        result = await asyncio.to_thread(ai_quick_analysis, code)
     payload = {"stock_code": code, "opinions": result.get("agent_opinions", [])}
     _ai_cache.set(cache_key, payload)
     return payload
 
 
-@router.get("/debate")
+@router.get("/debate", dependencies=[Depends(require_admin)])
 @limiter.limit("3/minute")
 async def get_debate(request: Request, code: str = Query(..., description="股票代码")) -> dict[str, Any]:
     cache_key = _ai_cache._make_key("debate", code=code)
     cached = _ai_cache.get(cache_key, _TTL_ANALYZE)
     if cached is not None:
+        logger.info(f"ai.debate.cache_hit code={code}")
         return cached
-    result = await asyncio.to_thread(analyze_stock, code, "quick")
+    with _ai_operation("debate", code=code):
+        result = await asyncio.to_thread(analyze_stock, code, "quick")
     payload = result.get("debate_result", {
         "topic": f"{code}多空辩论",
         "bull_arguments": [],
@@ -142,7 +191,7 @@ async def get_debate(request: Request, code: str = Query(..., description="股�
     return payload
 
 
-@router.get("/history")
+@router.get("/history", dependencies=[Depends(require_admin)])
 async def get_history() -> dict[str, Any]:
     return {
         "count": len(_decision_history),
@@ -156,8 +205,10 @@ async def quick_analysis(request: Request, req: QuickAnalysisRequest) -> dict[st
     cache_key = _ai_cache._make_key("quick", code=req.stock_code)
     cached = _ai_cache.get(cache_key, _TTL_QUICK)
     if cached is not None:
+        logger.info(f"ai.quick.cache_hit code={req.stock_code}")
         return cached
-    result = await asyncio.to_thread(ai_quick_analysis, req.stock_code)
+    with _ai_operation("quick", code=req.stock_code):
+        result = await asyncio.to_thread(ai_quick_analysis, req.stock_code)
     _ai_cache.set(cache_key, result)
     return result
 
@@ -168,8 +219,10 @@ async def multi_analyze(request: Request, req: MultiAnalyzeRequest) -> dict[str,
     cache_key = _ai_cache._make_key("multi", code=req.stock_code, mode=req.mode)
     cached = _ai_cache.get(cache_key, _TTL_ANALYZE)
     if cached is not None:
+        logger.info(f"ai.multi.cache_hit code={req.stock_code} mode={req.mode}")
         return cached
-    result = await asyncio.to_thread(ai_multi_analyze, req.stock_code, req.mode)
+    with _ai_operation("multi", code=req.stock_code, mode=req.mode):
+        result = await asyncio.to_thread(ai_multi_analyze, req.stock_code, req.mode)
     _decision_history.append(result)
     result["selected_agents"] = req.agents
     _ai_cache.set(cache_key, result)
@@ -182,20 +235,24 @@ async def portfolio_advice(request: Request, req: PortfolioRequest) -> dict[str,
     cache_key = _ai_cache._make_key("portfolio", positions_hash=hash(json.dumps(req.positions, sort_keys=True, default=str)))
     cached = _ai_cache.get(cache_key, _TTL_PORTFOLIO)
     if cached is not None:
+        logger.info(f"ai.portfolio.cache_hit positions={len(req.positions)}")
         return cached
-    result = await asyncio.to_thread(ai_analyze_portfolio, req.positions)
+    with _ai_operation("portfolio", positions_count=len(req.positions)):
+        result = await asyncio.to_thread(ai_analyze_portfolio, req.positions)
     _ai_cache.set(cache_key, result)
     return result
 
 
-@router.get("/market_outlook")
+@router.get("/market_outlook", dependencies=[Depends(require_admin)])
 @limiter.limit("3/minute")
 async def market_outlook(request: Request) -> dict[str, Any]:
     cache_key = _ai_cache._make_key("outlook")
     cached = _ai_cache.get(cache_key, _TTL_OUTLOOK)
     if cached is not None:
+        logger.info("ai.outlook.cache_hit")
         return cached
-    result = await asyncio.to_thread(ai_get_market_outlook)
+    with _ai_operation("outlook"):
+        result = await asyncio.to_thread(ai_get_market_outlook)
     _ai_cache.set(cache_key, result)
     return result
 
@@ -230,17 +287,19 @@ async def fund_multi_analyze(request: Request, req: FundMultiAnalyzeRequest) -> 
     )
     cached = _ai_cache.get(cache_key, _TTL_FUND_MULTI)
     if cached is not None:
+        logger.info(f"ai.fund_multi.cache_hit code={req.fund_code}")
         cached = dict(cached)  # 返回副本,避免被修改
         cached["_cached"] = True
         return cached
     from src.analysis.multi_agent_fund import analyze_fund_with_agents
-    result = await analyze_fund_with_agents(
-        fund_code=req.fund_code,
-        fund_name=req.fund_name,
-        cost_nav=req.cost_nav,
-        shares=req.shares,
-        mode=req.mode,
-    )
+    with _ai_operation("fund_multi", code=req.fund_code, name=req.fund_name, mode=req.mode):
+        result = await analyze_fund_with_agents(
+            fund_code=req.fund_code,
+            fund_name=req.fund_name,
+            cost_nav=req.cost_nav,
+            shares=req.shares,
+            mode=req.mode,
+        )
     _ai_cache.set(cache_key, result)
     return result
 

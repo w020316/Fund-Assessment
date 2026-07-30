@@ -998,7 +998,7 @@ class TestAnalyzeFundHoldingsExtended:
     async def test_diagnostic_source_unreachable(self):
         """P0 诊断:数据源不可达时返回 source_unreachable=True 与准确 hint"""
         with patch.object(fund_holdings, "get_fund_holdings", return_value=[]):
-            with patch.object(fund_holdings, "_last_fetch_reason",
+            with patch.object(fund_holdings, "_get_fetch_reason",
                               "em接口响应格式异常(resp_len=0, 可能被IP封禁或接口变更)"):
                 result = await analyze_fund_holdings("161725")
         assert result["holdings"] == []
@@ -1011,19 +1011,20 @@ class TestAnalyzeFundHoldingsExtended:
     async def test_diagnostic_no_data_when_source_ok(self):
         """P0 诊断:数据源可达但基金无数据时 source_unreachable=False"""
         with patch.object(fund_holdings, "get_fund_holdings", return_value=[]):
-            with patch.object(fund_holdings, "_last_fetch_reason", ""):
+            with patch.object(fund_holdings, "_get_fetch_reason", ""):
                 result = await analyze_fund_holdings("999999")
         assert result["holdings"] == []
         assert result["diagnostic"]["source_unreachable"] is False
         assert "债基" in result["diagnostic"]["hint"] or "新基金" in result["diagnostic"]["hint"]
 
     def test_fetch_em_sets_reason_on_parse_failure(self):
-        """_fetch_fund_holdings_em 解析失败时设置 _last_fetch_reason"""
+        """_fetch_fund_holdings_em 解析失败时设置 fetch reason(按 fund_code 隔离)"""
         with patch.object(fund_holdings._EM_FUND_SESSION, "get") as mock_get:
             mock_get.return_value.text = "<html>not apidata here</html>"
             mock_get.return_value.status_code = 200
-            fund_holdings._last_fetch_reason = ""
+            fund_holdings._set_fetch_reason("161725", "")  # 清空:模拟新一轮抓取
             result = _fetch_fund_holdings_em("161725")
         assert result == []
-        assert fund_holdings._last_fetch_reason  # 非空
-        assert "em接口" in fund_holdings._last_fetch_reason
+        reason = fund_holdings._get_fetch_reason("161725")
+        assert reason  # 非空
+        assert "em接口" in reason

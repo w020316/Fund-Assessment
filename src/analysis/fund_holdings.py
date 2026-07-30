@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import threading
 from datetime import datetime
 from typing import Any
 
@@ -41,7 +42,26 @@ _EM_FUND_SESSION.headers.update({
 # P0 诊断(2026-07-29 v1.3):记录最后一次重仓股抓取失败原因
 # 用于区分"基金无重仓股数据"与"数据源不可达"
 # 典型场景:Render Free 国外 IP 被 eastmoney fundf10 封禁,本地可访问但部署环境不可达
-_last_fetch_reason: str = ""
+# P2 修复(2026-07-30):原为单一全局 str,并发调用不同基金时会互相覆盖:
+#   线程A(161725)失败设reason→线程B(110022)成功清空reason→A读到空reason误判为"基金无数据"
+# 改为以 fund_code 为 key 的 dict,并加锁保护,避免并发写冲突。
+_last_fetch_reason_map: dict[str, str] = {}
+_last_fetch_reason_lock = threading.Lock()
+
+
+def _set_fetch_reason(fund_code: str, reason: str) -> None:
+    """设置指定基金的抓取失败原因(空字符串表示成功/重置)"""
+    with _last_fetch_reason_lock:
+        if reason:
+            _last_fetch_reason_map[fund_code] = reason
+        else:
+            _last_fetch_reason_map.pop(fund_code, None)
+
+
+def _get_fetch_reason(fund_code: str) -> str:
+    """读取指定基金的抓取失败原因(空字符串表示无失败)"""
+    with _last_fetch_reason_lock:
+        return _last_fetch_reason_map.get(fund_code, "")
 
 
 def _current_year_month() -> tuple[str, str]:
@@ -62,7 +82,6 @@ def _fetch_fund_holdings_em(fund_code: str, topline: int = 10) -> list[dict]:
     Returns:
         [{"code", "name", "weight", "hold_amount", "hold_value", "quarter", "change"}, ...]
     """
-    global _last_fetch_reason
     year, month = _current_year_month()
     url = "https://fundf10.eastmoney.com/FundArchivesDatas.aspx"
     params = {
@@ -78,17 +97,18 @@ def _fetch_fund_holdings_em(fund_code: str, topline: int = 10) -> list[dict]:
         # 接口返回 var apidata={ content:"<html>...</html>",arryear:[...],... };
         m = re.search(r'apidata\s*=\s*({.*?})\s*;', text, re.DOTALL)
         if not m:
-            _last_fetch_reason = (
+            _reason = (
                 f"em接口响应格式异常(resp_len={len(text)}, 可能被IP封禁或接口变更)"
             )
-            logger.warning(f"fund_holdings_em: {_last_fetch_reason} fund_code={fund_code}")
+            _set_fetch_reason(fund_code, _reason)
+            logger.warning(f"fund_holdings_em: {_reason} fund_code={fund_code}")
             return []
         # JS对象转JSON(单引号→双引号, 去除注释)
         js_obj = m.group(1)
         # 提取content字段(HTML)
         content_m = re.search(r'content\s*:\s*"(.*?)"\s*,', js_obj, re.DOTALL)
         if not content_m:
-            _last_fetch_reason = "em接口返回但无content字段(基金可能无持仓披露)"
+            _set_fetch_reason(fund_code, "em接口返回但无content字段(基金可能无持仓披露)")
             return []
         html = content_m.group(1)
         # 反转义
@@ -135,16 +155,15 @@ def _fetch_fund_holdings_em(fund_code: str, topline: int = 10) -> list[dict]:
                 continue
         return result
     except Exception as e:
-        _last_fetch_reason = f"em接口请求异常: {e}"
+        _set_fetch_reason(fund_code, f"em接口请求异常: {e}")
         logger.warning(f"fund_holdings_em failed fund_code={fund_code}: {e}")
         return []
 
 
 def _fetch_fund_holdings_ak(fund_code: str) -> list[dict]:
     """akshare 兜底:基金十大重仓股"""
-    global _last_fetch_reason
     if not _HAS_AKSHARE:
-        _last_fetch_reason = "akshare未安装"
+        _set_fetch_reason(fund_code, "akshare未安装")
         return []
     try:
         # 季度日期
@@ -182,25 +201,24 @@ def _fetch_fund_holdings_ak(fund_code: str) -> list[dict]:
             })
         return result[:10]
     except Exception as e:
-        _last_fetch_reason = f"akshare兜底失败: {e}(底层亦调eastmoney,同源封禁)"
+        _set_fetch_reason(fund_code, f"akshare兜底失败: {e}(底层亦调eastmoney,同源封禁)")
         logger.warning(f"fund_holdings_ak failed fund_code={fund_code}: {e}")
         return []
 
 
 def get_fund_holdings(fund_code: str) -> list[dict]:
     """获取基金前10大重仓股(东方财富优先,akshare兜底)"""
-    global _last_fetch_reason
     cache_key = f"fund_holdings:{fund_code}"
     cached = ds2._cache_get(cache_key)
     if cached is not None:
         return cached
 
-    _last_fetch_reason = ""  # 重置:新一轮抓取
+    _set_fetch_reason(fund_code, "")  # 重置:新一轮抓取
     holdings = _fetch_fund_holdings_em(fund_code)
     if not holdings:
         holdings = _fetch_fund_holdings_ak(fund_code)
     if holdings:
-        _last_fetch_reason = ""  # 成功:清除失败原因
+        _set_fetch_reason(fund_code, "")  # 成功:清除失败原因
 
     # 缓存12小时(季报数据变化慢)
     ds2._cache_set(cache_key, holdings, ttl=12 * 3600)
@@ -496,9 +514,11 @@ async def analyze_fund_holdings(fund_code: str) -> dict[str, Any]:
     holdings = await asyncio.to_thread(get_fund_holdings, fund_code)
     if not holdings:
         # P0 诊断(2026-07-29 v1.3):区分"基金无数据"与"数据源不可达"
-        reason = _last_fetch_reason or "基金无重仓股数据披露(可能为新基金或债基)"
+        # P2 修复(2026-07-30):改为按 fund_code 读取失败原因,避免并发互相覆盖
+        fetch_reason = _get_fetch_reason(fund_code)
+        reason = fetch_reason or "基金无重仓股数据披露(可能为新基金或债基)"
         # 数据源可达性判断:有失败原因 → 数据源问题;无原因 → 基金本身无数据
-        source_unreachable = bool(_last_fetch_reason)
+        source_unreachable = bool(fetch_reason)
         return {
             "fund_code": fund_code,
             "holdings": [],

@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import asyncio
+
+from loguru import logger
 from datetime import datetime
 from typing import Optional
 
@@ -84,7 +86,14 @@ async def global_indices():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("tencent", cached=True)}
-    raw = await asyncio.to_thread(ds2.get_global_indices)
+    # P2 修复(2026-07-30):原代码 raw 未防御 None,且无 try/except,上游异常直接 500
+    try:
+        raw = await asyncio.to_thread(ds2.get_global_indices)
+    except Exception as e:
+        logger.warning(f"get_global_indices failed: {e}")
+        return {"data": [], "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
+    if not raw:
+        return {"data": [], "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
     result: list[GlobalIndexItem] = []
     for item in raw:
         result.append(GlobalIndexItem(
@@ -111,7 +120,14 @@ async def us_hot_stocks():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("tencent", cached=True)}
-    raw = await asyncio.to_thread(ds2.get_us_hot_stocks)
+    # P2 修复(2026-07-30):None 防御 + try/except
+    try:
+        raw = await asyncio.to_thread(ds2.get_us_hot_stocks)
+    except Exception as e:
+        logger.warning(f"get_us_hot_stocks failed: {e}")
+        return {"data": [], "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
+    if not raw:
+        return {"data": [], "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
     result: list[UsStockItem] = []
     for item in raw:
         result.append(UsStockItem(
@@ -138,7 +154,14 @@ async def hk_hot_stocks():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("tencent", cached=True)}
-    raw = await asyncio.to_thread(ds2.get_hk_hot_stocks)
+    # P2 修复(2026-07-30):None 防御 + try/except
+    try:
+        raw = await asyncio.to_thread(ds2.get_hk_hot_stocks)
+    except Exception as e:
+        logger.warning(f"get_hk_hot_stocks failed: {e}")
+        return {"data": [], "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
+    if not raw:
+        return {"data": [], "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
     result: list[HkStockItem] = []
     for item in raw:
         result.append(HkStockItem(
@@ -166,7 +189,14 @@ async def us_realtime(codes: str = Query(..., description="美股代码,逗号�
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("tencent", cached=True)}
     symbol_list = [c.strip().upper() for c in codes.split(",") if c.strip()]
-    raw = await asyncio.to_thread(ds2.get_us_stock_realtime, symbol_list)
+    # P2 修复(2026-07-30):None 防御 + try/except
+    try:
+        raw = await asyncio.to_thread(ds2.get_us_stock_realtime, symbol_list)
+    except Exception as e:
+        logger.warning(f"get_us_stock_realtime failed: {e}")
+        return {"data": [], "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
+    if not raw:
+        return {"data": [], "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
     result: list[UsStockItem] = []
     for item in raw:
         result.append(UsStockItem(
@@ -194,7 +224,14 @@ async def hk_realtime(codes: str = Query(..., description="港股代码,逗号�
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("tencent", cached=True)}
     code_list = [c.strip() for c in codes.split(",") if c.strip()]
-    raw = await asyncio.to_thread(ds2.get_hk_stock_realtime, code_list)
+    # P2 修复(2026-07-30):None 防御 + try/except
+    try:
+        raw = await asyncio.to_thread(ds2.get_hk_stock_realtime, code_list)
+    except Exception as e:
+        logger.warning(f"get_hk_stock_realtime failed: {e}")
+        return {"data": [], "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
+    if not raw:
+        return {"data": [], "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
     result: list[HkStockItem] = []
     for item in raw:
         result.append(HkStockItem(
@@ -221,7 +258,14 @@ async def global_overview():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("tencent", cached=True)}
-    raw = await asyncio.to_thread(ds2.get_global_market_overview)
+    # P2 修复(2026-07-30):None 防御 + try/except,原代码 raw.get() 在 raw=None 时会 AttributeError
+    try:
+        raw = await asyncio.to_thread(ds2.get_global_market_overview)
+    except Exception as e:
+        logger.warning(f"get_global_market_overview failed: {e}")
+        return {"data": {"indices": [], "us_hot": [], "hk_hot": []}, "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
+    if not raw:
+        return {"data": {"indices": [], "us_hot": [], "hk_hot": []}, "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
     # 转换为响应模型
     indices = [GlobalIndexItem(
         code=_safe_str(i.get("code")), name=_safe_str(i.get("name")),

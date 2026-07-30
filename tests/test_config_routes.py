@@ -179,8 +179,14 @@ class TestUserPositions:
         assert data["available_cash"] == 800000.0
 
     def test_save_user_positions_returns_success(self, client):
-        """保存持仓返回成功(拦截文件写入)"""
-        with patch("builtins.open", mock_open()):
+        """保存持仓返回成功(拦截文件写入)
+
+        P0 修复(2026-07-30):后端改用 atomic_write_json 原子写入,
+        内部会调用 open/os.path.exists/os.replace,需全部 patch 才能完整拦截文件 IO。
+        """
+        with patch("builtins.open", mock_open()), \
+             patch("os.path.exists", return_value=False), \
+             patch("os.replace"):
             resp = client.post("/api/config/user_positions", json={
                 "positions": [{"symbol": "600519", "name": "贵州茅台", "quantity": 100}],
                 "available_cash": 500000.0,

@@ -12,7 +12,7 @@ import asyncio
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # P1 修复(2026-07-29):AI 检索端点加 admin 鉴权,触发 LLM 调用属高成本写操作
 from src.utils.auth import require_admin
@@ -80,7 +80,10 @@ async def news_sentiment():
 
 
 class SearchRequest(BaseModel):
-    query: str
+    # P1 修复(2026-07-30):原 query 无长度上限,可被提交超长文本(数 MB)
+    # 直接打入 Tavily+LLM 产生高额费用;空字符串触发无意义 LLM 调用。
+    # 限制 1-500 字符,兼顾正常检索需求与成本保护。
+    query: str = Field(..., min_length=1, max_length=500, description="检索关键词,限500字符")
 
 
 @router.post("/search", dependencies=[Depends(require_admin)])

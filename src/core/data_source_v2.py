@@ -32,6 +32,10 @@ _EM_AVAILABLE: bool | None = None
 # 每个线程都会读到 _EM_AVAILABLE=None 并发起探测请求(2s 超时 × N 线程 = N 个探测)
 # 改为:double-checked locking 模式,仅首个线程发起探测,其他线程等待锁后读取结果
 _em_check_lock = threading.Lock()
+# P2 修复(2026-07-30):em_get 限速器无锁,多线程并发时 "elapsed 检查 + sleep + 发请求 + 更新时间"
+# 非原子,导致 N 个线程同时通过限速检查,瞬间发出 N 个请求触发东方财富反爬封禁。
+# 改为:_em_rate_lock 保护整段限速逻辑,确保请求间隔串行化。
+_em_rate_lock = threading.Lock()
 
 _TTLCacheEntry = dict[str, Any]
 _cache: dict[str, _TTLCacheEntry] = {}
@@ -170,14 +174,20 @@ def _em_secid(code: str) -> str:
 def em_get(url: str, params: dict[str, Any] | None = None, **kwargs: Any) -> requests.Response:
     if "push2.eastmoney.com" in url and not _ensure_em_checked():
         raise requests.ConnectionError("EastMoney push2 API unavailable (proxy blocked)")
-    global _last_em_request_time
-    elapsed = time.monotonic() - _last_em_request_time
-    wait = _EM_MIN_INTERVAL - elapsed + random.uniform(0, 0.5)
-    if wait > 0:
-        time.sleep(wait)
-    resp = _EM_SESSION.get(url, params=params, timeout=5, **kwargs)
-    _last_em_request_time = time.monotonic()
-    return resp
+    # P2 修复(2026-07-30):整段限速逻辑加锁,确保 "检查间隔→sleep→发请求→更新时间" 原子化,
+    # 避免多线程并发时同时通过限速检查导致瞬时请求堆积触发反爬。
+    # 注意:锁内包含网络 IO(sleep + requests.get),会串行化所有 em 请求,
+    # 但 _EM_MIN_INTERVAL=0.3s + 网络 5s 超时,最坏情况下 N 个请求排队 ~5.3*N 秒,
+    # 而原本设计就是串行限速,加锁只是让设计意图真正生效。
+    with _em_rate_lock:
+        global _last_em_request_time
+        elapsed = time.monotonic() - _last_em_request_time
+        wait = _EM_MIN_INTERVAL - elapsed + random.uniform(0, 0.5)
+        if wait > 0:
+            time.sleep(wait)
+        resp = _EM_SESSION.get(url, params=params, timeout=5, **kwargs)
+        _last_em_request_time = time.monotonic()
+        return resp
 
 
 def _mootdx_client() -> Any:
