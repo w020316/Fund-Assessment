@@ -2,7 +2,10 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0d1117">
 <title>QuantFlow Pro 基金投资决策辅助</title>
 <style>
 /* ========== 全局变量与重置 ========== */
@@ -402,6 +405,106 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
   .data-quality-badge { display:none; }
   .data-freshness { display:none; }
   .llm-provider-bar { font-size:11px; padding:6px 10px; }
+
+  /* ===== 移动端深度优化(2026-07-30) ===== */
+  /* 顶栏瘦身:logo 文字隐藏,只保留 logo 图标 + 时间 */
+  .logo span { display:none; }
+  .logo-icon { width:28px; height:28px; font-size:13px; }
+  /* 刘海屏顶部安全区(iPhone X+ status bar) */
+  .topbar { height:46px; min-height:46px; padding:0 12px; padding-top:max(8px, env(safe-area-inset-top)); gap:10px; }
+  .topbar-right { gap:8px; font-size:11px; }
+  #sysTime { font-size:11px; }
+
+  /* 卡片更紧凑:减小内边距,避免内容拥挤 */
+  .card { padding:12px; border-radius:10px; }
+  .card-title { font-size:14px; margin-bottom:10px; }
+  .mb-16 { margin-bottom:10px; }
+  .mb-12 { margin-bottom:8px; }
+
+  /* 表格字号缩小,行高紧凑,横向滚动更友好 */
+  table { font-size:12px; }
+  th { padding:6px 8px; font-size:11px; }
+  td { padding:6px 8px; }
+  .table-wrap { -webkit-overflow-scrolling:touch; }
+
+  /* 按钮组在移动端强制换行,避免溢出 */
+  .btn { padding:6px 12px; font-size:12px; }
+  .btn-sm { padding:5px 10px; font-size:11px; }
+
+  /* 模态框更窄,padding 减小,避免撑满屏幕 */
+  .modal-mask { padding:0; }
+  .modal-box { border-radius:0; min-height:100vh; max-height:100vh; overflow-y:auto; }
+  .modal-header { padding:10px 14px; font-size:14px; position:sticky; top:0; background:var(--bg-card); z-index:1; }
+  .modal-close { font-size:24px; }
+  .modal-body { padding:14px; max-height:none !important; }
+
+  /* 内联 grid 1fr 1fr 在移动端强制单列(覆盖内联 style) */
+  .modal-body [style*="grid-template-columns:1fr 1fr"] { grid-template-columns:1fr !important; }
+  .modal-body [style*="display:grid"] { gap:8px !important; }
+
+  /* flex 按钮组换行:gap 较大且无 flex-wrap 的容器,移动端允许换行 */
+  .card [style*="display:flex"][style*="gap:12px"]:not([style*="flex-wrap"]) { flex-wrap:wrap; gap:8px !important; }
+  .card [style*="display:flex"][style*="gap:8px"]:not([style*="flex-wrap"]):not([style*="align-items:center"]) { flex-wrap:wrap; }
+
+  /* 输入框在移动端占满宽度,取消 max-width 限制 */
+  .input { width:100% !important; max-width:none !important; }
+  .card [style*="max-width"] { max-width:none !important; width:100% !important; }
+
+  /* SVG 图表自适应宽度(K线/雷达图固定 280px 不可缩放) */
+  svg[width="280"] { width:100% !important; height:auto !important; }
+  svg[width="100%"] { height:auto !important; }
+  svg[viewBox] { max-width:100%; }
+
+  /* 辩论面板:多空双方纵向排列(已在 1024px 处理,768px 进一步紧凑) */
+  .debate-side { padding:10px; }
+  .debate-center { padding:8px; min-width:0; }
+
+  /* 决策卡片:字号缩小 */
+  .decision-card { padding:14px; }
+  .decision-label { font-size:18px; }
+
+  /* 温度计:缩小分数 */
+  .thermo-score { font-size:24px; min-width:50px; }
+  .thermo-bar { height:10px; }
+
+  /* 分析师卡片:最小宽度降为 160px,避免过窄 */
+  .analyst-grid { grid-template-columns:1fr; gap:8px; }
+  .analyst-card { padding:8px 10px; }
+  .analyst-name { font-size:12px; }
+  .analyst-opinion { font-size:11px; }
+
+  /* 底部 tab 字号微调(10 个 tab 在 360px 屏宽较挤) */
+  .bottom-tab-item { padding:5px 2px; font-size:10px; min-width:0; }
+  .bottom-tab-item .tab-icon { font-size:16px; }
+
+  /* LLM provider bar 内边距更紧凑 */
+  .llm-provider-bar { font-size:11px; padding:6px 10px; margin-bottom:10px; }
+
+  /* 上传模态框:文件大小提示更紧凑 */
+  #uploadModal .modal-box { max-width:100% !important; }
+  #uploadResult table { font-size:11px; }
+  #uploadResult th, #uploadResult td { padding:3px 4px; }
+}
+
+/* ===== 超小屏优化(<=360px):进一步压缩 ===== */
+@media (max-width:360px) {
+  .bottom-tab-item { padding:5px 1px; font-size:9px; }
+  .bottom-tab-item .tab-icon { font-size:14px; }
+  .card { padding:10px; }
+  .card-title { font-size:13px; }
+  table { font-size:11px; }
+  th, td { padding:4px 6px; }
+  .btn { padding:5px 10px; font-size:11px; }
+  .logo-icon { width:24px; height:24px; font-size:11px; }
+  .topbar { padding:0 8px; }
+  #sysTime { font-size:10px; }
+  .modal-body { padding:10px; }
+}
+
+/* ===== 横屏适配(高度 <500px):模态框不撑满 ===== */
+@media (max-width:768px) and (max-height:500px) and (orientation:landscape) {
+  .modal-box { min-height:auto; max-height:100vh; }
+  .modal-body { max-height:70vh !important; overflow-y:auto; }
 }
 
 /* ========== 数据质量徽章 ========== */
@@ -457,10 +560,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 }
 .bottom-tab-item .tab-icon { font-size:18px; margin-bottom:2px; }
 .bottom-tab-item.active { color:var(--accent-blue); }
-@media (max-width:360px) {
-  .bottom-tab-item { padding:6px 2px; font-size:9px; }
-  .bottom-tab-item .tab-icon { font-size:16px; }
-}
+/* 注:原 @media (max-width:360px) 已合并到上方移动端优化块(2026-07-30) */
 
 /* ========== 骨架屏加载 ========== */
 .skeleton {
