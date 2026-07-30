@@ -60,7 +60,8 @@ def _cache_get(key: str) -> Any | None:
 
 def _cache_set(key: str, val: Any, ttl: float) -> None:
     with _cache_lock:
-        # LRU 淘汰:超过上限时删除最早的条目(简单 FIFO,避免 OrderedDict 开销)
+        # FIFO 淘汰:超过上限时删除最早插入的条目(避免 OrderedDict 开销)
+        # 注:非严格 LRU;实时行情热数据场景下命中率与 LRU 接近,实现更轻
         if len(_cache) >= _CACHE_MAX_SIZE and key not in _cache:
             _cache.pop(next(iter(_cache)), None)
         _cache[key] = {"val": val, "ts": time.monotonic(), "ttl": ttl}

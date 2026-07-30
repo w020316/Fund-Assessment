@@ -1130,6 +1130,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
               </div>
             </div>
             <button class="btn btn-sm btn-primary" style="width:100%;margin-top:12px;" onclick="addFundPosition()">添加持仓</button>
+            <button class="btn btn-sm" style="width:100%;margin-top:8px;" onclick="openUploadModal()">上传持仓文件/截图</button>
           </div>
         </div>
       </div>
@@ -1142,6 +1143,29 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
             <span class="modal-close" onclick="document.getElementById('holdingsModal').style.display='none'">×</span>
           </div>
           <div class="modal-body" id="holdingsModalBody" style="max-height:70vh;overflow-y:auto;"></div>
+        </div>
+      </div>
+
+      <!-- 上传持仓识别弹窗 -->
+      <div id="uploadModal" class="modal-mask" style="display:none;">
+        <div class="modal-box" style="max-width:600px;">
+          <div class="modal-header">
+            <span>上传持仓识别</span>
+            <span class="modal-close" onclick="document.getElementById('uploadModal').style.display='none'">×</span>
+          </div>
+          <div class="modal-body" style="max-height:75vh;overflow-y:auto;">
+            <div style="padding:16px;">
+              <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.6;">
+                支持 CSV/Excel 文件(表格列:代码/名称/占比)或持仓截图(png/jpg),<br>
+                识别后可一键导入到持仓列表。需管理员鉴权。
+              </p>
+              <label class="btn btn-sm" style="display:block;text-align:center;cursor:pointer;border:1px dashed var(--border);padding:20px;margin-bottom:12px;">
+                点击选择文件(CSV/Excel/图片)
+                <input type="file" id="uploadFileInput" style="display:none;" accept=".csv,.xlsx,.xls,.png,.jpg,.jpeg,.webp" onchange="handleUploadFile(this.files[0])">
+              </label>
+              <div id="uploadResult" style="display:none;"></div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1480,7 +1504,9 @@ async function api(url, options={}) {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     // 自动携带管理鉴权token(写操作需要)
-    const headers = {'Content-Type':'application/json'};
+    // FormData 上传时不能预设 Content-Type,由浏览器自动设 multipart boundary
+    const isFormData = options.body instanceof FormData;
+    const headers = isFormData ? {} : {'Content-Type':'application/json'};
     const adminToken = localStorage.getItem('admin_token');
     if (adminToken) headers['Authorization'] = `Bearer ${adminToken}`;
     const resp = await fetch(url, {
@@ -3091,6 +3117,73 @@ async function loadFundAdviceV2() {
   // 兼容话术推荐(用第一只基金)
   const first = positions[0];
   loadFundScripts([{ fund_code: first.fund_code, fund_name: first.fund_name, advice: first.advice || {}, market_signal: { action: first.advice?.action || 'HOLD', reason: first.advice?.reason || '' } }], { action: first.advice?.action || 'HOLD', reason: first.advice?.reason || '' });
+}
+
+/* ========== 上传持仓识别(CSV/Excel/图片 vision) ========== */
+let _uploadedHoldings = [];
+function openUploadModal() {
+  document.getElementById('uploadModal').style.display = 'flex';
+  document.getElementById('uploadResult').style.display = 'none';
+  document.getElementById('uploadFileInput').value = '';
+  _uploadedHoldings = [];
+}
+
+async function handleUploadFile(file) {
+  if (!file) return;
+  const resultEl = document.getElementById('uploadResult');
+  const isImage = file.type.startsWith('image/');
+  const sizeMb = (file.size / 1024 / 1024).toFixed(2);
+  resultEl.style.display = 'block';
+  resultEl.innerHTML = `<div style="padding:12px;text-align:center;color:var(--text-muted);">识别中... ${file.name} (${sizeMb}MB)<br><span style="font-size:11px;">${isImage ? '调用AI视觉识别,约10-20秒' : '解析表格中'}</span></div>`;
+
+  const formData = new FormData();
+  formData.append('file', file);
+  const resp = await api('/api/holdings/upload', { method: 'POST', body: formData });
+  if (!resp || !resp.holdings) {
+    resultEl.innerHTML = `<div style="padding:12px;color:var(--color-up);">识别失败,请重试或检查文件格式</div>`;
+    return;
+  }
+  if (!resp.holdings.length) {
+    resultEl.innerHTML = `<div style="padding:12px;color:var(--text-muted);">${resp.message || '未识别到持仓数据'}</div>`;
+    return;
+  }
+
+  _uploadedHoldings = resp.holdings;
+  const rows = resp.holdings.map((h, i) => `<tr>
+    <td>${i + 1}</td><td>${h.code || '-'}</td><td>${h.name || '-'}</td><td>${(h.weight || 0).toFixed(2)}%</td>
+  </tr>`).join('');
+  resultEl.innerHTML = `
+    <div style="margin-bottom:8px;font-size:12px;color:var(--text-muted);">
+      识别到 <strong style="color:var(--text-primary);">${resp.count}</strong> 条持仓(来源:${resp.source === 'image' ? 'AI视觉识别' : resp.source})
+    </div>
+    <table style="width:100%;font-size:12px;border-collapse:collapse;">
+      <thead><tr style="border-bottom:1px solid var(--border);"><th style="text-align:left;padding:4px;">#</th><th style="text-align:left;padding:4px;">代码</th><th style="text-align:left;padding:4px;">名称</th><th style="text-align:right;padding:4px;">占比</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <button class="btn btn-sm btn-primary" style="width:100%;margin-top:12px;" onclick="importUploadedToPositions()">一键导入到持仓列表</button>`;
+}
+
+async function importUploadedToPositions() {
+  if (!_uploadedHoldings.length) return;
+  const positions = _uploadedHoldings.map(h => ({
+    fund_code: h.code || '',
+    fund_name: h.name || '',
+    shares: 0,
+    cost_nav: 0,
+    buy_date: '',
+    note: '上传识别导入'
+  }));
+  const resp = await api('/api/config/user_positions', {
+    method: 'PUT',
+    body: JSON.stringify({ positions, available_cash: 800000.0 })
+  });
+  if (resp && resp.success) {
+    showToast(`成功导入 ${positions.length} 条持仓`, 'success');
+    document.getElementById('uploadModal').style.display = 'none';
+    if (typeof loadPositions === 'function') loadPositions();
+  } else {
+    showToast('导入失败: ' + (resp && resp.message ? resp.message : '未知错误'), 'error');
+  }
 }
 
 /* ========== P1-2 基金重仓股板块分析 ========== */

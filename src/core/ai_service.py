@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 from datetime import datetime
@@ -37,14 +38,11 @@ from src.utils.config import settings
 
 # P2 修复(2026-07-29):原模块级常量在 import 时固化 API Key,
 # 导致 Render Dashboard 修改 key 后需重启进程才生效,且测试 patch.dict 无效
-# 改为:_get_*_api_key() 实时读取函数,模块级常量保留作为兼容(向旧代码 fallback)
-# 但所有实际使用点改为调用函数,确保热更新生效
+# 改为:_get_*_api_key() 实时读取函数,所有使用点均改为调用函数
 # P3 修复(2026-07-29):env 优先于 settings(与 auth._get_admin_token 一致),
 # 确保 Render Dashboard 修改环境变量后无需重启即生效(settings 在 import 时缓存)
-_TTAPI_API_KEY = settings.ttapi_api_key or os.getenv("TTAPI_API_KEY", "")
-_TAVILY_API_KEY = settings.tavily_api_key or os.getenv("TAVILY_API_KEY", "")
-_TINYFISH_API_KEY = settings.tinyfish_api_key or os.getenv("TINYFISH_API_KEY", "")
-_AGNES_API_KEY = settings.agnes_api_key or os.getenv("AGNES_API_KEY", "")
+# P4 清理(2026-07-29):移除已废弃的模块级常量(原 _TTAPI/_TAVILY/_TINYFISH/_AGNES_API_KEY)
+# 经全仓 grep 确认无外部引用,统一通过 _get_*_api_key() 函数获取
 
 
 def _get_ttapi_api_key() -> str:
@@ -467,6 +465,126 @@ def _call_ttapi_direct(messages: list[dict[str, str]], model: str = _DEFAULT_MOD
     except (KeyError, IndexError, json.JSONDecodeError) as e:
         logger.error(f"TTAPI response parse failed: {e}")
         raise
+
+
+# ===== 持仓截图识别(agnes-2.0-flash vision,免费多模态) =====
+
+# 持仓识别 prompt:要求模型从截图提取持仓明细,返回严格 JSON
+_HOLDINGS_VISION_PROMPT = """你是基金持仓识别助手。请从用户提供的截图中提取持仓明细。
+
+识别要求:
+1. 识别每只基金/股票的:代码(code,6位数字)、名称(name)、持仓金额或占比(weight,数字,无单位)
+2. 若截图含基金代码(如161725)按基金处理;若为股票代码(如600519)按股票处理
+3. 若无法识别金额/占比,weight 填 0
+4. 仅返回 JSON,不要任何解释文字
+
+返回格式(严格 JSON,不要 markdown 代码块):
+{"holdings": [{"code": "161725", "name": "招商中证白酒", "weight": 35.5}, {"code": "600519", "name": "贵州茅台", "weight": 12.3}]}
+
+若截图中无可识别的持仓数据,返回:{"holdings": []}"""
+
+# 支持的图片 MIME 类型
+_IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"}
+
+
+def recognize_holdings_from_image(image_bytes: bytes, mime_type: str = "image/png") -> list[dict[str, Any]]:
+    """通过 agnes-2.0-flash 多模态识别持仓截图
+
+    直接调用 Agnes OpenAI 兼容接口(绕过 llm_router):
+    - llm_router 的 _llm_cache 以 messages 为 key,多模态 content 含 base64 不可哈希
+    - vision 调用低频且需实时结果,缓存价值低
+
+    Args:
+        image_bytes: 图片二进制数据
+        mime_type: 图片 MIME 类型(image/png/jpeg/webp/gif)
+
+    Returns:
+        [{"code": "161725", "name": "招商中证白酒", "weight": 35.5}, ...]
+        失败返回空列表
+    """
+    api_key = _get_agnes_api_key()
+    if not api_key:
+        logger.warning("recognize_holdings_from_image: AGNES_API_KEY 未配置,无法识别")
+        return []
+
+    if mime_type not in _IMAGE_MIME_TYPES:
+        logger.warning(f"recognize_holdings_from_image: 不支持的图片类型 {mime_type}")
+        return []
+
+    # base64 编码(data URI 格式,OpenAI vision 标准)
+    b64 = base64.b64encode(image_bytes).decode("ascii")
+    data_uri = f"data:{mime_type};base64,{b64}"
+
+    messages = [{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": _HOLDINGS_VISION_PROMPT},
+            {"type": "image_url", "image_url": {"url": data_uri}},
+        ],
+    }]
+
+    base_url = os.getenv("AGNES_BASE_URL", "https://apihub.agnes-ai.com/v1")
+    model = os.getenv("AGNES_VISION_MODEL", "agnes-2.0-flash")
+    url = f"{base_url}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": 0.1,  # 识别任务用低温度确保准确
+        "max_tokens": 2000,
+    }
+
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        if not content:
+            logger.warning("recognize_holdings_from_image: 模型返回空内容")
+            return []
+
+        # 清理可能的 markdown 代码块包裹
+        content = content.strip()
+        if content.startswith("```"):
+            content = content.split("\n", 1)[-1] if "\n" in content else content[3:]
+            if content.endswith("```"):
+                content = content[:-3]
+            content = content.strip()
+
+        result = json.loads(content)
+        holdings = result.get("holdings", [])
+        if not isinstance(holdings, list):
+            return []
+
+        # 字段规范化与清洗
+        cleaned: list[dict[str, Any]] = []
+        for h in holdings:
+            if not isinstance(h, dict):
+                continue
+            code = str(h.get("code", "")).strip()
+            name = str(h.get("name", "")).strip()
+            if not code and not name:
+                continue
+            try:
+                weight = float(h.get("weight", 0) or 0)
+            except (ValueError, TypeError):
+                weight = 0.0
+            cleaned.append({"code": code, "name": name, "weight": round(weight, 3)})
+
+        logger.info(f"recognize_holdings_from_image: 识别到 {len(cleaned)} 条持仓")
+        return cleaned
+    except requests.exceptions.Timeout:
+        logger.error("recognize_holdings_from_image: agnes vision 请求超时(30s)")
+        return []
+    except json.JSONDecodeError as e:
+        logger.error(f"recognize_holdings_from_image: 模型返回非JSON: {e}, content={content[:200]}")
+        return []
+    except Exception as e:
+        logger.error(f"recognize_holdings_from_image: 识别失败: {e}")
+        return []
 
 
 def _parse_analysis_response(response_text: str, stock_code: str) -> dict[str, Any]:

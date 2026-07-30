@@ -38,6 +38,11 @@ _EM_FUND_SESSION.headers.update({
     "Referer": "https://fundf10.eastmoney.com/",
 })
 
+# P0 诊断(2026-07-29 v1.3):记录最后一次重仓股抓取失败原因
+# 用于区分"基金无重仓股数据"与"数据源不可达"
+# 典型场景:Render Free 国外 IP 被 eastmoney fundf10 封禁,本地可访问但部署环境不可达
+_last_fetch_reason: str = ""
+
 
 def _current_year_month() -> tuple[str, str]:
     """当前年份和月份(用于东方财富持仓接口)"""
@@ -57,6 +62,7 @@ def _fetch_fund_holdings_em(fund_code: str, topline: int = 10) -> list[dict]:
     Returns:
         [{"code", "name", "weight", "hold_amount", "hold_value", "quarter", "change"}, ...]
     """
+    global _last_fetch_reason
     year, month = _current_year_month()
     url = "https://fundf10.eastmoney.com/FundArchivesDatas.aspx"
     params = {
@@ -72,13 +78,17 @@ def _fetch_fund_holdings_em(fund_code: str, topline: int = 10) -> list[dict]:
         # 接口返回 var apidata={ content:"<html>...</html>",arryear:[...],... };
         m = re.search(r'apidata\s*=\s*({.*?})\s*;', text, re.DOTALL)
         if not m:
-            logger.warning(f"fund_holdings_em: 解析失败 fund_code={fund_code}")
+            _last_fetch_reason = (
+                f"em接口响应格式异常(resp_len={len(text)}, 可能被IP封禁或接口变更)"
+            )
+            logger.warning(f"fund_holdings_em: {_last_fetch_reason} fund_code={fund_code}")
             return []
         # JS对象转JSON(单引号→双引号, 去除注释)
         js_obj = m.group(1)
         # 提取content字段(HTML)
         content_m = re.search(r'content\s*:\s*"(.*?)"\s*,', js_obj, re.DOTALL)
         if not content_m:
+            _last_fetch_reason = "em接口返回但无content字段(基金可能无持仓披露)"
             return []
         html = content_m.group(1)
         # 反转义
@@ -125,13 +135,16 @@ def _fetch_fund_holdings_em(fund_code: str, topline: int = 10) -> list[dict]:
                 continue
         return result
     except Exception as e:
+        _last_fetch_reason = f"em接口请求异常: {e}"
         logger.warning(f"fund_holdings_em failed fund_code={fund_code}: {e}")
         return []
 
 
 def _fetch_fund_holdings_ak(fund_code: str) -> list[dict]:
     """akshare 兜底:基金十大重仓股"""
+    global _last_fetch_reason
     if not _HAS_AKSHARE:
+        _last_fetch_reason = "akshare未安装"
         return []
     try:
         # 季度日期
@@ -169,20 +182,25 @@ def _fetch_fund_holdings_ak(fund_code: str) -> list[dict]:
             })
         return result[:10]
     except Exception as e:
+        _last_fetch_reason = f"akshare兜底失败: {e}(底层亦调eastmoney,同源封禁)"
         logger.warning(f"fund_holdings_ak failed fund_code={fund_code}: {e}")
         return []
 
 
 def get_fund_holdings(fund_code: str) -> list[dict]:
     """获取基金前10大重仓股(东方财富优先,akshare兜底)"""
+    global _last_fetch_reason
     cache_key = f"fund_holdings:{fund_code}"
     cached = ds2._cache_get(cache_key)
     if cached is not None:
         return cached
 
+    _last_fetch_reason = ""  # 重置:新一轮抓取
     holdings = _fetch_fund_holdings_em(fund_code)
     if not holdings:
         holdings = _fetch_fund_holdings_ak(fund_code)
+    if holdings:
+        _last_fetch_reason = ""  # 成功:清除失败原因
 
     # 缓存12小时(季报数据变化慢)
     ds2._cache_set(cache_key, holdings, ttl=12 * 3600)
@@ -477,6 +495,10 @@ async def analyze_fund_holdings(fund_code: str) -> dict[str, Any]:
     # 1. 抓取重仓股
     holdings = await asyncio.to_thread(get_fund_holdings, fund_code)
     if not holdings:
+        # P0 诊断(2026-07-29 v1.3):区分"基金无数据"与"数据源不可达"
+        reason = _last_fetch_reason or "基金无重仓股数据披露(可能为新基金或债基)"
+        # 数据源可达性判断:有失败原因 → 数据源问题;无原因 → 基金本身无数据
+        source_unreachable = bool(_last_fetch_reason)
         return {
             "fund_code": fund_code,
             "holdings": [],
@@ -484,7 +506,17 @@ async def analyze_fund_holdings(fund_code: str) -> dict[str, Any]:
             "concentration": {"top5_weight": 0, "top10_weight": 0, "hhi": 0, "level": "无数据"},
             "nav_impact": {"estimated_change_pct": 0, "contributors": [], "draggers": [], "note": "无重仓股数据"},
             "sector_rotation": [],
-            "note": "未抓取到重仓股数据,可能为新基金或债基",
+            "note": reason,
+            "diagnostic": {
+                "source_unreachable": source_unreachable,
+                "reason": reason,
+                "hint": (
+                    "数据源在当前部署环境不可达,建议:1)本地运行验证 2)迁移至国内可访问eastmoney的部署环境 "
+                    "3)配置TUSHARE_TOKEN启用第三数据源"
+                    if source_unreachable else
+                    "该基金可能确实无重仓股披露(债基/新基金/QDII等)"
+                ),
+            },
         }
 
     # 2. 板块映射

@@ -25,3 +25,7 @@ slowapi>=0.1.9
 # 代码已实现降级:未安装时自动退化为纯关键词法(news_aggregator.py)
 # 本地开发: pip install snownlp 即可启用语义分析增强
 # Render部署: 不安装,使用关键词法(稳定优先)
+# openpyxl: 基金持仓文件上传 Excel 解析(纯 Python wheel, Python 3.14 兼容)
+openpyxl==3.1.5
+# python-multipart: FastAPI 文件上传 multipart/form-data 解析
+python-multipart==0.0.20
