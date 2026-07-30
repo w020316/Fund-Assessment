@@ -470,16 +470,21 @@ def _call_ttapi_direct(messages: list[dict[str, str]], model: str = _DEFAULT_MOD
 # ===== 持仓截图识别(agnes-2.0-flash vision,免费多模态) =====
 
 # 持仓识别 prompt:要求模型从截图提取持仓明细,返回严格 JSON
+# P1 改进(2026-07-30):明确区分"市值(元)"与"占比(%)",避免把市值误当占比
 _HOLDINGS_VISION_PROMPT = """你是基金持仓识别助手。请从用户提供的截图中提取持仓明细。
 
 识别要求:
-1. 识别每只基金/股票的:代码(code,6位数字)、名称(name)、持仓金额或占比(weight,数字,无单位)
-2. 若截图含基金代码(如161725)按基金处理;若为股票代码(如600519)按股票处理
-3. 若无法识别金额/占比,weight 填 0
-4. 仅返回 JSON,不要任何解释文字
+1. 识别每只基金/股票的:代码(code,6位数字)、名称(name)
+2. 金额与占比必须分开返回,不要混淆:
+   - amount: 持仓市值(单位:元,数字,无符号)。如截图显示"345.28元"或"¥345.28",填 345.28
+   - weight: 持仓占比(单位:%,数字,无%)。如截图显示"35.5%",填 35.5
+3. 若截图只有市值无占比:amount 填实际金额,weight 填 0
+4. 若截图只有占比无市值:weight 填实际占比,amount 填 0
+5. 若两者都无法识别:amount 和 weight 都填 0
+6. 仅返回 JSON,不要任何解释文字
 
 返回格式(严格 JSON,不要 markdown 代码块):
-{"holdings": [{"code": "161725", "name": "招商中证白酒", "weight": 35.5}, {"code": "600519", "name": "贵州茅台", "weight": 12.3}]}
+{"holdings": [{"code": "161725", "name": "招商中证白酒", "amount": 345.28, "weight": 35.5}, {"code": "600519", "name": "贵州茅台", "amount": 12000.0, "weight": 0}]}
 
 若截图中无可识别的持仓数据,返回:{"holdings": []}"""
 
@@ -572,7 +577,16 @@ def recognize_holdings_from_image(image_bytes: bytes, mime_type: str = "image/pn
                 weight = float(h.get("weight", 0) or 0)
             except (ValueError, TypeError):
                 weight = 0.0
-            cleaned.append({"code": code, "name": name, "weight": round(weight, 3)})
+            try:
+                amount = float(h.get("amount", 0) or 0)
+            except (ValueError, TypeError):
+                amount = 0.0
+            cleaned.append({
+                "code": code,
+                "name": name,
+                "weight": round(weight, 3),
+                "amount": round(amount, 2),
+            })
 
         logger.info(f"recognize_holdings_from_image: 识别到 {len(cleaned)} 条持仓")
         return cleaned

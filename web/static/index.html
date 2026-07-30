@@ -3268,15 +3268,24 @@ async function handleUploadFile(file) {
   }
 
   _uploadedHoldings = resp.holdings;
+  // 智能显示:优先显示占比(若有),否则显示市值(若有)
+  const hasWeight = resp.holdings.some(h => h.weight && h.weight > 0);
+  const hasAmount = resp.holdings.some(h => h.amount && h.amount > 0);
+  const showWeightCol = hasWeight;
+  const showAmountCol = hasAmount;
   const rows = resp.holdings.map((h, i) => `<tr>
-    <td>${i + 1}</td><td>${h.code || '-'}</td><td>${h.name || '-'}</td><td>${(h.weight || 0).toFixed(2)}%</td>
+    <td>${i + 1}</td><td>${h.code || '-'}</td><td>${h.name || '-'}</td>
+    ${showWeightCol ? `<td style="text-align:right;">${(h.weight || 0).toFixed(2)}%</td>` : ''}
+    ${showAmountCol ? `<td style="text-align:right;">¥${(h.amount || 0).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>` : ''}
   </tr>`).join('');
+  const thWeight = showWeightCol ? `<th style="text-align:right;padding:4px;">占比</th>` : '';
+  const thAmount = showAmountCol ? `<th style="text-align:right;padding:4px;">市值</th>` : '';
   resultEl.innerHTML = `
     <div style="margin-bottom:8px;font-size:12px;color:var(--text-muted);">
       识别到 <strong style="color:var(--text-primary);">${resp.count}</strong> 条持仓(来源:${resp.source === 'image' ? 'AI视觉识别' : resp.source})
     </div>
     <table style="width:100%;font-size:12px;border-collapse:collapse;">
-      <thead><tr style="border-bottom:1px solid var(--border);"><th style="text-align:left;padding:4px;">#</th><th style="text-align:left;padding:4px;">代码</th><th style="text-align:left;padding:4px;">名称</th><th style="text-align:right;padding:4px;">占比</th></tr></thead>
+      <thead><tr style="border-bottom:1px solid var(--border);"><th style="text-align:left;padding:4px;">#</th><th style="text-align:left;padding:4px;">代码</th><th style="text-align:left;padding:4px;">名称</th>${thWeight}${thAmount}</tr></thead>
       <tbody>${rows}</tbody>
     </table>
     <button class="btn btn-sm btn-primary" style="width:100%;margin-top:12px;" onclick="importUploadedToPositions()">一键导入到持仓列表</button>`;
@@ -3293,7 +3302,7 @@ async function importUploadedToPositions() {
     note: '上传识别导入'
   }));
   const resp = await api('/api/config/user_positions', {
-    method: 'PUT',
+    method: 'POST',
     body: JSON.stringify({ positions, available_cash: 800000.0 })
   });
   if (resp && resp.success) {

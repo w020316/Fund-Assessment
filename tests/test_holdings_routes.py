@@ -273,12 +273,12 @@ class TestRecognizeHoldingsImage:
         assert result == []
 
     def test_valid_response_parses_holdings(self, monkeypatch):
-        """正常 agnes 响应解析持仓"""
+        """正常 agnes 响应解析持仓(含 amount + weight 双字段)"""
         from src.core import ai_service
         monkeypatch.setenv("AGNES_API_KEY", "sk-test")
         mock_resp = MagicMock()
         mock_resp.json.return_value = {
-            "choices": [{"message": {"content": '{"holdings": [{"code":"161725","name":"招商白酒","weight":35.5}]}'}}]
+            "choices": [{"message": {"content": '{"holdings": [{"code":"161725","name":"招商白酒","amount":345.28,"weight":35.5}]}'}}]
         }
         mock_resp.raise_for_status.return_value = None
         with patch.object(ai_service.requests, "post", return_value=mock_resp):
@@ -286,6 +286,21 @@ class TestRecognizeHoldingsImage:
         assert len(result) == 1
         assert result[0]["code"] == "161725"
         assert result[0]["weight"] == 35.5
+        assert result[0]["amount"] == 345.28
+
+    def test_amount_only_no_weight(self, monkeypatch):
+        """截图只有市值无占比时,amount 有值 weight 为 0"""
+        from src.core import ai_service
+        monkeypatch.setenv("AGNES_API_KEY", "sk-test")
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": '{"holdings": [{"code":"161725","name":"招商白酒","amount":12000.0,"weight":0}]}'}}]
+        }
+        mock_resp.raise_for_status.return_value = None
+        with patch.object(ai_service.requests, "post", return_value=mock_resp):
+            result = ai_service.recognize_holdings_from_image(b"fake-png", "image/png")
+        assert result[0]["amount"] == 12000.0
+        assert result[0]["weight"] == 0.0
 
     def test_markdown_wrapped_response(self, monkeypatch):
         """模型返回 ```json 包裹的内容时正确解析"""
