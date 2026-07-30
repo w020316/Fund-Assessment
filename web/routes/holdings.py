@@ -23,6 +23,8 @@ from src.analysis.fund_holdings import (
 )
 from src.core.cache import DataCache
 from src.utils.auth import require_admin
+# limiter 从独立模块导入,避免 import web.api 触发循环 import
+from web.rate_limiter import limiter
 
 router = APIRouter()
 cache = DataCache(default_ttl=300)
@@ -149,6 +151,7 @@ def _parse_excel_holdings(contents: bytes) -> list[dict]:
 
 
 @router.post("/upload", dependencies=[Depends(require_admin)])
+@limiter.limit("3/minute")
 async def upload_holdings_file(request: Request, file: UploadFile = File(...)) -> dict[str, Any]:
     """上传文件/图片识别持仓
 
@@ -195,11 +198,3 @@ async def upload_holdings_file(request: Request, file: UploadFile = File(...)) -
         }
 
     return {"holdings": holdings, "source": source, "count": len(holdings)}
-
-
-# 限流装饰(借鉴 agent.py 模式,模块末尾重新装饰避免循环 import)
-try:
-    from web.api import limiter as _limiter
-    upload_holdings_file = _limiter.limit("3/minute")(upload_holdings_file)
-except Exception:  # pragma: no cover
-    pass

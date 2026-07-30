@@ -23,11 +23,27 @@ def client():
 
 @pytest.fixture(autouse=True)
 def clear_holdings_cache():
-    """每个测试前清空 holdings 路由的文件缓存,避免 mock 被跳过"""
+    """每个测试前清空 holdings 路由的文件缓存 + slowapi 限流计数器
+
+    限流计数器必须清理的原因:
+    - TestClient 共享同一客户端 IP(127.0.0.1)
+    - slowapi 的 3/minute 限流会在连续测试中累积,导致第4个测试起被 429 拒绝
+    - 通过 limiter._storage.reset() 清除计数,确保每个测试独立
+    """
     from web.routes import holdings
     holdings.cache.clear()
+    # 清除 slowapi 限流存储,避免跨测试影响
+    from web.rate_limiter import limiter
+    try:
+        limiter._storage.reset()
+    except Exception:
+        pass
     yield
     holdings.cache.clear()
+    try:
+        limiter._storage.reset()
+    except Exception:
+        pass
 
 
 # 模拟重仓股分析结果

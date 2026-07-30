@@ -3131,16 +3131,35 @@ function openUploadModal() {
 async function handleUploadFile(file) {
   if (!file) return;
   const resultEl = document.getElementById('uploadResult');
-  const isImage = file.type.startsWith('image/');
+  const fileInput = document.getElementById('uploadFileInput');
+  // 前置鉴权检查:未配置admin_token时直接提示,避免发起401请求浪费时间
+  const adminToken = localStorage.getItem('admin_token');
+  if (!adminToken) {
+    resultEl.style.display = 'block';
+    resultEl.innerHTML = `<div style="padding:12px;color:var(--color-up);">未登录管理员,请先在"设置"页配置管理Token</div>`;
+    return;
+  }
+  // 文件大小前置校验(避免上传后服务端413,节省带宽和用户等待)
+  const MAX_MB = 10;
   const sizeMb = (file.size / 1024 / 1024).toFixed(2);
+  if (file.size > MAX_MB * 1024 * 1024) {
+    resultEl.style.display = 'block';
+    resultEl.innerHTML = `<div style="padding:12px;color:var(--color-up);">文件过大(${sizeMb}MB),最大支持 ${MAX_MB}MB</div>`;
+    return;
+  }
+  const isImage = file.type.startsWith('image/');
   resultEl.style.display = 'block';
   resultEl.innerHTML = `<div style="padding:12px;text-align:center;color:var(--text-muted);">识别中... ${file.name} (${sizeMb}MB)<br><span style="font-size:11px;">${isImage ? '调用AI视觉识别,约10-20秒' : '解析表格中'}</span></div>`;
+  // 上传中禁用文件选择,避免重复提交(api()已用 AbortController 但 UI 也需反馈)
+  fileInput.disabled = true;
 
   const formData = new FormData();
   formData.append('file', file);
   const resp = await api('/api/holdings/upload', { method: 'POST', body: formData });
+  fileInput.disabled = false;
   if (!resp || !resp.holdings) {
-    resultEl.innerHTML = `<div style="padding:12px;color:var(--color-up);">识别失败,请重试或检查文件格式</div>`;
+    // 区分错误类型:api()已通过 showToast 提示,这里给出可操作的下一步建议
+    resultEl.innerHTML = `<div style="padding:12px;color:var(--color-up);">识别失败,请检查:<br>1. 管理Token是否正确(设置页)<br>2. 是否触发限流(3次/分钟,请1分钟后重试)<br>3. 网络是否正常</div>`;
     return;
   }
   if (!resp.holdings.length) {
