@@ -109,7 +109,8 @@ async def analyze(request: Request, req: AnalyzeRequest) -> dict[str, Any]:
 
 
 @router.get("/opinions")
-async def get_opinions(code: str = Query(..., description="股票代码")) -> dict[str, Any]:
+@limiter.limit("3/minute")
+async def get_opinions(request: Request, code: str = Query(..., description="股票代码")) -> dict[str, Any]:
     cache_key = _ai_cache._make_key("opinions", code=code)
     cached = _ai_cache.get(cache_key, _TTL_QUICK)
     if cached is not None:
@@ -121,7 +122,8 @@ async def get_opinions(code: str = Query(..., description="股票代码")) -> di
 
 
 @router.get("/debate")
-async def get_debate(code: str = Query(..., description="股票代码")) -> dict[str, Any]:
+@limiter.limit("3/minute")
+async def get_debate(request: Request, code: str = Query(..., description="股票代码")) -> dict[str, Any]:
     cache_key = _ai_cache._make_key("debate", code=code)
     cached = _ai_cache.get(cache_key, _TTL_ANALYZE)
     if cached is not None:
@@ -187,7 +189,8 @@ async def portfolio_advice(request: Request, req: PortfolioRequest) -> dict[str,
 
 
 @router.get("/market_outlook")
-async def market_outlook() -> dict[str, Any]:
+@limiter.limit("3/minute")
+async def market_outlook(request: Request) -> dict[str, Any]:
     cache_key = _ai_cache._make_key("outlook")
     cached = _ai_cache.get(cache_key, _TTL_OUTLOOK)
     if cached is not None:

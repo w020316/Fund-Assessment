@@ -163,6 +163,14 @@ async def upload_holdings_file(request: Request, file: UploadFile = File(...)) -
     鉴权: 需管理员 token(写操作,避免匿名调用消耗免费 vision 额度)
     返回: {holdings: [{code, name, weight}], source: "csv"|"excel"|"image", count: N}
     """
+    # P1 修复(2026-07-30):先检查 Content-Length 提前拒绝,避免大文件读入内存后才发现超限
+    # Render Free 512MB RAM,几个并发大文件上传即可 OOM
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > _MAX_FILE_SIZE + 1024:  # +1KB multipart 开销
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            "文件过大,最大10MB(Render Free 内存友好)",
+        )
     contents = await file.read()
     if len(contents) > _MAX_FILE_SIZE:
         raise HTTPException(
