@@ -4,9 +4,11 @@
 - GET  /api/holdings/{fund_code}    基金重仓股分析(持仓/板块/集中度/净值影响)
 - GET  /api/holdings/sector-rotation  板块轮动总览
 - POST /api/holdings/upload         上传文件/图片识别持仓(CSV/Excel/图片)
-"""
-from __future__ import annotations
 
+注意:本模块不使用 `from __future__ import annotations`,
+因为 FastAPI 在 Python 3.14 下无法解析 UploadFile 等 ForwardRef,
+会导致启动报错 "Invalid args for response field!"
+"""
 import asyncio
 import io
 import os
