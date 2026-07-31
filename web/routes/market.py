@@ -294,25 +294,25 @@ async def index_realtime():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
-    # P1 修复(2026-07-31):原代码无 try/except,数据源异常时直接 500
+    # P1 修复(2026-07-31):整个函数体包裹,确保模型构造/cache.set 异常也返回空数据而非 500
     try:
         data = await asyncio.to_thread(ds2.get_index_realtime)
+        result: list[IndexRealtimeItem] = []
+        for item in data:
+            result.append(IndexRealtimeItem(
+                code=_safe_str(item.get("code")),
+                name=_safe_str(item.get("name")),
+                price=_safe_float(item.get("price")),
+                change=_safe_float(item.get("change")),
+                change_pct=_safe_float(item.get("change_pct")),
+                volume=_safe_float(item.get("volume")),
+                amount=_safe_float(item.get("amount")),
+            ))
+        cache.set(cache_key, result)
+        return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
     except Exception as e:
         logger.warning(f"index_realtime failed: {e}")
         return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
-    result: list[IndexRealtimeItem] = []
-    for item in data:
-        result.append(IndexRealtimeItem(
-            code=_safe_str(item.get("code")),
-            name=_safe_str(item.get("name")),
-            price=_safe_float(item.get("price")),
-            change=_safe_float(item.get("change")),
-            change_pct=_safe_float(item.get("change_pct")),
-            volume=_safe_float(item.get("volume")),
-            amount=_safe_float(item.get("amount")),
-        ))
-    cache.set(cache_key, result)
-    return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
 
 
 @router.get("/hot_stocks")
@@ -321,7 +321,7 @@ async def hot_stocks():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
-    # P1 修复(2026-07-31):原代码无 try/except,数据源异常时直接 500
+    # P1 修复(2026-07-31):整个函数体包裹,确保模型构造/cache.set 异常也返回空数据而非 500
     try:
         # 三个排行并行获取(用 asyncio.to_thread 避免阻塞事件循环)
         top_gainers_data, top_losers_data, top_volume_data = await asyncio.gather(
@@ -329,27 +329,27 @@ async def hot_stocks():
             asyncio.to_thread(ds2.get_stock_ranking_em, "f3", 1, 10),
             asyncio.to_thread(ds2.get_stock_ranking_em, "f6", 0, 10),
         )
+
+        def _to_item(item: dict) -> HotStocksItem:
+            return HotStocksItem(
+                code=_safe_str(item.get("code")),
+                name=_safe_str(item.get("name")),
+                price=_safe_float(item.get("price")),
+                change_pct=_safe_float(item.get("change_pct")),
+                volume=_safe_float(item.get("volume")),
+                amount=_safe_float(item.get("amount")),
+            )
+
+        result = HotStocksResponse(
+            top_gainers=[_to_item(i) for i in top_gainers_data],
+            top_losers=[_to_item(i) for i in top_losers_data],
+            top_volume=[_to_item(i) for i in top_volume_data],
+        )
+        cache.set(cache_key, result.model_dump())
+        return {"data": result.model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
     except Exception as e:
         logger.warning(f"hot_stocks failed: {e}")
         return {"data": HotStocksResponse(top_gainers=[], top_losers=[], top_volume=[]).model_dump(), "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
-
-    def _to_item(item: dict) -> HotStocksItem:
-        return HotStocksItem(
-            code=_safe_str(item.get("code")),
-            name=_safe_str(item.get("name")),
-            price=_safe_float(item.get("price")),
-            change_pct=_safe_float(item.get("change_pct")),
-            volume=_safe_float(item.get("volume")),
-            amount=_safe_float(item.get("amount")),
-        )
-
-    result = HotStocksResponse(
-        top_gainers=[_to_item(i) for i in top_gainers_data],
-        top_losers=[_to_item(i) for i in top_losers_data],
-        top_volume=[_to_item(i) for i in top_volume_data],
-    )
-    cache.set(cache_key, result.model_dump())
-    return {"data": result.model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
 
 
 @router.get("/sector_flow")
@@ -358,22 +358,22 @@ async def sector_flow():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
-    # P1 修复(2026-07-31):原代码无 try/except,上游异常直接 500
+    # P1 修复(2026-07-31):整个函数体包裹,确保模型构造/cache.set 异常也返回空数据而非 500
     try:
         data = await asyncio.to_thread(ds2.get_sector_ranking)
+        result: list[SectorFlowItem] = []
+        for item in data:
+            result.append(SectorFlowItem(
+                sector=_safe_str(item.get("name")),
+                change_pct=_safe_float(item.get("change_pct")),
+                main_net_inflow=_safe_float(item.get("main_net_inflow")),
+                large_order_ratio=_safe_float(item.get("main_inflow_pct")),
+            ))
+        cache.set(cache_key, result)
+        return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
     except Exception as e:
         logger.warning(f"sector_flow failed: {e}")
         return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
-    result: list[SectorFlowItem] = []
-    for item in data:
-        result.append(SectorFlowItem(
-            sector=_safe_str(item.get("name")),
-            change_pct=_safe_float(item.get("change_pct")),
-            main_net_inflow=_safe_float(item.get("main_net_inflow")),
-            large_order_ratio=_safe_float(item.get("main_inflow_pct")),
-        ))
-    cache.set(cache_key, result)
-    return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
 
 
 class ResearchReportItem(BaseModel):
@@ -471,10 +471,14 @@ async def research_reports(
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
-    data = await asyncio.to_thread(ds2.get_research_reports, code, page=page, page_size=page_size)
-    result = [ResearchReportItem(**item) for item in data]
-    cache.set(cache_key, result, ttl=300)
-    return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
+    try:
+        data = await asyncio.to_thread(ds2.get_research_reports, code, page=page, page_size=page_size)
+        result = [ResearchReportItem(**item) for item in data]
+        cache.set(cache_key, result, ttl=300)
+        return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
+    except Exception as e:
+        logger.warning(f"research_reports failed: {e}")
+        return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
 
 
 @router.get("/dragon_tiger")
@@ -483,10 +487,14 @@ async def dragon_tiger():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
-    data = await asyncio.to_thread(ds2.get_dragon_tiger)
-    result = [DragonTigerItem(**item) for item in data]
-    cache.set(cache_key, result, ttl=300)
-    return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
+    try:
+        data = await asyncio.to_thread(ds2.get_dragon_tiger)
+        result = [DragonTigerItem(**item) for item in data]
+        cache.set(cache_key, result, ttl=300)
+        return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
+    except Exception as e:
+        logger.warning(f"dragon_tiger failed: {e}")
+        return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
 
 
 @router.get("/margin")
@@ -497,12 +505,16 @@ async def margin(code: str = Query("", description="股票代码")):
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
-    data = await asyncio.to_thread(ds2.get_margin_trading, code)
-    if not data:
-        return {"data": MarginTradingItem(code=code, trade_date="", margin_buy=0, margin_balance=0, short_sell=0, short_balance=0, total_balance=0).model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
-    result = MarginTradingItem(**data)
-    cache.set(cache_key, result.model_dump(), ttl=300)
-    return {"data": result.model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
+    try:
+        data = await asyncio.to_thread(ds2.get_margin_trading, code)
+        if not data:
+            return {"data": MarginTradingItem(code=code, trade_date="", margin_buy=0, margin_balance=0, short_sell=0, short_balance=0, total_balance=0).model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
+        result = MarginTradingItem(**data)
+        cache.set(cache_key, result.model_dump(), ttl=300)
+        return {"data": result.model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
+    except Exception as e:
+        logger.warning(f"margin failed: {e}")
+        return {"data": MarginTradingItem(code=code, trade_date="", margin_buy=0, margin_balance=0, short_sell=0, short_balance=0, total_balance=0).model_dump(), "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
 
 
 @router.get("/block_trades")
@@ -513,10 +525,14 @@ async def block_trades(code: str = Query("", description="股票代码")):
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
-    data = await asyncio.to_thread(ds2.get_block_trades, code)
-    result = [BlockTradeItem(**item) for item in data]
-    cache.set(cache_key, result, ttl=300)
-    return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
+    try:
+        data = await asyncio.to_thread(ds2.get_block_trades, code)
+        result = [BlockTradeItem(**item) for item in data]
+        cache.set(cache_key, result, ttl=300)
+        return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
+    except Exception as e:
+        logger.warning(f"block_trades failed: {e}")
+        return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
 
 
 @router.get("/shareholder")
@@ -527,12 +543,16 @@ async def shareholder(code: str = Query("", description="股票代码")):
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
-    data = await asyncio.to_thread(ds2.get_shareholder_count, code)
-    if not data:
-        return {"data": ShareholderItem(code=code, end_date="", holder_num=0, change_pct=0.0).model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
-    result = ShareholderItem(**data)
-    cache.set(cache_key, result.model_dump(), ttl=300)
-    return {"data": result.model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
+    try:
+        data = await asyncio.to_thread(ds2.get_shareholder_count, code)
+        if not data:
+            return {"data": ShareholderItem(code=code, end_date="", holder_num=0, change_pct=0.0).model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
+        result = ShareholderItem(**data)
+        cache.set(cache_key, result.model_dump(), ttl=300)
+        return {"data": result.model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
+    except Exception as e:
+        logger.warning(f"shareholder failed: {e}")
+        return {"data": ShareholderItem(code=code, end_date="", holder_num=0, change_pct=0.0).model_dump(), "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
 
 
 @router.get("/news")
@@ -545,14 +565,18 @@ async def news(
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
-    if not code:
-        data = await asyncio.to_thread(ds2.get_global_news)
-        result = [NewsItem(**item) for item in data]
-    else:
-        data = await asyncio.to_thread(ds2.get_stock_news, code, page=page, page_size=page_size)
-        result = [NewsItem(**item) for item in data]
-    cache.set(cache_key, result, ttl=120)
-    return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
+    try:
+        if not code:
+            data = await asyncio.to_thread(ds2.get_global_news)
+            result = [NewsItem(**item) for item in data]
+        else:
+            data = await asyncio.to_thread(ds2.get_stock_news, code, page=page, page_size=page_size)
+            result = [NewsItem(**item) for item in data]
+        cache.set(cache_key, result, ttl=120)
+        return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
+    except Exception as e:
+        logger.warning(f"news failed: {e}")
+        return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
 
 
 @router.get("/global_news")
@@ -561,10 +585,14 @@ async def global_news():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
-    data = await asyncio.to_thread(ds2.get_global_news)
-    result = [NewsItem(**item) for item in data]
-    cache.set(cache_key, result, ttl=120)
-    return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
+    try:
+        data = await asyncio.to_thread(ds2.get_global_news)
+        result = [NewsItem(**item) for item in data]
+        cache.set(cache_key, result, ttl=120)
+        return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
+    except Exception as e:
+        logger.warning(f"global_news failed: {e}")
+        return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
 
 
 @router.get("/hot_stocks_signal")
@@ -573,16 +601,20 @@ async def hot_stocks_signal():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("ths", cached=True)}
-    data_source = "ths"
-    data = await asyncio.to_thread(ds2.get_hot_stocks_ths)
-    if data:
-        result = [HotStockSignalItem(**item) for item in data]
-    else:
-        data = await asyncio.to_thread(ds2.get_hot_stocks_signal_fallback)
-        data_source = "eastmoney"
-        result = [HotStockSignalItem(**item) for item in data]
-    cache.set(cache_key, result)
-    return {"data": result, "_meta": _build_meta(data_source, cached=False)}
+    try:
+        data_source = "ths"
+        data = await asyncio.to_thread(ds2.get_hot_stocks_ths)
+        if data:
+            result = [HotStockSignalItem(**item) for item in data]
+        else:
+            data = await asyncio.to_thread(ds2.get_hot_stocks_signal_fallback)
+            data_source = "eastmoney"
+            result = [HotStockSignalItem(**item) for item in data]
+        cache.set(cache_key, result)
+        return {"data": result, "_meta": _build_meta(data_source, cached=False)}
+    except Exception as e:
+        logger.warning(f"hot_stocks_signal failed: {e}")
+        return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
 
 
 @router.get("/sector_ranking")
@@ -591,15 +623,14 @@ async def sector_ranking():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
-    # P1 修复(2026-07-31):原代码无 try/except,get_sector_ranking 抛异常时直接 500
     try:
         data = await asyncio.to_thread(ds2.get_sector_ranking)
+        result = [SectorRankingItem(**item) for item in data]
+        cache.set(cache_key, result)
+        return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
     except Exception as e:
         logger.warning(f"sector_ranking failed: {e}")
         return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
-    result = [SectorRankingItem(**item) for item in data]
-    cache.set(cache_key, result)
-    return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
 
 
 class HeatmapItem(BaseModel):

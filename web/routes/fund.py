@@ -275,7 +275,7 @@ async def search_fund(q: str = Query(..., min_length=1, description="基金代�
         return {"data": result[:20], "query": q, "count": len(result), "_meta": {"cached": False}}
     except Exception as e:
         logger.warning(f"fund search failed: {e}")
-        return {"data": [], "query": q, "error": str(e)}
+        return {"data": [], "query": q, "error": "搜索失败,请稍后重试"}
 
 
 # ============ 基金实时行情聚合 ============
@@ -291,10 +291,15 @@ async def fund_realtime(codes: str = Query(..., description="基金代码,逗号
     cached = _fund_cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": {"cached": True}}
-    quotes = await asyncio.to_thread(get_fund_realtime_tencent, code_list)
-    if quotes:
-        _fund_cache.set(cache_key, quotes, ttl=10)
-    return {"data": quotes, "_meta": {"cached": False}}
+    # P1 修复(2026-07-31):添加 try/except,数据源异常时返回空数据而非 500
+    try:
+        quotes = await asyncio.to_thread(get_fund_realtime_tencent, code_list)
+        if quotes:
+            _fund_cache.set(cache_key, quotes, ttl=10)
+        return {"data": quotes, "_meta": {"cached": False}}
+    except Exception as e:
+        logger.warning(f"fund_realtime failed: {e}")
+        return {"data": [], "_meta": {"cached": False, "quality_score": 0.0}}
 
 
 # ============ 基金历史净值 ============
@@ -307,7 +312,12 @@ async def fund_history(code: str = Query(...), period: str = Query("1y")):
     cached = _fund_cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "code": code, "period": period, "_meta": {"cached": True}}
-    data = await asyncio.to_thread(get_fund_history_tencent, code, period)
-    if data:
-        _fund_cache.set(cache_key, data, ttl=300)
-    return {"data": data, "code": code, "period": period, "_meta": {"cached": False}}
+    # P1 修复(2026-07-31):添加 try/except,数据源异常时返回空数据而非 500
+    try:
+        data = await asyncio.to_thread(get_fund_history_tencent, code, period)
+        if data:
+            _fund_cache.set(cache_key, data, ttl=300)
+        return {"data": data, "code": code, "period": period, "_meta": {"cached": False}}
+    except Exception as e:
+        logger.warning(f"fund_history failed: {e}")
+        return {"data": [], "code": code, "period": period, "_meta": {"cached": False, "quality_score": 0.0}}

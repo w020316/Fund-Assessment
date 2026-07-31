@@ -48,9 +48,14 @@ async def news_feed(
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("aggregator", cached=True)}
-    data = await get_news_feed(sector=sector, fund_code=fund_code)
-    cache.set(cache_key, data, ttl=60)
-    return {"data": data, "_meta": _build_meta("aggregator", cached=False)}
+    try:
+        data = await get_news_feed(sector=sector, fund_code=fund_code)
+        cache.set(cache_key, data, ttl=60)
+        return {"data": data, "_meta": _build_meta("aggregator", cached=False)}
+    except Exception as e:
+        from loguru import logger
+        logger.warning(f"news_feed failed: {e}")
+        return {"data": [], "_meta": _build_meta("aggregator", cached=False, quality_score=0.0)}
 
 
 @router.get("/hot")
@@ -62,9 +67,14 @@ async def news_hot(
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("aggregator", cached=True)}
-    data = await get_hot_events(limit=limit)
-    cache.set(cache_key, data, ttl=60)
-    return {"data": data, "_meta": _build_meta("aggregator", cached=False)}
+    try:
+        data = await get_hot_events(limit=limit)
+        cache.set(cache_key, data, ttl=60)
+        return {"data": data, "_meta": _build_meta("aggregator", cached=False)}
+    except Exception as e:
+        from loguru import logger
+        logger.warning(f"news_hot failed: {e}")
+        return {"data": [], "_meta": _build_meta("aggregator", cached=False, quality_score=0.0)}
 
 
 @router.get("/sentiment")
@@ -74,9 +84,14 @@ async def news_sentiment():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("aggregator", cached=True)}
-    data = await get_sentiment_index()
-    cache.set(cache_key, data, ttl=60)
-    return {"data": data, "_meta": _build_meta("aggregator", cached=False)}
+    try:
+        data = await get_sentiment_index()
+        cache.set(cache_key, data, ttl=60)
+        return {"data": data, "_meta": _build_meta("aggregator", cached=False)}
+    except Exception as e:
+        from loguru import logger
+        logger.warning(f"news_sentiment failed: {e}")
+        return {"data": {"score": 50, "level": "neutral"}, "_meta": _build_meta("aggregator", cached=False, quality_score=0.0)}
 
 
 class SearchRequest(BaseModel):
@@ -90,5 +105,10 @@ class SearchRequest(BaseModel):
 async def news_search(req: SearchRequest):
     """AI检索(Tavily+LLM总结)"""
     # AI检索不缓存(实时性要求高)
-    data = await ai_search(req.query)
-    return {"data": data, "_meta": _build_meta("tavily+llm", cached=False)}
+    try:
+        data = await ai_search(req.query)
+        return {"data": data, "_meta": _build_meta("tavily+llm", cached=False)}
+    except Exception as e:
+        from loguru import logger
+        logger.warning(f"news_search failed: {e}")
+        return {"data": {"summary": "检索失败,请稍后重试", "results": []}, "_meta": _build_meta("tavily+llm", cached=False, quality_score=0.0)}
