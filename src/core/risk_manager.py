@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta
 from enum import Enum
@@ -69,6 +70,10 @@ class RiskManager:
         self._no_new_positions: bool = False
         self._position_reduction: float = 1.0
         self._last_trade_date: Optional[date] = None
+        # 并发安全修复(2026-07-31):RiskManager 被多策略并发调用(asyncio.to_thread),
+        # check_order/record_trade/update_position 修改共享状态(_total_assets/_daily_pnl 等)无锁保护,
+        # 导致连续止损计数错误、资金计算不准。用 RLock(可重入,因 record_trade 会调用 _save_state)。
+        self._lock = threading.RLock()
         self._init_db()
         self._load_state()
 
@@ -253,96 +258,99 @@ class RiskManager:
         return self._daily_pnl / self._daily_start_assets
 
     def check_order(self, order: dict[str, Any]) -> tuple[bool, str]:
-        self._check_pause_expiry()
-        self._check_daily_reset()
+        with self._lock:
+            self._check_pause_expiry()
+            self._check_daily_reset()
 
-        if self._is_emergency_stopped:
-            return False, "紧急停止已激活，禁止所有交易"
+            if self._is_emergency_stopped:
+                return False, "紧急停止已激活，禁止所有交易"
 
-        if self._is_paused:
-            return False, f"系统暂停中，恢复日期: {self._pause_until}"
+            if self._is_paused:
+                return False, f"系统暂停中，恢复日期: {self._pause_until}"
 
-        drawdown = self._calc_drawdown()
-        if drawdown > _SYSTEM_DRAWDOWN_THRESHOLD:
-            self._is_paused = True
-            self._pause_until = date.today() + timedelta(days=_SYSTEM_PAUSE_DAYS)
-            self._save_state()
-            return False, f"资产回撤 {drawdown:.2%} 超过 {_SYSTEM_DRAWDOWN_THRESHOLD:.0%} 阈值，清仓并暂停{_SYSTEM_PAUSE_DAYS}日"
-
-        daily_pnl_pct = self._calc_daily_pnl_pct()
-        if daily_pnl_pct < -_DAILY_LOSS_THRESHOLD:
-            side = order.get("side", "")
-            if side.lower() in ("buy", "买入"):
-                self._no_new_positions = True
+            drawdown = self._calc_drawdown()
+            if drawdown > _SYSTEM_DRAWDOWN_THRESHOLD:
+                self._is_paused = True
+                self._pause_until = date.today() + timedelta(days=_SYSTEM_PAUSE_DAYS)
                 self._save_state()
-                return False, f"单日亏损 {daily_pnl_pct:.2%} 超过 {_DAILY_LOSS_THRESHOLD:.0%} 阈值，禁止开新仓"
+                return False, f"资产回撤 {drawdown:.2%} 超过 {_SYSTEM_DRAWDOWN_THRESHOLD:.0%} 阈值，清仓并暂停{_SYSTEM_PAUSE_DAYS}日"
 
-        if self._no_new_positions:
-            side = order.get("side", "")
-            if side.lower() in ("buy", "买入"):
-                return False, "风控限制：当日禁止开新仓"
+            daily_pnl_pct = self._calc_daily_pnl_pct()
+            if daily_pnl_pct < -_DAILY_LOSS_THRESHOLD:
+                side = order.get("side", "")
+                if side.lower() in ("buy", "买入"):
+                    self._no_new_positions = True
+                    self._save_state()
+                    return False, f"单日亏损 {daily_pnl_pct:.2%} 超过 {_DAILY_LOSS_THRESHOLD:.0%} 阈值，禁止开新仓"
 
-        if self._consecutive_stop_losses >= _CONSECUTIVE_STOP_LOSS_LIMIT:
-            side = order.get("side", "")
-            if side.lower() in ("buy", "买入"):
-                self._position_reduction = _POSITION_REDUCTION_RATIO
-                self._save_state()
-                return True, f"连续{_CONSECUTIVE_STOP_LOSS_LIMIT}次止损，买入仓位缩减至{_POSITION_REDUCTION_RATIO:.0%}"
+            if self._no_new_positions:
+                side = order.get("side", "")
+                if side.lower() in ("buy", "买入"):
+                    return False, "风控限制：当日禁止开新仓"
 
-        return True, "风控检查通过"
+            if self._consecutive_stop_losses >= _CONSECUTIVE_STOP_LOSS_LIMIT:
+                side = order.get("side", "")
+                if side.lower() in ("buy", "买入"):
+                    self._position_reduction = _POSITION_REDUCTION_RATIO
+                    self._save_state()
+                    return True, f"连续{_CONSECUTIVE_STOP_LOSS_LIMIT}次止损，买入仓位缩减至{_POSITION_REDUCTION_RATIO:.0%}"
+
+            return True, "风控检查通过"
 
     def update_position(self, position: dict[str, Any]) -> None:
-        total_assets = position.get("total_assets", self._total_assets)
-        self._total_assets = total_assets
-        if total_assets > self._peak_assets:
-            self._peak_assets = total_assets
-        self._daily_pnl = self._total_assets - self._daily_start_assets
-        self._save_state()
+        with self._lock:
+            total_assets = position.get("total_assets", self._total_assets)
+            self._total_assets = total_assets
+            if total_assets > self._peak_assets:
+                self._peak_assets = total_assets
+            self._daily_pnl = self._total_assets - self._daily_start_assets
+            self._save_state()
 
     def record_trade(self, trade: TradeRecord) -> None:
-        today = date.today()
-        if self._last_trade_date != today:
-            self._daily_start_assets = self._total_assets
-            self._daily_pnl = 0.0
-            self._last_trade_date = today
+        with self._lock:
+            today = date.today()
+            if self._last_trade_date != today:
+                self._daily_start_assets = self._total_assets
+                self._daily_pnl = 0.0
+                self._last_trade_date = today
 
-        self._daily_pnl += trade.profit
-        self._total_assets += trade.profit
-        if self._total_assets > self._peak_assets:
-            self._peak_assets = self._total_assets
+            self._daily_pnl += trade.profit
+            self._total_assets += trade.profit
+            if self._total_assets > self._peak_assets:
+                self._peak_assets = self._total_assets
 
-        if trade.is_stop_loss:
-            self._consecutive_stop_losses += 1
-        else:
-            if trade.side.lower() in ("sell", "卖出") and trade.profit > 0:
-                self._consecutive_stop_losses = 0
-                if self._position_reduction < 1.0:
-                    self._position_reduction = 1.0
+            if trade.is_stop_loss:
+                self._consecutive_stop_losses += 1
+            else:
+                if trade.side.lower() in ("sell", "卖出") and trade.profit > 0:
+                    self._consecutive_stop_losses = 0
+                    if self._position_reduction < 1.0:
+                        self._position_reduction = 1.0
 
-        try:
-            with self._get_conn() as conn:
-                conn.execute(
-                    """
-                    INSERT INTO trade_records (symbol, side, price, quantity, amount, profit, is_stop_loss, timestamp)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        trade.symbol,
-                        trade.side,
-                        trade.price,
-                        trade.quantity,
-                        trade.amount,
-                        trade.profit,
-                        int(trade.is_stop_loss),
-                        trade.timestamp.isoformat(),
-                    ),
-                )
-        except Exception as e:
-            # P1 修复(2026-07-29):交易记录持久化失败也升级为 error(原 warning)
-            # 交易记录丢失会导致风控连续止损计数不准,后续 save_state 也会因状态丢失而失败
-            logger.error(f"RiskManager.record_trade DB insert failed: {e}. trade={trade}")
+            try:
+                with self._get_conn() as conn:
+                    conn.execute(
+                        """
+                        INSERT INTO trade_records (symbol, side, price, quantity, amount, profit, is_stop_loss, timestamp)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            trade.symbol,
+                            trade.side,
+                            trade.price,
+                            trade.quantity,
+                            trade.amount,
+                            trade.profit,
+                            int(trade.is_stop_loss),
+                            trade.timestamp.isoformat(),
+                        ),
+                    )
+            except Exception as e:
+                # P1 修复(2026-07-29):交易记录持久化失败也升级为 error(原 warning)
+                # 交易记录丢失会导致风控连续止损计数不准,后续 save_state 也会因状态丢失而失败
+                logger.error(f"RiskManager.record_trade DB insert failed: {e}. trade={trade}")
 
-        self._save_state()
+            self._save_state()
 
     def get_risk_status(self) -> RiskStatus:
         self._check_pause_expiry()
@@ -390,16 +398,18 @@ class RiskManager:
         )
 
     def emergency_stop(self) -> None:
-        self._is_emergency_stopped = True
-        self._save_state()
+        with self._lock:
+            self._is_emergency_stopped = True
+            self._save_state()
         logger.critical("紧急停止已激活！所有自动交易已停止")
 
     def resume(self) -> None:
-        self._is_emergency_stopped = False
-        self._is_paused = False
-        self._pause_until = None
-        self._no_new_positions = False
-        self._position_reduction = 1.0
-        self._consecutive_stop_losses = 0
-        self._save_state()
+        with self._lock:
+            self._is_emergency_stopped = False
+            self._is_paused = False
+            self._pause_until = None
+            self._no_new_positions = False
+            self._position_reduction = 1.0
+            self._consecutive_stop_losses = 0
+            self._save_state()
         logger.info("风控状态已重置，恢复交易")

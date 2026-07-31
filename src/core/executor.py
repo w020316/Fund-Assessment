@@ -360,6 +360,10 @@ class TradeExecutor:
         # 修复(2026-07-29): 原代码未在 __init__ 初始化 _pre_sell_snapshot,
         # 若 execute_signal 未先调用 _snapshot_positions 会抛 AttributeError
         self._pre_sell_snapshot: dict[str, Any] = {}
+        # 修复(2026-07-31): 新增 _lock 保护 SELL 流程中"快照持仓 + 执行 sell"的原子性,
+        # 避免多策略并发时快照后、sell 前持仓被其他策略修改,导致 profit 计算基于过期
+        # 快照,或 _pre_sell_snapshot 实例属性被并发请求互相覆盖
+        self._lock = threading.Lock()
 
     def _get_conn(self) -> sqlite3.Connection:
         return sqlite3.connect(self._db_path)
@@ -477,23 +481,31 @@ class TradeExecutor:
                 return None
 
         order: Optional[Order] = None
+        # 修复(2026-07-31): 用局部变量保存 SELL 前快照,避免实例属性 _pre_sell_snapshot
+        # 被并发请求互相覆盖。配合 _lock 保证快照与 sell 的原子性。
+        pre_sell_snapshot_local: dict[str, Any] = {}
         if signal.side == OrderSide.BUY:
             order = self._broker.buy(
                 signal.symbol, signal.price, signal.quantity, signal.order_type
             )
         elif signal.side == OrderSide.SELL:
-            # 修复:在 sell 之前快照持仓,用于后续 profit 计算(sell 后持仓被削减)
-            try:
-                positions = self._broker.get_positions()
-                self._pre_sell_snapshot = {
-                    p.symbol: {"cost_price": p.cost_price, "quantity": p.quantity}
-                    for p in positions if p.symbol == signal.symbol
-                }
-            except Exception:
-                self._pre_sell_snapshot = {}
-            order = self._broker.sell(
-                signal.symbol, signal.price, signal.quantity, signal.order_type
-            )
+            # 修复(2026-07-31): _pre_sell_snapshot 快照与 sell 执行非原子,
+            # 多策略并发时可能在快照后、执行前持仓被其他策略修改,导致 profit 计算
+            # 基于过期快照。将快照与 sell 放入 _lock 内,确保原子性。
+            with self._lock:
+                try:
+                    positions = self._broker.get_positions()
+                    pre_sell_snapshot_local = {
+                        p.symbol: {"cost_price": p.cost_price, "quantity": p.quantity}
+                        for p in positions if p.symbol == signal.symbol
+                    }
+                except Exception:
+                    pre_sell_snapshot_local = {}
+                # 同步更新实例属性(向后兼容,保留原有行为)
+                self._pre_sell_snapshot = pre_sell_snapshot_local
+                order = self._broker.sell(
+                    signal.symbol, signal.price, signal.quantity, signal.order_type
+                )
 
         if order is None:
             logger.warning(f"订单执行失败: {signal.symbol}")
@@ -509,10 +521,11 @@ class TradeExecutor:
             self._risk_manager.update_position({"total_assets": balance.total_assets})
 
             # 修复:中文不需要 lower(),且 SELL 后持仓已被削减,需用执行前的快照计算 profit
+            # 修复(2026-07-31): 改用局部变量 pre_sell_snapshot_local,避免实例属性被并发覆盖
             is_stop_loss = "止损" in (signal.reason or "")
             profit = 0.0
-            if signal.side == OrderSide.SELL and hasattr(self, '_pre_sell_snapshot'):
-                prev_pos = self._pre_sell_snapshot.get(signal.symbol)
+            if signal.side == OrderSide.SELL and pre_sell_snapshot_local:
+                prev_pos = pre_sell_snapshot_local.get(signal.symbol)
                 if prev_pos:
                     profit = (order.filled_price - prev_pos["cost_price"]) * order.filled_quantity
 

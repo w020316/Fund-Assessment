@@ -10,6 +10,10 @@ from typing import Any
 from loguru import logger
 from pydantic import BaseModel
 
+# 文件层原子写入修复(2026-07-31):原 cache.set 用 write_text 直接写文件,
+# 并发写时可能产生半截 JSON 损坏文件。复用 file_io.atomic_write_json 原子写入(写临时文件再 rename)。
+from src.utils.file_io import atomic_write_json, safe_read_json
+
 
 def _serialize(obj: Any) -> Any:
     """JSON serializer that handles Pydantic models and common types."""
@@ -115,12 +119,12 @@ class DataCache:
         mem_val = self._memory.get(key)
         if mem_val is not None:
             return mem_val
-        # 2. 内存未命中:查文件层
+        # 2. 内存未命中:查文件层(用 safe_read_json 防止损坏文件导致异常)
         path = self.cache_dir / f"{self._safe_key(key)}.json"
-        if not path.exists():
+        data = safe_read_json(path)
+        if data is None:
             return None
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
             ttl = data.get("_ttl", self.default_ttl)
             if time.time() - data.get("_timestamp", 0) > ttl:
                 # 修复(2026-07-29):原代码 unlink 在并发读时引发 FileNotFoundError 竞态
@@ -138,14 +142,14 @@ class DataCache:
         effective_ttl = ttl or self.default_ttl
         # 1. 写内存层(后续命中走内存)
         self._memory.set(key, value, ttl=effective_ttl)
-        # 2. 写文件层(持久化,重启后仍有效)
+        # 2. 写文件层(原子写入,防止并发写损坏)
         path = self.cache_dir / f"{self._safe_key(key)}.json"
         data = {
             "value": value,
             "_timestamp": time.time(),
             "_ttl": effective_ttl,
         }
-        path.write_text(json.dumps(data, ensure_ascii=False, default=_serialize), encoding="utf-8")
+        atomic_write_json(path, data)
 
     def delete(self, key: str):
         self._memory.delete(key)

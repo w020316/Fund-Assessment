@@ -688,41 +688,43 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
       <span class="data-quality-badge badge-mock" id="dataQualityBadge">模拟</span>
       <span class="data-freshness" id="dataFreshness"><span class="freshness-icon"></span><span id="freshnessText">—</span></span>
       <span id="sysTime"></span>
-      <span class="status-dot connected" id="connStatus" title="连接状态"></span>
+      <!-- (2026-07-31) P2-2 无障碍: status-dot 添加 role/tabindex/aria-label -->
+      <span class="status-dot connected" id="connStatus" role="button" tabindex="0" aria-label="连接状态" title="连接状态"></span>
     </div>
   </header>
 
   <div class="main-layout">
     <!-- ========== 左侧导航 ========== -->
     <nav class="sidebar">
-      <div class="nav-item active" data-page="market" onclick="switchPage('market')">
+      <!-- (2026-07-31) P2-2 无障碍: nav-item 添加 role/tabindex/aria-label -->
+      <div class="nav-item active" data-page="market" role="button" tabindex="0" aria-label="行情总览" onclick="switchPage('market')">
         <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg></span><span>行情总览</span><span class="kbd" style="margin-left:auto;">1</span>
       </div>
-      <div class="nav-item" data-page="ai" onclick="switchPage('ai')">
+      <div class="nav-item" data-page="ai" role="button" tabindex="0" aria-label="智能分析" onclick="switchPage('ai')">
         <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/></svg></span><span>智能分析</span><span class="kbd" style="margin-left:auto;">2</span>
       </div>
-      <div class="nav-item" data-page="strategy" onclick="switchPage('strategy')">
+      <div class="nav-item" data-page="strategy" role="button" tabindex="0" aria-label="策略中心" onclick="switchPage('strategy')">
         <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg></span><span>策略中心</span><span class="kbd" style="margin-left:auto;">3</span>
       </div>
-      <div class="nav-item" data-page="trade" onclick="switchPage('trade')">
+      <div class="nav-item" data-page="trade" role="button" tabindex="0" aria-label="交易执行" onclick="switchPage('trade')">
         <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 7-7"/><path d="M17 7h4v4"/></svg></span><span>交易执行</span><span class="kbd" style="margin-left:auto;">4</span>
       </div>
-      <div class="nav-item" data-page="position" onclick="switchPage('position')">
+      <div class="nav-item" data-page="position" role="button" tabindex="0" aria-label="持仓管理" onclick="switchPage('position')">
         <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></svg></span><span>持仓管理</span><span class="kbd" style="margin-left:auto;">5</span>
       </div>
-      <div class="nav-item" data-page="fund" onclick="switchPage('fund')">
+      <div class="nav-item" data-page="fund" role="button" tabindex="0" aria-label="基金管理" onclick="switchPage('fund')">
         <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg></span><span>基金管理</span><span class="kbd" style="margin-left:auto;">6</span>
       </div>
-      <div class="nav-item" data-page="global" onclick="switchPage('global')">
+      <div class="nav-item" data-page="global" role="button" tabindex="0" aria-label="国际市场" onclick="switchPage('global')">
         <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18"/><path d="M12 3a15 15 0 0 0 0 18"/></svg></span><span>国际市场</span><span class="kbd" style="margin-left:auto;">7</span>
       </div>
-      <div class="nav-item" data-page="data" onclick="switchPage('data')">
+      <div class="nav-item" data-page="data" role="button" tabindex="0" aria-label="数据中心" onclick="switchPage('data')">
         <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg></span><span>数据中心</span><span class="kbd" style="margin-left:auto;">8</span>
       </div>
-      <div class="nav-item" data-page="monitor" onclick="switchPage('monitor')">
+      <div class="nav-item" data-page="monitor" role="button" tabindex="0" aria-label="监控预警" onclick="switchPage('monitor')">
         <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></span><span>监控预警</span><span class="kbd" style="margin-left:auto;">9</span>
       </div>
-      <div class="nav-item" data-page="config" onclick="switchPage('config')">
+      <div class="nav-item" data-page="config" role="button" tabindex="0" aria-label="系统配置" onclick="switchPage('config')">
         <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg></span><span>系统配置</span><span class="kbd" style="margin-left:auto;">0</span>
       </div>
     </nav>
@@ -744,9 +746,10 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
           <div class="card">
             <div class="card-title">热门股票排行</div>
             <div class="tabs" id="hotStockTabs">
-              <div class="tab active" onclick="switchHotTab('gain')">涨幅TOP10</div>
-              <div class="tab" onclick="switchHotTab('loss')">跌幅TOP10</div>
-              <div class="tab" onclick="switchHotTab('volume')">成交额TOP10</div>
+              <!-- (2026-07-31) P2-2 无障碍: tab 添加 role/tabindex/aria-label -->
+              <div class="tab active" role="button" tabindex="0" aria-label="涨幅TOP10" onclick="switchHotTab('gain')">涨幅TOP10</div>
+              <div class="tab" role="button" tabindex="0" aria-label="跌幅TOP10" onclick="switchHotTab('loss')">跌幅TOP10</div>
+              <div class="tab" role="button" tabindex="0" aria-label="成交额TOP10" onclick="switchHotTab('volume')">成交额TOP10</div>
             </div>
             <div class="table-wrap" style="max-height:360px;overflow-y:auto;">
               <table>
@@ -995,19 +998,20 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
           <div class="card">
             <div class="card-title" style="color:var(--color-up);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 7-7"/><path d="M17 7h4v4"/></svg> 买入</div>
             <div class="form-group">
-              <label class="form-label">股票代码</label>
+              <!-- (2026-07-31) P2-3 无障碍: label 添加 for 关联 input/select id -->
+              <label for="buyCode" class="form-label">股票代码</label>
               <input class="input" id="buyCode" placeholder="如 600519">
             </div>
             <div class="form-group">
-              <label class="form-label">买入数量</label>
+              <label for="buyQty" class="form-label">买入数量</label>
               <input class="input" id="buyQty" type="number" placeholder="100的整数倍" min="100" step="100">
             </div>
             <div class="form-group">
-              <label class="form-label">委托价格</label>
+              <label for="buyPrice" class="form-label">委托价格</label>
               <input class="input" id="buyPrice" type="number" step="0.01" placeholder="留空为市价">
             </div>
             <div class="form-group">
-              <label class="form-label">策略选择</label>
+              <label for="buyStrategy" class="form-label">策略选择</label>
               <select class="select" id="buyStrategy">
                 <option value="">不使用策略</option>
                 <option value="momentum">动量策略</option>
@@ -1021,11 +1025,11 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
           <div class="card">
             <div class="card-title" style="color:var(--color-down);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 6l7.5 7.5L13.5 8.5 23 18"/><path d="M17 18h6v-6"/></svg> 卖出</div>
             <div class="form-group">
-              <label class="form-label">股票代码</label>
+              <label for="sellCode" class="form-label">股票代码</label>
               <input class="input" id="sellCode" placeholder="如 600519">
             </div>
             <div class="form-group">
-              <label class="form-label">卖出数量</label>
+              <label for="sellQty" class="form-label">卖出数量</label>
               <input class="input" id="sellQty" type="number" placeholder="卖出数量" min="100" step="100">
             </div>
             <div class="form-group">
@@ -1033,7 +1037,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
               <input class="input" id="sellPrice" type="number" step="0.01" placeholder="留空为市价">
             </div>
             <div class="form-group">
-              <label class="form-label">策略选择</label>
+              <label for="sellStrategy" class="form-label">策略选择</label>
               <select class="select" id="sellStrategy">
                 <option value="">不使用策略</option>
                 <option value="stop_loss">止损策略</option>
@@ -1320,7 +1324,8 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <div class="modal-box" style="max-width:900px;">
           <div class="modal-header">
             <span id="holdingsModalTitle">基金重仓股分析</span>
-            <span class="modal-close" onclick="document.getElementById('holdingsModal').style.display='none'">×</span>
+            <!-- (2026-07-31) P2-2 无障碍: modal-close 添加 role/tabindex/aria-label -->
+            <span class="modal-close" role="button" tabindex="0" aria-label="关闭" onclick="document.getElementById('holdingsModal').style.display='none'">×</span>
           </div>
           <div class="modal-body" id="holdingsModalBody" style="max-height:70vh;overflow-y:auto;"></div>
         </div>
@@ -1331,7 +1336,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <div class="modal-box" style="max-width:600px;">
           <div class="modal-header">
             <span>上传持仓识别</span>
-            <span class="modal-close" onclick="closeUploadModal()">×</span>
+            <span class="modal-close" role="button" tabindex="0" aria-label="关闭" onclick="closeUploadModal()">×</span>
           </div>
           <div class="modal-body" style="max-height:75vh;overflow-y:auto;">
             <div style="padding:16px;">
@@ -1354,7 +1359,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <div class="modal-box" style="max-width:1000px;">
           <div class="modal-header">
             <span id="multiAgentModalTitle">基金多智能体分析</span>
-            <span class="modal-close" onclick="closeMultiAgentModal()">×</span>
+            <span class="modal-close" role="button" tabindex="0" aria-label="关闭" onclick="closeMultiAgentModal()">×</span>
           </div>
           <div class="modal-body" id="multiAgentModalBody" style="max-height:75vh;overflow-y:auto;"></div>
         </div>
@@ -1428,11 +1433,12 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
       <div class="page" id="page-data">
         <div class="card mb-16">
           <div class="tabs" id="dataTabs">
-            <div class="tab active" onclick="switchDataTab('research')">研报</div>
-            <div class="tab" onclick="switchDataTab('dragon')">龙虎榜</div>
-            <div class="tab" onclick="switchDataTab('margin')">融资融券</div>
-            <div class="tab" onclick="switchDataTab('block')">大宗交易</div>
-            <div class="tab" onclick="switchDataTab('shareholder')">股东户数</div>
+            <!-- (2026-07-31) P2-2 无障碍: tab 添加 role/tabindex/aria-label -->
+            <div class="tab active" role="button" tabindex="0" aria-label="研报" onclick="switchDataTab('research')">研报</div>
+            <div class="tab" role="button" tabindex="0" aria-label="龙虎榜" onclick="switchDataTab('dragon')">龙虎榜</div>
+            <div class="tab" role="button" tabindex="0" aria-label="融资融券" onclick="switchDataTab('margin')">融资融券</div>
+            <div class="tab" role="button" tabindex="0" aria-label="大宗交易" onclick="switchDataTab('block')">大宗交易</div>
+            <div class="tab" role="button" tabindex="0" aria-label="股东户数" onclick="switchDataTab('shareholder')">股东户数</div>
           </div>
           <div style="display:flex;gap:8px;margin-bottom:12px;">
             <input class="input" id="dataCodeInput" placeholder="输入股票代码（可选）" style="max-width:200px;">
@@ -1583,6 +1589,9 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 </div>
 
 <script>
+// (2026-07-31) P3-1 修复: 提取魔数为 CONFIG 常量, 便于统一维护
+const CONFIG = { TOAST_DURATION: 3000, MARKET_REFRESH_MS: 15000, TIME_UPDATE_MS: 1000, FRESHNESS_UPDATE_MS: 5000 };
+
 /* ========== 全局工具函数 ========== */
 
 // Toast提示
@@ -1592,7 +1601,7 @@ function showToast(msg, type='info') {
   t.className = 'toast toast-' + type;
   t.textContent = msg;
   c.appendChild(t);
-  setTimeout(() => { t.style.opacity='0'; t.style.transition='opacity 0.3s'; setTimeout(()=>t.remove(),300); }, 3000);
+  setTimeout(() => { t.style.opacity='0'; t.style.transition='opacity 0.3s'; setTimeout(()=>t.remove(),300); }, CONFIG.TOAST_DURATION);
 }
 
 // HTML 转义(2026-07-30):防止用户输入的 name 等字段经 innerHTML 注入,造成 XSS
@@ -1820,7 +1829,7 @@ function updateTime() {
     String(now.getMinutes()).padStart(2,'0') + ':' +
     String(now.getSeconds()).padStart(2,'0');
 }
-setInterval(updateTime, 1000);
+setInterval(updateTime, CONFIG.TIME_UPDATE_MS);
 updateTime();
 
 /* ========== 1. 行情总览 ========== */
@@ -1840,7 +1849,7 @@ async function loadMarketData() {
   marketRefreshTimer = setInterval(() => {
     loadIndexData();
     loadHotStocks(currentHotTab);
-  }, 15000);
+  }, CONFIG.MARKET_REFRESH_MS);
 }
 
 // 指数数据
@@ -1924,19 +1933,32 @@ async function loadGlobalIndexBar() {
   const data = await apiCached('/api/global/indices', 'global_indices', 60);
   const list = (data && data.data) || [];
   if (!list.length) return;
-  // 保留已有 A 股指数,追加国际指数
-  const existing = bar.innerHTML;
+  // P1-5 修复(2026-07-31):原代码 bar.innerHTML = existing + globalHtml 会重新解析整个 A 股指数 DOM,
+  // 导致闪烁+丢失事件监听器。改为:用一个单独的 span 容器存放国际指数,只更新该容器。
+  let globalBar = document.getElementById('globalIndexBar');
+  if (!globalBar) {
+    // 首次创建:在 A 股指数后追加一个分隔符+国际指数容器
+    const sep = document.createElement('span');
+    sep.className = 'index-item';
+    sep.style.cssText = 'opacity:0.3;pointer-events:none;';
+    sep.textContent = '|';
+    bar.appendChild(sep);
+    globalBar = document.createElement('span');
+    globalBar.id = 'globalIndexBar';
+    globalBar.style.cssText = 'display:inline-flex;gap:0;';
+    bar.appendChild(globalBar);
+  }
   const globalHtml = list.map(idx => {
     const color = changeColor(idx.change_pct);
     const sign = changeSign(idx.change_pct);
     const flag = idx.market === 'US' ? 'US ' : idx.market === 'HK' ? 'HK ' : '';
     return `<div class="index-item">
-      <span class="index-name">${flag}${idx.name}</span>
+      <span class="index-name">${flag}${escapeHtml(idx.name)}</span>
       <span class="index-price" style="color:${color}">${fmtNum(idx.price)}</span>
       <span class="index-change" style="color:${color}">${sign}${fmtNum(idx.change_pct)}%</span>
     </div>`;
   }).join('');
-  bar.innerHTML = existing + globalHtml;
+  globalBar.innerHTML = globalHtml;
 }
 
 // 迷你走势线（纯SVG）
@@ -2534,7 +2556,8 @@ async function loadKline() {
     const top = toY(Math.max(k.open, k.close));
     const bot = toY(Math.min(k.open, k.close));
     const bodyH = Math.max(bot - top, 1);
-    candlesHtml += `<rect x="${x - bodyW/2}" y="${top}" width="${bodyW}" height="${bodyH}" fill="${isUp ? color : color}" stroke="${color}" stroke-width="0.5" ${isUp ? '' : 'fill-opacity="1"'}/>`;
+    // (2026-07-31) P2-14 修复: 实体填充 isUp?color:color 两分支相同, 简化为 fill="${color}"
+    candlesHtml += `<rect x="${x - bodyW/2}" y="${top}" width="${bodyW}" height="${bodyH}" fill="${color}" stroke="${color}" stroke-width="0.5" ${isUp ? '' : 'fill-opacity="1"'}/>`;
   });
 
   // Y轴刻度
@@ -2643,7 +2666,13 @@ async function loadTradeData() {
   loadTradeHistory();
 }
 
+// 防重复提交标志(P1-6 修复 2026-07-31):网络慢时用户可能多次点击,导致重复成交
+let _tradeSubmitting = false;
+
 async function submitBuy() {
+  if (_tradeSubmitting) return;
+  _tradeSubmitting = true;
+  try {
   const code = document.getElementById('buyCode').value.trim();
   const qty = document.getElementById('buyQty').value;
   const price = document.getElementById('buyPrice').value;
@@ -2677,9 +2706,13 @@ async function submitBuy() {
   document.getElementById('buyPrice').value = '';
   loadTradeHistory();
   loadAccountOverview();
+  } finally { _tradeSubmitting = false; }
 }
 
 async function submitSell() {
+  if (_tradeSubmitting) return;
+  _tradeSubmitting = true;
+  try {
   const code = document.getElementById('sellCode').value.trim();
   const qty = document.getElementById('sellQty').value;
   const price = document.getElementById('sellPrice').value;
@@ -2712,6 +2745,7 @@ async function submitSell() {
   document.getElementById('sellPrice').value = '';
   loadTradeHistory();
   loadAccountOverview();
+  } finally { _tradeSubmitting = false; }
 }
 
 async function loadTradeHistory() {
@@ -2803,6 +2837,8 @@ async function loadTradeHistory() {
 }
 
 async function cancelOrder(orderId) {
+  // (2026-07-31) P2-17 修复: 空参数校验, 避免无 orderId 仍发起请求
+  if (!orderId) return;
   const result = await api('/api/trade/cancel', {
     method: 'POST',
     body: JSON.stringify({order_id: orderId})
@@ -2942,7 +2978,8 @@ async function loadFundData() {
       <td>${(p.cost_nav || 0).toFixed(4)}</td>
       <td>${(p.current_nav || 0).toFixed(4)}</td>
       <td style="color:${changeColorStr};">${(p.change_pct || 0).toFixed(2)}%</td>
-      <td style="color:${pnlColor};">${(p.pnl_amount >= 0 ? '+' : '') + (p.pnl_amount || 0).toFixed(2)}<br><span style="font-size:11px;">(${(p.pnl_pct >= 0 ? '+' : '') + (p.pnl_pct || 0).toFixed(2)}%)</span></td>
+      <!-- (2026-07-31) P2-9 修复: pnl_amount 为 0 时不应显示 "+", 改为 > 0 才加正号 -->
+      <td style="color:${pnlColor};">${(p.pnl_amount > 0 ? '+' : '') + (p.pnl_amount || 0).toFixed(2)}<br><span style="font-size:11px;">(${(p.pnl_pct >= 0 ? '+' : '') + (p.pnl_pct || 0).toFixed(2)}%)</span></td>
       <td style="white-space:nowrap;">
         <button class="btn btn-sm" style="color:var(--accent-cyan);padding:3px 8px;" title="P1-2 重仓股板块分析" onclick="viewHoldings('${escapeHtml(p.fund_code)}','${safeNameAttr}')">分析</button>
         <button class="btn btn-sm" style="color:var(--accent);padding:3px 8px;" title="P1-5 多智能体深度分析" onclick="multiAgentAnalyze('${escapeHtml(p.fund_code)}','${safeNameAttr}',${p.cost_nav || 0},${p.shares || 0})">深度</button>
@@ -3626,9 +3663,11 @@ let _fundAnalyzeProgressTimer = null; // 进度计时器(全局,便于清理)
 // (3) 连续点击 N 次会堆积 N 个并发请求。提升为模块级,统一在 closeMultiAgentModal 清理。
 let _fundAnalyzeAbortController = null; // 当前分析请求的 AbortController(便于外部 abort)
 let _fundAnalyzeTimeoutTimer = null;    // 90s 超时定时器(便于外部 clearTimeout)
+let _fundAnalyzeClosed = false;         // 标志位:modal 已关闭,旧请求不应再写入 DOM
 
 function closeMultiAgentModal() {
   // 统一关闭入口:清理进度计时器 + 超时定时器 + abort 当前请求
+  _fundAnalyzeClosed = true; // P1-2 修复(2026-07-31):设置关闭标志,防止旧请求 catch 仍写入 bodyEl
   if (_fundAnalyzeProgressTimer) { clearInterval(_fundAnalyzeProgressTimer); _fundAnalyzeProgressTimer = null; }
   if (_fundAnalyzeTimeoutTimer) { clearTimeout(_fundAnalyzeTimeoutTimer); _fundAnalyzeTimeoutTimer = null; }
   if (_fundAnalyzeAbortController) { try { _fundAnalyzeAbortController.abort(); } catch(e) {} _fundAnalyzeAbortController = null; }
@@ -3671,6 +3710,7 @@ async function multiAgentAnalyze(fundCode, fundName, costNav, shares) {
   const modal = document.getElementById('multiAgentModal');
   const titleEl = document.getElementById('multiAgentModalTitle');
   const bodyEl = document.getElementById('multiAgentModalBody');
+  _fundAnalyzeClosed = false; // P1-2 修复(2026-07-31):重置关闭标志,允许本次分析写入 DOM
   titleEl.textContent = `多智能体分析 - ${fundName || fundCode} (${fundCode})`;
   // 初始渲染进度条(第1步)
   bodyEl.innerHTML = _renderFundAnalyzeProgress(1, 0);
@@ -3685,6 +3725,7 @@ async function multiAgentAnalyze(fundCode, fundName, costNav, shares) {
     const step = Math.min(7, Math.floor(elapsed / 12) + 1);
     bodyEl.innerHTML = _renderFundAnalyzeProgress(step, elapsed);
   }, 1000);
+  // P1-2 修复(2026-07-31):进度计时器回调中检查关闭标志,避免 modal 关闭后仍写入 DOM
 
   try {
     // P1 修复(2026-07-30):controller/timer 提升为模块级,在 closeMultiAgentModal 中可被 abort/clear
@@ -3811,6 +3852,8 @@ async function multiAgentAnalyze(fundCode, fundName, costNav, shares) {
       </div>` : ''}
     `;
   } catch (e) {
+    // P1-2 修复(2026-07-31):modal 已关闭时不写入 DOM(避免旧请求 catch 污染新显示)
+    if (_fundAnalyzeClosed) return;
     bodyEl.innerHTML = `<div style="padding:24px;text-align:center;color:var(--color-up);">分析失败: ${e.message}</div>`;
   }
 }
@@ -3962,8 +4005,11 @@ function debounceFundSearch(q) {
 }
 
 async function fundSearch(q) {
-  const data = await api(`/api/fund/search?q=${encodeURIComponent(q)}`);
+  // (2026-07-31) P2-10 修复: 添加搜索中加载状态提示, 避免用户误以为无响应
   const el = document.getElementById('fundSearchResult');
+  if (el) el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:4px;" class="pulse-loading">搜索中...</div>';
+  const data = await api(`/api/fund/search?q=${encodeURIComponent(q)}`);
+  if (!el) return;
   if (!data || !data.data || !data.data.length) {
     el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:4px;">无匹配基金</div>';
     return;
@@ -4014,8 +4060,9 @@ async function loadGlobalOverview() {
   const hkHot = ov.hk_hot || [];
 
   // 统计函数
+  // (2026-07-31) P2-20 修复: 空数组返回 empty 标记, 供各分栏渲染"暂无数据"
   const stats = (arr) => {
-    if (!arr.length) return {gain:0, fall:0, flat:0, avg:0, max:null, min:null};
+    if (!arr.length) return {gain:0, fall:0, flat:0, avg:0, max:null, min:null, empty:true};
     let gain=0, fall=0, flat=0, sum=0, max=null, min=null;
     arr.forEach(s => {
       const pct = Number(s.change_pct || 0);
@@ -4026,7 +4073,7 @@ async function loadGlobalOverview() {
       if (!max || pct > max.change_pct) max = s;
       if (!min || pct < min.change_pct) min = s;
     });
-    return {gain, fall, flat, avg: sum/arr.length, max, min};
+    return {gain, fall, flat, avg: sum/arr.length, max, min, empty:false};
   };
 
   const idxStats = stats(indices);
@@ -4062,6 +4109,10 @@ async function loadGlobalOverview() {
   html += '<div class="grid-3 gap-12">';
 
   // 国际指数
+  // (2026-07-31) P2-20 修复: 空数组时显示"暂无数据", 不再展示 0 个指数 +0.00%
+  if (idxStats.empty) {
+    html += `<div style="padding:10px;background:var(--bg-card);border-radius:6px;border-left:3px solid var(--border);"><div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">国际指数</div><div style="font-size:13px;color:var(--text-muted);text-align:center;padding:10px 0;">暂无数据</div></div>`;
+  } else {
   const idxAvgColor = idxStats.avg >= 0 ? 'var(--color-down)' : 'var(--color-up)';
   html += `<div style="padding:10px;background:var(--bg-card);border-radius:6px;border-left:3px solid ${idxAvgColor};">
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">国际指数</div>
@@ -4078,8 +4129,13 @@ async function loadGlobalOverview() {
     html += `<div style="margin-top:6px;font-size:11px;color:var(--text-secondary);">领涨: ${idxStats.max.name || ''} <span style="color:var(--color-down);">+${Number(idxStats.max.change_pct||0).toFixed(2)}%</span></div>`;
   }
   html += '</div>';
+  }
 
   // 美股热门
+  // (2026-07-31) P2-20 修复: 空数组时显示"暂无数据", 不再展示 0 只 +0.00%
+  if (usStats.empty) {
+    html += `<div style="padding:10px;background:var(--bg-card);border-radius:6px;border-left:3px solid var(--border);"><div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">美股热门</div><div style="font-size:13px;color:var(--text-muted);text-align:center;padding:10px 0;">暂无数据</div></div>`;
+  } else {
   const usAvgColor = usStats.avg >= 0 ? 'var(--color-down)' : 'var(--color-up)';
   html += `<div style="padding:10px;background:var(--bg-card);border-radius:6px;border-left:3px solid ${usAvgColor};">
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">美股热门</div>
@@ -4096,8 +4152,13 @@ async function loadGlobalOverview() {
     html += `<div style="margin-top:6px;font-size:11px;color:var(--text-secondary);">领涨: ${usStats.max.name || usStats.max.code || ''} <span style="color:var(--color-down);">+${Number(usStats.max.change_pct||0).toFixed(2)}%</span></div>`;
   }
   html += '</div>';
+  }
 
   // 港股热门
+  // (2026-07-31) P2-20 修复: 空数组时显示"暂无数据", 不再展示 0 只 +0.00%
+  if (hkStats.empty) {
+    html += `<div style="padding:10px;background:var(--bg-card);border-radius:6px;border-left:3px solid var(--border);"><div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">港股热门</div><div style="font-size:13px;color:var(--text-muted);text-align:center;padding:10px 0;">暂无数据</div></div>`;
+  } else {
   const hkAvgColor = hkStats.avg >= 0 ? 'var(--color-down)' : 'var(--color-up)';
   html += `<div style="padding:10px;background:var(--bg-card);border-radius:6px;border-left:3px solid ${hkAvgColor};">
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">港股热门</div>
@@ -4114,6 +4175,7 @@ async function loadGlobalOverview() {
     html += `<div style="margin-top:6px;font-size:11px;color:var(--text-secondary);">领涨: ${hkStats.max.name || hkStats.max.code || ''} <span style="color:var(--color-down);">+${Number(hkStats.max.change_pct||0).toFixed(2)}%</span></div>`;
   }
   html += '</div>';
+  }
 
   html += '</div>';
 
@@ -4195,6 +4257,14 @@ async function queryGlobalStock() {
   const body = document.getElementById('globalQueryBody');
   if (!codes) {
     body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-warning);">请输入代码</td></tr>';
+    return;
+  }
+  // (2026-07-31) P2-12 修复: 添加代码格式校验(美股 1-5 位字母, 港股 5 位数字)
+  const codeList = codes.split(/[,，\s]+/).filter(Boolean);
+  const validRe = market === 'us' ? /^[A-Za-z]{1,5}$/ : /^\d{5}$/;
+  const invalidCode = codeList.find(c => !validRe.test(c));
+  if (invalidCode) {
+    body.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-warning);">代码格式错误: ${escapeHtml(invalidCode)} (${market === 'us' ? '美股应为1-5位字母' : '港股应为5位数字'})</td></tr>`;
     return;
   }
   body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);" class="pulse-loading">查询中...</td></tr>';
@@ -4467,7 +4537,8 @@ async function addStockPosition() {
   if (!code) { showToast('请输入股票代码', 'error'); return; }
   if (!/^\d{6}$/.test(code)) { showToast('股票代码需为 6 位数字', 'error'); return; }
   if (!(qty > 0)) { showToast('数量需大于 0', 'error'); return; }
-  if (!(cost > 0)) { showToast('成本价需大于 0', 'error'); return; }
+  // (2026-07-31) P2-18 修复: cost 校验过严, 允许 0 成本, 仅拒绝负数与非法值
+  if (!(cost >= 0) || isNaN(cost)) { showToast('成本价需为非负数字', 'error'); return; }
 
   try {
     // 1. 读取现有持仓(避免覆盖)
@@ -4514,7 +4585,9 @@ async function addStockPosition() {
 }
 
 async function deleteStockPosition(code) {
-  if (!confirm(`确认删除 ${code} 的持仓?`)) return;
+  // UI 一致性修复(2026-07-31):原代码使用浏览器原生 confirm,与 deleteFundPosition 的 customConfirm 风格不一致,
+  // 且 confirm 在移动端体验差、阻塞主线程。改为 customConfirm。
+  if (!await customConfirm('删除股票持仓', `确认删除 ${code} 的持仓?`)) return;
   try {
     const existing = await api('/api/config/user_positions');
     if (!existing) { showToast('读取现有持仓失败,无法删除', 'error'); return; }
@@ -4925,6 +4998,8 @@ async function addWatchlist() {
 }
 
 async function removeWatchlist(code) {
+  // (2026-07-31) P2-17 修复: 空参数校验, 避免无 code 仍发起请求
+  if (!code) return;
   const result = await api(`/api/monitor/watchlist/${code}`, {method: 'DELETE'});
   // 修复(2026-07-31):未检查返回值时,api() 失败仍显示"已移除"误导用户
   if (!result) return;
@@ -5067,7 +5142,8 @@ function loadAuthStatus() {
   if (!panel) return;
   panel.innerHTML = `
     <div class="form-group">
-      <label class="form-label">管理令牌(ADMIN_TOKEN)</label>
+      <!-- (2026-07-31) P2-3 无障碍: label 添加 for 关联 input/select id -->
+      <label for="cfg-admin-token" class="form-label">管理令牌(ADMIN_TOKEN)</label>
       <input class="input" id="cfg-admin-token" type="password" placeholder="${token ? '已配置(输入新值可替换)' : '请输入管理令牌'}" value="">
     </div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
@@ -5124,7 +5200,7 @@ async function loadSettings() {
   // 配置表单(configForm 已在函数开头声明)
   configForm.innerHTML = `
     <div class="form-group">
-      <label class="form-label">交易模式</label>
+      <label for="cfg-trade-mode" class="form-label">交易模式</label>
       <select class="select" id="cfg-trade-mode">
         <option value="simulation" ${currentConfig.trade_mode==='simulation'?'selected':''}>模拟盘</option>
         <option value="paper" ${currentConfig.trade_mode==='paper'?'selected':''}>纸上交易</option>
@@ -5132,18 +5208,18 @@ async function loadSettings() {
       </select>
     </div>
     <div class="form-group">
-      <label class="form-label">通知邮箱</label>
+      <label for="cfg-email" class="form-label">通知邮箱</label>
       <input class="input" id="cfg-email" value="${currentConfig.notify_email || ''}">
     </div>
     <div class="form-group">
-      <label class="form-label">微信通知</label>
+      <label for="cfg-wechat" class="form-label">微信通知</label>
       <select class="select" id="cfg-wechat">
         <option value="true" ${currentConfig.notify_wechat?'selected':''}>开启</option>
         <option value="false" ${!currentConfig.notify_wechat?'selected':''}>关闭</option>
       </select>
     </div>
     <div class="form-group">
-      <label class="form-label">数据刷新间隔（秒）</label>
+      <label for="cfg-refresh" class="form-label">数据刷新间隔（秒）</label>
       <input class="input" id="cfg-refresh" type="number" value="${currentConfig.refresh_interval || 5}" min="1" max="60">
     </div>
   `;
@@ -5151,15 +5227,15 @@ async function loadSettings() {
   // 风控参数(riskParams 已在函数开头声明)
   riskParams.innerHTML = `
     <div class="form-group">
-      <label class="form-label">最大仓位（%）</label>
+      <label for="risk-max-pos" class="form-label">最大仓位（%）</label>
       <input class="input" id="risk-max-pos" type="number" value="${currentConfig.max_position || 80}" min="10" max="100">
     </div>
     <div class="form-group">
-      <label class="form-label">止损线（%）</label>
+      <label for="risk-stop-loss" class="form-label">止损线（%）</label>
       <input class="input" id="risk-stop-loss" type="number" value="${currentConfig.stop_loss || 5}" min="1" max="50" step="0.5">
     </div>
     <div class="form-group">
-      <label class="form-label">止盈线（%）</label>
+      <label for="risk-take-profit" class="form-label">止盈线（%）</label>
       <input class="input" id="risk-take-profit" type="number" value="${currentConfig.take_profit || 15}" min="1" max="100" step="0.5">
     </div>
   `;
@@ -5202,7 +5278,12 @@ async function saveRiskParams() {
 
 async function testNotify(type) {
   const names = {email:'邮件',wechat:'微信',ding:'钉钉',webhook:'Webhook'};
-  const result = await api('/api/config/test_notify', {method: 'POST'});
+  // channel 参数修复(2026-07-31):原代码未传 body,后端无法区分测试哪种通知渠道。
+  // 前端 toast 文案 ${names[type]} 误导用户以为单独测试成功。
+  const result = await api('/api/config/test_notify', {
+    method: 'POST',
+    body: JSON.stringify({ channel: type })
+  });
   if (result && result.success) {
     showToast(`${names[type] || ''}通知测试成功`, 'success');
   } else {
@@ -5278,7 +5359,7 @@ function updateFreshness() {
   else if (diff < 3600) textEl.textContent = Math.floor(diff / 60) + '分钟前更新';
   else textEl.textContent = Math.floor(diff / 3600) + '小时前更新';
 }
-setInterval(updateFreshness, 5000);
+setInterval(updateFreshness, CONFIG.FRESHNESS_UPDATE_MS);
 
 function markDataUpdated(quality) {
   lastDataUpdate = Date.now();

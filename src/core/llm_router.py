@@ -44,6 +44,9 @@ class LLMProvider:
     _circuit_open: bool = field(default=False, repr=False)
     _key_index: int = field(default=0, repr=False)  # Key轮换索引
     _last_health_status: dict = field(default_factory=dict, repr=False)  # 最近健康检查结果
+    # 修复(2026-07-31): 新增 _key_lock 保护 _key_index 的原子自增,避免多线程并发调用
+    # current_api_key 时 _key_index 丢失更新,导致 key 轮换不公平(多线程选到同一 key)
+    _key_lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     @property
     def is_available(self) -> bool:
@@ -509,7 +512,12 @@ class LLMRouter:
                         provider.record_failure()
                         logger.warning(f"LLM Provider [{provider.name}] 全部{max_attempts}次重试失败: {e}")
 
-        raise RuntimeError(f"所有LLM Provider均不可用，最后错误: {last_error}")
+        # 修复(2026-07-31): 所有 Provider 不可用时返回明确错误。
+        # 当所有 Provider 被熔断或未配置时,循环不执行,last_error 仍为 None,
+        # 原"最后错误: None"信息含糊。区分"有 Provider 调用失败"和"无可用 Provider"两种情况。
+        if last_error is not None:
+            raise RuntimeError(f"所有LLM Provider均不可用，最后错误: {last_error}")
+        raise RuntimeError("所有LLM Provider均不可用: 无可用Provider(全部被熔断或未配置)")
 
     def _call_provider(
         self,
