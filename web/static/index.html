@@ -2820,10 +2820,12 @@ async function loadTradeHistory() {
 }
 
 async function cancelOrder(orderId) {
-  await api('/api/trade/cancel', {
+  const result = await api('/api/trade/cancel', {
     method: 'POST',
     body: JSON.stringify({order_id: orderId})
   });
+  // 修复(2026-07-31):未检查返回值时,api() 失败(鉴权/网络/超时)仍显示"已提交"误导用户
+  if (!result) return;
   showToast('撤单请求已提交', 'info');
   loadTradeHistory();
 }
@@ -4902,17 +4904,21 @@ async function loadWatchlist() {
 async function addWatchlist() {
   const code = document.getElementById('watchlistInput').value.trim();
   if (!code) return;
-  await api('/api/monitor/watchlist', {
+  const result = await api('/api/monitor/watchlist', {
     method: 'POST',
     body: JSON.stringify({stock_code: code, rules: ['price_surge']})
   });
+  // 修复(2026-07-31):未检查返回值时,api() 失败仍显示"已添加"误导用户
+  if (!result) return;
   showToast(`已添加 ${code} 到自选股`, 'success');
   document.getElementById('watchlistInput').value = '';
   loadWatchlist();
 }
 
 async function removeWatchlist(code) {
-  await api(`/api/monitor/watchlist/${code}`, {method: 'DELETE'});
+  const result = await api(`/api/monitor/watchlist/${code}`, {method: 'DELETE'});
+  // 修复(2026-07-31):未检查返回值时,api() 失败仍显示"已移除"误导用户
+  if (!result) return;
   showToast(`已从自选股移除 ${code}`, 'info');
   loadWatchlist();
 }
@@ -5163,10 +5169,12 @@ async function saveConfig() {
     refresh_interval: parseInt(document.getElementById('cfg-refresh').value)
   };
 
-  await api('/api/config/settings', {
+  const result = await api('/api/config/settings', {
     method: 'PUT',
     body: JSON.stringify({settings: settings})
   });
+  // 修复(2026-07-31):未检查返回值时,api() 失败(鉴权/网络)仍显示"已保存"误导用户
+  if (!result) return;
 
   showToast('配置已保存', 'success');
 }
@@ -5178,10 +5186,12 @@ async function saveRiskParams() {
     take_profit: parseFloat(document.getElementById('risk-take-profit').value)
   };
 
-  await api('/api/config/settings', {
+  const result = await api('/api/config/settings', {
     method: 'PUT',
     body: JSON.stringify({settings: params})
   });
+  // 修复(2026-07-31):未检查返回值时,api() 失败仍显示"已保存"误导用户
+  if (!result) return;
 
   showToast('风控参数已保存', 'success');
 }
