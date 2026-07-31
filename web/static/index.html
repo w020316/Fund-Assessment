@@ -1189,6 +1189,37 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
           <div id="fundScriptBody" style="margin-top:8px;"></div>
         </div>
 
+        <!-- 定投计算器(纯前端,不依赖外部API,符合Render Free资源约束) -->
+        <div class="card mb-16">
+          <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 16l4-8 4 4 6-9"/></svg> 定投计算器</div>
+          <div class="grid-4" style="gap:8px;margin-top:8px;">
+            <div>
+              <label style="font-size:11px;color:var(--text-muted);">每期金额(元)</label>
+              <input class="input" id="dcaAmount" type="number" value="1000" placeholder="1000">
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-muted);">定投频率</label>
+              <select class="select" id="dcaFreq">
+                <option value="monthly">每月</option>
+                <option value="weekly">每周</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-muted);">期限(年)</label>
+              <input class="input" id="dcaYears" type="number" value="5" min="1" max="50" placeholder="5">
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-muted);">预期年化(%)</label>
+              <input class="input" id="dcaRate" type="number" value="8" step="0.1" placeholder="8">
+            </div>
+          </div>
+          <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
+            <button class="btn btn-primary btn-sm" onclick="calcDCA()">计算</button>
+            <span style="font-size:11px;color:var(--text-muted);">复利模式:期末年金</span>
+          </div>
+          <div id="dcaResult" style="margin-top:12px;display:none;"></div>
+        </div>
+
         <div class="grid-2 mb-16">
           <!-- 基金持仓列表 -->
           <div class="card">
@@ -4111,6 +4142,63 @@ async function queryGlobalStock() {
       <td style="color:var(--text-muted);">${s.currency || ''}</td>
     </tr>`;
   }).join('');
+}
+
+// 定投计算器(纯前端复利计算,不调用后端,符合 Render Free 资源约束)
+// 公式:期末年金定投 FV = PMT * [((1+r)^n - 1) / r] * (1+r)
+//   r = 每期利率(年化/12 或 /52),n = 总期数(年数*12 或 *52)
+function calcDCA() {
+  const amount = parseFloat(document.getElementById('dcaAmount').value);
+  const freq = document.getElementById('dcaFreq').value;
+  const years = parseInt(document.getElementById('dcaYears').value, 10);
+  const annualRate = parseFloat(document.getElementById('dcaRate').value);
+
+  // 输入校验
+  if (!(amount > 0)) { showToast('每期金额需大于 0', 'error'); return; }
+  if (!(years > 0 && years <= 50)) { showToast('期限需在 1-50 年之间', 'error'); return; }
+  if (isNaN(annualRate) || annualRate < -50 || annualRate > 100) { showToast('预期年化需在 -50% ~ 100% 之间', 'error'); return; }
+
+  const periodsPerYear = freq === 'weekly' ? 52 : 12;
+  const r = annualRate / 100 / periodsPerYear;
+  const n = years * periodsPerYear;
+  const invested = amount * n;
+
+  // 期末年金定投复利:r=0 时退化为 PMT*n
+  let fv;
+  if (Math.abs(r) < 1e-10) {
+    fv = invested;
+  } else {
+    fv = amount * ((Math.pow(1 + r, n) - 1) / r) * (1 + r);
+  }
+  const profit = fv - invested;
+  const profitPct = invested > 0 ? (profit / invested) * 100 : 0;
+
+  const el = document.getElementById('dcaResult');
+  el.style.display = 'block';
+  el.innerHTML = `
+    <div class="grid-4" style="margin-top:4px;">
+      <div class="card" style="text-align:center;padding:12px;">
+        <div style="color:var(--text-muted);font-size:11px;margin-bottom:4px;">投入总额</div>
+        <div style="font-size:18px;font-weight:700;">${fmtMoney(invested)}</div>
+      </div>
+      <div class="card" style="text-align:center;padding:12px;">
+        <div style="color:var(--text-muted);font-size:11px;margin-bottom:4px;">期末金额</div>
+        <div style="font-size:18px;font-weight:700;color:var(--accent-cyan);">${fmtMoney(fv)}</div>
+      </div>
+      <div class="card" style="text-align:center;padding:12px;">
+        <div style="color:var(--text-muted);font-size:11px;margin-bottom:4px;">累计收益</div>
+        <div style="font-size:18px;font-weight:700;color:${changeColor(profit)};">${changeSign(profit)}${fmtMoney(profit)}</div>
+      </div>
+      <div class="card" style="text-align:center;padding:12px;">
+        <div style="color:var(--text-muted);font-size:11px;margin-bottom:4px;">收益率</div>
+        <div style="font-size:18px;font-weight:700;color:${changeColor(profitPct)};">${changeSign(profitPct)}${fmtNum(profitPct)}%</div>
+      </div>
+    </div>
+    <div style="margin-top:8px;font-size:11px;color:var(--text-muted);">
+      ${freq === 'weekly' ? '每周' : '每月'}定投 ${fmtMoney(amount)} 元,连续 ${years} 年(共 ${n} 期),按年化 ${fmtNum(annualRate)}% 复利计算。
+      ${annualRate <= 0 ? '<span style="color:var(--accent-blue);">提示:收益率为非正数,定投意义不大,建议调高预期。</span>' : '定投适合长期坚持,平滑波动,享受复利效应。'}
+    </div>
+  `;
 }
 
 async function loadAccountOverview() {
