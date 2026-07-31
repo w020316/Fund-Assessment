@@ -441,6 +441,8 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
   /* 内联 grid 1fr 1fr 在移动端强制单列(覆盖内联 style) */
   .modal-body [style*="grid-template-columns:1fr 1fr"] { grid-template-columns:1fr !important; }
   .modal-body [style*="display:grid"] { gap:8px !important; }
+  /* 添加股票表单(2026-07-30):移动端强制单列 */
+  #addStockForm [style*="grid-template-columns:1fr 1fr"] { grid-template-columns:1fr !important; }
 
   /* flex 按钮组换行:gap 较大且无 flex-wrap 的容器,移动端允许换行 */
   .card [style*="display:flex"][style*="gap:12px"]:not([style*="flex-wrap"]) { flex-wrap:wrap; gap:8px !important; }
@@ -1088,10 +1090,38 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <div class="grid-2 mb-16">
           <!-- 持仓列表 -->
           <div class="card">
-            <div class="card-title">持仓列表</div>
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+              <span>持仓列表</span>
+              <button class="btn btn-outline" style="padding:4px 10px;font-size:12px;" onclick="toggleAddStockForm()">+ 添加股票</button>
+            </div>
+            <!-- 添加股票表单(2026-07-30):inline 展开,调用 /api/config/user_positions,先读后合并避免覆盖 -->
+            <div id="addStockForm" style="display:none;padding:10px;margin-bottom:8px;background:rgba(255,255,255,0.02);border-radius:6px;">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                <div>
+                  <label style="font-size:11px;color:var(--text-muted);">股票代码</label>
+                  <input class="input" id="addStockCode" placeholder="如 600519" style="width:100%;">
+                </div>
+                <div>
+                  <label style="font-size:11px;color:var(--text-muted);">名称</label>
+                  <input class="input" id="addStockName" placeholder="如 贵州茅台" style="width:100%;">
+                </div>
+                <div>
+                  <label style="font-size:11px;color:var(--text-muted);">数量(股)</label>
+                  <input class="input" id="addStockQty" type="number" value="100" style="width:100%;">
+                </div>
+                <div>
+                  <label style="font-size:11px;color:var(--text-muted);">成本价</label>
+                  <input class="input" id="addStockCost" type="number" step="0.01" value="100" style="width:100%;">
+                </div>
+              </div>
+              <div style="margin-top:8px;display:flex;gap:8px;">
+                <button class="btn btn-primary btn-sm" onclick="addStockPosition()">确认添加</button>
+                <button class="btn btn-sm" onclick="toggleAddStockForm()">取消</button>
+              </div>
+            </div>
             <div class="table-wrap" style="max-height:360px;overflow-y:auto;">
               <table>
-                <thead><tr><th>代码</th><th>名称</th><th>数量</th><th>成本</th><th>现价</th><th>盈亏</th><th>盈亏%</th></tr></thead>
+                <thead><tr><th>代码</th><th>名称</th><th>数量</th><th>成本</th><th>现价</th><th>盈亏</th><th>盈亏%</th><th>操作</th></tr></thead>
                 <tbody id="positionBody"></tbody>
               </table>
             </div>
@@ -4362,6 +4392,91 @@ async function loadAccountOverview() {
   }
 }
 
+// 股票持仓手动添加/删除(2026-07-30):补全组合风险分析的上游数据入口
+// 调用 /api/config/user_positions,先 GET 读现有持仓再合并 POST,避免覆盖
+function toggleAddStockForm() {
+  const form = document.getElementById('addStockForm');
+  form.style.display = form.style.display === 'none' ? 'block' : 'none';
+  if (form.style.display === 'block') {
+    document.getElementById('addStockCode').focus();
+  }
+}
+
+async function addStockPosition() {
+  const code = (document.getElementById('addStockCode').value || '').trim();
+  const name = (document.getElementById('addStockName').value || '').trim();
+  const qty = parseFloat(document.getElementById('addStockQty').value);
+  const cost = parseFloat(document.getElementById('addStockCost').value);
+
+  if (!code) { showToast('请输入股票代码', 'error'); return; }
+  if (!/^\d{6}$/.test(code)) { showToast('股票代码需为 6 位数字', 'error'); return; }
+  if (!(qty > 0)) { showToast('数量需大于 0', 'error'); return; }
+  if (!(cost > 0)) { showToast('成本价需大于 0', 'error'); return; }
+
+  try {
+    // 1. 读取现有持仓(避免覆盖)
+    const existing = await api('/api/config/user_positions');
+    // 安全检查:api() 失败返回 null,此时不能继续否则会用空列表覆盖现有持仓
+    if (!existing) {
+      showToast('读取现有持仓失败,无法添加', 'error');
+      return;
+    }
+    const positions = existing.positions || [];
+    // 2. 检查是否已存在
+    if (positions.some(p => p.symbol === code)) {
+      showToast(`股票 ${code} 已存在,如需修改请先删除`, 'error');
+      return;
+    }
+    // 3. 追加新持仓
+    const newPos = {
+      symbol: code,
+      name: name || code,
+      quantity: qty,
+      available_quantity: qty,
+      cost_price: cost,
+    };
+    const merged = [...positions, newPos];
+    const availableCash = existing.available_cash || 800000.0;
+    // 4. 写回
+    const resp = await api('/api/config/user_positions', {
+      method: 'POST',
+      body: JSON.stringify({ positions: merged, available_cash: availableCash }),
+    });
+    if (!resp) { showToast('写入失败,请重试', 'error'); return; }
+    showToast(`已添加 ${name || code}`, 'success');
+    // 5. 清空表单 + 折叠
+    document.getElementById('addStockCode').value = '';
+    document.getElementById('addStockName').value = '';
+    document.getElementById('addStockQty').value = '100';
+    document.getElementById('addStockCost').value = '100';
+    toggleAddStockForm();
+    // 6. 刷新列表
+    loadPositions();
+  } catch (e) {
+    showToast(`添加失败: ${e.message || e}`, 'error');
+  }
+}
+
+async function deleteStockPosition(code) {
+  if (!confirm(`确认删除 ${code} 的持仓?`)) return;
+  try {
+    const existing = await api('/api/config/user_positions');
+    if (!existing) { showToast('读取现有持仓失败,无法删除', 'error'); return; }
+    const positions = existing.positions || [];
+    const merged = positions.filter(p => p.symbol !== code);
+    const availableCash = existing.available_cash || 800000.0;
+    const resp = await api('/api/config/user_positions', {
+      method: 'POST',
+      body: JSON.stringify({ positions: merged, available_cash: availableCash }),
+    });
+    if (!resp) { showToast('写入失败,请重试', 'error'); return; }
+    showToast(`已删除 ${code}`, 'info');
+    loadPositions();
+  } catch (e) {
+    showToast(`删除失败: ${e.message || e}`, 'error');
+  }
+}
+
 async function loadPositions() {
   const data = await api('/api/dashboard/positions');
   const body = document.getElementById('positionBody');
@@ -4398,6 +4513,7 @@ async function loadPositions() {
       <td style="color:${color}">${fmtNum(price)}</td>
       <td style="color:${color}">${changeSign(profit)}${fmtMoney(profit)}</td>
       <td style="color:${color}">${changeSign(profitPct)}${fmtNum(profitPct)}%</td>
+      <td><button class="btn btn-sm" style="padding:2px 8px;font-size:11px;color:#ef4444;" onclick="deleteStockPosition('${code}')">删除</button></td>
     </tr>`;
   }).join('');
 
