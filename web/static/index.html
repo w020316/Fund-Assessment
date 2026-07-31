@@ -1776,6 +1776,14 @@ function switchPage(name) {
     clearInterval(marketRefreshTimer);
     marketRefreshTimer = null;
   }
+  // 内存泄漏修复(2026-07-31):离开 fund 页时清理所有 LightweightCharts 实例,
+  // 避免图表实例(含 RAF 循环/ResizeObserver)在后台持续占用内存。
+  if (name !== 'fund') {
+    Object.keys(_fundCharts).forEach(k => {
+      try { _fundCharts[k].remove(); } catch(e) {}
+      delete _fundCharts[k];
+    });
+  }
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.querySelectorAll('.bottom-tab-item').forEach(n => n.classList.remove('active'));
@@ -1883,7 +1891,7 @@ async function loadIndexData() {
   container.innerHTML = indices.map(idx => {
     const color = changeColor(idx.change_pct);
     const sign = changeSign(idx.change_pct);
-    const svgId = 'spark-' + idx.code.replace('.','_');
+    const svgId = 'spark-' + idx.code.replace(/\./g, '_').replace(/[^\w]/g, '_');
     return `<div class="card">
       <div class="flex-between mb-12">
         <div>
@@ -1901,7 +1909,7 @@ async function loadIndexData() {
 
   // 生成模拟迷你走势线
   indices.forEach(idx => {
-    const svgId = 'spark-' + idx.code.replace('.','_');
+    const svgId = 'spark-' + idx.code.replace(/\./g, '_').replace(/[^\w]/g, '_');
     drawSparkline(svgId, idx.change_pct >= 0);
   });
 }
@@ -1975,47 +1983,10 @@ async function loadHotStocks(type) {
   // 前端type到API字段名的映射
   const typeMap = {gain: 'top_gainers', loss: 'top_losers', volume: 'top_volume'};
   const apiKey = typeMap[type] || type;
-  // 默认数据
-  const defaultStocks = {
-    gain: [
-      {code:'300999',name:'金龙鱼',price:45.67,change_pct:10.01,volume:2345678900},
-      {code:'688981',name:'中芯国际',price:78.90,change_pct:8.52,volume:5678901234},
-      {code:'002594',name:'比亚迪',price:267.80,change_pct:6.34,volume:8901234567},
-      {code:'600519',name:'贵州茅台',price:1856.00,change_pct:4.21,volume:3456789012},
-      {code:'000858',name:'五粮液',price:156.78,change_pct:3.89,volume:2345678901},
-      {code:'601318',name:'中国平安',price:52.34,change_pct:3.45,volume:4567890123},
-      {code:'000001',name:'平安银行',price:14.56,change_pct:2.98,volume:6789012345},
-      {code:'600036',name:'招商银行',price:38.90,change_pct:2.67,volume:3456789012},
-      {code:'002475',name:'立讯精密',price:34.56,change_pct:2.34,volume:1234567890},
-      {code:'300750',name:'宁德时代',price:198.00,change_pct:2.12,volume:7890123456}
-    ],
-    loss: [
-      {code:'688001',name:'华兴源创',price:23.45,change_pct:-8.76,volume:567890123},
-      {code:'300782',name:'卓胜微',price:89.01,change_pct:-6.54,volume:890123456},
-      {code:'002371',name:'北方华创',price:234.56,change_pct:-5.43,volume:1234567890},
-      {code:'688012',name:'中微公司',price:123.45,change_pct:-4.32,volume:456789012},
-      {code:'300124',name:'汇川技术',price:56.78,change_pct:-3.21,volume:789012345},
-      {code:'002049',name:'紫光国微',price:145.67,change_pct:-2.89,volume:345678901},
-      {code:'688005',name:'容百科技',price:34.56,change_pct:-2.56,volume:234567890},
-      {code:'300014',name:'亿纬锂能',price:67.89,change_pct:-2.34,volume:567890123},
-      {code:'002415',name:'海康威视',price:34.12,change_pct:-1.98,volume:8901234567},
-      {code:'600745',name:'闻泰科技',price:45.67,change_pct:-1.67,volume:1234567890}
-    ],
-    volume: [
-      {code:'600519',name:'贵州茅台',price:1856.00,change_pct:4.21,volume:34567890123},
-      {code:'300750',name:'宁德时代',price:198.00,change_pct:2.12,volume:28901234567},
-      {code:'002594',name:'比亚迪',price:267.80,change_pct:6.34,volume:23456789012},
-      {code:'601318',name:'中国平安',price:52.34,change_pct:3.45,volume:19876543210},
-      {code:'000858',name:'五粮液',price:156.78,change_pct:3.89,volume:15678901234},
-      {code:'600036',name:'招商银行',price:38.90,change_pct:2.67,volume:12345678901},
-      {code:'000001',name:'平安银行',price:14.56,change_pct:2.98,volume:10987654321},
-      {code:'002475',name:'立讯精密',price:34.56,change_pct:2.34,volume:9876543210},
-      {code:'600900',name:'长江电力',price:28.90,change_pct:1.23,volume:8765432109},
-      {code:'601012',name:'隆基绿能',price:23.45,change_pct:-0.56,volume:7654321098}
-    ]
-  };
-
-  let stocks;
+  // mock 数据误导修复(2026-07-31):原代码在 API 失败时回退到下方 defaultStocks mock
+  // (含"金龙鱼涨停""贵州茅台"等真实股票代码与假涨幅),用户误以为是实时数据并据此操作。
+  // 改为:API 无数据时显示空状态,不显示 mock。
+  let stocks = [];
   if (data && data.data) {
     const raw = data.data;
     // hot_stocks API返回 {top_gainers, top_losers, top_volume}
@@ -2025,11 +1996,11 @@ async function loadHotStocks(type) {
       stocks = raw[type];
     } else if (Array.isArray(raw)) {
       stocks = raw;
-    } else {
-      stocks = defaultStocks[type];
     }
-  } else {
-    stocks = defaultStocks[type];
+  }
+  if (!stocks || stocks.length === 0) {
+    renderEmpty(body, '暂无数据', '数据获取失败,请稍后重试');
+    return;
   }
 
   body.innerHTML = stocks.map(s => {
@@ -2408,7 +2379,15 @@ function drawRadarChart(scores) {
   const svg = document.getElementById('radarChart');
   if (!svg) return;
 
-  const s = scores || {tech:75, fund:60, basic:80, news:65, sentiment:55};
+  // mock 数据误导修复(2026-07-31):原代码无 scores 时使用 mock 分数(技术75/资金60/基本面80/消息65/情绪55),
+  // 综合评分永远 67.0 显示"建议买入",用户误以为是真实分析结果。改为:无数据时显示空状态。
+  if (!scores) {
+    svg.innerHTML = `<text x="140" y="140" text-anchor="middle" fill="var(--text-muted)" font-size="12">暂无评分数据</text>
+      <text x="140" y="160" text-anchor="middle" fill="var(--text-muted)" font-size="10">请输入股票代码进行分析</text>`;
+    document.getElementById('signalLevel').innerHTML = '<span class="signal" style="background:var(--text-muted)22;color:var(--text-muted);">待分析</span>';
+    return;
+  }
+  const s = scores;
   const dims = [
     {label:'技术', key:'tech'},
     {label:'资金', key:'fund'},
@@ -2486,21 +2465,13 @@ async function loadKline() {
   const svg = document.getElementById('klineChart');
   if (!svg) return;
 
-  // 生成模拟K线数据
-  const klines = [];
-  let price = 1800;
-  for (let i = 0; i < 60; i++) {
-    const open = price + (Math.random() - 0.48) * 30;
-    const close = open + (Math.random() - 0.45) * 40;
-    const high = Math.max(open, close) + Math.random() * 15;
-    const low = Math.min(open, close) - Math.random() * 15;
-    klines.push({open, close, high, low});
-    price = close;
+  // mock 数据误导修复(2026-07-31):原代码用 Math.random 生成 60 根假 K 线(起始价 1800=贵州茅台),
+  // API 失败时用户看到假 K 线可能误判走势并据此决策。改为:API 无数据时显示空状态。
+  const items = (data && data.data) ? data.data : [];
+  if (!items || items.length === 0) {
+    svg.innerHTML = `<text x="300" y="150" text-anchor="middle" fill="var(--text-muted)" font-size="14">暂无K线数据,请检查股票代码或稍后重试</text>`;
+    return;
   }
-
-  // 如果API有数据则使用
-  const items = (data && data.data) ? data.data : klines;
-  if (!items || items.length === 0) return;
 
   const W = 600, H = 300;
   const padL = 50, padR = 10, padT = 10, padB = 30;
@@ -3930,6 +3901,8 @@ async function deleteFundPosition(code) {
   if (!await customConfirm('删除基金持仓', `确认删除基金 ${code}?`)) return;
   const resp = await api(`/api/fund/positions/${code}`, { method: 'DELETE' });
   if (resp && resp.success) {
+    // 内存泄漏修复(2026-07-31):删除基金时清理对应图表实例
+    if (_fundCharts[code]) { try { _fundCharts[code].remove(); } catch(e) {} delete _fundCharts[code]; }
     loadFundData();
     showToast(`已删除基金 ${code}`, 'success');
   } else {
@@ -3951,12 +3924,13 @@ function customConfirm(title, message) {
       </div>
     </div>`;
     document.body.appendChild(modal);
-    const cleanup = (val) => { modal.remove(); resolve(val); };
+    // 内存泄漏修复(2026-07-31):原 cleanup 只 remove modal 不移除 escHandler,
+    // 点击按钮/遮罩关闭时 escHandler 残留,反复弹窗累积监听器。统一在 cleanup 中移除。
+    const escHandler = (e) => { if (e.key === 'Escape') cleanup(false); };
+    const cleanup = (val) => { modal.remove(); document.removeEventListener('keydown', escHandler); resolve(val); };
     modal.querySelector('#_cancelBtn').onclick = () => cleanup(false);
     modal.querySelector('#_okBtn').onclick = () => cleanup(true);
     modal.onclick = (e) => { if (e.target === modal) cleanup(false); };
-    // ESC键取消
-    const escHandler = (e) => { if (e.key === 'Escape') { cleanup(false); document.removeEventListener('keydown', escHandler); } };
     document.addEventListener('keydown', escHandler);
     // 自动聚焦确认按钮
     setTimeout(() => modal.querySelector('#_okBtn').focus(), 50);
@@ -4594,6 +4568,12 @@ function drawPieChart(positions) {
 
   const cx = 150, cy = 130, R = 90, r = 55;
   const total = positions.reduce((s, p) => s + Math.abs((p.quantity || p.qty || 0) * (p.current_price || p.price || 0)), 0);
+  // 除零修复(2026-07-31):所有持仓 quantity/current_price 为 0 时 total=0,
+  // 导致 pct=val/total=NaN, SVG 坐标全部 NaN 渲染异常。改为显示空状态。
+  if (total === 0) {
+    svg.innerHTML = '<text x="150" y="135" text-anchor="middle" fill="var(--text-muted)" font-size="13">暂无持仓数据</text>';
+    return;
+  }
   const colors = ['#3b82f6','#8b5cf6','#06b6d4','#f59e0b','#ef4444','#22c55e','#ec4899','#6366f1'];
 
   let html = '';
@@ -4762,13 +4742,17 @@ async function loadDataTab() {
 
   const cfg = configs[currentDataTab];
   const data = await api(cfg.url);
-  let items = (data && data.data) ? data.data : cfg.default;
+  // mock 数据误导修复(2026-07-31):原代码回退到 cfg.default mock(含"贵州茅台研报"等假研报),
+  // 用户误以为是真实研报数据。改为:API 无数据时显示空状态。
+  let items = (data && data.data) ? data.data : [];
   // margin和shareholder API返回单个对象而非数组，需要包装为数组
   if (items && !Array.isArray(items)) {
     items = [items];
   }
   if (!items || items.length === 0) {
-    items = cfg.default;
+    thead.innerHTML = '<tr><th>' + cfg.title + '</th></tr>';
+    tbody.innerHTML = '<tr><td style="color:var(--text-muted);text-align:center;padding:20px;">暂无' + cfg.title + '数据,请稍后重试</td></tr>';
+    return;
   }
 
   thead.innerHTML = '<tr>' + cfg.headers.map(h => `<th>${h}</th>`).join('') + '</tr>';
@@ -5012,23 +4996,18 @@ async function loadHotSignals() {
   const data = await api('/api/market/hot_stocks_signal');
   const body = document.getElementById('hotSignalBody');
 
-  const defaultSignals = [
-    {code:'300999',name:'金龙鱼',signal:'涨停突破',strength:95},
-    {code:'688981',name:'中芯国际',signal:'放量上涨',strength:88},
-    {code:'002594',name:'比亚迪',signal:'均线多头',strength:82},
-    {code:'600519',name:'贵州茅台',signal:'新高突破',strength:78},
-    {code:'000858',name:'五粮液',signal:'量价齐升',strength:72}
-  ];
-
-  let signals = defaultSignals;
-  if (data && data.data && Array.isArray(data.data) && data.data.length > 0) {
-    signals = data.data.map(s => ({
-      code: s.code || '',
-      name: s.name || '',
-      signal: s.reason || s.signal || '强势',
-      strength: Math.min(100, Math.max(0, Math.round(Math.abs(s.change_pct || 0) * 10 + 50)))
-    }));
+  // mock 数据误导修复(2026-07-31):原代码回退到 defaultSignals mock(金龙鱼涨停突破等假信号),
+  // 用户误以为是实时信号并据此操作。改为:API 无数据时显示空状态。
+  if (!data || !data.data || !Array.isArray(data.data) || data.data.length === 0) {
+    renderEmpty(body, '暂无信号', '数据获取失败,请稍后重试');
+    return;
   }
+  const signals = data.data.map(s => ({
+    code: s.code || '',
+    name: s.name || '',
+    signal: s.reason || s.signal || '强势',
+    strength: Math.min(100, Math.max(0, Math.round(Math.abs(s.change_pct || 0) * 10 + 50)))
+  }));
 
   body.innerHTML = signals.map(s => {
     const strengthColor = s.strength >= 80 ? 'var(--color-up)' : s.strength >= 60 ? 'var(--color-warning)' : 'var(--color-flat)';
@@ -5210,24 +5189,20 @@ function loadHealthStatus() {
   const container = document.getElementById('healthPanel');
 
   api('/api/health').then(data => {
-    let checks = [
-      {name:'API服务', status:'ok', detail:'响应时间 23ms'},
-      {name:'数据库', status:'ok', detail:'连接正常'},
-      {name:'行情数据源', status:'ok', detail:'延迟 <100ms'},
-      {name:'分析引擎', status:'warn', detail:'未配置'},
-      {name:'消息队列', status:'ok', detail:'积压 0'},
-      {name:'磁盘空间', status:'ok', detail:'已用 42%'}
-    ];
-
-    if (data) {
-      checks = [];
-      checks.push({name:'API服务', status: data.status === 'ok' ? 'ok' : 'err', detail: '运行正常'});
-      checks.push({name:'AkShare', status: data.akshare ? 'ok' : 'warn', detail: data.akshare ? '已安装' : '未安装'});
-      checks.push({name:'核心模块', status: data.core_modules ? 'ok' : 'warn', detail: data.core_modules ? '已加载' : '未加载'});
-      if (data.ai_keys) {
-        const hasKey = data.ai_keys.ttapi || data.ai_keys.tavily || data.ai_keys.tinyfish || data.ai_keys.agnes;
-        checks.push({name:'分析引擎', status: hasKey ? 'ok' : 'warn', detail: hasKey ? '已就绪' : '未配置'});
-      }
+    // mock 数据误导修复(2026-07-31):原代码 API 失败时回退到 mock 检查项
+    // (API服务 ok / 数据库 ok / 行情数据源 ok / 分析引擎 warn / 磁盘空间 42% 等),
+    // 用户误以为系统健康。改为:API 失败时显示失败状态。
+    if (!data) {
+      container.innerHTML = '<div style="color:var(--color-warning);text-align:center;padding:20px;">健康检查接口不可达,请稍后重试</div>';
+      return;
+    }
+    let checks = [];
+    checks.push({name:'API服务', status: data.status === 'ok' ? 'ok' : 'err', detail: '运行正常'});
+    checks.push({name:'AkShare', status: data.akshare ? 'ok' : 'warn', detail: data.akshare ? '已安装' : '未安装'});
+    checks.push({name:'核心模块', status: data.core_modules ? 'ok' : 'warn', detail: data.core_modules ? '已加载' : '未加载'});
+    if (data.ai_keys) {
+      const hasKey = data.ai_keys.ttapi || data.ai_keys.tavily || data.ai_keys.tinyfish || data.ai_keys.agnes;
+      checks.push({name:'分析引擎', status: hasKey ? 'ok' : 'warn', detail: hasKey ? '已就绪' : '未配置'});
     }
 
     container.innerHTML = checks.map(c => {

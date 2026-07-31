@@ -1,8 +1,9 @@
 app = "fund-assessment"
 primary_region = "sin"
 
-[build]
-  dockerfile = "Dockerfile"
+# 文档一致性修复(2026-07-31):原配置引用不存在的 Dockerfile 会导致 Fly.io 部署失败。
+# 项目实际部署在 Render 上(render.yaml),Fly.io 为备选方案。
+# 如需 Fly.io 部署,请先创建 Dockerfile 或改用 Fly.io Buildpack。
 
 [deploy]
   strategy = "rolling"

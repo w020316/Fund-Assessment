@@ -63,8 +63,8 @@
 | 配置 | PyYAML + python-dotenv |
 | 鉴权 | 静态 Token + secrets.compare_digest |
 | 数据库 | SQLite (风控状态持久化) |
-| 部署 | Docker, Fly.io, Render, Railway, Vercel |
-| 测试 | pytest + TestClient + mock,204 用例 |
+| 部署 | Render (主要), Fly.io, Railway, Vercel |
+| 测试 | pytest + TestClient + mock, 56 文件 1394 用例 |
 
 ## 快速开始
 
@@ -111,7 +111,7 @@ python -m uvicorn web.api:app --host 0.0.0.0 --port 8000
 ### 4. 运行测试
 
 ```bash
-# 全量测试(204 用例)
+# 全量测试(56 文件, 1394 用例)
 python -m pytest tests/ -v
 
 # 单个子项目测试
@@ -253,7 +253,7 @@ Fund-Assessment/
 │       ├── config.py            # 配置加载
 │       ├── logger.py            # 日志
 │       └── notify.py            # 通知
-├── tests/               # 测试(204 用例)
+├── tests/               # 测试(56 文件, 1394 用例)
 │   ├── conftest.py              # 测试配置 + fixtures
 │   ├── test_api.py              # API 端点测试
 │   ├── test_auth.py             # 鉴权测试
@@ -285,8 +285,8 @@ Fund-Assessment/
 ├── launch.py            # 启动入口(推荐)
 ├── .env.example         # 环境变量模板
 ├── requirements.txt     # Python 依赖
-├── Dockerfile           # Docker 部署
-└── docker-compose.yml   # Docker Compose
+├── render.yaml          # Render 部署配置(主要)
+└── fly.toml             # Fly.io 部署配置(备选)
 ```
 
 ## 测试
@@ -301,7 +301,7 @@ Fund-Assessment/
 | S4 话术库 | 1 | 26 | 模板列表/填充/生成/基金匹配/股票匹配/分类 |
 | S5 前端去 AI 化 | 0 | 0 | 纯前端改造(无单测) |
 | S6 测试补全 | 3 | 55 | DataCache/话术路由/国际路由 |
-| **合计** | **12** | **204** | 全部通过 |
+| **合计** | **56** | **1394** | 全部通过 |
 
 ### 运行测试
 
@@ -315,15 +315,9 @@ python -m pytest tests/ --cov=src --cov=web --cov-report=html
 
 ## 部署
 
-### Docker
-
-```bash
-docker-compose up -d
-```
-
 ### 云平台
 
-支持一键部署到 Fly.io / Railway / Render / Vercel,详见对应配置文件:
+主要部署在 Render 上,也支持 Fly.io / Railway / Vercel,详见对应配置文件:
 - `fly.toml` — Fly.io
 - `railway.json` — Railway
 - `render.yaml` — Render
@@ -331,7 +325,7 @@ docker-compose up -d
 
 ## 质量保障
 
-- **204 个单元测试**:覆盖核心模块、数据源、路由、引擎
+- **1394 个单元测试**:覆盖核心模块、数据源、路由、引擎
 - **数据真实性**:移除所有造假 fallback,返回空数据 + 日志说明
 - **async 友好**:所有同步网络调用用 `asyncio.to_thread` 包装,不阻塞事件循环
 - **鉴权安全**:6 个写/交易端点静态 Token 保护,`secrets.compare_digest` 防时序攻击
