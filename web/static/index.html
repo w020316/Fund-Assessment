@@ -2061,17 +2061,14 @@ async function loadSectorRanking() {
   const data = await apiCached('/api/market/sector_ranking', 'sector_ranking', 60);
   const container = document.getElementById('sectorHeatmap');
 
-  const defaultSectors = [
-    {name:'半导体',change_pct:3.45},{name:'新能源',change_pct:2.89},{name:'白酒',change_pct:2.34},
-    {name:'医药',change_pct:1.78},{name:'银行',change_pct:1.23},{name:'房地产',change_pct:0.56},
-    {name:'汽车',change_pct:-0.34},{name:'军工',change_pct:-0.89},{name:'钢铁',change_pct:-1.45},
-    {name:'煤炭',change_pct:-2.12},{name:'传媒',change_pct:1.56},{name:'计算机',change_pct:2.01},
-    {name:'通信',change_pct:0.89},{name:'电力',change_pct:-0.67},{name:'家电',change_pct:1.12},
-    {name:'食品饮料',change_pct:1.67},{name:'非银金融',change_pct:0.45},{name:'建材',change_pct:-1.23},
-    {name:'农林牧渔',change_pct:-0.56},{name:'石油石化',change_pct:0.78}
-  ];
-
-  const sectors = (data && data.data) ? data.data : defaultSectors;
+  // mock 回退修复(2026-07-31):原代码在 API 返回空时回退到 defaultSectors mock
+  // (半导体 3.45% 等假涨幅),用户误以为是实时板块数据并据此操作。
+  // 改为:API 无数据时显示空状态,不显示 mock。
+  const sectors = (data && data.data) ? data.data : [];
+  if (!sectors || sectors.length === 0) {
+    renderEmpty(container, '暂无板块数据', '请稍后重试');
+    return;
+  }
 
   container.innerHTML = sectors.map(s => {
     // 根据涨跌幅计算颜色深浅
@@ -2363,29 +2360,25 @@ async function loadAiHistory() {
   }
   const data = await api('/api/agent/history');
 
-  const defaultHistory = [
-    {time:'2025-01-15 14:30',code:'600519',decision:'BUY',confidence:72,score:7.8},
-    {time:'2025-01-15 10:15',code:'000858',decision:'HOLD',confidence:55,score:6.2},
-    {time:'2025-01-14 15:00',code:'300750',decision:'SELL',confidence:65,score:4.5},
-    {time:'2025-01-14 09:35',code:'002594',decision:'BUY',confidence:80,score:8.1},
-    {time:'2025-01-13 14:20',code:'601318',decision:'HOLD',confidence:60,score:6.0}
-  ];
-
-  let history = defaultHistory;
-  // API返回{count, history: [...]}，history项为完整分析结果对象
-  if (data && data.history && Array.isArray(data.history) && data.history.length > 0) {
-    history = data.history.map(h => {
-      const d = h.data || h;
-      const decision = d.decision || d.signal || 'HOLD';
-      return {
-        time: h.timestamp || h.created_at || new Date().toLocaleString('zh-CN'),
-        code: h.stock_code || d.stock_code || '',
-        decision: decision,
-        confidence: d.confidence || d.total_score || 0,
-        score: d.total_score || d.composite_score || 0
-      };
-    });
+  // mock 回退修复(2026-07-31):原代码在 API 返回空时回退到 defaultHistory mock
+  // (2025-01-15 买入茅台等假记录),用户误以为是真实分析历史。
+  // 改为:API 无数据时显示空状态,不显示 mock。
+  if (!data || !data.history || !Array.isArray(data.history) || data.history.length === 0) {
+    body.innerHTML = '<tr><td colspan="5" style="color:var(--text-muted);text-align:center;padding:20px 0;">暂无分析历史记录</td></tr>';
+    return;
   }
+
+  const history = data.history.map(h => {
+    const d = h.data || h;
+    const decision = d.decision || d.signal || 'HOLD';
+    return {
+      time: h.timestamp || h.created_at || new Date().toLocaleString('zh-CN'),
+      code: h.stock_code || d.stock_code || '',
+      decision: decision,
+      confidence: d.confidence || d.total_score || 0,
+      score: d.total_score || d.composite_score || 0
+    };
+  });
 
   body.innerHTML = history.map(h => {
     const cls = h.decision === 'BUY' ? 'signal-buy' : h.decision === 'SELL' ? 'signal-sell' : 'signal-hold';
@@ -2763,23 +2756,13 @@ async function loadTradeHistory() {
   }
   const data = await api('/api/dashboard/trades');
 
-  const defaultTrades = [
-    {time:'2025-01-15 14:30',code:'600519',direction:'买入',qty:100,price:1850.00,amount:185000,pnl:null},
-    {time:'2025-01-15 10:15',code:'000858',direction:'卖出',qty:200,price:158.50,amount:31700,pnl:2340},
-    {time:'2025-01-14 15:00',code:'300750',direction:'买入',qty:100,price:195.80,amount:19580,pnl:null},
-    {time:'2025-01-14 09:35',code:'002594',direction:'卖出',qty:50,price:268.00,amount:13400,pnl:890},
-    {time:'2025-01-13 14:20',code:'601318',direction:'买入',qty:500,price:51.80,amount:25900,pnl:null}
-  ];
-
-  const defaultOrders = [
-    {time:'2025-01-15 14:35',code:'600519',direction:'买入',qty:100,price:1860.00,status:'待成交'},
-    {time:'2025-01-15 14:32',code:'000858',direction:'卖出',qty:100,price:157.50,status:'部分成交'}
-  ];
-
-  let trades = defaultTrades;
-  // API返回list[TradeItem]，字段: trade_id, order_id, symbol, side, price, quantity, amount, commission, stamp_tax, net_amount, strategy, reason, created_at
-  if (data && Array.isArray(data) && data.length > 0) {
-    trades = data.map(t => ({
+  // mock 回退修复(2026-07-31):原代码在 API 返回空时回退到 defaultTrades mock
+  // (2025-01-15 买入茅台等假交易记录),用户误以为是真实交易历史。
+  // 改为:API 无数据时显示空状态,不显示 mock。
+  if (!data || !Array.isArray(data) || data.length === 0) {
+    body.innerHTML = '<tr><td colspan="7" style="color:var(--text-muted);text-align:center;padding:20px 0;">暂无交易记录</td></tr>';
+  } else {
+    const trades = data.map(t => ({
       time: t.created_at || '',
       code: t.symbol || '',
       direction: t.side === 'buy' ? '买入' : '卖出',
@@ -2788,21 +2771,21 @@ async function loadTradeHistory() {
       amount: t.amount || 0,
       pnl: t.net_amount || null
     }));
-  }
 
-  body.innerHTML = trades.map(t => {
-    const dirColor = t.direction === '买入' ? 'var(--color-up)' : 'var(--color-down)';
-    const pnlStr = t.pnl != null ? `<span style="color:${changeColor(t.pnl)}">${changeSign(t.pnl)}${fmtNum(t.pnl)}</span>` : '—';
-    return `<tr>
-      <td>${t.time}</td>
-      <td style="color:var(--accent-cyan);">${t.code}</td>
-      <td style="color:${dirColor};">${t.direction}</td>
-      <td>${t.qty}</td>
-      <td>${fmtNum(t.price)}</td>
-      <td>${fmtMoney(t.amount)}</td>
-      <td>${pnlStr}</td>
-    </tr>`;
-  }).join('');
+    body.innerHTML = trades.map(t => {
+      const dirColor = t.direction === '买入' ? 'var(--color-up)' : 'var(--color-down)';
+      const pnlStr = t.pnl != null ? `<span style="color:${changeColor(t.pnl)}">${changeSign(t.pnl)}${fmtNum(t.pnl)}</span>` : '—';
+      return `<tr>
+        <td>${t.time}</td>
+        <td style="color:var(--accent-cyan);">${t.code}</td>
+        <td style="color:${dirColor};">${t.direction}</td>
+        <td>${t.qty}</td>
+        <td>${fmtNum(t.price)}</td>
+        <td>${fmtMoney(t.amount)}</td>
+        <td>${pnlStr}</td>
+      </tr>`;
+    }).join('');
+  }
 
   // 委托单 - 从trade/orders API获取
   const orderData = await api('/api/trade/orders');
@@ -2822,18 +2805,9 @@ async function loadTradeHistory() {
       </tr>`;
     }).join('');
   } else {
-    orderBody.innerHTML = defaultOrders.map(o => {
-      const dirColor = o.direction === '买入' ? 'var(--color-up)' : 'var(--color-down)';
-      return `<tr>
-        <td>${o.time}</td>
-        <td style="color:var(--accent-cyan);">${o.code}</td>
-        <td style="color:${dirColor};">${o.direction}</td>
-        <td>${o.qty}</td>
-        <td>${fmtNum(o.price)}</td>
-        <td><span style="color:var(--color-warning);">${o.status}</span></td>
-        <td><button class="btn btn-sm btn-outline" onclick="showToast('已撤单','info')">撤单</button></td>
-      </tr>`;
-    }).join('');
+    // mock 回退修复(2026-07-31):原代码回退到 defaultOrders mock(假委托单),
+    // 用户误以为有 pending 订单。改为显示空状态。
+    orderBody.innerHTML = '<tr><td colspan="7" style="color:var(--text-muted);text-align:center;padding:20px 0;">暂无委托单</td></tr>';
   }
 }
 
@@ -4488,9 +4462,19 @@ async function loadAccountOverview() {
     return;
   }
   const data = await api('/api/dashboard/overview');
-  const defaultOverview = {total_assets:1256780, available_cash:356780, market_value:900000, daily_pnl:12345};
+  // mock 回退修复(2026-07-31):原代码在 API 返回空时回退到 defaultOverview mock
+  // (总资产 125 万/当日盈亏 12345),用户误以为是真实资产。
+  // 改为:API 无数据时显示占位符,不显示 mock。
+  if (!data || (!data.data && !data.total_assets)) {
+    document.getElementById('totalAsset').textContent = '—';
+    document.getElementById('availableCash').textContent = '—';
+    document.getElementById('marketValue').textContent = '—';
+    const pnlEl = document.getElementById('todayPnl');
+    if (pnlEl) { pnlEl.textContent = '—'; pnlEl.style.color = ''; }
+    return;
+  }
 
-  const d = (data && data.data) ? data.data : (data && !data.data) ? data : defaultOverview;
+  const d = (data && data.data) ? data.data : data;
 
   document.getElementById('totalAsset').textContent = fmtMoney(d.total_assets || d.total_asset || 0);
   document.getElementById('availableCash').textContent = fmtMoney(d.available_cash || d.available || 0);
@@ -4618,15 +4602,20 @@ async function loadPositions() {
   }
   const data = await api('/api/dashboard/positions');
 
-  const defaultPositions = [
-    {symbol:'600519',name:'贵州茅台',quantity:100,cost_price:1800.00,current_price:1856.00,profit:5600,profit_pct:3.11},
-    {symbol:'000858',name:'五粮液',quantity:300,cost_price:150.00,current_price:156.78,profit:2034,profit_pct:4.52},
-    {symbol:'300750',name:'宁德时代',quantity:200,cost_price:190.00,current_price:198.00,profit:1600,profit_pct:4.21},
-    {symbol:'002594',name:'比亚迪',quantity:100,cost_price:270.00,current_price:267.80,profit:-220,profit_pct:-0.81},
-    {symbol:'601318',name:'中国平安',quantity:1000,cost_price:50.00,current_price:52.34,profit:2340,profit_pct:4.68}
-  ];
-
-  const positions = (data && Array.isArray(data)) ? data : (data && data.data && Array.isArray(data.data)) ? data.data : defaultPositions;
+  // mock 回退修复(2026-07-31):原代码在 API 返回空时回退到 defaultPositions mock
+  // (贵州茅台 100 股/五粮液 300 股等假持仓),用户误以为是自己的真实持仓。
+  // 改为:API 无数据时显示空状态,不显示 mock。
+  let positions = [];
+  if (data && Array.isArray(data)) {
+    positions = data;
+  } else if (data && data.data && Array.isArray(data.data)) {
+    positions = data.data;
+  }
+  if (positions.length === 0) {
+    body.innerHTML = '<tr><td colspan="8" style="color:var(--text-muted);text-align:center;padding:20px 0;">暂无股票持仓,请在下方添加</td></tr>';
+    drawPieChart([]);
+    return;
+  }
 
   body.innerHTML = positions.map(p => {
     const code = p.symbol || p.code || '';
@@ -4728,24 +4717,23 @@ async function loadRiskStatus() {
   }
   const data = await api('/api/dashboard/risk');
 
-  const defaultRisk = [
-    {name:'仓位风险',level:'低',value:'45%',desc:'总仓位处于安全范围'},
-    {name:'集中度风险',level:'中',value:'32%',desc:'单一持仓占比偏高'},
-    {name:'波动率风险',level:'低',value:'1.2%',desc:'组合波动率正常'}
-  ];
-
-  let risks = defaultRisk;
-  if (data && (data.data || data.level)) {
-    const d = data.data || data;
-    // 将API返回的风控数据转换为前端格式
-    const level = d.level || 'NORMAL';
-    const levelMap = {NORMAL:'低',WARNING:'中',DANGER:'高',CRITICAL:'高'};
-    risks = [
-      {name:'风控等级', level: levelMap[level] || '低', value: level, desc: d.message || '系统正常运行'},
-      {name:'最大回撤', level: (d.drawdown_pct || 0) >= 10 ? '高' : (d.drawdown_pct || 0) >= 5 ? '中' : '低', value: fmtNum(d.drawdown_pct || 0) + '%', desc: '账户最大回撤'},
-      {name:'今日盈亏', level: (d.daily_pnl || 0) < 0 ? '中' : '低', value: fmtMoney(d.daily_pnl || 0), desc: '当日盈亏金额'}
-    ];
+  // mock 回退修复(2026-07-31):原代码在 API 返回空时回退到 defaultRisk mock
+  // (仓位风险低/集中度风险中等假状态),用户误以为风控正常。
+  // 改为:API 无数据时显示空状态,不显示 mock。
+  if (!data || (!data.data && !data.level)) {
+    container.innerHTML = '<div class="card" style="text-align:center;color:var(--text-muted);padding:20px;">暂无风控数据</div>';
+    return;
   }
+
+  const d = data.data || data;
+  // 将API返回的风控数据转换为前端格式
+  const level = d.level || 'NORMAL';
+  const levelMap = {NORMAL:'低',WARNING:'中',DANGER:'高',CRITICAL:'高'};
+  const risks = [
+    {name:'风控等级', level: levelMap[level] || '低', value: level, desc: d.message || '系统正常运行'},
+    {name:'最大回撤', level: (d.drawdown_pct || 0) >= 10 ? '高' : (d.drawdown_pct || 0) >= 5 ? '中' : '低', value: fmtNum(d.drawdown_pct || 0) + '%', desc: '账户最大回撤'},
+    {name:'今日盈亏', level: (d.daily_pnl || 0) < 0 ? '中' : '低', value: fmtMoney(d.daily_pnl || 0), desc: '当日盈亏金额'}
+  ];
 
   container.innerHTML = risks.map(r => {
     const levelColor = r.level === '低' ? 'var(--color-down)' : r.level === '中' ? 'var(--color-warning)' : 'var(--color-up)';
@@ -4889,27 +4877,22 @@ async function loadAlerts() {
   }
   const data = await api('/api/monitor/alerts');
 
-  const defaultAlerts = [
-    {type:'critical',icon:ALERT_ICON_MAP.critical,msg:'600519 跌破止损线 1800.00',time:'14:30:15'},
-    {type:'warning',icon:ALERT_ICON_MAP.warning,msg:'002594 成交量异常放大，换手率8.5%',time:'14:15:22'},
-    {type:'info',icon:ALERT_ICON_MAP.info,msg:'北向资金今日净流入超50亿',time:'13:45:00'},
-    {type:'warning',icon:ALERT_ICON_MAP.warning,msg:'持仓集中度超过30%阈值',time:'11:30:00'},
-    {type:'info',icon:ALERT_ICON_MAP.info,msg:'策略"动量突破"触发买入信号',time:'10:15:30'},
-    {type:'critical',icon:ALERT_ICON_MAP.critical,msg:'账户可用资金不足，请及时补充',time:'09:35:12'}
-  ];
-
-  let alerts = defaultAlerts;
-  // api()已自动解包FastAPI的{value:[...]}格式
-  if (data && Array.isArray(data) && data.length > 0) {
-    const severityMap = {critical:'critical',warning:'warning',info:'info'};
-    const iconMap = ALERT_ICON_MAP;
-    alerts = data.map(a => ({
-      type: severityMap[a.severity] || 'info',
-      icon: iconMap[a.severity] || ALERT_ICON_MAP.info,
-      msg: a.message || `${a.stock_code} ${a.alert_type}`,
-      time: new Date().toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit',second:'2-digit'})
-    }));
+  // mock 回退修复(2026-07-31):原代码在 API 返回空时回退到 defaultAlerts mock
+  // (6 条假告警,含"跌破止损线""资金不足"等),用户误以为发生真实告警。
+  // 改为:API 无数据时显示空状态,不显示 mock。
+  if (!data || !Array.isArray(data) || data.length === 0) {
+    container.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:20px;font-size:13px;">暂无告警信息</div>';
+    return;
   }
+
+  const severityMap = {critical:'critical',warning:'warning',info:'info'};
+  const iconMap = ALERT_ICON_MAP;
+  const alerts = data.map(a => ({
+    type: severityMap[a.severity] || 'info',
+    icon: iconMap[a.severity] || ALERT_ICON_MAP.info,
+    msg: a.message || `${a.stock_code} ${a.alert_type}`,
+    time: new Date().toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit',second:'2-digit'})
+  }));
 
   container.innerHTML = alerts.map(a => {
     return `<div class="alert-item alert-${a.type}">
@@ -4933,42 +4916,40 @@ async function loadWatchlist() {
   }
   const data = await api('/api/monitor/watchlist');
 
-  const defaultWatchlist = [
-    {code:'600519',name:'贵州茅台',price:1856.00,change_pct:4.21},
-    {code:'000858',name:'五粮液',price:156.78,change_pct:3.89},
-    {code:'300750',name:'宁德时代',price:198.00,change_pct:2.12},
-    {code:'002594',name:'比亚迪',price:267.80,change_pct:6.34}
-  ];
+  // mock 回退修复(2026-07-31):原代码在 API 返回空时回退到 defaultWatchlist mock
+  // (贵州茅台/五粮液等假自选股),用户误以为是自己的自选股。
+  // 改为:API 无数据时显示空状态,不显示 mock。
+  if (!data || !Array.isArray(data) || data.length === 0) {
+    body.innerHTML = '<tr><td colspan="5" style="color:var(--text-muted);text-align:center;padding:20px 0;">暂无自选股,请在下方添加</td></tr>';
+    return;
+  }
 
-  let list = defaultWatchlist;
-  // API返回list[WatchlistItem]，字段: stock_code, rules（无价格数据）
-  if (data && Array.isArray(data) && data.length > 0) {
-    const codes = data.map(w => w.stock_code).filter(Boolean);
-    if (codes.length > 0) {
-      // 获取实时行情补充价格数据
-      const quoteData = await api(`/api/market/stock_realtime?codes=${codes.join(',')}`);
-      if (quoteData && quoteData.data && Array.isArray(quoteData.data)) {
-        const quoteMap = {};
-        quoteData.data.forEach(q => { quoteMap[q.code] = q; });
-        list = data.map(w => {
-          const q = quoteMap[w.stock_code] || {};
-          return {
-            code: w.stock_code,
-            name: q.name || w.stock_code,
-            price: q.price || 0,
-            change_pct: q.change_pct || 0,
-            rules: w.rules || []
-          };
-        });
-      } else {
-        list = data.map(w => ({
+  const codes = data.map(w => w.stock_code).filter(Boolean);
+  let list;
+  if (codes.length > 0) {
+    // 获取实时行情补充价格数据
+    const quoteData = await api(`/api/market/stock_realtime?codes=${codes.join(',')}`);
+    if (quoteData && quoteData.data && Array.isArray(quoteData.data)) {
+      const quoteMap = {};
+      quoteData.data.forEach(q => { quoteMap[q.code] = q; });
+      list = data.map(w => {
+        const q = quoteMap[w.stock_code] || {};
+        return {
           code: w.stock_code,
-          name: w.stock_code,
-          price: 0,
-          change_pct: 0,
+          name: q.name || w.stock_code,
+          price: q.price || 0,
+          change_pct: q.change_pct || 0,
           rules: w.rules || []
-        }));
-      }
+        };
+      });
+    } else {
+      list = data.map(w => ({
+        code: w.stock_code,
+        name: w.stock_code,
+        price: 0,
+        change_pct: 0,
+        rules: w.rules || []
+      }));
     }
   }
 
@@ -5184,19 +5165,17 @@ async function loadSettings() {
     return;
   }
   const data = await api('/api/config/settings');
-  const defaultSettings = {
-    trade_mode: 'simulation',
-    max_position: 80,
-    stop_loss: 5,
-    take_profit: 15,
-    notify_email: 'admin@example.com',
-    notify_wechat: true,
-    notify_ding: false,
-    api_key: '****',
-    refresh_interval: 5
-  };
+  // mock 回退修复(2026-07-31):原代码在 API 返回空时回退到 defaultSettings mock
+  // (模拟盘/通知邮箱 admin@example.com 等假配置),用户可能误以为是已保存配置并直接保存。
+  // 改为:API 无数据时显示提示,不渲染表单。
+  if (!data || (!data.settings && !data.data)) {
+    const hint = '<div style="color:var(--text-muted);text-align:center;padding:20px;font-size:13px;">暂无配置数据,请稍后重试</div>';
+    if (configForm) configForm.innerHTML = hint;
+    if (riskParams) riskParams.innerHTML = hint;
+    return;
+  }
 
-  currentConfig = (data && data.settings) ? data.settings : (data && data.data) ? data.data : defaultSettings;
+  currentConfig = (data && data.settings) ? data.settings : (data && data.data) ? data.data : {};
 
   // 配置表单(configForm 已在函数开头声明)
   configForm.innerHTML = `
