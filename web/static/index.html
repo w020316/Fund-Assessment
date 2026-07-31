@@ -499,6 +499,11 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
   .topbar { padding:0 8px; }
   #sysTime { font-size:10px; }
   .modal-body { padding:10px; }
+  /* 超小屏表格优化(2026-07-30):数字列不换行 + 等宽数字,
+     配合 .table-wrap overflow-x:auto 横向滚动,避免 7 列挤压导致数字换行难读。
+     pure CSS,不改 HTML 结构/配色/字体。 */
+  th, td { white-space:nowrap; }
+  table { font-variant-numeric:tabular-nums; }
 }
 
 /* ===== 横屏适配(高度 <500px):模态框不撑满 ===== */
