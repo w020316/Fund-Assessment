@@ -326,3 +326,238 @@ async def risk(request: Request):
         position_reduction=status.position_reduction,
         message=status.message,
     )
+
+
+# ===== 组合风险分析(2026-07-30 新增) =====
+# 复用 backtest 模块的指标计算函数(_calc_sortino_ratio 已有),
+# 但组合分析逻辑独立:按持仓权重构建组合日收益率序列,再计算风险指标。
+# 设计约束:
+# - 并行拉取 K 线(asyncio.gather + to_thread),整体超时 25s(Render Free 30s 限制)
+# - 60s 进程内缓存,避免短时间内重复计算
+# - 复用 numpy/pandas,不引入新依赖
+
+import time as _time
+import numpy as np
+_portfolio_risk_cache: dict = {"ts": 0.0, "data": None}
+_PORTFOLIO_RISK_CACHE_TTL = 60.0  # 60 秒缓存
+
+
+class PortfolioRiskResponse(BaseModel):
+    """组合风险分析响应"""
+    position_count: int
+    trading_days: int  # 实际使用的交易日数
+    annual_volatility: float  # 年化波动率(%)
+    sharpe_ratio: float  # 夏普比率(年化超额收益/年化波动)
+    sortino_ratio: float  # Sortino 比率(只惩罚下行波动)
+    max_drawdown: float  # 最大回撤(%)
+    calmar_ratio: float  # Calmar 比率(年化收益/最大回撤)
+    weighted_returns: list[float]  # 近 30 日组合日收益率(%)
+    weights: list[dict]  # 各持仓权重 {symbol, name, weight}
+    data_quality: str = "normal"  # normal | degraded | insufficient
+
+
+def _calc_max_drawdown(cumulative: list[float]) -> float:
+    """计算最大回撤(%)。借鉴 mementum/backtrader DrawDown Analyzer。"""
+    if not cumulative:
+        return 0.0
+    peak = cumulative[0]
+    max_dd = 0.0
+    for v in cumulative:
+        if v > peak:
+            peak = v
+        dd = (peak - v) / peak if peak > 0 else 0.0
+        if dd > max_dd:
+            max_dd = dd
+    return round(max_dd * 100, 2)
+
+
+@router.get("/portfolio_risk", response_model=PortfolioRiskResponse, dependencies=[Depends(require_admin)])
+async def portfolio_risk(request: Request):
+    """组合风险分析:基于持仓权重计算夏普/Sortino/最大回撤/Calmar。
+
+    算法:
+    1. 读取用户持仓,计算各股市值权重
+    2. 并行拉取每只股票近 120 日 K 线(超时 25s)
+    3. 按权重构建组合日收益率序列: r_p(t) = Σ w_i * r_i(t)
+    4. 年化波动 = std(daily_returns) * sqrt(252)
+    5. Sharpe = (mean(daily) - rf/252) / std(daily) * sqrt(252)
+    6. Sortino = 同 Sharpe 但分母用下行标准差(复用 backtest._calc_sortino_ratio)
+    7. 最大回撤基于组合累计收益曲线
+    8. Calmar = 年化收益 / 最大回撤
+    """
+    # 缓存检查
+    now = _time.monotonic()
+    if _portfolio_risk_cache["data"] is not None and now - _portfolio_risk_cache["ts"] < _PORTFOLIO_RISK_CACHE_TTL:
+        return _portfolio_risk_cache["data"]
+
+    positions = _load_user_positions()
+    if not positions:
+        result = PortfolioRiskResponse(
+            position_count=0, trading_days=0,
+            annual_volatility=0.0, sharpe_ratio=0.0, sortino_ratio=0.0,
+            max_drawdown=0.0, calmar_ratio=0.0,
+            weighted_returns=[], weights=[],
+            data_quality="insufficient",
+        )
+        _portfolio_risk_cache["data"] = result
+        _portfolio_risk_cache["ts"] = now
+        return result
+
+    # 获取实时行情以计算市值权重(复用 _enrich)
+    enriched = await _enrich_positions_with_realtime([dict(p) for p in positions])
+    valid = [p for p in enriched if p.get("market_value", 0) > 0 and p.get("quantity", 0) > 0]
+    if not valid:
+        result = PortfolioRiskResponse(
+            position_count=len(positions), trading_days=0,
+            annual_volatility=0.0, sharpe_ratio=0.0, sortino_ratio=0.0,
+            max_drawdown=0.0, calmar_ratio=0.0,
+            weighted_returns=[], weights=[],
+            data_quality="insufficient",
+        )
+        _portfolio_risk_cache["data"] = result
+        _portfolio_risk_cache["ts"] = now
+        return result
+
+    total_mv = sum(p["market_value"] for p in valid)
+    weights_map = {p["symbol"]: p["market_value"] / total_mv for p in valid}
+
+    # 并行拉取 K 线(超时 25s 保护,避免 Render Free 30s 限制)
+    async def fetch_kline(sym: str) -> list[dict]:
+        return await asyncio.to_thread(ds2.get_kline_mootdx, sym, "daily", 120)
+
+    try:
+        kline_results = await asyncio.wait_for(
+            asyncio.gather(*[fetch_kline(p["symbol"]) for p in valid], return_exceptions=True),
+            timeout=25.0,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("portfolio_risk: fetch klines timeout(25s)")
+        result = PortfolioRiskResponse(
+            position_count=len(valid), trading_days=0,
+            annual_volatility=0.0, sharpe_ratio=0.0, sortino_ratio=0.0,
+            max_drawdown=0.0, calmar_ratio=0.0,
+            weighted_returns=[], weights=[],
+            data_quality="degraded",
+        )
+        _portfolio_risk_cache["data"] = result
+        _portfolio_risk_cache["ts"] = now
+        return result
+
+    # 构建各股票的日收益率(用 numpy 避免新增 pandas 依赖到 dashboard 模块)
+    returns_dict = {}
+    for p, klines in zip(valid, kline_results):
+        if isinstance(klines, Exception) or not klines or len(klines) < 2:
+            continue
+        try:
+            # klines 按 date 升序还是降序不确定,先按 date 排序保证时序正确
+            sorted_klines = sorted(klines, key=lambda x: str(x.get("date", "")))
+            closes = []
+            for k in sorted_klines:
+                try:
+                    c = float(k.get("close", 0))
+                    if c > 0:
+                        closes.append(c)
+                except (TypeError, ValueError):
+                    continue
+            if len(closes) < 2:
+                continue
+            # 日收益率: r(t) = close(t)/close(t-1) - 1
+            closes_arr = np.array(closes, dtype=float)
+            rets = (closes_arr[1:] / closes_arr[:-1] - 1.0).tolist()
+            returns_dict[p["symbol"]] = rets
+        except Exception as e:
+            logger.warning(f"portfolio_risk: calc returns for {p['symbol']} failed: {e}")
+
+    if not returns_dict:
+        result = PortfolioRiskResponse(
+            position_count=len(valid), trading_days=0,
+            annual_volatility=0.0, sharpe_ratio=0.0, sortino_ratio=0.0,
+            max_drawdown=0.0, calmar_ratio=0.0,
+            weighted_returns=[], weights=[],
+            data_quality="degraded",
+        )
+        _portfolio_risk_cache["data"] = result
+        _portfolio_risk_cache["ts"] = now
+        return result
+
+    # 对齐到最短长度(各股票交易日数可能不同)
+    min_len = min(len(r) for r in returns_dict.values())
+    if min_len < 5:
+        logger.warning(f"portfolio_risk: insufficient trading days ({min_len})")
+        result = PortfolioRiskResponse(
+            position_count=len(valid), trading_days=min_len,
+            annual_volatility=0.0, sharpe_ratio=0.0, sortino_ratio=0.0,
+            max_drawdown=0.0, calmar_ratio=0.0,
+            weighted_returns=[], weights=[],
+            data_quality="insufficient",
+        )
+        _portfolio_risk_cache["data"] = result
+        _portfolio_risk_cache["ts"] = now
+        return result
+
+    # 按权重构建组合日收益率
+    portfolio_returns = []
+    for i in range(min_len):
+        r = 0.0
+        for sym, rets in returns_dict.items():
+            w = weights_map.get(sym, 0)
+            r += w * rets[i]
+        portfolio_returns.append(r)
+
+    # 计算指标
+    arr = np.array(portfolio_returns, dtype=float)
+    trading_days = 252
+
+    # 年化波动率(ddof=1 样本标准差,与 backtest 统一)
+    daily_std = float(np.std(arr, ddof=1)) if len(arr) > 1 else 0.0
+    annual_vol = daily_std * float(np.sqrt(trading_days))
+
+    # 年化收益(基于日收益均值)
+    daily_mean = float(arr.mean())
+    annual_return = daily_mean * trading_days
+
+    # Sharpe 比率
+    risk_free = 0.03
+    daily_rf = risk_free / trading_days
+    sharpe = ((daily_mean - daily_rf) / daily_std * float(np.sqrt(trading_days))) if daily_std > 0 else 0.0
+
+    # Sortino(复用 backtest 模块函数)
+    try:
+        from src.core.backtest import _calc_sortino_ratio
+        sortino = _calc_sortino_ratio(portfolio_returns, risk_free)
+    except Exception:
+        sortino = 0.0
+
+    # 累计收益曲线 + 最大回撤
+    cumulative = [1.0]
+    for r in portfolio_returns:
+        cumulative.append(cumulative[-1] * (1 + r))
+    max_dd = _calc_max_drawdown(cumulative)
+
+    # Calmar = 年化收益 / 最大回撤
+    calmar = (annual_return / (max_dd / 100)) if max_dd > 0 else 0.0
+
+    # 权重列表
+    weights_list = [
+        {"symbol": p["symbol"], "name": p.get("name", ""), "weight": round(weights_map[p["symbol"]] * 100, 2)}
+        for p in valid
+    ]
+
+    # 近 30 日组合日收益率(%),供前端图表
+    recent_returns = [round(r * 100, 4) for r in portfolio_returns[-30:]]
+
+    result = PortfolioRiskResponse(
+        position_count=len(valid),
+        trading_days=min_len,
+        annual_volatility=round(annual_vol * 100, 2),
+        sharpe_ratio=round(sharpe, 3),
+        sortino_ratio=round(sortino, 3),
+        max_drawdown=max_dd,
+        calmar_ratio=round(calmar, 3),
+        weighted_returns=recent_returns,
+        weights=weights_list,
+        data_quality="normal",
+    )
+    _portfolio_risk_cache["data"] = result
+    _portfolio_risk_cache["ts"] = now
+    return result

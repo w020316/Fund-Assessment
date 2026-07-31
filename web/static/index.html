@@ -1114,6 +1114,17 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
           </div>
         </div>
 
+        <!-- 组合风险分析(2026-07-30 新增):夏普/Sortino/最大回撤/Calmar -->
+        <div class="card mb-16">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+            <span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 16l4-8 4 4 6-9"/></svg> 组合风险分析</span>
+            <button class="btn btn-outline" style="padding:4px 10px;font-size:12px;" onclick="loadPortfolioRisk()">分析</button>
+          </div>
+          <div id="portfolioRiskBody" style="padding:8px 0;">
+            <div style="color:var(--text-muted);text-align:center;padding:20px 0;">点击"分析"基于持仓权重计算夏普/最大回撤等风险指标</div>
+          </div>
+        </div>
+
         <!-- 风控状态 -->
         <div class="card">
           <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> 风控状态</div>
@@ -4199,6 +4210,123 @@ function calcDCA() {
       ${annualRate <= 0 ? '<span style="color:var(--accent-blue);">提示:收益率为非正数,定投意义不大,建议调高预期。</span>' : '定投适合长期坚持,平滑波动,享受复利效应。'}
     </div>
   `;
+}
+
+// 组合风险分析(2026-07-30 新增):调用 /api/dashboard/portfolio_risk
+// 展示夏普/Sortino/最大回撤/Calmar + 持仓权重 + 近 30 日组合日收益率迷你折线图
+async function loadPortfolioRisk() {
+  const body = document.getElementById('portfolioRiskBody');
+  body.innerHTML = '<div style="text-align:center;padding:20px 0;color:var(--text-muted);">分析中... 拉取近 120 日 K 线计算风险指标,约 5-15 秒</div>';
+  try {
+    const data = await api('/api/dashboard/portfolio_risk');
+    const d = (data && data.data) ? data.data : data;
+    if (!d) { body.innerHTML = '<div style="color:var(--accent-blue);text-align:center;padding:20px 0;">接口返回空</div>'; return; }
+
+    const dq = d.data_quality || 'normal';
+    if (dq === 'insufficient') {
+      body.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:20px 0;">暂无持仓或历史数据不足(需 ≥5 个交易日),无法计算风险指标。请先在持仓列表添加股票。</div>';
+      return;
+    }
+    if (dq === 'degraded') {
+      body.innerHTML = '<div style="color:var(--accent-blue);text-align:center;padding:12px 0;">⚠ 行情数据源拉取超时或失败,请稍后重试</div>';
+      return;
+    }
+
+    // 风险等级评估(基于夏普 + 最大回撤)
+    const sharpe = d.sharpe_ratio || 0;
+    const dd = d.max_drawdown || 0;
+    let riskLevel, riskColor, riskDesc;
+    if (sharpe >= 1.5 && dd < 10) { riskLevel = '优秀'; riskColor = 'var(--accent-cyan)'; riskDesc = '组合风险调整后收益优秀,回撤可控'; }
+    else if (sharpe >= 1.0 && dd < 20) { riskLevel = '良好'; riskColor = 'var(--accent-cyan)'; riskDesc = '组合表现良好,风险适中'; }
+    else if (sharpe >= 0.5) { riskLevel = '一般'; riskColor = 'var(--accent-blue)'; riskDesc = '收益波动较大,建议关注'; }
+    else { riskLevel = '较差'; riskColor = '#ef4444'; riskDesc = '风险调整后收益偏低,需优化持仓结构'; }
+
+    // 各持仓权重表格
+    const weightsHtml = (d.weights || []).map(w => {
+      const wColor = w.weight > 40 ? '#ef4444' : (w.weight > 25 ? 'var(--accent-blue)' : 'var(--text-secondary)');
+      return `<tr>
+        <td style="color:var(--accent-cyan);">${w.symbol}</td>
+        <td>${w.name}</td>
+        <td style="color:${wColor};font-weight:600;">${fmtNum(w.weight)}%</td>
+        <td><div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden;"><div style="height:100%;width:${Math.min(w.weight, 100)}%;background:${wColor};"></div></div></td>
+      </tr>`;
+    }).join('');
+
+    // 近 30 日组合日收益率迷你折线图(SVG)
+    const rets = d.weighted_returns || [];
+    let chartHtml = '';
+    if (rets.length > 1) {
+      const min = Math.min(...rets), max = Math.max(...rets);
+      const range = (max - min) || 1;
+      const W = 400, H = 80, pad = 4;
+      const zero = H - pad - ((0 - min) / range) * (H - 2 * pad);
+      const pathD = rets.map((r, i) => {
+        const x = pad + (i / (rets.length - 1)) * (W - 2 * pad);
+        const y = pad + (1 - (r - min) / range) * (H - 2 * pad);
+        return (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1);
+      }).join(' ');
+      const zeroLine = (0 >= min && 0 <= max) ? `<line x1="${pad}" y1="${zero.toFixed(1)}" x2="${W-pad}" y2="${zero.toFixed(1)}" stroke="var(--text-muted)" stroke-width="0.5" stroke-dasharray="2,2"/>` : '';
+      chartHtml = `
+        <div style="margin-top:12px;">
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">近 ${rets.length} 日组合日收益率(%)</div>
+          <svg width="100%" height="${H}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+            ${zeroLine}
+            <path d="${pathD}" fill="none" stroke="var(--accent-cyan)" stroke-width="1.5"/>
+          </svg>
+        </div>`;
+    }
+
+    body.innerHTML = `
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;padding:8px 12px;background:rgba(255,255,255,0.02);border-radius:6px;">
+        <div style="font-size:11px;color:var(--text-muted);">风险评级</div>
+        <div style="font-size:18px;font-weight:700;color:${riskColor};">${riskLevel}</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-left:auto;">${riskDesc}</div>
+      </div>
+      <div class="grid-4" style="gap:8px;">
+        <div class="card" style="text-align:center;padding:10px;">
+          <div style="color:var(--text-muted);font-size:11px;margin-bottom:4px;">年化波动率</div>
+          <div style="font-size:18px;font-weight:700;">${fmtNum(d.annual_volatility)}%</div>
+        </div>
+        <div class="card" style="text-align:center;padding:10px;">
+          <div style="color:var(--text-muted);font-size:11px;margin-bottom:4px;">夏普比率</div>
+          <div style="font-size:18px;font-weight:700;color:${changeColor(d.sharpe_ratio)};">${fmtNum(d.sharpe_ratio, 3)}</div>
+        </div>
+        <div class="card" style="text-align:center;padding:10px;">
+          <div style="color:var(--text-muted);font-size:11px;margin-bottom:4px;">Sortino 比率</div>
+          <div style="font-size:18px;font-weight:700;color:${changeColor(d.sortino_ratio)};">${fmtNum(d.sortino_ratio, 3)}</div>
+        </div>
+        <div class="card" style="text-align:center;padding:10px;">
+          <div style="color:var(--text-muted);font-size:11px;margin-bottom:4px;">最大回撤</div>
+          <div style="font-size:18px;font-weight:700;color:#ef4444;">-${fmtNum(d.max_drawdown)}%</div>
+        </div>
+      </div>
+      <div class="grid-2" style="margin-top:12px;gap:8px;">
+        <div class="card" style="text-align:center;padding:8px;">
+          <div style="color:var(--text-muted);font-size:11px;margin-bottom:4px;">Calmar 比率</div>
+          <div style="font-size:16px;font-weight:600;color:${changeColor(d.calmar_ratio)};">${fmtNum(d.calmar_ratio, 3)}</div>
+        </div>
+        <div class="card" style="text-align:center;padding:8px;">
+          <div style="color:var(--text-muted);font-size:11px;margin-bottom:4px;">交易日数 / 持仓数</div>
+          <div style="font-size:16px;font-weight:600;">${d.trading_days} 日 / ${d.position_count} 只</div>
+        </div>
+      </div>
+      ${chartHtml}
+      <div style="margin-top:12px;">
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">持仓权重分布</div>
+        <div class="table-wrap" style="max-height:200px;overflow-y:auto;">
+          <table>
+            <thead><tr><th>代码</th><th>名称</th><th>权重</th><th>占比</th></tr></thead>
+            <tbody>${weightsHtml}</tbody>
+          </table>
+        </div>
+      </div>
+      <div style="margin-top:8px;font-size:11px;color:var(--text-muted);">
+        指标说明:夏普 >1.0 良好,>1.5 优秀;Sortino 只惩罚下行波动;最大回撤为历史峰值到谷值的最大跌幅;Calmar = 年化收益/最大回撤,>3 为优秀策略。基于近 ${d.trading_days} 个交易日数据。
+      </div>
+    `;
+  } catch (e) {
+    body.innerHTML = `<div style="color:var(--accent-blue);text-align:center;padding:20px 0;">分析失败: ${e.message || e}</div>`;
+  }
 }
 
 async function loadAccountOverview() {
