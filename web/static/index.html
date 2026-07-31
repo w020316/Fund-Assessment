@@ -18,6 +18,9 @@
   --text-primary: #e6edf3;
   --text-secondary: #8b949e;
   --text-muted: #6e7681;
+  --text-tertiary: #586069;
+  --text-warning: #f59e0b;
+  --bg-hover: rgba(255,255,255,0.06);
   --accent: #f59e0b;
   --accent-blue: #f59e0b;
   --accent-cyan: #06b6d4;
@@ -1910,7 +1913,7 @@ async function loadIndexData() {
   // 生成模拟迷你走势线
   indices.forEach(idx => {
     const svgId = 'spark-' + idx.code.replace(/\./g, '_').replace(/[^\w]/g, '_');
-    drawSparkline(svgId, idx.change_pct >= 0);
+    drawSparkline(svgId, idx.change_pct >= 0, idx.code);
   });
 }
 
@@ -1937,13 +1940,24 @@ async function loadGlobalIndexBar() {
 }
 
 // 迷你走势线（纯SVG）
-function drawSparkline(svgId, isUp) {
+function drawSparkline(svgId, isUp, seedStr) {
   const svg = document.getElementById(svgId);
   if (!svg) return;
+  // 走势线抖动修复(2026-07-31):原代码用 Math.random 生成走势线,每次刷新都变形,
+  // 用户误以为指数在实时波动。改为基于种子(seedStr=idx.code)的确定性 PRNG,
+  // 保证同一指数每次刷新走势线一致,仅涨跌方向(isUp)影响斜率。
+  let hash = 0;
+  for (let i = 0; i < (seedStr || svgId).length; i++) {
+    hash = ((hash << 5) - hash) + (seedStr || svgId).charCodeAt(i);
+    hash |= 0;
+  }
+  let rng = Math.abs(hash) || 1;
+  const nextRand = () => { rng = (rng * 9301 + 49297) % 233280; return rng / 233280; };
+
   const points = [];
   let val = 20;
   for (let i = 0; i < 20; i++) {
-    val += (Math.random() - (isUp ? 0.4 : 0.6)) * 3;
+    val += (nextRand() - (isUp ? 0.4 : 0.6)) * 3;
     val = Math.max(5, Math.min(35, val));
     points.push(val);
   }
@@ -1973,7 +1987,10 @@ let currentHotTab = 'gain';
 function switchHotTab(tab) {
   currentHotTab = tab;
   document.querySelectorAll('#hotStockTabs .tab').forEach(t => t.classList.remove('active'));
-  event.target.classList.add('active');
+  // event 依赖修复(2026-07-31):原代码使用全局 event 变量,Firefox 严格模式或非 onclick 调用时报错。
+  // 改为通过 data-tab 属性查找对应 tab 元素,不依赖 event。
+  const tabEl = document.querySelector(`#hotStockTabs .tab[data-tab="${tab}"]`) || document.querySelector(`#hotStockTabs .tab[onclick*="${tab}"]`);
+  if (tabEl) tabEl.classList.add('active');
   loadHotStocks(tab);
 }
 
@@ -2057,27 +2074,19 @@ async function loadGlobalNews() {
   const data = await apiCached('/api/market/global_news', 'global_news', 120);
   const container = document.getElementById('newsTicker');
 
-  const defaultNews = [
-    {title:'美联储维持利率不变，市场预期年内降息两次'},
-    {title:'A股三大指数集体收涨，成交额突破万亿'},
-    {title:'北向资金今日净流入超80亿元，重点加仓消费板块'},
-    {title:'半导体板块强势领涨，多只个股涨停'},
-    {title:'央行开展MLF操作，释放流动性信号'},
-    {title:'新能源车销量再创新高，产业链受益'},
-    {title:'国际油价小幅回落，OPEC+维持减产协议'},
-    {title:'科创板注册制改革深化，IPO节奏保持稳定'}
-  ];
-
-  let news = defaultNews;
-  if (data && data.data && Array.isArray(data.data) && data.data.length > 0) {
-    news = data.data;
+  // mock 数据误导修复(2026-07-31):原代码回退到 defaultNews mock(美联储降息/北向流入80亿等假新闻),
+  // 用户误以为是实时资讯。改为:API 无数据时显示"暂无资讯"。
+  if (!data || !data.data || !Array.isArray(data.data) || data.data.length === 0) {
+    container.innerHTML = '<span class="news-item" style="color:var(--text-muted);">暂无资讯</span>';
+    return;
   }
+  const news = data.data;
 
   // 重复两遍实现无缝滚动
   const html = news.map(n => {
     const title = typeof n === 'string' ? n : (n.title || '');
     const source = (typeof n === 'object' && n.source) ? ` [${n.source}]` : '';
-    return `<span class="news-item"><span class="news-dot"></span>${title}${source}</span>`;
+    return `<span class="news-item"><span class="news-dot"></span>${escapeHtml(title)}${escapeHtml(source)}</span>`;
   }).join('');
   container.innerHTML = html + html;
 }
@@ -2423,7 +2432,8 @@ function drawRadarChart(scores) {
   // 数据区域
   const dataPoints = dims.map((d, i) => {
     const angle = startAngle + i * angleStep;
-    const r = (s[d.key] / 100) * maxR;
+    // undefined 兜底(2026-07-31):缺维度时兜底 50
+    const r = ((s[d.key] != null ? s[d.key] : 50) / 100) * maxR;
     return `${cx + r * Math.cos(angle)},${cy + r * Math.sin(angle)}`;
   }).join(' ');
 
@@ -2444,7 +2454,9 @@ function drawRadarChart(scores) {
     <polygon points="${dataPoints}" fill="rgba(245,158,11,0.15)" stroke="var(--accent)" stroke-width="2"/>
     ${dims.map((d, i) => {
       const angle = startAngle + i * angleStep;
-      const r = (s[d.key] / 100) * maxR;
+      // undefined 兜底修复(2026-07-31):scores 缺某维度时 s[d.key] 为 undefined,
+      // 导致 r=NaN,SVG 坐标异常。兜底为 50(中性分)。
+      const r = ((s[d.key] != null ? s[d.key] : 50) / 100) * maxR;
       return `<circle cx="${cx + r * Math.cos(angle)}" cy="${cy + r * Math.sin(angle)}" r="4" fill="var(--accent-blue)"/>`;
     }).join('')}
     ${labelHtml}
@@ -3882,6 +3894,9 @@ async function addFundPosition() {
   const note = document.getElementById('fundNoteInput').value.trim();
 
   if (!code) { showToast('请输入基金代码', 'error'); return; }
+  // 输入校验修复(2026-07-31):原代码未校验基金代码格式,用户输入"白酒"或"abc123"也能提交,
+  // 后端可能存入脏数据。基金代码通常为 5-6 位数字(部分场内基金 5 位)。
+  if (!/^\d{5,6}$/.test(code)) { showToast('基金代码需为 5-6 位数字', 'error'); return; }
   if (shares <= 0) { showToast('请输入有效份额', 'error'); return; }
 
   const resp = await api('/api/fund/positions/add', {
@@ -3953,11 +3968,19 @@ async function fundSearch(q) {
     el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:4px;">无匹配基金</div>';
     return;
   }
-  el.innerHTML = data.data.slice(0, 8).map(item =>
-    `<div style="padding:4px 8px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background=''" onclick="selectFund('${item.code}','${item.name.replace(/'/g, '')}')">
-      <strong>${item.code}</strong> ${item.name} <span style="color:var(--text-muted);font-size:11px;">${item.type || ''}</span>
-    </div>`
-  ).join('');
+  el.innerHTML = data.data.slice(0, 8).map(item => {
+    // XSS 修复(2026-07-31):原代码 item.name 未 escapeHtml 直接插入 innerHTML,
+    // 且 onclick 字符串只替换单引号未处理反斜杠/双引号。改为 escapeHtml 显示,
+    // onclick 用 JSON.stringify 安全嵌入字符串字面量。
+    const safeCode = escapeHtml(item.code);
+    const safeName = escapeHtml(item.name);
+    const safeType = escapeHtml(item.type || '');
+    const jsCode = JSON.stringify(String(item.code));
+    const jsName = JSON.stringify(String(item.name));
+    return `<div style="padding:4px 8px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background=''" onclick="selectFund(${jsCode},${jsName})">
+      <strong>${safeCode}</strong> ${safeName} <span style="color:var(--text-muted);font-size:11px;">${safeType}</span>
+    </div>`;
+  }).join('');
 }
 
 function selectFund(code, name) {
@@ -4667,7 +4690,9 @@ let currentDataTab = 'research';
 function switchDataTab(tab) {
   currentDataTab = tab;
   document.querySelectorAll('#dataTabs .tab').forEach(t => t.classList.remove('active'));
-  event.target.classList.add('active');
+  // event 依赖修复(2026-07-31):同 switchHotTab,改为通过 onclick 属性查找,不依赖全局 event。
+  const tabEl = document.querySelector(`#dataTabs .tab[onclick*="${tab}"]`);
+  if (tabEl) tabEl.classList.add('active');
   loadDataTab();
 }
 
@@ -5355,6 +5380,26 @@ document.addEventListener('DOMContentLoaded', () => {
   loadMarketData();   // 后台加载数据(覆盖骨架屏)
   loadLlmProvider();
   updateFreshness();
+  // ESC 关闭 modal 修复(2026-07-31):原代码三个业务 modal(holdingsModal/uploadModal/multiAgentModal)
+  // 只能点击 × 或遮罩关闭,键盘用户不便。注册全局 ESC 监听,按 ESC 时关闭所有可见 modal。
+  // customConfirm 有自己的 escHandler,优先级更高(先触发先关闭)。
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    // 按优先级检查 customConfirm(它是动态创建的,已自行处理)
+    // 检查业务 modal
+    const modals = ['holdingsModal', 'uploadModal', 'multiAgentModal'];
+    for (const id of modals) {
+      const m = document.getElementById(id);
+      if (m && m.style.display !== 'none' && m.style.display !== '') {
+        // 调用对应的 close 函数(如果有),否则直接隐藏
+        if (id === 'uploadModal') closeUploadModal();
+        else if (id === 'multiAgentModal') closeMultiAgentModal();
+        else m.style.display = 'none';
+        e.preventDefault();
+        return;
+      }
+    }
+  });
 });
 </script>
 </body>
