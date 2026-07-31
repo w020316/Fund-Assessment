@@ -517,5 +517,7 @@ def ai_generate_script(
             "target_type": target_type,
             "target_name": name,
             "target_code": code,
-            "error": str(e),
+            # P1-2 修复(2026-07-30):删除 "error": str(e),
+            # 异常可能含 LLM API URL/模型名/鉴权失败细节,经 /api/scripts/ai-generate 透传前端。
+            # 完整异常已在上方 logger.warning 记录,客户端仅需知道是否降级(source 字段)。
         }

@@ -1592,6 +1592,18 @@ function showToast(msg, type='info') {
   setTimeout(() => { t.style.opacity='0'; t.style.transition='opacity 0.3s'; setTimeout(()=>t.remove(),300); }, 3000);
 }
 
+// HTML 转义(2026-07-30):防止用户输入的 name 等字段经 innerHTML 注入,造成 XSS
+// 用于所有用户可控文本(股票/基金名称、备注)插入 DOM 前的转义
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // 格式化数字
 function fmtNum(n, decimals=2) {
   if (n == null || isNaN(n)) return '—';
@@ -2913,19 +2925,23 @@ async function loadFundData() {
   body.innerHTML = positions.map(p => {
     const pnlColor = changeColor(p.pnl_amount || 0);
     const changeColorStr = changeColor(p.change_pct || 0);
+    // P1-XSS 修复(2026-07-30):fund_name 经 escapeHtml 转义后再插入 DOM 和 onclick 属性,
+    // 防止用户输入 <img onerror> 等 HTML 造成 XSS,或单引号破坏 onclick JS 字符串
+    const safeName = escapeHtml(p.fund_name || '—');
+    const safeNameAttr = escapeHtml(p.fund_name || '');  // 用于 onclick 字符串字面量
     return `<tr>
-      <td>${p.fund_code}</td>
-      <td>${p.fund_name || '—'}</td>
+      <td>${escapeHtml(p.fund_code)}</td>
+      <td>${safeName}</td>
       <td>${p.shares}</td>
       <td>${(p.cost_nav || 0).toFixed(4)}</td>
       <td>${(p.current_nav || 0).toFixed(4)}</td>
       <td style="color:${changeColorStr};">${(p.change_pct || 0).toFixed(2)}%</td>
       <td style="color:${pnlColor};">${(p.pnl_amount >= 0 ? '+' : '') + (p.pnl_amount || 0).toFixed(2)}<br><span style="font-size:11px;">(${(p.pnl_pct >= 0 ? '+' : '') + (p.pnl_pct || 0).toFixed(2)}%)</span></td>
       <td style="white-space:nowrap;">
-        <button class="btn btn-sm" style="color:var(--accent-cyan);padding:3px 8px;" title="P1-2 重仓股板块分析" onclick="viewHoldings('${p.fund_code}','${p.fund_name || ''}')">分析</button>
-        <button class="btn btn-sm" style="color:var(--accent);padding:3px 8px;" title="P1-5 多智能体深度分析" onclick="multiAgentAnalyze('${p.fund_code}','${p.fund_name || ''}',${p.cost_nav || 0},${p.shares || 0})">深度</button>
-        <button class="btn btn-sm" style="color:var(--text-muted);padding:3px 8px;" title="净值走势图" onclick="toggleFundChart('${p.fund_code}')">走势</button>
-        <button class="btn btn-sm" style="color:var(--color-up);padding:3px 8px;" onclick="deleteFundPosition('${p.fund_code}')">删</button>
+        <button class="btn btn-sm" style="color:var(--accent-cyan);padding:3px 8px;" title="P1-2 重仓股板块分析" onclick="viewHoldings('${escapeHtml(p.fund_code)}','${safeNameAttr}')">分析</button>
+        <button class="btn btn-sm" style="color:var(--accent);padding:3px 8px;" title="P1-5 多智能体深度分析" onclick="multiAgentAnalyze('${escapeHtml(p.fund_code)}','${safeNameAttr}',${p.cost_nav || 0},${p.shares || 0})">深度</button>
+        <button class="btn btn-sm" style="color:var(--text-muted);padding:3px 8px;" title="净值走势图" onclick="toggleFundChart('${escapeHtml(p.fund_code)}')">走势</button>
+        <button class="btn btn-sm" style="color:var(--color-up);padding:3px 8px;" onclick="deleteFundPosition('${escapeHtml(p.fund_code)}')">删</button>
       </td>
     </tr>
     <tr id="chart-row-${p.fund_code}" style="display:none;">
@@ -4506,8 +4522,8 @@ async function loadPositions() {
       ? ` <span title="实时行情获取失败,当前价/盈亏可能不准确" style="color:var(--accent-blue);font-size:11px;cursor:help;">⚠</span>`
       : '';
     return `<tr${degraded ? ' style="opacity:0.85;"' : ''}>
-      <td style="color:var(--accent-cyan);">${code}${warnIcon}</td>
-      <td>${p.name}</td>
+      <td style="color:var(--accent-cyan);">${escapeHtml(code)}${warnIcon}</td>
+      <td>${escapeHtml(p.name)}</td>
       <td>${qty}</td>
       <td>${fmtNum(cost)}</td>
       <td style="color:${color}">${fmtNum(price)}</td>

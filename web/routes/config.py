@@ -157,7 +157,10 @@ async def test_notify():
 
         return NotifyTestResponse(success=False, message="未启用任何通知渠道，请在配置中开启钉钉或企业微信")
     except Exception as e:
-        return NotifyTestResponse(success=False, message=f"通知测试失败: {str(e)}")
+        # P1-1 修复(2026-07-30):异常详情可能含 webhook URL/连接细节等内部信息,
+        # 不返回客户端,仅记录日志。客户端只看到通用提示。
+        logger.warning(f"通知测试失败: {e}")
+        return NotifyTestResponse(success=False, message="通知测试失败,请检查配置或稍后重试")
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -199,4 +202,6 @@ async def save_user_positions(req: SavePositionsRequest):
         )
         return {"success": True, "message": "持仓已保存"}
     except Exception as e:
-        return {"success": False, "message": f"保存失败: {e}"}
+        # P1-1 修复(2026-07-30):异常详情可能含文件路径/权限等内部信息,不返回客户端
+        logger.warning(f"保存持仓失败: {e}")
+        return {"success": False, "message": "保存失败,请稍后重试"}

@@ -10,7 +10,7 @@ try:
 except ImportError:
     _HAS_AKSHARE = False
 import pandas as pd
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from loguru import logger
 
@@ -120,12 +120,15 @@ class SectorFlowItem(BaseModel):
 
 
 @router.get("/stock_realtime")
-async def stock_realtime(codes: str = Query(..., description="股票代码，逗号分隔")):
+async def stock_realtime(codes: str = Query(..., max_length=200, description="股票代码，逗号分隔(最多20个)")):
+    # P2-2 修复(2026-07-30):限制 codes 长度+数量,防止超长字符串撑大缓存键和外部请求 URL
+    code_list = [c.strip() for c in codes.split(",") if c.strip()]
+    if len(code_list) > 20:
+        raise HTTPException(400, "单次最多查询 20 个股票代码")
     cache_key = f"market:stock_realtime:{codes}"
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("tencent", cached=True)}
-    code_list = [c.strip() for c in codes.split(",") if c.strip()]
     data = await asyncio.to_thread(ds2.get_realtime_quote_tencent, code_list)
     result: list[StockRealtimeItem] = []
     for item in data:
@@ -164,7 +167,7 @@ async def stock_realtime(codes: str = Query(..., description="股票代码，逗
 async def stock_kline(
     code: str = Query(..., description="股票代码"),
     period: str = Query("daily", description="周期: daily/weekly/monthly"),
-    count: int = Query(120, description="返回条数"),
+    count: int = Query(120, ge=1, le=500, description="返回条数(最大500)"),
 ):
     cache_key = f"market:stock_kline:{code}:{period}:{count}"
     cached = cache.get(cache_key)
@@ -639,7 +642,7 @@ async def market_heatmap():
 
 
 @router.get("/search")
-async def stock_search(q: str = Query(..., description="搜索关键词（股票代码或名称）")):
+async def stock_search(q: str = Query(..., min_length=1, max_length=50, description="搜索关键词（股票代码或名称）")):
     cache_key = f"market:search:{q}"
     cached = cache.get(cache_key)
     if cached is not None:
