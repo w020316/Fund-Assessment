@@ -2294,6 +2294,11 @@ function renderFinalDecision(result) {
 async function loadMarketOutlook() {
   const body = document.getElementById('marketOutlookBody');
   if (!body) return;
+  // P2-4 修复(2026-07-30):需鉴权端点,未设置 token 时显示引导而非"分析引擎超时"
+  if (!localStorage.getItem('admin_token')) {
+    body.innerHTML = '<div style="color:var(--color-warning);text-align:center;padding:20px 0;">请先在系统配置页设置管理员 Token 后使用此功能</div>';
+    return;
+  }
   body.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:20px 0;">分析中，请稍候（约30秒）...</div>';
   const data = await api('/api/agent/market_outlook');
   if (!data || !data.outlook_analysis) {
@@ -2345,8 +2350,15 @@ async function loadMarketOutlook() {
 
 // 分析历史
 async function loadAiHistory() {
-  const data = await api('/api/agent/history');
   const body = document.getElementById('aiHistoryBody');
+  // 未登录预检(2026-07-31):/api/agent/history 需鉴权,未设置 token 时 API 返回 401,
+  // 原代码会回退到下方 defaultHistory mock 数据(2025-01-15 等假记录),
+  // 用户误以为是真实分析历史。改为显示登录引导,不调用 API 不显示 mock。
+  if (!localStorage.getItem('admin_token')) {
+    if (body) body.innerHTML = '<tr><td colspan="5" style="color:var(--color-warning);text-align:center;padding:20px 0;">请先在系统配置页设置管理员 Token 后查看分析历史</td></tr>';
+    return;
+  }
+  const data = await api('/api/agent/history');
 
   const defaultHistory = [
     {time:'2025-01-15 14:30',code:'600519',decision:'BUY',confidence:72,score:7.8},
@@ -2720,9 +2732,18 @@ async function submitSell() {
 }
 
 async function loadTradeHistory() {
-  const data = await api('/api/dashboard/trades');
   const body = document.getElementById('tradeHistoryBody');
   const orderBody = document.getElementById('orderBody');
+  // 未登录预检(2026-07-31):/api/dashboard/trades 和 /api/trade/orders 需鉴权,
+  // 未设置 token 时 API 返回 401,原代码会回退到下方 defaultTrades/defaultOrders mock
+  // (2025-01-15 买入茅台等假交易记录),用户误以为是真实交易历史。改为显示登录引导。
+  if (!localStorage.getItem('admin_token')) {
+    const hint = '<tr><td colspan="7" style="color:var(--color-warning);text-align:center;padding:20px 0;">请先在系统配置页设置管理员 Token 后查看交易记录</td></tr>';
+    if (body) body.innerHTML = hint;
+    if (orderBody) orderBody.innerHTML = hint;
+    return;
+  }
+  const data = await api('/api/dashboard/trades');
 
   const defaultTrades = [
     {time:'2025-01-15 14:30',code:'600519',direction:'买入',qty:100,price:1850.00,amount:185000,pnl:null},
@@ -4262,6 +4283,13 @@ function calcDCA() {
 // 展示夏普/Sortino/最大回撤/Calmar + 持仓权重 + 近 30 日组合日收益率迷你折线图
 async function loadPortfolioRisk() {
   const body = document.getElementById('portfolioRiskBody');
+  // 未登录预检(2026-07-31):/api/dashboard/portfolio_risk 需鉴权,
+  // 未设置 token 时 API 返回 401,原代码会显示"分析失败: HTTP 401",体验差。
+  // 改为显示登录引导,与 loadMarketOutlook 等其他需鉴权函数保持一致。
+  if (!localStorage.getItem('admin_token')) {
+    if (body) body.innerHTML = '<div style="color:var(--color-warning);text-align:center;padding:20px 0;">请先在系统配置页设置管理员 Token 后使用组合风险分析功能</div>';
+    return;
+  }
   body.innerHTML = '<div style="text-align:center;padding:20px 0;color:var(--text-muted);">分析中... 拉取近 120 日 K 线计算风险指标,约 5-15 秒</div>';
   try {
     const data = await api('/api/dashboard/portfolio_risk');
@@ -4376,6 +4404,19 @@ async function loadPortfolioRisk() {
 }
 
 async function loadAccountOverview() {
+  // 未登录预检(2026-07-31):/api/dashboard/overview 需鉴权,未设置 token 时 API 返回 401,
+  // 原代码会回退到下方 defaultOverview mock(总资产 125 万/当日盈亏 12345),
+  // 用户误以为是真实资产。改为显示占位符 '—',不调用 API 不显示 mock。
+  if (!localStorage.getItem('admin_token')) {
+    document.getElementById('totalAsset').textContent = '—';
+    document.getElementById('availableCash').textContent = '—';
+    document.getElementById('marketValue').textContent = '—';
+    const pnlEl = document.getElementById('todayPnl');
+    if (pnlEl) { pnlEl.textContent = '—'; pnlEl.style.color = ''; }
+    const badge = document.getElementById('todayPnlBadge');
+    if (badge) badge.remove();
+    return;
+  }
   const data = await api('/api/dashboard/overview');
   const defaultOverview = {total_assets:1256780, available_cash:356780, market_value:900000, daily_pnl:12345};
 
@@ -4494,8 +4535,15 @@ async function deleteStockPosition(code) {
 }
 
 async function loadPositions() {
-  const data = await api('/api/dashboard/positions');
   const body = document.getElementById('positionBody');
+  // 未登录预检(2026-07-31):/api/dashboard/positions 需鉴权,未设置 token 时 API 返回 401,
+  // 原代码会回退到下方 defaultPositions mock(贵州茅台 100 股等假持仓),
+  // 用户误以为是真实持仓。改为显示登录引导,不调用 API 不显示 mock。
+  if (!localStorage.getItem('admin_token')) {
+    if (body) body.innerHTML = '<tr><td colspan="8" style="color:var(--color-warning);text-align:center;padding:20px 0;">请先在系统配置页设置管理员 Token 后查看持仓</td></tr>';
+    return;
+  }
+  const data = await api('/api/dashboard/positions');
 
   const defaultPositions = [
     {symbol:'600519',name:'贵州茅台',quantity:100,cost_price:1800.00,current_price:1856.00,profit:5600,profit_pct:3.11},
@@ -4591,8 +4639,15 @@ function drawPieChart(positions) {
 
 // 风控状态
 async function loadRiskStatus() {
-  const data = await api('/api/dashboard/risk');
   const container = document.getElementById('riskCards');
+  // 未登录预检(2026-07-31):/api/dashboard/risk 需鉴权,未设置 token 时 API 返回 401,
+  // 原代码会回退到下方 defaultRisk mock(仓位风险低/集中度风险中等假状态),
+  // 用户误以为风控正常。改为显示登录引导,不调用 API 不显示 mock。
+  if (!localStorage.getItem('admin_token')) {
+    if (container) container.innerHTML = '<div class="card" style="text-align:center;color:var(--color-warning);padding:20px;">请先在系统配置页设置管理员 Token 后查看风控状态</div>';
+    return;
+  }
+  const data = await api('/api/dashboard/risk');
 
   const defaultRisk = [
     {name:'仓位风险',level:'低',value:'45%',desc:'总仓位处于安全范围'},
@@ -4739,8 +4794,15 @@ async function loadMonitorData() {
 }
 
 async function loadAlerts() {
-  const data = await api('/api/monitor/alerts');
   const container = document.getElementById('alertList');
+  // 未登录预检(2026-07-31):/api/monitor/alerts 需鉴权,未设置 token 时 API 返回 401,
+  // 原代码会回退到下方 defaultAlerts mock(6 条假告警,含"跌破止损线""资金不足"等),
+  // 用户误以为发生真实告警。改为显示登录引导,不调用 API 不显示 mock。
+  if (!localStorage.getItem('admin_token')) {
+    if (container) container.innerHTML = '<div style="color:var(--color-warning);text-align:center;padding:20px;font-size:13px;">请先在系统配置页设置管理员 Token 后查看告警</div>';
+    return;
+  }
+  const data = await api('/api/monitor/alerts');
 
   const defaultAlerts = [
     {type:'critical',icon:ALERT_ICON_MAP.critical,msg:'600519 跌破止损线 1800.00',time:'14:30:15'},
@@ -4776,8 +4838,15 @@ async function loadAlerts() {
 }
 
 async function loadWatchlist() {
-  const data = await api('/api/monitor/watchlist');
   const body = document.getElementById('watchlistBody');
+  // 未登录预检(2026-07-31):/api/monitor/watchlist 需鉴权,未设置 token 时 API 返回 401,
+  // 原代码会回退到下方 defaultWatchlist mock(贵州茅台/五粮液等假自选股),
+  // 用户误以为是自己的自选股。改为显示登录引导,不调用 API 不显示 mock。
+  if (!localStorage.getItem('admin_token')) {
+    if (body) body.innerHTML = '<tr><td colspan="5" style="color:var(--color-warning);text-align:center;padding:20px 0;">请先在系统配置页设置管理员 Token 后查看自选股</td></tr>';
+    return;
+  }
+  const data = await api('/api/monitor/watchlist');
 
   const defaultWatchlist = [
     {code:'600519',name:'贵州茅台',price:1856.00,change_pct:4.21},
@@ -5016,6 +5085,17 @@ function clearAdminToken() {
 }
 
 async function loadSettings() {
+  const configForm = document.getElementById('configForm');
+  const riskParams = document.getElementById('riskParams');
+  // 未登录预检(2026-07-31):/api/config/settings 需鉴权,未设置 token 时 API 返回 401,
+  // 原代码会回退到下方 defaultSettings mock(模拟盘/通知邮箱 admin@example.com 等假配置),
+  // 用户可能误以为是已保存配置并直接保存。改为显示登录引导,不渲染表单不调用 API。
+  if (!localStorage.getItem('admin_token')) {
+    const hint = '<div style="color:var(--color-warning);text-align:center;padding:20px;font-size:13px;">请先在上方"管理令牌"区域设置管理员 Token 并保存后,即可加载和编辑系统配置</div>';
+    if (configForm) configForm.innerHTML = hint;
+    if (riskParams) riskParams.innerHTML = hint;
+    return;
+  }
   const data = await api('/api/config/settings');
   const defaultSettings = {
     trade_mode: 'simulation',
@@ -5031,8 +5111,7 @@ async function loadSettings() {
 
   currentConfig = (data && data.settings) ? data.settings : (data && data.data) ? data.data : defaultSettings;
 
-  // 配置表单
-  const configForm = document.getElementById('configForm');
+  // 配置表单(configForm 已在函数开头声明)
   configForm.innerHTML = `
     <div class="form-group">
       <label class="form-label">交易模式</label>
@@ -5059,8 +5138,7 @@ async function loadSettings() {
     </div>
   `;
 
-  // 风控参数
-  const riskParams = document.getElementById('riskParams');
+  // 风控参数(riskParams 已在函数开头声明)
   riskParams.innerHTML = `
     <div class="form-group">
       <label class="form-label">最大仓位（%）</label>
