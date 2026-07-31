@@ -1662,6 +1662,7 @@ const API_TIMEOUT_MS = (url) => {
   if (url.startsWith('/api/agent/') || url.includes('/fund_analyze')) return 90000; // 多智能体 90s
   if (url.startsWith('/api/news/search')) return 30000; // 智能检索 30s
   if (url.startsWith('/api/market/outlook') || url.startsWith('/api/scripts/ai-generate')) return 30000;
+  if (url.startsWith('/api/holdings/upload')) return 60000; // 图片OCR识别需调用AI视觉模型,后端30s超时,前端给60s余量
   return 15000; // 默认 15s
 };
 

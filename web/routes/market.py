@@ -294,7 +294,12 @@ async def index_realtime():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
-    data = await asyncio.to_thread(ds2.get_index_realtime)
+    # P1 修复(2026-07-31):原代码无 try/except,数据源异常时直接 500
+    try:
+        data = await asyncio.to_thread(ds2.get_index_realtime)
+    except Exception as e:
+        logger.warning(f"index_realtime failed: {e}")
+        return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
     result: list[IndexRealtimeItem] = []
     for item in data:
         result.append(IndexRealtimeItem(
@@ -316,12 +321,17 @@ async def hot_stocks():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
-    # 三个排行并行获取(用 asyncio.to_thread 避免阻塞事件循环)
-    top_gainers_data, top_losers_data, top_volume_data = await asyncio.gather(
-        asyncio.to_thread(ds2.get_stock_ranking_em, "f3", 0, 10),
-        asyncio.to_thread(ds2.get_stock_ranking_em, "f3", 1, 10),
-        asyncio.to_thread(ds2.get_stock_ranking_em, "f6", 0, 10),
-    )
+    # P1 修复(2026-07-31):原代码无 try/except,数据源异常时直接 500
+    try:
+        # 三个排行并行获取(用 asyncio.to_thread 避免阻塞事件循环)
+        top_gainers_data, top_losers_data, top_volume_data = await asyncio.gather(
+            asyncio.to_thread(ds2.get_stock_ranking_em, "f3", 0, 10),
+            asyncio.to_thread(ds2.get_stock_ranking_em, "f3", 1, 10),
+            asyncio.to_thread(ds2.get_stock_ranking_em, "f6", 0, 10),
+        )
+    except Exception as e:
+        logger.warning(f"hot_stocks failed: {e}")
+        return {"data": HotStocksResponse(top_gainers=[], top_losers=[], top_volume=[]).model_dump(), "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
 
     def _to_item(item: dict) -> HotStocksItem:
         return HotStocksItem(
@@ -348,7 +358,12 @@ async def sector_flow():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
-    data = await asyncio.to_thread(ds2.get_sector_ranking)
+    # P1 修复(2026-07-31):原代码无 try/except,上游异常直接 500
+    try:
+        data = await asyncio.to_thread(ds2.get_sector_ranking)
+    except Exception as e:
+        logger.warning(f"sector_flow failed: {e}")
+        return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
     result: list[SectorFlowItem] = []
     for item in data:
         result.append(SectorFlowItem(
@@ -576,7 +591,12 @@ async def sector_ranking():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
-    data = await asyncio.to_thread(ds2.get_sector_ranking)
+    # P1 修复(2026-07-31):原代码无 try/except,get_sector_ranking 抛异常时直接 500
+    try:
+        data = await asyncio.to_thread(ds2.get_sector_ranking)
+    except Exception as e:
+        logger.warning(f"sector_ranking failed: {e}")
+        return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
     result = [SectorRankingItem(**item) for item in data]
     cache.set(cache_key, result)
     return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
