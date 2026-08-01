@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from src.core import data_source_v2 as ds2
 from src.utils.auth import require_admin
 from src.utils.convert import safe_float as _safe_float
+from src.utils.file_io import atomic_write_json, safe_read_json
 
 router = APIRouter()
 
@@ -73,23 +74,27 @@ _WATCHLIST_FILE = os.path.join(os.path.dirname(__file__), "..", "user_watchlist.
 
 
 def _load_watchlist() -> dict[str, list[str]]:
-    """读取自选股规则,文件缺失时返回空 dict"""
-    if os.path.exists(_WATCHLIST_FILE):
-        try:
-            with open(_WATCHLIST_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            logger.warning(f"load watchlist failed: {e}")
-    return {}
+    """读取自选股规则,文件缺失时返回空 dict
+    
+    P1 修复(2026-08-01):改用 safe_read_json,主文件损坏自动回退 .bak 备份
+    """
+    data = safe_read_json(_WATCHLIST_FILE, default={})
+    if data is None or not isinstance(data, dict):
+        return {}
+    return data
 
 
-def _save_watchlist(data: dict[str, list[str]]) -> None:
-    """持久化自选股规则"""
+def _save_watchlist(data: dict[str, list[str]]) -> bool:
+    """持久化自选股规则
+    
+    P1 修复(2026-08-01):改用 atomic_write_json,确保写入原子性,防止并发写导致数据损坏
+    """
     try:
-        with open(_WATCHLIST_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        atomic_write_json(_WATCHLIST_FILE, data)
+        return True
     except Exception as e:
         logger.warning(f"save watchlist failed: {e}")
+        return False
 
 
 @router.get("/alerts", response_model=list[AlertItem])
@@ -114,12 +119,13 @@ async def alerts(stock_code: str = ""):
     except Exception as e:
         # P1 修复(2026-07-30):原静默返回空列表,用户以为"无告警"但实际是系统故障。
         # 改为日志记录 + 返回错误告警项,前端可明确区分"无告警"与"获取失败"。
+        # P1 修复(2026-08-01):异常详情不返回给客户端,避免泄露内部信息
         logger.warning(f"check_alerts {stock_code} failed: {e}")
         return [AlertItem(
             stock_code=stock_code, alert_type="system_error",
             severity="warning",
             message=f"{stock_code} 告警检查失败,请稍后重试",
-            detail={"error": str(e)},
+            detail={},
         )]
 
 

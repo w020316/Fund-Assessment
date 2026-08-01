@@ -181,7 +181,8 @@ def _lightweight_analysis(stock_code: str, strategy_type: str) -> dict[str, Any]
             "source": "lightweight",
         }
     except Exception as e:
-        return _fallback_analysis(stock_code, strategy_type, str(e)[:50])
+        logger.warning(f"_lightweight_analysis {stock_code} failed: {e}")
+        return _fallback_analysis(stock_code, strategy_type)
 
 
 def _normalize_analysis(result: dict) -> dict:
@@ -256,7 +257,7 @@ async def analyze(req: AnalyzeRequest):
         return AnalyzeResponse(
             stock_code=req.stock_code,
             strategy_type=req.strategy_type,
-            result=_fallback_analysis(req.stock_code, req.strategy_type, str(e)[:50]),
+            result=_fallback_analysis(req.stock_code, req.strategy_type),
         )
 
 
@@ -379,7 +380,7 @@ async def backtest(req: BacktestRequest):
     except Exception as e:
         logger.exception(f"backtest {req.strategy} failed")
         from fastapi import HTTPException
-        raise HTTPException(status_code=503, detail=f"回测执行失败: {type(e).__name__}: {str(e)[:100]}")
+        raise HTTPException(status_code=503, detail="回测执行失败，请稍后重试")
 
 
 @router.get("/list", response_model=list[StrategyInfo])

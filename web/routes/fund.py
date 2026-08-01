@@ -202,19 +202,27 @@ async def delete_position(fund_code: str):
 @router.get("/advice")
 async def get_advice():
     """获取基金建议(基于大盘/板块/盈亏的规则引擎)。"""
-    from src.analysis.fund_advisor import generate_fund_advice
-    positions = _load_positions()
-    result = await asyncio.to_thread(generate_fund_advice, positions)
-    return result
+    try:
+        from src.analysis.fund_advisor import generate_fund_advice
+        positions = _load_positions()
+        result = await asyncio.to_thread(generate_fund_advice, positions)
+        return result
+    except Exception as e:
+        logger.warning(f"get_advice failed: {e}")
+        return {"error": "获取基金建议失败,请稍后重试", "advice": None}
 
 
 @router.get("/advice-v2")
 async def get_advice_v2():
     """获取基金建议v2(五信号融合:技术面/基本面/消息面/重仓股板块/大盘环境)。"""
-    from src.analysis.fund_advisor_v2 import generate_fund_advice_v2
-    positions = _load_positions()
-    result = await generate_fund_advice_v2(positions)
-    return result
+    try:
+        from src.analysis.fund_advisor_v2 import generate_fund_advice_v2
+        positions = _load_positions()
+        result = await generate_fund_advice_v2(positions)
+        return result
+    except Exception as e:
+        logger.warning(f"get_advice_v2 failed: {e}")
+        return {"error": "获取基金建议失败,请稍后重试", "signals": None}
 
 
 # ============ 基金搜索 ============
