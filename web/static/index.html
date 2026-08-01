@@ -478,9 +478,11 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
   .analyst-name { font-size:12px; }
   .analyst-opinion { font-size:11px; }
 
-  /* 底部 tab 字号微调(10 个 tab 在 360px 屏宽较挤) */
-  .bottom-tab-item { padding:5px 2px; font-size:10px; min-width:0; }
-  .bottom-tab-item .tab-icon { font-size:16px; }
+  /* 底部 tab 小屏适配 */
+  .bottom-tab-bar .tab-items { padding:1px 2px 0; }
+  .bottom-tab-item { padding:4px 2px 5px; font-size:9px; }
+  .bottom-tab-item .tab-icon svg { width:16px; height:16px; }
+  .bottom-tab-item.active::after { inset:1px -1px; border-radius:8px; }
 
   /* LLM provider bar 内边距更紧凑 */
   .llm-provider-bar { font-size:11px; padding:6px 10px; margin-bottom:10px; }
@@ -493,8 +495,9 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 
 /* ===== 超小屏优化(<=360px):进一步压缩 ===== */
 @media (max-width:360px) {
-  .bottom-tab-item { padding:5px 1px; font-size:9px; }
-  .bottom-tab-item .tab-icon { font-size:14px; }
+  .bottom-tab-item { padding:3px 1px 4px; font-size:8px; }
+  .bottom-tab-item .tab-icon svg { width:14px; height:14px; }
+  .bottom-tab-item.active::after { inset:0; border-radius:6px; }
   .card { padding:10px; }
   .card-title { font-size:13px; }
   table { font-size:11px; }
@@ -546,31 +549,117 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 .llm-provider-name { color:var(--accent); font-weight:600; }
 .llm-provider-status { margin-left:auto; }
 
-/* ========== 底部标签栏（移动端） ========== */
+/* ========== 底部标签栏（移动端）— 全新设计(2026-08-01) ========== */
 .bottom-tab-bar {
   display:none;
   position:fixed; bottom:0; left:0; right:0;
-  background:var(--bg-card);
-  border-top:1px solid var(--border);
   z-index:200;
-  padding:4px 0;
-  padding-bottom:env(safe-area-inset-bottom, 4px);
+  padding:0;
+  padding-bottom:env(safe-area-inset-bottom, 0px);
+  /* 玻璃态效果 */
+  background:rgba(22,27,34,0.85);
+  backdrop-filter:blur(16px) saturate(1.4);
+  -webkit-backdrop-filter:blur(16px) saturate(1.4);
+  /* 渐变顶部边框 */
+  border-top:none;
+  box-shadow:0 -1px 0 rgba(48,54,61,0.5), 0 -4px 20px rgba(0,0,0,0.2);
+}
+.bottom-tab-bar::before {
+  content:'';
+  position:absolute; top:0; left:0; right:0; height:1px;
+  background:linear-gradient(90deg, transparent 5%, rgba(245,158,11,0.3) 30%, rgba(245,158,11,0.5) 50%, rgba(245,158,11,0.3) 70%, transparent 95%);
 }
 .bottom-tab-bar .tab-items {
-  display:flex; justify-content:space-around; overflow-x:auto;
+  display:flex;
+  overflow-x:auto;
   -webkit-overflow-scrolling:touch;
   scrollbar-width:none;
+  gap:0;
+  padding:2px 4px 0;
 }
 .bottom-tab-bar .tab-items::-webkit-scrollbar { display:none; }
 .bottom-tab-item {
   display:flex; flex-direction:column; align-items:center;
-  padding:6px 4px; cursor:pointer;
-  color:var(--text-muted); font-size:10px;
-  transition:var(--transition); min-width:0; flex:1;
+  justify-content:center;
+  padding:5px 3px 6px;
+  cursor:pointer;
+  color:var(--text-muted);
+  font-size:10px;
+  font-weight:500;
+  min-width:0; flex:1 0 auto;
+  position:relative;
+  transition:color 0.25s ease, transform 0.2s ease;
+  border-radius:8px;
+  margin:2px 1px;
+  letter-spacing:0.3px;
 }
-.bottom-tab-item .tab-icon { font-size:18px; margin-bottom:2px; }
-.bottom-tab-item.active { color:var(--accent-blue); }
-/* 注:原 @media (max-width:360px) 已合并到上方移动端优化块(2026-07-30) */
+.bottom-tab-item .tab-icon {
+  font-size:18px;
+  margin-bottom:2px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  position:relative;
+  z-index:1;
+  transition:transform 0.3s cubic-bezier(0.34,1.56,0.64,1), color 0.25s ease;
+}
+.bottom-tab-item .tab-icon svg {
+  width:18px; height:18px;
+  transition:transform 0.3s cubic-bezier(0.34,1.56,0.64,1);
+}
+/* 活动指示器 — 标签上方的小圆点 */
+.bottom-tab-item .tab-indicator {
+  position:absolute; top:-1px; left:50%;
+  width:3px; height:3px;
+  border-radius:50%;
+  background:var(--accent);
+  transform:translateX(-50%) scale(0);
+  transition:transform 0.3s cubic-bezier(0.34,1.56,0.64,1);
+  box-shadow:0 0 6px rgba(245,158,11,0.6);
+}
+/* 活动标签背景高亮 */
+.bottom-tab-item.active {
+  color:var(--accent);
+}
+.bottom-tab-item.active::after {
+  content:'';
+  position:absolute; inset:2px -2px;
+  background:linear-gradient(135deg, rgba(245,158,11,0.12), rgba(245,158,11,0.06));
+  border-radius:10px;
+  z-index:0;
+  animation:tabActivePulse 2s ease-in-out infinite;
+}
+.bottom-tab-item.active .tab-icon {
+  transform:translateY(-1px) scale(1.1);
+  color:var(--accent);
+  filter:drop-shadow(0 0 6px rgba(245,158,11,0.35));
+}
+.bottom-tab-item.active .tab-icon svg {
+  transform:scale(1.05);
+}
+.bottom-tab-item.active .tab-indicator {
+  transform:translateX(-50%) scale(1);
+}
+/* 悬停反馈 */
+.bottom-tab-item:not(.active):hover {
+  color:var(--text-secondary);
+  background:rgba(255,255,255,0.04);
+}
+.bottom-tab-item:not(.active):hover .tab-icon {
+  transform:translateY(-1px);
+}
+/* 点击反馈 */
+.bottom-tab-item:active {
+  transform:scale(0.94);
+}
+.bottom-tab-item:active .tab-icon {
+  transform:scale(0.94);
+}
+/* 活动标签脉冲动画 */
+@keyframes tabActivePulse {
+  0%, 100% { opacity:1; }
+  50% { opacity:0.7; }
+}
 
 /* ========== 骨架屏加载 ========== */
 .skeleton {
@@ -1541,37 +1630,47 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
     </main>
   </div>
 
-  <!-- 底部标签栏（移动端） -->
+  <!-- 底部标签栏（移动端）— 全新设计(2026-08-01) -->
   <nav class="bottom-tab-bar">
     <div class="tab-items">
       <div class="bottom-tab-item active" data-page="market" onclick="switchPage('market')">
+        <span class="tab-indicator"></span>
         <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg></span><span>行情</span>
       </div>
       <div class="bottom-tab-item" data-page="ai" onclick="switchPage('ai')">
+        <span class="tab-indicator"></span>
         <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/></svg></span><span>分析</span>
       </div>
       <div class="bottom-tab-item" data-page="strategy" onclick="switchPage('strategy')">
+        <span class="tab-indicator"></span>
         <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg></span><span>策略</span>
       </div>
       <div class="bottom-tab-item" data-page="trade" onclick="switchPage('trade')">
+        <span class="tab-indicator"></span>
         <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 7-7"/><path d="M17 7h4v4"/></svg></span><span>交易</span>
       </div>
       <div class="bottom-tab-item" data-page="position" onclick="switchPage('position')">
+        <span class="tab-indicator"></span>
         <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></svg></span><span>持仓</span>
       </div>
       <div class="bottom-tab-item" data-page="fund" onclick="switchPage('fund')">
+        <span class="tab-indicator"></span>
         <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg></span><span>基金</span>
       </div>
       <div class="bottom-tab-item" data-page="global" onclick="switchPage('global')">
+        <span class="tab-indicator"></span>
         <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18"/><path d="M12 3a15 15 0 0 0 0 18"/></svg></span><span>国际</span>
       </div>
       <div class="bottom-tab-item" data-page="data" onclick="switchPage('data')">
+        <span class="tab-indicator"></span>
         <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg></span><span>数据</span>
       </div>
       <div class="bottom-tab-item" data-page="monitor" onclick="switchPage('monitor')">
+        <span class="tab-indicator"></span>
         <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></span><span>监控</span>
       </div>
       <div class="bottom-tab-item" data-page="config" onclick="switchPage('config')">
+        <span class="tab-indicator"></span>
         <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg></span><span>配置</span>
       </div>
     </div>
