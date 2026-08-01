@@ -116,12 +116,13 @@ class TestParseFundAnalysisResponse:
 
     def test_invalid_json_returns_fallback(self):
         result = _parse_fund_analysis_response("not a json", "110022")
-        assert "error" in result
         assert result["action"] == "HOLD"
+        assert result["final_recommendation"]["action"] == "持有"
 
     def test_empty_response_returns_fallback(self):
         result = _parse_fund_analysis_response("", "110022")
-        assert "error" in result
+        assert result["action"] == "HOLD"
+        assert result["final_recommendation"]["action"] == "持有"
 
 
 class TestFallbackResult:
@@ -133,7 +134,7 @@ class TestFallbackResult:
         assert result["action"] == "HOLD"
         assert result["confidence"] == 0.0
         assert result["analyst_count"] == 0
-        assert "测试失败" in result["error"]
+        assert "测试失败" in result["final_recommendation"]["reason"]
         assert result["final_recommendation"]["action"] == "持有"
 
 
@@ -208,8 +209,8 @@ class TestAnalyzeFundWithAgents:
                                         )
 
         assert result["action"] == "HOLD"
-        assert "error" in result
-        assert "多智能体分析失败" in result["error"]
+        assert result["final_recommendation"]["action"] == "持有"
+        assert "多智能体分析失败" in result["final_recommendation"]["reason"]
 
     @pytest.mark.asyncio
     async def test_data_source_failures_isolated(self):

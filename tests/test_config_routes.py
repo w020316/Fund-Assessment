@@ -186,7 +186,8 @@ class TestUserPositions:
         """
         with patch("builtins.open", mock_open()), \
              patch("os.path.exists", return_value=False), \
-             patch("os.replace"):
+             patch("os.replace"), \
+             patch("os.fsync"):
             resp = client.post("/api/config/user_positions", json={
                 "positions": [{"symbol": "600519", "name": "贵州茅台", "quantity": 100}],
                 "available_cash": 500000.0,

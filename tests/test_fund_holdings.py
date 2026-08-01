@@ -999,7 +999,7 @@ class TestAnalyzeFundHoldingsExtended:
         """P0 诊断:数据源不可达时返回 source_unreachable=True 与准确 hint"""
         with patch.object(fund_holdings, "get_fund_holdings", return_value=[]):
             with patch.object(fund_holdings, "_get_fetch_reason",
-                              "em接口响应格式异常(resp_len=0, 可能被IP封禁或接口变更)"):
+                              return_value="em接口响应格式异常(resp_len=0, 可能被IP封禁或接口变更)"):
                 result = await analyze_fund_holdings("161725")
         assert result["holdings"] == []
         assert "diagnostic" in result
@@ -1011,7 +1011,7 @@ class TestAnalyzeFundHoldingsExtended:
     async def test_diagnostic_no_data_when_source_ok(self):
         """P0 诊断:数据源可达但基金无数据时 source_unreachable=False"""
         with patch.object(fund_holdings, "get_fund_holdings", return_value=[]):
-            with patch.object(fund_holdings, "_get_fetch_reason", ""):
+            with patch.object(fund_holdings, "_get_fetch_reason", return_value=""):
                 result = await analyze_fund_holdings("999999")
         assert result["holdings"] == []
         assert result["diagnostic"]["source_unreachable"] is False

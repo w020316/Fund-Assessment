@@ -254,8 +254,8 @@ async def capital_flow(stock_code: str = ""):
             small_net = _safe_float(data.get("small_net_inflow", 0))
             total_amount = abs(large_net) + abs(super_large_net) + abs(medium_net) + abs(small_net)
             large_ratio = (large_net + super_large_net) / total_amount * 100 if total_amount > 0 else 0
-            medium_ratio = medium_net / total_amount * 100 if total_amount > 0 else 0
-            small_ratio = small_net / total_amount * 100 if total_amount > 0 else 0
+            medium_ratio = abs(medium_net) / total_amount * 100 if total_amount > 0 else 0
+            small_ratio = abs(small_net) / total_amount * 100 if total_amount > 0 else 0
             return CapitalFlowResponse(
                 main_net_inflow=round(main_net, 0),
                 large_order_ratio=round(large_ratio, 2),
@@ -264,6 +264,12 @@ async def capital_flow(stock_code: str = ""):
                 northbound_change=round(northbound_change, 2),
                 data_quality="degraded" if nb_degraded else "normal",
             )
+        # data 为空时返回默认值,避免函数无返回值导致 500
+        return CapitalFlowResponse(
+            main_net_inflow=0, large_order_ratio=0, medium_order_ratio=0,
+            small_order_ratio=0, northbound_change=round(northbound_change, 2),
+            data_quality="degraded",
+        )
     except Exception as e:
         logger.warning(f"fetch capital_flow_detail failed: {e}")
         # capital_flow_detail 失败也算降级(主力资金明细缺失)

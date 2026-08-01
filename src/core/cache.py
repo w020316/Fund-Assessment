@@ -143,9 +143,11 @@ class DataCache:
         # 1. 写内存层(后续命中走内存)
         self._memory.set(key, value, ttl=effective_ttl)
         # 2. 写文件层(原子写入,防止并发写损坏)
+        # 先序列化 value(Pydantic model/set/bytes 等),确保 JSON 可序列化
+        serialized = _serialize(value)
         path = self.cache_dir / f"{self._safe_key(key)}.json"
         data = {
-            "value": value,
+            "value": serialized,
             "_timestamp": time.time(),
             "_ttl": effective_ttl,
         }

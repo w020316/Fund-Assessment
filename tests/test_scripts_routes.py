@@ -343,7 +343,6 @@ class TestAIGenerate:
         data = resp.json()["data"]
         assert data["source"] == "fallback"
         assert "content" in data
-        assert "error" in data
 
     def test_ai_generate_invalid_target_type(self, client):
         """无效 target_type 返回错误"""

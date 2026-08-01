@@ -405,7 +405,7 @@ class TestCallTTapiDirect:
 
     def test_successful_call_returns_content(self, monkeypatch):
         """成功调用 → 返回 content"""
-        monkeypatch.setattr(ai_service, "_TTAPI_API_KEY", "test-key")
+        monkeypatch.setattr(ai_service, "_get_ttapi_api_key", lambda: "test-key")
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = {
@@ -417,7 +417,7 @@ class TestCallTTapiDirect:
 
     def test_empty_content_raises(self, monkeypatch):
         """空 content → 抛 ValueError"""
-        monkeypatch.setattr(ai_service, "_TTAPI_API_KEY", "test-key")
+        monkeypatch.setattr(ai_service, "_get_ttapi_api_key", lambda: "test-key")
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = {"choices": [{"message": {"content": ""}}]}
@@ -428,7 +428,7 @@ class TestCallTTapiDirect:
     def test_timeout_propagates(self, monkeypatch):
         """超时异常应向上抛出"""
         import requests
-        monkeypatch.setattr(ai_service, "_TTAPI_API_KEY", "test-key")
+        monkeypatch.setattr(ai_service, "_get_ttapi_api_key", lambda: "test-key")
         with patch("requests.post", side_effect=requests.exceptions.Timeout("timeout")):
             with pytest.raises(requests.exceptions.Timeout):
                 _call_ttapi_direct([{"role": "user", "content": "t"}])
@@ -438,7 +438,7 @@ class TestSearchTavily:
     """_search_tavily Tavily 检索"""
 
     def test_successful_search_returns_results(self, monkeypatch):
-        monkeypatch.setattr(ai_service, "_TAVILY_API_KEY", "test-key")
+        monkeypatch.setattr(ai_service, "_get_tavily_api_key", lambda: "test-key")
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = {
@@ -457,7 +457,7 @@ class TestSearchTavily:
 
     def test_exception_returns_empty(self, monkeypatch):
         """异常 → 返回空列表"""
-        monkeypatch.setattr(ai_service, "_TAVILY_API_KEY", "test-key")
+        monkeypatch.setattr(ai_service, "_get_tavily_api_key", lambda: "test-key")
         with patch("requests.post", side_effect=Exception("net error")):
             assert _search_tavily("白酒") == []
 
@@ -477,8 +477,8 @@ class TestSearchNews:
 
     def test_tavily_priority_over_tinyfish(self, monkeypatch):
         """Tavily 有结果时优先返回,不调用 tinyfish"""
-        monkeypatch.setattr(ai_service, "_TAVILY_API_KEY", "tavily-key")
-        monkeypatch.setattr(ai_service, "_TINYFISH_API_KEY", "tinyfish-key")
+        monkeypatch.setattr(ai_service, "_get_tavily_api_key", lambda: "tavily-key")
+        monkeypatch.setattr(ai_service, "_get_tinyfish_api_key", lambda: "tinyfish-key")
         with patch.object(ai_service, "_search_tavily", return_value=[{"title": "tavily 结果"}]) as mock_tavily:
             with patch.object(ai_service, "_search_tinyfish", return_value=[{"title": "tinyfish 结果"}]) as mock_tiny:
                 result = search_news("白酒")
@@ -488,8 +488,8 @@ class TestSearchNews:
 
     def test_fallback_to_tinyfish_when_tavily_empty(self, monkeypatch):
         """Tavily 空结果 → 回退到 tinyfish"""
-        monkeypatch.setattr(ai_service, "_TAVILY_API_KEY", "tavily-key")
-        monkeypatch.setattr(ai_service, "_TINYFISH_API_KEY", "tinyfish-key")
+        monkeypatch.setattr(ai_service, "_get_tavily_api_key", lambda: "tavily-key")
+        monkeypatch.setattr(ai_service, "_get_tinyfish_api_key", lambda: "tinyfish-key")
         with patch.object(ai_service, "_search_tavily", return_value=[]):
             with patch.object(ai_service, "_search_tinyfish", return_value=[{"title": "tinyfish 结果"}]):
                 result = search_news("白酒")
@@ -612,7 +612,7 @@ class TestCallLlm:
             router.chat.side_effect = RuntimeError("所有LLM Provider均不可用")
             return router
         monkeypatch.setattr("src.core.llm_router.get_llm_router", fake_get_router)
-        monkeypatch.setattr(ai_service, "_TTAPI_API_KEY", "tt-key")
+        monkeypatch.setattr(ai_service, "_get_ttapi_api_key", lambda: "tt-key")
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = {"choices": [{"message": {"content": "ttapi 返回"}}]}
@@ -626,7 +626,7 @@ class TestCallLlm:
         mock_router.available_providers = [MagicMock()]
         mock_router.chat.side_effect = ValueError("weird error")
         monkeypatch.setattr("src.core.llm_router.get_llm_router", lambda: mock_router)
-        monkeypatch.setattr(ai_service, "_TTAPI_API_KEY", "tt-key")
+        monkeypatch.setattr(ai_service, "_get_ttapi_api_key", lambda: "tt-key")
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = {"choices": [{"message": {"content": "ttapi 返回"}}]}
@@ -639,7 +639,7 @@ class TestCallLlm:
         mock_router = MagicMock()
         mock_router.available_providers = []  # 空,跳过 router
         monkeypatch.setattr("src.core.llm_router.get_llm_router", lambda: mock_router)
-        monkeypatch.setattr(ai_service, "_TTAPI_API_KEY", "tt-key")
+        monkeypatch.setattr(ai_service, "_get_ttapi_api_key", lambda: "tt-key")
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = {"choices": [{"message": {"content": "ttapi 返回"}}]}
@@ -654,7 +654,7 @@ class TestSearchTinyfish:
     """_search_tinyfish TinyFish 检索测试"""
 
     def test_successful_search_returns_results(self, monkeypatch):
-        monkeypatch.setattr(ai_service, "_TINYFISH_API_KEY", "tf-key")
+        monkeypatch.setattr(ai_service, "_get_tinyfish_api_key", lambda: "tf-key")
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = {
@@ -674,7 +674,7 @@ class TestSearchTinyfish:
 
     def test_news_key_returns_results(self, monkeypatch):
         """响应用 news 键而非 results 也应能解析"""
-        monkeypatch.setattr(ai_service, "_TINYFISH_API_KEY", "tf-key")
+        monkeypatch.setattr(ai_service, "_get_tinyfish_api_key", lambda: "tf-key")
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = {
@@ -689,7 +689,7 @@ class TestSearchTinyfish:
 
     def test_empty_content_returns_empty(self, monkeypatch):
         """空 content → 返回空列表"""
-        monkeypatch.setattr(ai_service, "_TINYFISH_API_KEY", "tf-key")
+        monkeypatch.setattr(ai_service, "_get_tinyfish_api_key", lambda: "tf-key")
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = {"choices": [{"message": {"content": ""}}]}
@@ -698,7 +698,7 @@ class TestSearchTinyfish:
 
     def test_non_list_results_returns_empty(self, monkeypatch):
         """results 非 list → 返回空"""
-        monkeypatch.setattr(ai_service, "_TINYFISH_API_KEY", "tf-key")
+        monkeypatch.setattr(ai_service, "_get_tinyfish_api_key", lambda: "tf-key")
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = {
@@ -709,13 +709,13 @@ class TestSearchTinyfish:
 
     def test_exception_returns_empty(self, monkeypatch):
         """异常 → 返回空列表"""
-        monkeypatch.setattr(ai_service, "_TINYFISH_API_KEY", "tf-key")
+        monkeypatch.setattr(ai_service, "_get_tinyfish_api_key", lambda: "tf-key")
         with patch("requests.post", side_effect=Exception("net error")):
             assert _search_tinyfish("白酒") == []
 
     def test_invalid_json_content_returns_empty(self, monkeypatch):
         """content 非 JSON → 返回空"""
-        monkeypatch.setattr(ai_service, "_TINYFISH_API_KEY", "tf-key")
+        monkeypatch.setattr(ai_service, "_get_tinyfish_api_key", lambda: "tf-key")
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = {
@@ -729,16 +729,16 @@ class TestSearchNewsFallback:
     """search_news 回退逻辑补充"""
 
     def test_both_sources_empty_returns_empty(self, monkeypatch):
-        monkeypatch.setattr(ai_service, "_TAVILY_API_KEY", "tavily-key")
-        monkeypatch.setattr(ai_service, "_TINYFISH_API_KEY", "tinyfish-key")
+        monkeypatch.setattr(ai_service, "_get_tavily_api_key", lambda: "tavily-key")
+        monkeypatch.setattr(ai_service, "_get_tinyfish_api_key", lambda: "tinyfish-key")
         with patch.object(ai_service, "_search_tavily", return_value=[]):
             with patch.object(ai_service, "_search_tinyfish", return_value=[]):
                 assert search_news("白酒") == []
 
     def test_only_tinyfish_key_configured(self, monkeypatch):
         """仅 tinyfish 配置时应直接调用 tinyfish"""
-        monkeypatch.setattr(ai_service, "_TAVILY_API_KEY", "")
-        monkeypatch.setattr(ai_service, "_TINYFISH_API_KEY", "tinyfish-key")
+        monkeypatch.setattr(ai_service, "_get_tavily_api_key", lambda: "")
+        monkeypatch.setattr(ai_service, "_get_tinyfish_api_key", lambda: "tinyfish-key")
         with patch.object(ai_service, "_search_tavily", return_value=[]) as mock_tavily:
             with patch.object(ai_service, "_search_tinyfish", return_value=[{"title": "tf 结果"}]) as mock_tf:
                 result = search_news("白酒")

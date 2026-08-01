@@ -57,11 +57,11 @@ def _calc_sortino_ratio(returns: list[float], risk_free: float = _RISK_FREE_RATE
     if len(downside) == 0:
         # P3-7 修复(2026-07-30):原返回 inf 不利于 JSON 序列化(json.dumps 默认不允许 inf),
         # 前端 JSON.parse 会报错。改为有限大数 99.0 表示"无下行风险"。
-        return 99.0 if float(arr.mean()) > 0 else 0.0
+        return float('inf') if float(arr.mean()) > 0 else 0.0
     if len(downside) < 2:
         # 单个下行点无法可靠估计 std,视为无下行波动
         daily_rf_single = risk_free / _TRADING_DAYS_PER_YEAR
-        return 99.0 if float(arr.mean()) > daily_rf_single else 0.0
+        return float('inf') if float(arr.mean()) > daily_rf_single else 0.0
     downside_std = float(np.std(downside, ddof=1))
     if downside_std == 0:
         return 0.0
