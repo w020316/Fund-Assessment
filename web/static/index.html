@@ -4993,33 +4993,31 @@ async function loadNorthbound() {
   const data = await api('/api/market/northbound');
   const container = document.getElementById('northboundPanel');
 
-  const defaultNorth = {
-    today_net: 82.5,
-    today_sh: 45.2,
-    today_sz: 37.3,
-    trend: [12.3, 23.5, 34.2, 28.9, 45.6, 52.3, 61.8, 55.2, 68.9, 75.3, 80.1, 82.5]
-  };
-
-  let nb = defaultNorth;
-  if (data && data.data) {
-    const d = data.data;
-    // API返回字段映射到前端字段
-    const totalNet = d.total_net_inflow || 0;
-    const shNet = d.sh_net_inflow || 0;
-    const szNet = d.sz_net_inflow || 0;
-    // 将亿元转换为亿元（API返回的是元，需要转换）
-    const toYi = (v) => {
-      if (Math.abs(v) >= 1e8) return (v / 1e8).toFixed(2);
-      if (Math.abs(v) >= 1e4) return (v / 1e4).toFixed(2);
-      return v;
-    };
-    nb = {
-      today_net: parseFloat(toYi(totalNet)),
-      today_sh: parseFloat(toYi(shNet)),
-      today_sz: parseFloat(toYi(szNet)),
-      trend: defaultNorth.trend
-    };
+  // mock 回退修复(2026-07-31):原代码在 API 返回空时回退到 defaultNorth mock
+  // (今日净流入 82.5 亿等假数据),用户误以为是真实北向资金数据。
+  // 改为:API 无数据时显示空状态,不显示 mock。
+  if (!data || !data.data) {
+    container.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:20px;font-size:13px;">北向资金数据获取失败,请稍后重试</div>';
+    return;
   }
+
+  const d = data.data;
+  // API返回字段映射到前端字段
+  const totalNet = d.total_net_inflow || 0;
+  const shNet = d.sh_net_inflow || 0;
+  const szNet = d.sz_net_inflow || 0;
+  // 将亿元转换为亿元（API返回的是元，需要转换）
+  const toYi = (v) => {
+    if (Math.abs(v) >= 1e8) return (v / 1e8).toFixed(2);
+    if (Math.abs(v) >= 1e4) return (v / 1e4).toFixed(2);
+    return v;
+  };
+  const nb = {
+    today_net: parseFloat(toYi(totalNet)),
+    today_sh: parseFloat(toYi(shNet)),
+    today_sz: parseFloat(toYi(szNet)),
+    trend: []
+  };
 
   const netColor = changeColor(nb.today_net);
   // P2-5 收尾(2026-07-30):后端 NorthboundResponse.data_quality=degraded 表示
@@ -5050,7 +5048,10 @@ async function loadNorthbound() {
   // 绘制北向资金趋势线
   setTimeout(() => {
     const svg = document.getElementById('northboundChart');
-    if (!svg || !nb.trend) return;
+    if (!svg || !nb.trend || nb.trend.length === 0) {
+      if (svg) svg.innerHTML = '<text x="200" y="60" text-anchor="middle" fill="var(--text-muted)" font-size="12">暂无趋势数据</text>';
+      return;
+    }
     const points = nb.trend;
     const min = Math.min(...points);
     const max = Math.max(...points);
