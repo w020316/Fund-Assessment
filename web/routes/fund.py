@@ -187,14 +187,18 @@ async def add_position(req: AddPositionRequest):
 @router.delete("/positions/{fund_code}", dependencies=[Depends(require_admin)])
 async def delete_position(fund_code: str):
     """删除指定基金持仓。"""
-    positions = _load_positions()
-    before = len(positions)
-    positions = [p for p in positions if p.get("fund_code") != fund_code]
-    removed = before - len(positions)
-    if removed == 0:
-        return {"success": False, "message": f"未找到 {fund_code}"}
-    ok = _save_positions(positions)
-    return {"success": ok, "message": f"已删除 {fund_code}" if ok else "删除失败,请重试"}
+    try:
+        positions = _load_positions()
+        before = len(positions)
+        positions = [p for p in positions if p.get("fund_code") != fund_code]
+        removed = before - len(positions)
+        if removed == 0:
+            return {"success": False, "message": f"未找到 {fund_code}"}
+        ok = _save_positions(positions)
+        return {"success": ok, "message": f"已删除 {fund_code}" if ok else "删除失败,请重试"}
+    except Exception as e:
+        logger.warning(f"delete_position {fund_code} failed: {e}")
+        return {"success": False, "message": "删除失败,请稍后重试"}
 
 
 # ============ 基金建议 ============

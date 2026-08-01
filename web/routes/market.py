@@ -472,8 +472,8 @@ class SectorRankingItem(BaseModel):
 @router.get("/research_reports")
 async def research_reports(
     code: str = Query("", description="股票代码（可选，为空时返回最新研报）"),
-    page: int = Query(1, description="页码"),
-    page_size: int = Query(10, description="每页条数"),
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(10, ge=1, le=50, description="每页条数"),
 ):
     cache_key = f"market:research_reports:{code}:{page}:{page_size}"
     cached = cache.get(cache_key)
@@ -566,8 +566,8 @@ async def shareholder(code: str = Query("", description="股票代码")):
 @router.get("/news")
 async def news(
     code: str = Query("", description="股票代码（可选，为空时返回全局新闻）"),
-    page: int = Query(1, description="页码"),
-    page_size: int = Query(10, description="每页条数"),
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(10, ge=1, le=50, description="每页条数"),
 ):
     cache_key = f"market:news:{code}:{page}:{page_size}"
     cached = cache.get(cache_key)
