@@ -86,31 +86,32 @@ async def global_indices():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("tencent", cached=True)}
-    # P2 修复(2026-07-30):原代码 raw 未防御 None,且无 try/except,上游异常直接 500
+    # P1 修复(2026-07-31):原 try/except 仅包裹数据源调用,后续 GlobalIndexItem 构造/cache.set 出错仍会 500
+    # 改为整个函数体包裹,确保任何异常都返回空数据而非 500
     try:
         raw = await asyncio.to_thread(ds2.get_global_indices)
+        if not raw:
+            return {"data": [], "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
+        result: list[GlobalIndexItem] = []
+        for item in raw:
+            result.append(GlobalIndexItem(
+                code=_safe_str(item.get("code")),
+                name=_safe_str(item.get("name")),
+                price=_safe_float(item.get("price")),
+                prev_close=_safe_float(item.get("prev_close")),
+                change=_safe_float(item.get("change")),
+                change_pct=_safe_float(item.get("change_pct")),
+                high=_safe_float(item.get("high")),
+                low=_safe_float(item.get("low")),
+                market=_safe_str(item.get("market")),
+                currency=_safe_str(item.get("currency")),
+            ))
+        cache.set(cache_key, result, ttl=15)
+        quality = 90.0 if result else 0.0
+        return {"data": result, "_meta": _build_meta("tencent", cached=False, quality_score=quality)}
     except Exception as e:
-        logger.warning(f"get_global_indices failed: {e}")
+        logger.warning(f"global_indices failed: {e}")
         return {"data": [], "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
-    if not raw:
-        return {"data": [], "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
-    result: list[GlobalIndexItem] = []
-    for item in raw:
-        result.append(GlobalIndexItem(
-            code=_safe_str(item.get("code")),
-            name=_safe_str(item.get("name")),
-            price=_safe_float(item.get("price")),
-            prev_close=_safe_float(item.get("prev_close")),
-            change=_safe_float(item.get("change")),
-            change_pct=_safe_float(item.get("change_pct")),
-            high=_safe_float(item.get("high")),
-            low=_safe_float(item.get("low")),
-            market=_safe_str(item.get("market")),
-            currency=_safe_str(item.get("currency")),
-        ))
-    cache.set(cache_key, result, ttl=15)
-    quality = 90.0 if result else 0.0
-    return {"data": result, "_meta": _build_meta("tencent", cached=False, quality_score=quality)}
 
 
 @router.get("/us_hot")
@@ -120,31 +121,31 @@ async def us_hot_stocks():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("tencent", cached=True)}
-    # P2 修复(2026-07-30):None 防御 + try/except
+    # P1 修复(2026-07-31):try/except 包裹整个函数体,防止模型构造/cache.set 异常导致 500
     try:
         raw = await asyncio.to_thread(ds2.get_us_hot_stocks)
+        if not raw:
+            return {"data": [], "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
+        result: list[UsStockItem] = []
+        for item in raw:
+            result.append(UsStockItem(
+                code=_safe_str(item.get("code")),
+                name=_safe_str(item.get("name")),
+                price=_safe_float(item.get("price")),
+                prev_close=_safe_float(item.get("prev_close")),
+                change=_safe_float(item.get("change")),
+                change_pct=_safe_float(item.get("change_pct")),
+                high=_safe_float(item.get("high")),
+                low=_safe_float(item.get("low")),
+                volume=_safe_float(item.get("volume")),
+                currency=_safe_str(item.get("currency")) or "USD",
+            ))
+        cache.set(cache_key, result, ttl=15)
+        quality = 90.0 if result else 0.0
+        return {"data": result, "_meta": _build_meta("tencent", cached=False, quality_score=quality)}
     except Exception as e:
-        logger.warning(f"get_us_hot_stocks failed: {e}")
+        logger.warning(f"us_hot_stocks failed: {e}")
         return {"data": [], "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
-    if not raw:
-        return {"data": [], "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
-    result: list[UsStockItem] = []
-    for item in raw:
-        result.append(UsStockItem(
-            code=_safe_str(item.get("code")),
-            name=_safe_str(item.get("name")),
-            price=_safe_float(item.get("price")),
-            prev_close=_safe_float(item.get("prev_close")),
-            change=_safe_float(item.get("change")),
-            change_pct=_safe_float(item.get("change_pct")),
-            high=_safe_float(item.get("high")),
-            low=_safe_float(item.get("low")),
-            volume=_safe_float(item.get("volume")),
-            currency=_safe_str(item.get("currency")) or "USD",
-        ))
-    cache.set(cache_key, result, ttl=15)
-    quality = 90.0 if result else 0.0
-    return {"data": result, "_meta": _build_meta("tencent", cached=False, quality_score=quality)}
 
 
 @router.get("/hk_hot")
@@ -154,31 +155,30 @@ async def hk_hot_stocks():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("tencent", cached=True)}
-    # P2 修复(2026-07-30):None 防御 + try/except
     try:
         raw = await asyncio.to_thread(ds2.get_hk_hot_stocks)
+        if not raw:
+            return {"data": [], "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
+        result: list[HkStockItem] = []
+        for item in raw:
+            result.append(HkStockItem(
+                code=_safe_str(item.get("code")),
+                name=_safe_str(item.get("name")),
+                price=_safe_float(item.get("price")),
+                prev_close=_safe_float(item.get("prev_close")),
+                change=_safe_float(item.get("change")),
+                change_pct=_safe_float(item.get("change_pct")),
+                high=_safe_float(item.get("high")),
+                low=_safe_float(item.get("low")),
+                volume=_safe_float(item.get("volume")),
+                currency=_safe_str(item.get("currency")) or "HKD",
+            ))
+        cache.set(cache_key, result, ttl=15)
+        quality = 90.0 if result else 0.0
+        return {"data": result, "_meta": _build_meta("tencent", cached=False, quality_score=quality)}
     except Exception as e:
-        logger.warning(f"get_hk_hot_stocks failed: {e}")
+        logger.warning(f"hk_hot_stocks failed: {e}")
         return {"data": [], "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
-    if not raw:
-        return {"data": [], "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
-    result: list[HkStockItem] = []
-    for item in raw:
-        result.append(HkStockItem(
-            code=_safe_str(item.get("code")),
-            name=_safe_str(item.get("name")),
-            price=_safe_float(item.get("price")),
-            prev_close=_safe_float(item.get("prev_close")),
-            change=_safe_float(item.get("change")),
-            change_pct=_safe_float(item.get("change_pct")),
-            high=_safe_float(item.get("high")),
-            low=_safe_float(item.get("low")),
-            volume=_safe_float(item.get("volume")),
-            currency=_safe_str(item.get("currency")) or "HKD",
-        ))
-    cache.set(cache_key, result, ttl=15)
-    quality = 90.0 if result else 0.0
-    return {"data": result, "_meta": _build_meta("tencent", cached=False, quality_score=quality)}
 
 
 @router.get("/us_realtime")
@@ -189,31 +189,30 @@ async def us_realtime(codes: str = Query(..., description="美股代码,逗号�
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("tencent", cached=True)}
     symbol_list = [c.strip().upper() for c in codes.split(",") if c.strip()]
-    # P2 修复(2026-07-30):None 防御 + try/except
     try:
         raw = await asyncio.to_thread(ds2.get_us_stock_realtime, symbol_list)
+        if not raw:
+            return {"data": [], "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
+        result: list[UsStockItem] = []
+        for item in raw:
+            result.append(UsStockItem(
+                code=_safe_str(item.get("code")),
+                name=_safe_str(item.get("name")),
+                price=_safe_float(item.get("price")),
+                prev_close=_safe_float(item.get("prev_close")),
+                change=_safe_float(item.get("change")),
+                change_pct=_safe_float(item.get("change_pct")),
+                high=_safe_float(item.get("high")),
+                low=_safe_float(item.get("low")),
+                volume=_safe_float(item.get("volume")),
+                currency=_safe_str(item.get("currency")) or "USD",
+            ))
+        cache.set(cache_key, result, ttl=15)
+        quality = 90.0 if result else 0.0
+        return {"data": result, "_meta": _build_meta("tencent", cached=False, quality_score=quality)}
     except Exception as e:
-        logger.warning(f"get_us_stock_realtime failed: {e}")
+        logger.warning(f"us_realtime failed: {e}")
         return {"data": [], "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
-    if not raw:
-        return {"data": [], "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
-    result: list[UsStockItem] = []
-    for item in raw:
-        result.append(UsStockItem(
-            code=_safe_str(item.get("code")),
-            name=_safe_str(item.get("name")),
-            price=_safe_float(item.get("price")),
-            prev_close=_safe_float(item.get("prev_close")),
-            change=_safe_float(item.get("change")),
-            change_pct=_safe_float(item.get("change_pct")),
-            high=_safe_float(item.get("high")),
-            low=_safe_float(item.get("low")),
-            volume=_safe_float(item.get("volume")),
-            currency=_safe_str(item.get("currency")) or "USD",
-        ))
-    cache.set(cache_key, result, ttl=15)
-    quality = 90.0 if result else 0.0
-    return {"data": result, "_meta": _build_meta("tencent", cached=False, quality_score=quality)}
 
 
 @router.get("/hk_realtime")
@@ -224,31 +223,30 @@ async def hk_realtime(codes: str = Query(..., description="港股代码,逗号�
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("tencent", cached=True)}
     code_list = [c.strip() for c in codes.split(",") if c.strip()]
-    # P2 修复(2026-07-30):None 防御 + try/except
     try:
         raw = await asyncio.to_thread(ds2.get_hk_stock_realtime, code_list)
+        if not raw:
+            return {"data": [], "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
+        result: list[HkStockItem] = []
+        for item in raw:
+            result.append(HkStockItem(
+                code=_safe_str(item.get("code")),
+                name=_safe_str(item.get("name")),
+                price=_safe_float(item.get("price")),
+                prev_close=_safe_float(item.get("prev_close")),
+                change=_safe_float(item.get("change")),
+                change_pct=_safe_float(item.get("change_pct")),
+                high=_safe_float(item.get("high")),
+                low=_safe_float(item.get("low")),
+                volume=_safe_float(item.get("volume")),
+                currency=_safe_str(item.get("currency")) or "HKD",
+            ))
+        cache.set(cache_key, result, ttl=15)
+        quality = 90.0 if result else 0.0
+        return {"data": result, "_meta": _build_meta("tencent", cached=False, quality_score=quality)}
     except Exception as e:
-        logger.warning(f"get_hk_stock_realtime failed: {e}")
+        logger.warning(f"hk_realtime failed: {e}")
         return {"data": [], "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
-    if not raw:
-        return {"data": [], "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
-    result: list[HkStockItem] = []
-    for item in raw:
-        result.append(HkStockItem(
-            code=_safe_str(item.get("code")),
-            name=_safe_str(item.get("name")),
-            price=_safe_float(item.get("price")),
-            prev_close=_safe_float(item.get("prev_close")),
-            change=_safe_float(item.get("change")),
-            change_pct=_safe_float(item.get("change_pct")),
-            high=_safe_float(item.get("high")),
-            low=_safe_float(item.get("low")),
-            volume=_safe_float(item.get("volume")),
-            currency=_safe_str(item.get("currency")) or "HKD",
-        ))
-    cache.set(cache_key, result, ttl=15)
-    quality = 90.0 if result else 0.0
-    return {"data": result, "_meta": _build_meta("tencent", cached=False, quality_score=quality)}
 
 
 @router.get("/overview")
@@ -258,37 +256,35 @@ async def global_overview():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("tencent", cached=True)}
-    # P2 修复(2026-07-30):None 防御 + try/except,原代码 raw.get() 在 raw=None 时会 AttributeError
     try:
         raw = await asyncio.to_thread(ds2.get_global_market_overview)
+        if not raw:
+            return {"data": {"indices": [], "us_hot": [], "hk_hot": []}, "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
+        indices = [GlobalIndexItem(
+            code=_safe_str(i.get("code")), name=_safe_str(i.get("name")),
+            price=_safe_float(i.get("price")), prev_close=_safe_float(i.get("prev_close")),
+            change=_safe_float(i.get("change")), change_pct=_safe_float(i.get("change_pct")),
+            high=_safe_float(i.get("high")), low=_safe_float(i.get("low")),
+            market=_safe_str(i.get("market")), currency=_safe_str(i.get("currency")),
+        ).model_dump() for i in raw.get("indices", [])]
+        us_hot = [UsStockItem(
+            code=_safe_str(i.get("code")), name=_safe_str(i.get("name")),
+            price=_safe_float(i.get("price")), prev_close=_safe_float(i.get("prev_close")),
+            change=_safe_float(i.get("change")), change_pct=_safe_float(i.get("change_pct")),
+            high=_safe_float(i.get("high")), low=_safe_float(i.get("low")),
+            volume=_safe_float(i.get("volume")), currency=_safe_str(i.get("currency")) or "USD",
+        ).model_dump() for i in raw.get("us_hot", [])]
+        hk_hot = [HkStockItem(
+            code=_safe_str(i.get("code")), name=_safe_str(i.get("name")),
+            price=_safe_float(i.get("price")), prev_close=_safe_float(i.get("prev_close")),
+            change=_safe_float(i.get("change")), change_pct=_safe_float(i.get("change_pct")),
+            high=_safe_float(i.get("high")), low=_safe_float(i.get("low")),
+            volume=_safe_float(i.get("volume")), currency=_safe_str(i.get("currency")) or "HKD",
+        ).model_dump() for i in raw.get("hk_hot", [])]
+        result = {"indices": indices, "us_hot": us_hot, "hk_hot": hk_hot}
+        cache.set(cache_key, result, ttl=15)
+        quality = 90.0 if (indices or us_hot or hk_hot) else 0.0
+        return {"data": result, "_meta": _build_meta("tencent", cached=False, quality_score=quality)}
     except Exception as e:
-        logger.warning(f"get_global_market_overview failed: {e}")
+        logger.warning(f"global_overview failed: {e}")
         return {"data": {"indices": [], "us_hot": [], "hk_hot": []}, "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
-    if not raw:
-        return {"data": {"indices": [], "us_hot": [], "hk_hot": []}, "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
-    # 转换为响应模型
-    indices = [GlobalIndexItem(
-        code=_safe_str(i.get("code")), name=_safe_str(i.get("name")),
-        price=_safe_float(i.get("price")), prev_close=_safe_float(i.get("prev_close")),
-        change=_safe_float(i.get("change")), change_pct=_safe_float(i.get("change_pct")),
-        high=_safe_float(i.get("high")), low=_safe_float(i.get("low")),
-        market=_safe_str(i.get("market")), currency=_safe_str(i.get("currency")),
-    ).model_dump() for i in raw.get("indices", [])]
-    us_hot = [UsStockItem(
-        code=_safe_str(i.get("code")), name=_safe_str(i.get("name")),
-        price=_safe_float(i.get("price")), prev_close=_safe_float(i.get("prev_close")),
-        change=_safe_float(i.get("change")), change_pct=_safe_float(i.get("change_pct")),
-        high=_safe_float(i.get("high")), low=_safe_float(i.get("low")),
-        volume=_safe_float(i.get("volume")), currency=_safe_str(i.get("currency")) or "USD",
-    ).model_dump() for i in raw.get("us_hot", [])]
-    hk_hot = [HkStockItem(
-        code=_safe_str(i.get("code")), name=_safe_str(i.get("name")),
-        price=_safe_float(i.get("price")), prev_close=_safe_float(i.get("prev_close")),
-        change=_safe_float(i.get("change")), change_pct=_safe_float(i.get("change_pct")),
-        high=_safe_float(i.get("high")), low=_safe_float(i.get("low")),
-        volume=_safe_float(i.get("volume")), currency=_safe_str(i.get("currency")) or "HKD",
-    ).model_dump() for i in raw.get("hk_hot", [])]
-    result = {"indices": indices, "us_hot": us_hot, "hk_hot": hk_hot}
-    cache.set(cache_key, result, ttl=15)
-    quality = 90.0 if (indices or us_hot or hk_hot) else 0.0
-    return {"data": result, "_meta": _build_meta("tencent", cached=False, quality_score=quality)}

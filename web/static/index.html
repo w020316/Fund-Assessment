@@ -2358,7 +2358,8 @@ async function loadAiHistory() {
     if (body) body.innerHTML = '<tr><td colspan="5" style="color:var(--color-warning);text-align:center;padding:20px 0;">请先在系统配置页设置管理员 Token 后查看分析历史</td></tr>';
     return;
   }
-  const data = await api('/api/agent/history');
+  // P1 优化(2026-08-01):使用缓存减少重复请求,30秒内复用缓存数据
+  const data = await apiCached('/api/agent/history', 'ai_history', 30);
 
   // mock 回退修复(2026-07-31):原代码在 API 返回空时回退到 defaultHistory mock
   // (2025-01-15 买入茅台等假记录),用户误以为是真实分析历史。
@@ -3881,7 +3882,9 @@ async function loadScriptLibrary() {
   if (category) params.set('category', category);
   if (scene) params.set('scene', scene);
   const url = '/api/scripts/list' + (params.toString() ? '?' + params.toString() : '');
-  const data = await api(url);
+  // P1 优化(2026-08-01):使用缓存减少重复请求,120秒内复用缓存数据(话术库变化不频繁)
+  const cacheKey = 'script_library_' + (params.toString() || 'default');
+  const data = await apiCached(url, cacheKey, 120);
   const list = (data && data.data) || [];
   countEl.textContent = `共 ${list.length} 条`;
   if (!list.length) {
@@ -5354,7 +5357,8 @@ async function loadLlmProvider() {
   const statusEl = document.getElementById('llmProviderStatus');
   if (!nameEl) return;
 
-  const data = await api('/api/health');
+  // P1 优化(2026-08-01):使用缓存减少重复请求,60秒内复用缓存数据
+  const data = await apiCached('/api/health', 'llm_provider', 60);
   if (data && data.ai_keys) {
     const keys = data.ai_keys;
     const hasKey = keys.provider || keys.ttapi || keys.tavily || keys.tinyfish || keys.agnes || keys.openai_key || keys.api_key;

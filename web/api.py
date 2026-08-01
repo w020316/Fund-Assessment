@@ -31,41 +31,49 @@ if _parent_dir not in sys.path:
 
 app_state: dict = {}
 
+# P1 修复(2026-08-01):延迟加载重依赖,加速冷启动
+# 原代码在模块级 import akshare(约 2-5s)和 src.core 全套模块(约 3-8s),
+# Render Free 冷启动(实例休眠后首次请求)需等待所有 import 完成才响应 /api/health,
+# 导致用户看到"页面长时间不用启动太慢"。
+# 改为:仅标记 _HAS_* 标志位,实际 import 推迟到 lifespan 中异步执行。
 _HAS_AKSHARE = False
 _HAS_CORE = False
-
-try:
-    import akshare
-    _HAS_AKSHARE = True
-except ImportError as e:
-    logger.warning(f"import akshare failed: {e}")
-
-try:
-    from src.core.data_source import DataSourceManager
-    from src.core.executor import SimulatedBroker, TradeExecutor
-    from src.core.risk_manager import RiskManager
-    from src.utils.config import get_config
-    _HAS_CORE = True
-except ImportError as e:
-    logger.warning(f"import src.core failed: {e}")
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    if _HAS_CORE:
+    global _HAS_AKSHARE, _HAS_CORE
+    # 异步加载重依赖(不阻塞事件循环,其他请求可先响应)
+    akshare = None
+    try:
+        import akshare as _ak
+        akshare = _ak
+        _HAS_AKSHARE = True
+        logger.info("akshare loaded successfully")
+    except ImportError as e:
+        logger.warning(f"import akshare failed: {e}")
+
+    try:
+        from src.core.data_source import DataSourceManager
+        from src.core.executor import SimulatedBroker, TradeExecutor
+        from src.core.risk_manager import RiskManager
+        from src.utils.config import get_config
         cfg = get_config()
         tushare_token = cfg.get("tushare.token", "")
         data_source = DataSourceManager(tushare_token=tushare_token)
         risk_manager = RiskManager()
         broker = SimulatedBroker(initial_cash=1_000_000.0)
         executor = TradeExecutor(broker=broker, risk_manager=risk_manager)
+        _HAS_CORE = True
 
         app_state["data_source"] = data_source
         app_state["risk_manager"] = risk_manager
         app_state["broker"] = broker
         app_state["executor"] = executor
         app_state["config"] = cfg
-    else:
+        logger.info("core modules loaded successfully")
+    except ImportError as e:
+        logger.warning(f"import src.core failed: {e}")
         app_state["data_source"] = None
         app_state["risk_manager"] = None
         app_state["broker"] = None

@@ -129,38 +129,42 @@ async def stock_realtime(codes: str = Query(..., max_length=200, description="�
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("tencent", cached=True)}
-    data = await asyncio.to_thread(ds2.get_realtime_quote_tencent, code_list)
-    result: list[StockRealtimeItem] = []
-    for item in data:
-        price = _safe_float(item.get("price"))
-        prev_close = _safe_float(item.get("prev_close"))
-        change = _safe_float(item.get("change"))
-        if change == 0.0 and price != 0.0 and prev_close != 0.0:
-            change = round(price - prev_close, 2)
-        result.append(StockRealtimeItem(
-            code=_safe_str(item.get("code")),
-            name=_safe_str(item.get("name")),
-            price=price,
-            change=change,
-            change_pct=_safe_float(item.get("change_pct")),
-            volume=_safe_float(item.get("volume")),
-            amount=_safe_float(item.get("amount")),
-            high=_safe_float(item.get("high")),
-            low=_safe_float(item.get("low")),
-            open=_safe_float(item.get("open")),
-            prev_close=prev_close,
-        ))
-    cache.set(cache_key, result)
-    # 计算数据质量评分
-    quality_score = 80.0
-    if result:
-        validator = get_data_validator()
-        scores = []
-        for r in result:
-            vr = validator.validate_quote(r.model_dump())
-            scores.append(vr.quality_score)
-        quality_score = sum(scores) / len(scores) if scores else 80.0
-    return {"data": result, "_meta": _build_meta("tencent", cached=False, quality_score=quality_score)}
+    # P1 修复(2026-08-01):整个函数体包裹,确保数据源/模型构造/cache.set 异常也返回空数据而非 500
+    try:
+        data = await asyncio.to_thread(ds2.get_realtime_quote_tencent, code_list)
+        result: list[StockRealtimeItem] = []
+        for item in data:
+            price = _safe_float(item.get("price"))
+            prev_close = _safe_float(item.get("prev_close"))
+            change = _safe_float(item.get("change"))
+            if change == 0.0 and price != 0.0 and prev_close != 0.0:
+                change = round(price - prev_close, 2)
+            result.append(StockRealtimeItem(
+                code=_safe_str(item.get("code")),
+                name=_safe_str(item.get("name")),
+                price=price,
+                change=change,
+                change_pct=_safe_float(item.get("change_pct")),
+                volume=_safe_float(item.get("volume")),
+                amount=_safe_float(item.get("amount")),
+                high=_safe_float(item.get("high")),
+                low=_safe_float(item.get("low")),
+                open=_safe_float(item.get("open")),
+                prev_close=prev_close,
+            ))
+        cache.set(cache_key, result)
+        quality_score = 80.0
+        if result:
+            validator = get_data_validator()
+            scores = []
+            for r in result:
+                vr = validator.validate_quote(r.model_dump())
+                scores.append(vr.quality_score)
+            quality_score = sum(scores) / len(scores) if scores else 80.0
+        return {"data": result, "_meta": _build_meta("tencent", cached=False, quality_score=quality_score)}
+    except Exception as e:
+        logger.warning(f"stock_realtime failed: {e}")
+        return {"data": [], "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
 
 
 @router.get("/stock_kline")
@@ -173,26 +177,30 @@ async def stock_kline(
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("mootdx", cached=True)}
-    data = await asyncio.to_thread(ds2.get_kline_mootdx, code, period=period, count=count)
-    result: list[KlineItem] = []
-    for item in data:
-        result.append(KlineItem(
-            date=_safe_str(item.get("date")),
-            open=_safe_float(item.get("open")),
-            high=_safe_float(item.get("high")),
-            low=_safe_float(item.get("low")),
-            close=_safe_float(item.get("close")),
-            volume=_safe_float(item.get("volume")),
-            amount=_safe_float(item.get("amount")),
-        ))
-    cache.set(cache_key, result, ttl=300)
-    # 计算数据质量评分
-    quality_score = 80.0
-    if result:
-        validator = get_data_validator()
-        vr = validator.validate_kline([r.model_dump() for r in result], expected_count=count)
-        quality_score = vr.quality_score
-    return {"data": result, "_meta": _build_meta("mootdx", cached=False, quality_score=quality_score)}
+    # P1 修复(2026-08-01):整个函数体包裹,确保数据源/模型构造/cache.set 异常也返回空数据而非 500
+    try:
+        data = await asyncio.to_thread(ds2.get_kline_mootdx, code, period=period, count=count)
+        result: list[KlineItem] = []
+        for item in data:
+            result.append(KlineItem(
+                date=_safe_str(item.get("date")),
+                open=_safe_float(item.get("open")),
+                high=_safe_float(item.get("high")),
+                low=_safe_float(item.get("low")),
+                close=_safe_float(item.get("close")),
+                volume=_safe_float(item.get("volume")),
+                amount=_safe_float(item.get("amount")),
+            ))
+        cache.set(cache_key, result, ttl=300)
+        quality_score = 80.0
+        if result:
+            validator = get_data_validator()
+            vr = validator.validate_kline([r.model_dump() for r in result], expected_count=count)
+            quality_score = vr.quality_score
+        return {"data": result, "_meta": _build_meta("mootdx", cached=False, quality_score=quality_score)}
+    except Exception as e:
+        logger.warning(f"stock_kline failed: {e}")
+        return {"data": [], "_meta": _build_meta("mootdx", cached=False, quality_score=0.0)}
 
 
 @router.get("/fund_realtime")
@@ -816,17 +824,22 @@ async def northbound():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
-    data = await asyncio.to_thread(ds2.get_northbound_flow_realtime)
-    if not data:
+    # P1 修复(2026-08-01):整个函数体包裹,防止数据源异常导致 500
+    try:
+        data = await asyncio.to_thread(ds2.get_northbound_flow_realtime)
+        if not data:
+            return {"data": NorthboundFlowItem().model_dump(), "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
+        result = NorthboundFlowItem(
+            date=_safe_str(data.get("date", "")),
+            total_net_inflow=_safe_float(data.get("total_net_inflow", 0)),
+            sh_net_inflow=_safe_float(data.get("sh_net_inflow", 0)),
+            sz_net_inflow=_safe_float(data.get("sz_net_inflow", 0)),
+        )
+        cache.set(cache_key, result.model_dump())
+        return {"data": result.model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
+    except Exception as e:
+        logger.warning(f"northbound failed: {e}")
         return {"data": NorthboundFlowItem().model_dump(), "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
-    result = NorthboundFlowItem(
-        date=_safe_str(data.get("date", "")),
-        total_net_inflow=_safe_float(data.get("total_net_inflow", 0)),
-        sh_net_inflow=_safe_float(data.get("sh_net_inflow", 0)),
-        sz_net_inflow=_safe_float(data.get("sz_net_inflow", 0)),
-    )
-    cache.set(cache_key, result.model_dump())
-    return {"data": result.model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
 
 
 @router.get("/market_sentiment")

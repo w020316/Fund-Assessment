@@ -470,23 +470,26 @@ def _call_ttapi_direct(messages: list[dict[str, str]], model: str = _DEFAULT_MOD
 # ===== 持仓截图识别(agnes-2.0-flash vision,免费多模态) =====
 
 # 持仓识别 prompt:要求模型从截图提取持仓明细,返回严格 JSON
-# P1 改进(2026-07-30):明确区分"市值(元)"与"占比(%)",避免把市值误当占比
-_HOLDINGS_VISION_PROMPT = """你是基金持仓识别助手。请从用户提供的截图中提取持仓明细。
+# P1 改进(2026-08-01):增强 prompt 鲁棒性,支持更多格式,明确输出约束
+_HOLDINGS_VISION_PROMPT = """你是专业的基金/股票持仓截图识别助手。请仔细分析图片中的持仓表格或列表,提取每只持仓的详细信息。
 
-识别要求:
-1. 识别每只基金/股票的:代码(code,6位数字)、名称(name)
-2. 金额与占比必须分开返回,不要混淆:
-   - amount: 持仓市值(单位:元,数字,无符号)。如截图显示"345.28元"或"¥345.28",填 345.28
-   - weight: 持仓占比(单位:%,数字,无%)。如截图显示"35.5%",填 35.5
-3. 若截图只有市值无占比:amount 填实际金额,weight 填 0
-4. 若截图只有占比无市值:weight 填实际占比,amount 填 0
-5. 若两者都无法识别:amount 和 weight 都填 0
-6. 仅返回 JSON,不要任何解释文字
+## 识别规则
+1. **代码(code)**: 提取6位数字基金代码(如161725)或股票代码(如600519/000001)。若图片中代码含小数点(如"161725.0"),去掉小数部分。
+2. **名称(name)**: 提取基金或股票的完整名称(如"招商中证白酒指数"、"贵州茅台")。
+3. **金额(amount)**: 持仓市值,单位元。识别"市值""持仓金额""持有金额"等列。如"345.28"填345.28。
+4. **占比(weight)**: 持仓百分比,不带%号。识别"占比""比例""权重""仓位"等列。如"35.5%"填35.5。
+5. 若某字段无法识别,填0。
+6. 只返回JSON,不要markdown代码块,不要解释文字。
 
-返回格式(严格 JSON,不要 markdown 代码块):
-{"holdings": [{"code": "161725", "name": "招商中证白酒", "amount": 345.28, "weight": 35.5}, {"code": "600519", "name": "贵州茅台", "amount": 12000.0, "weight": 0}]}
+## 返回格式
+{"holdings": [{"code": "161725", "name": "招商中证白酒", "amount": 345.28, "weight": 35.5}]}
 
-若截图中无可识别的持仓数据,返回:{"holdings": []}"""
+## 注意事项
+- 图片可能来自支付宝/天天基金/券商APP等不同平台,表格格式各异
+- 代码可能是纯数字或带前缀(如"SZ161725"),只保留6位数字部分
+- 名称可能含"(LOF)""(ETF)"等后缀,保留完整名称
+- 金额可能含千分位逗号(如"1,234.56"),去掉逗号后解析
+- 若图片模糊或无持仓数据,返回 {"holdings": []}"""
 
 # 支持的图片 MIME 类型
 _IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"}
@@ -529,76 +532,108 @@ def recognize_holdings_from_image(image_bytes: bytes, mime_type: str = "image/pn
     }]
 
     base_url = os.getenv("AGNES_BASE_URL", "https://apihub.agnes-ai.com/v1")
-    model = os.getenv("AGNES_VISION_MODEL", "agnes-2.0-flash")
+    # P1 修复(2026-08-01):增加备用模型列表,主模型失败时自动降级
+    primary_model = os.getenv("AGNES_VISION_MODEL", "agnes-2.0-flash")
+    fallback_models = [
+        os.getenv("AGNES_VISION_MODEL_FALLBACK", "agnes-2.0-lite"),
+        "agnes-2.0-flash",  # 兜底
+    ]
+    # 去重,确保主模型优先
+    models = [primary_model] + [m for m in fallback_models if m and m != primary_model]
     url = f"{base_url}/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
-    payload = {
-        "model": model,
-        "messages": messages,
-        "temperature": 0.1,  # 识别任务用低温度确保准确
-        "max_tokens": 2000,
-    }
 
-    try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-        if not content:
-            logger.warning("recognize_holdings_from_image: 模型返回空内容")
-            return []
+    # P1 修复(2026-08-01):超时从30s增加到60s,vision模型处理图片需要更长时间
+    # 同时支持多模型降级:主模型失败后尝试备用模型
+    for model in models:
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": 0.1,
+            "max_tokens": 2000,
+        }
+        try:
+            logger.info(f"recognize_holdings_from_image: 尝试模型 {model}")
+            resp = requests.post(url, headers=headers, json=payload, timeout=60)
+            resp.raise_for_status()
+            data = resp.json()
+            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            if not content:
+                logger.warning(f"recognize_holdings_from_image: 模型 {model} 返回空内容")
+                continue
 
-        # 清理可能的 markdown 代码块包裹
-        content = content.strip()
-        if content.startswith("```"):
-            content = content.split("\n", 1)[-1] if "\n" in content else content[3:]
-            if content.endswith("```"):
-                content = content[:-3]
+            # 清理可能的 markdown 代码块包裹
             content = content.strip()
+            if content.startswith("```"):
+                content = content.split("\n", 1)[-1] if "\n" in content else content[3:]
+                if content.endswith("```"):
+                    content = content[:-3]
+                content = content.strip()
 
-        result = json.loads(content)
-        holdings = result.get("holdings", [])
-        if not isinstance(holdings, list):
-            return []
-
-        # 字段规范化与清洗
-        cleaned: list[dict[str, Any]] = []
-        for h in holdings:
-            if not isinstance(h, dict):
+            result = json.loads(content)
+            holdings = result.get("holdings", [])
+            if not isinstance(holdings, list):
                 continue
-            code = str(h.get("code", "")).strip()
-            name = str(h.get("name", "")).strip()
-            if not code and not name:
-                continue
-            try:
-                weight = float(h.get("weight", 0) or 0)
-            except (ValueError, TypeError):
-                weight = 0.0
-            try:
-                amount = float(h.get("amount", 0) or 0)
-            except (ValueError, TypeError):
-                amount = 0.0
-            cleaned.append({
-                "code": code,
-                "name": name,
-                "weight": round(weight, 3),
-                "amount": round(amount, 2),
-            })
 
-        logger.info(f"recognize_holdings_from_image: 识别到 {len(cleaned)} 条持仓")
-        return cleaned
-    except requests.exceptions.Timeout:
-        logger.error("recognize_holdings_from_image: agnes vision 请求超时(30s)")
-        return []
-    except json.JSONDecodeError as e:
-        logger.error(f"recognize_holdings_from_image: 模型返回非JSON: {e}, content={content[:200]}")
-        return []
-    except Exception as e:
-        logger.error(f"recognize_holdings_from_image: 识别失败: {e}")
-        return []
+            # 字段规范化与清洗
+            cleaned: list[dict[str, Any]] = []
+            for h in holdings:
+                if not isinstance(h, dict):
+                    continue
+                code = str(h.get("code", "")).strip()
+                # 清理代码:去掉前缀(SZ/SH)和小数(.0)
+                code = re.sub(r'^(SZ|SH|sz|sh)', '', code)
+                code = re.sub(r'\.\d+$', '', code)
+                name = str(h.get("name", "")).strip()
+                # 清理名称中的多余空格
+                name = re.sub(r'\s+', '', name)
+                if not code and not name:
+                    continue
+                try:
+                    weight = float(h.get("weight", 0) or 0)
+                except (ValueError, TypeError):
+                    weight = 0.0
+                try:
+                    amount_val = h.get("amount", 0) or 0
+                    # 处理千分位逗号 "1,234.56" -> "1234.56"
+                    if isinstance(amount_val, str):
+                        amount_val = amount_val.replace(',', '').replace('，', '')
+                    amount = float(amount_val)
+                except (ValueError, TypeError):
+                    amount = 0.0
+                cleaned.append({
+                    "code": code,
+                    "name": name,
+                    "weight": round(weight, 3),
+                    "amount": round(amount, 2),
+                })
+
+            if cleaned:
+                logger.info(f"recognize_holdings_from_image: 模型 {model} 识别到 {len(cleaned)} 条持仓")
+                return cleaned
+            else:
+                logger.warning(f"recognize_holdings_from_image: 模型 {model} 返回空持仓列表")
+                # 如果主模型返回空列表(非异常),不再尝试备用模型(避免无意义重试)
+                if model == primary_model:
+                    return []
+        except requests.exceptions.Timeout:
+            logger.warning(f"recognize_holdings_from_image: 模型 {model} 请求超时(60s),尝试备用模型")
+            continue
+        except json.JSONDecodeError as e:
+            logger.warning(f"recognize_holdings_from_image: 模型 {model} 返回非JSON: {e}, 尝试备用模型")
+            continue
+        except requests.exceptions.HTTPError as e:
+            logger.warning(f"recognize_holdings_from_image: 模型 {model} HTTP错误: {e}, 尝试备用模型")
+            continue
+        except Exception as e:
+            logger.warning(f"recognize_holdings_from_image: 模型 {model} 异常: {e}, 尝试备用模型")
+            continue
+
+    logger.error("recognize_holdings_from_image: 所有模型均失败")
+    return []
 
 
 def _parse_analysis_response(response_text: str, stock_code: str) -> dict[str, Any]:
