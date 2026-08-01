@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -88,46 +89,93 @@ class NotifyTestResponse(BaseModel):
 def _load_yaml(filename: str) -> dict[str, Any]:
     filepath = _CONFIG_DIR / filename
     if not filepath.exists():
+        # 尝试读取备份文件
+        bak_path = filepath.with_suffix(filepath.suffix + ".bak")
+        if bak_path.exists():
+            try:
+                with open(bak_path, "r", encoding="utf-8") as f:
+                    return yaml.safe_load(f) or {}
+            except Exception:
+                pass
         return {}
-    with open(filepath, "r", encoding="utf-8") as f:
-        content = yaml.safe_load(f)
-        return content if content else {}
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            content = yaml.safe_load(f)
+            return content if content else {}
+    except Exception as e:
+        logger.warning(f"load yaml {filename} failed, trying backup: {e}")
+        bak_path = filepath.with_suffix(filepath.suffix + ".bak")
+        if bak_path.exists():
+            try:
+                with open(bak_path, "r", encoding="utf-8") as f:
+                    return yaml.safe_load(f) or {}
+            except Exception:
+                pass
+        return {}
 
 
 def _save_yaml(filename: str, data: dict[str, Any]) -> None:
     _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     filepath = _CONFIG_DIR / filename
-    with open(filepath, "w", encoding="utf-8") as f:
-        yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+    tmp_path = filepath.with_suffix(filepath.suffix + ".tmp")
+    bak_path = filepath.with_suffix(filepath.suffix + ".bak")
+    # 先写临时文件,再原子替换
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+        # 备份旧文件
+        if filepath.exists():
+            shutil.copy2(filepath, bak_path)
+        # 原子替换
+        tmp_path.replace(filepath)
+    except Exception as e:
+        logger.warning(f"save yaml {filename} failed: {e}")
+        raise
 
 
 @router.get("/settings", response_model=SettingsResponse)
 async def get_settings():
-    data = _load_yaml("settings.yaml")
-    return SettingsResponse(settings=_mask_sensitive(data))
+    try:
+        data = _load_yaml("settings.yaml")
+        return SettingsResponse(settings=_mask_sensitive(data))
+    except Exception as e:
+        logger.warning(f"get_settings failed: {e}")
+        return SettingsResponse(settings={})
 
 
 @router.put("/settings", response_model=SettingsResponse, dependencies=[Depends(require_admin)])
 async def update_settings(req: SettingsUpdateRequest):
-    existing = _load_yaml("settings.yaml")
-    cleaned = _strip_masked(req.settings)
-    _deep_merge(existing, cleaned)
-    _save_yaml("settings.yaml", existing)
-    return SettingsResponse(settings=_mask_sensitive(existing))
+    try:
+        existing = _load_yaml("settings.yaml")
+        cleaned = _strip_masked(req.settings)
+        _deep_merge(existing, cleaned)
+        _save_yaml("settings.yaml", existing)
+        return SettingsResponse(settings=_mask_sensitive(existing))
+    except Exception as e:
+        logger.warning(f"update_settings failed: {e}")
+        return SettingsResponse(settings={})
 
 
 @router.get("/strategies", response_model=StrategiesResponse)
 async def get_strategies():
-    data = _load_yaml("strategies.yaml")
-    return StrategiesResponse(strategies=data)
+    try:
+        data = _load_yaml("strategies.yaml")
+        return StrategiesResponse(strategies=data)
+    except Exception as e:
+        logger.warning(f"get_strategies failed: {e}")
+        return StrategiesResponse(strategies={})
 
 
 @router.put("/strategies", response_model=StrategiesResponse, dependencies=[Depends(require_admin)])
 async def update_strategies(req: StrategiesUpdateRequest):
-    existing = _load_yaml("strategies.yaml")
-    _deep_merge(existing, req.strategies)
-    _save_yaml("strategies.yaml", existing)
-    return StrategiesResponse(strategies=existing)
+    try:
+        existing = _load_yaml("strategies.yaml")
+        _deep_merge(existing, req.strategies)
+        _save_yaml("strategies.yaml", existing)
+        return StrategiesResponse(strategies=existing)
+    except Exception as e:
+        logger.warning(f"update_strategies failed: {e}")
+        return StrategiesResponse(strategies={})
 
 
 @router.post("/test_notify", response_model=NotifyTestResponse, dependencies=[Depends(require_admin)])

@@ -624,11 +624,12 @@ async def generate_fund_advice_v2(positions: list[dict]) -> dict[str, Any]:
     for i, result in enumerate(positions_advice):
         if isinstance(result, Exception):
             logger.warning(f"five_signals: position {positions[i].get('fund_code', '')} failed: {result}")
+            # P1 修复(2026-08-01):不返回异常详情到客户端,避免泄露内部信息
             clean_advice.append({
                 "fund_code": positions[i].get("fund_code", ""),
                 "fund_name": positions[i].get("fund_name", ""),
-                "error": str(result),
-                "advice": {"signal": "none", "action": "暂无建议", "reason": f"分析失败: {result}"},
+                "error": "分析失败,请稍后重试",
+                "advice": {"signal": "none", "action": "暂无建议", "reason": "分析失败,请稍后重试"},
             })
         else:
             clean_advice.append(result)

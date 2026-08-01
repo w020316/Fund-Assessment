@@ -63,10 +63,14 @@ async def fund_holdings_analysis(
         if cached is not None:
             return {"data": cached, "_meta": _build_meta("em_fund+akshare", cached=True)}
 
-    data = await analyze_fund_holdings(fund_code)
-    # 缓存5分钟(持仓数据变化慢,但净值影响需刷新)
-    cache.set(f"holdings:{fund_code}", data, ttl=300)
-    return {"data": data, "_meta": _build_meta("em_fund+akshare", cached=False)}
+    try:
+        data = await analyze_fund_holdings(fund_code)
+        # 缓存5分钟(持仓数据变化慢,但净值影响需刷新)
+        cache.set(f"holdings:{fund_code}", data, ttl=300)
+        return {"data": data, "_meta": _build_meta("em_fund+akshare", cached=False)}
+    except Exception as e:
+        logger.warning(f"fund_holdings_analysis {fund_code} failed: {e}")
+        return {"data": {}, "_meta": _build_meta("em_fund+akshare", cached=False, quality_score=0.0)}
 
 
 @router.get("/sector-rotation/overview")
@@ -76,9 +80,13 @@ async def sector_rotation_overview():
     cached = cache.get(cache_key)
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("em_sector_ranking", cached=True)}
-    data = await get_sector_rotation()
-    cache.set(cache_key, data, ttl=60)
-    return {"data": data, "_meta": _build_meta("em_sector_ranking", cached=False)}
+    try:
+        data = await get_sector_rotation()
+        cache.set(cache_key, data, ttl=60)
+        return {"data": data, "_meta": _build_meta("em_sector_ranking", cached=False)}
+    except Exception as e:
+        logger.warning(f"sector_rotation_overview failed: {e}")
+        return {"data": [], "_meta": _build_meta("em_sector_ranking", cached=False, quality_score=0.0)}
 
 
 # ===== 文件/图片持仓识别(P1 新功能:上传持仓截图或表格批量导入) =====

@@ -209,8 +209,8 @@ async def watchlist():
 async def add_watchlist(req: AddWatchlistRequest):
     watchlist_data = _load_watchlist()
     watchlist_data[req.stock_code] = req.rules or ["price_surge"]
-    _save_watchlist(watchlist_data)
-    return MessageResponse(success=True, message=f"已添加 {req.stock_code} 到自选")
+    ok = _save_watchlist(watchlist_data)
+    return MessageResponse(success=ok, message=f"已添加 {req.stock_code} 到自选" if ok else "添加失败,请重试")
 
 
 @router.delete("/watchlist/{stock_code}", response_model=MessageResponse, dependencies=[Depends(require_admin)])
@@ -218,8 +218,8 @@ async def remove_watchlist(stock_code: str):
     watchlist_data = _load_watchlist()
     if stock_code in watchlist_data:
         watchlist_data.pop(stock_code, None)
-        _save_watchlist(watchlist_data)
-        return MessageResponse(success=True, message=f"已移除 {stock_code}")
+        ok = _save_watchlist(watchlist_data)
+        return MessageResponse(success=ok, message=f"已移除 {stock_code}" if ok else "移除失败,请重试")
     return MessageResponse(success=False, message=f"{stock_code} 不在自选列表")
 
 

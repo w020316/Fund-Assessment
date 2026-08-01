@@ -380,7 +380,10 @@ def _parse_fund_analysis_response(response_text: str, fund_code: str) -> dict[st
 
 
 def _fallback_fund_result(fund_code: str, reason: str) -> dict[str, Any]:
-    """分析失败时的兜底结果"""
+    """分析失败时的兜底结果
+    
+    P1 修复(2026-08-01):删除"error"字段,原因已通过日志记录,不返回客户端
+    """
     return {
         "fund_code": fund_code,
         "agent_opinions": [],
@@ -396,7 +399,6 @@ def _fallback_fund_result(fund_code: str, reason: str) -> dict[str, Any]:
         "confidence": 0.0,
         "analysis_mode": "multi_agent_fund",
         "analyst_count": 0,
-        "error": reason,
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 
@@ -553,4 +555,4 @@ async def analyze_fund_with_agents(
         return result
     except Exception as e:
         logger.error(f"multi-agent fund analysis failed for {fund_code}: {e}")
-        return _fallback_fund_result(fund_code, f"多智能体分析失败: {e}")
+        return _fallback_fund_result(fund_code, "多智能体分析失败,请稍后重试")
