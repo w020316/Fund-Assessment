@@ -32,10 +32,10 @@ router = APIRouter()
 cache = DataCache(default_ttl=300)
 
 
-def _build_meta(data_source: str, cached: bool = False) -> dict:
+def _build_meta(data_source: str, cached: bool = False, quality_score: float | None = None) -> dict:
     return {
         "data_source": data_source,
-        "quality_score": 100.0 if cached else 80.0,
+        "quality_score": quality_score if quality_score is not None else (100.0 if cached else 80.0),
         "cached": cached,
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }

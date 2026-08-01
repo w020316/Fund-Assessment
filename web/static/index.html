@@ -1785,7 +1785,7 @@ function _setCached(key, data, ttl = 60) {
 // 带缓存的API调用:先返回缓存(秒开),后台刷新(后台刷新不阻塞UI)
 async function apiCached(url, cacheKey, ttl = 60) {
   const cached = _getCached(cacheKey);
-  if (cached) {
+  if (cached && cached.data !== undefined) {
     // 有缓存:立即返回缓存数据(秒级显示)
     // 后台静默刷新最新数据(不阻塞当前调用)
     api(url).then(fresh => {
