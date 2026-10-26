@@ -114,3 +114,56 @@ class TestGZipCompression:
         # 重定向响应体极小,不应压缩
         assert resp.status_code in (307, 302)
         assert resp.headers.get("content-encoding") != "gzip"
+
+
+class TestRateLimitKey:
+    """限流键取值（2026-10-26 P1 修复回归）
+
+    缺陷：原 key_func 用 slowapi 的 get_remote_address，只读 request.client.host、
+    不读 X-Forwarded-For。Render 反代不在回环地址上且 forwarded_allow_ips 默认仅信任
+    127.0.0.1 → XFF 被忽略 → 全站共享一个限流桶（60/min 变成全站额度）。
+
+    本类锁定取值规则：公网对端直用；否则从 XFF **右侧**（最近一跳）取，
+    防止客户端伪造左侧内容绕过限流。
+    """
+
+    @staticmethod
+    def _req(peer: str | None, xff: str | None = None):
+        from starlette.requests import Request
+        headers = []
+        if xff is not None:
+            headers.append((b"x-forwarded-for", xff.encode()))
+        scope = {
+            "type": "http", "method": "GET", "path": "/", "headers": headers,
+            "query_string": b"", "scheme": "http", "server": ("testserver", 80),
+        }
+        if peer is not None:
+            scope["client"] = (peer, 54321)
+        return Request(scope)
+
+    def test_public_peer_used_directly(self):
+        from web.rate_limiter import client_ip_key
+        assert client_ip_key(self._req("8.8.8.8")) == "8.8.8.8"
+
+    def test_private_peer_falls_back_to_xff(self):
+        from web.rate_limiter import client_ip_key
+        assert client_ip_key(self._req("10.0.0.5", "8.8.4.4")) == "8.8.4.4"
+
+    def test_rightmost_hop_wins_over_spoofed_left(self):
+        """客户端伪造左侧内容不得生效：最近一跳（右侧）才是真实来源"""
+        from web.rate_limiter import client_ip_key
+        # 攻击者自带 "2.2.2.2"，真实 proxy 追加了真实 IP "8.8.4.4"
+        assert client_ip_key(self._req("10.0.0.5", "2.2.2.2, 8.8.4.4")) == "8.8.4.4"
+
+    def test_all_private_hops_fall_back_to_peer(self):
+        from web.rate_limiter import client_ip_key
+        assert client_ip_key(self._req("10.0.0.5", "10.0.0.1, 192.168.1.1")) == "10.0.0.5"
+
+    def test_non_ip_peer_without_xff(self):
+        """TestClient 等非 IP 对端不得抛异常"""
+        from web.rate_limiter import client_ip_key
+        assert client_ip_key(self._req("testclient")) == "testclient"
+
+    def test_missing_client_returns_unknown(self):
+        from web.rate_limiter import client_ip_key
+        assert client_ip_key(self._req(None)) == "unknown"
