@@ -56,7 +56,11 @@ def _cache_get(key: str) -> Any | None:
         entry = _cache.get(key)
         if entry is None:
             return None
-        if time.monotonic() - entry["ts"] > entry["ttl"]:
+        # 2026-10-26：ttl<=0 显式视为"立即过期"。
+        # 原实现只依赖 `monotonic() - ts > ttl`，当 ttl=0 时该式退化为 `elapsed > 0`，
+        # 结果取决于两次取时钟之间是否跨过了一个时间戳步进 —— 在高并发/计时器精度
+        # 受限的环境里可能出现 elapsed 正好为 0 而命中过期条目，属于边界不确定行为。
+        if entry["ttl"] <= 0 or time.monotonic() - entry["ts"] > entry["ttl"]:
             del _cache[key]
             return None
         return entry["val"]
