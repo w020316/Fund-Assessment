@@ -155,6 +155,12 @@ body {
 }
 .grid-2 { display:grid; grid-template-columns:repeat(2,1fr); gap:16px; }
 .grid-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+/* (2026-10-26) CLS 修复：首屏三块数据容器在异步回填前高度为 0，数据到达后撑开，
+   导致下方内容整体下移。实测桌面 CLS 0.03–0.37（中位数 0.23，远超 0.1 阈值）。
+   预留最小高度 + 布局隔离，把位移锁进容器内部，不改视觉。 */
+#indexCards { min-height:108px; }
+#indexCards > .card { contain:layout; }
+#sectorHeatmap { min-height:220px; }
 .grid-4 { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; }
 .flex-between { display:flex; justify-content:space-between; align-items:center; }
 .mb-16 { margin-bottom:16px; }
