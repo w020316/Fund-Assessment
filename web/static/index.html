@@ -844,6 +844,18 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
   .fund-card-list { display: block; }
 }
 
+/* ===== STAGE5: cls-fix ===== K5 修复(QA Bug S2,CLS 0.036→0.061 回退):
+   数据填充到达前后不改变布局尺寸 ——
+   ① .index-bar 预留 28px 高 + nowrap + overflow:hidden,填充指数条前后高度恒定;
+   ② 顶栏与行情页新鲜度文字(#freshnessText/#marketFreshness)预留 96px 宽,
+      "—/暂无数据 → 更新于 HH:MM:SS"变宽时不再水平推挤 #sysTime/#connStatus;
+   ③ 指数卡骨架屏补齐 T04 新鲜度徽章行的等高占位(见 _renderSkeletons)。
+   注:375px 下 .index-bar 为 display:none,移动端不受影响。 */
+.index-bar { min-height: 28px; flex-wrap: nowrap; overflow: hidden; }
+#freshnessText,
+#marketFreshness span:not(.freshness-icon) { display: inline-block; min-width: 96px; }
+
+
 
 
 
@@ -5815,8 +5827,10 @@ function _renderSkeletons() {
   // 指数卡片区域:3个骨架卡片
   const indexCards = document.getElementById('indexCards');
   if (indexCards && !indexCards.innerHTML.trim()) {
+    // ===== STAGE5: cls-fix ===== 末尾 26px 占位与真实卡片中 T04 新鲜度徽章行
+    // (margin-top:8px + 11px*1.6 行高 ≈ 25.6px)等高,消除骨架→实卡的 CLS(QA Bug S2)
     indexCards.innerHTML = Array(3).fill(0).map(() =>
-      '<div class="skeleton-card"><div class="skeleton-line short"></div><div class="skeleton-line large" style="height:28px;"></div><div class="skeleton-line medium"></div></div>'
+      '<div class="skeleton-card"><div class="skeleton-line short"></div><div class="skeleton-line large" style="height:28px;"></div><div class="skeleton-line medium"></div><div style="height:26px;margin-top:8px;"></div></div>'
     ).join('');
   }
   // 板块热力图:骨架占位
