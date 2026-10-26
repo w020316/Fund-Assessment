@@ -190,6 +190,7 @@ from web.routes import holdings as holdings_route
 from web.routes import market as market_route
 from web.routes import monitor as monitor_route
 from web.routes import news as news_route
+from web.routes import portfolio as portfolio_route
 from web.routes import scripts as scripts_route
 from web.routes import strategy as strategy_route
 from web.routes import trade as trade_route
@@ -206,6 +207,8 @@ app.include_router(global_route.router, prefix="/api/global", tags=["国际市�
 app.include_router(scripts_route.router, prefix="/api/scripts", tags=["话术库"])
 app.include_router(news_route.router, prefix="/api/news", tags=["消息面"])
 app.include_router(holdings_route.router, prefix="/api/holdings", tags=["重仓股板块"])
+# 阶段六批次A:组合盯盘/风险/X-Ray/Webhook/账本导入导出(全部挂 require_admin,scan 例外见路由内说明)
+app.include_router(portfolio_route.router, prefix="/api/portfolio", tags=["组合阶段六"])
 
 _static_dir = Path(__file__).resolve().parent / "static"
 if _static_dir.is_dir():

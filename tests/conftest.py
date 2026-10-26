@@ -1,4 +1,5 @@
 """测试配置与公共fixtures"""
+import hashlib
 import os
 import sys
 from pathlib import Path
@@ -12,6 +13,39 @@ if _project_root not in sys.path:
 _pylibs = str(Path(_project_root) / "pylibs")
 if _pylibs not in sys.path:
     sys.path.insert(0, _pylibs)
+
+# ===== 阶段六批次A:CI 级红线守卫 =====
+# web/user_fund_positions.json 是用户真实持仓文件,测试绝不允许触碰。
+_PROTECTED_POSITIONS_FILE = Path(_project_root) / "web" / "user_fund_positions.json"
+
+
+def _snapshot_protected_file() -> dict | None:
+    """对受保护持仓文件做 mtime + sha256 快照(只读,不修改)。"""
+    p = _PROTECTED_POSITIONS_FILE
+    if not p.exists():
+        return None
+    import os as _os
+    st = p.stat()
+    digest = hashlib.sha256(p.read_bytes()).hexdigest()
+    return {"mtime_ns": st.st_mtime_ns, "size": st.st_size, "sha256": digest}
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _guard_real_positions_file():
+    """CI 级断言(阶段六批次A):整个测试会话前后,真实持仓文件 mtime 与 sha256 不变。
+
+    任何测试若读写 web/user_fund_positions.json(哪怕只是 mtime 变化),
+    全量回归将在会话结束时失败,防止真实持仓数据被测试污染。
+    """
+    before = _snapshot_protected_file()
+    yield
+    after = _snapshot_protected_file()
+    if before != after:
+        raise AssertionError(
+            "测试运行修改了 web/user_fund_positions.json(真实持仓文件)!\n"
+            f"before={before}\nafter={after}\n"
+            "铁律:测试一律使用 tmp_path/mock,绝不触碰该文件。"
+        )
 
 # P1 修复(2026-07-29)配套:测试环境全局设为 dev 模式
 # 原因:auth.require_admin 在生产环境(APP_ENV != "dev")未配置 ADMIN_TOKEN 时抛 500(fail-closed)
