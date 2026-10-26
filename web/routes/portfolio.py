@@ -21,6 +21,7 @@ from loguru import logger
 from src.core import data_source_v2 as ds2
 from src.core import fund_nav_source as fns
 from src.analysis import portfolio_risk as prisk
+from src.analysis import portfolio_xray as pxray
 from src.core.cache import DataCache
 from src.utils.auth import require_admin
 from src.utils.convert import safe_float as _safe_float, safe_str as _safe_str
@@ -404,5 +405,82 @@ async def get_portfolio_risk(
             "funds": [],
             "degraded": True,
             "note": f"风险计算异常: {e}",
+            "generated_at": _now_iso(),
+        }
+
+
+# ==================================================================
+# STAGE6: xray-report 持仓重叠 X-Ray(批次 A 功能 #4,简化版)
+# ==================================================================
+
+_XRAY_CACHE_TTL = 6 * 3600  # 重叠矩阵缓存 6h(季报级数据,架构文档 §3.3)
+
+
+async def _compute_xray() -> dict:
+    """聚合披露持仓并计算重叠度(持仓不可得的基金标 missing,绝不 500)。"""
+    positions = fund_route._load_positions()
+    codes = [p.get("fund_code", "") for p in positions if p.get("fund_code")]
+    if not codes:
+        return {
+            "schema_version": pxray.SCHEMA_VERSION,
+            "funds": [], "overlap_matrix": [], "stock_exposure": [],
+            "concentration_warnings": [], "missing_funds": [],
+            "data_as_of": {}, "degraded": False, "status": "ok",
+            "message": "暂无持仓", "generated_at": _now_iso(),
+        }
+
+    # 并发抓取披露持仓(批量限 5 并发,内存/上游压力可控)
+    sem = asyncio.Semaphore(5)
+
+    async def _fetch_one(code: str):
+        async with sem:
+            return await asyncio.to_thread(fns.get_fund_holdings, code)
+
+    holdings_list = await asyncio.gather(*[_fetch_one(c) for c in codes])
+    holdings_map: dict[str, fns.FundHoldings | None] = dict(zip(codes, holdings_list))
+
+    # 基金市值占比(官方净值 × 份额;行情失败则不参与单基金集中度预警,不编数据)
+    fund_weights: dict[str, float] = {}
+    try:
+        quotes = await asyncio.to_thread(ds2.get_fund_realtime_tencent, codes)
+        nav_map = {q.get("code", ""): _safe_float(q.get("nav")) for q in quotes}
+        mv = {c: nav_map.get(c, 0.0) * _safe_float(next((p.get("shares") for p in positions if p.get("fund_code") == c), 0.0)) for c in codes}
+        total_mv = sum(v for v in mv.values() if v > 0)
+        if total_mv > 0:
+            fund_weights = {c: v / total_mv for c, v in mv.items() if v > 0}
+    except Exception as e:
+        logger.warning(f"xray fund weights fetch failed: {e}")
+
+    report = pxray.build_xray(holdings_map, fund_weights)
+    report["generated_at"] = _now_iso()
+    return report
+
+
+@router.get("/xray", dependencies=[Depends(require_admin)])
+async def get_portfolio_xray(force: bool = Query(False, description="跳过缓存强制刷新")):
+    """持仓重叠 X-Ray(批次 A 功能 #4,简化版)。
+
+    - 基于最新季报前十大重仓:两两重叠度矩阵、单股跨基金暴露 TopN、集中度预警
+    - 成功结果缓存 6h;降级结果不缓存(下次调用重试)
+    - 披露持仓全部不可得 → status=insufficient_data + "数据不足",绝不 500/空结果
+    """
+    try:
+        if not force:
+            cached = _portfolio_cache.get("xray")
+            if cached is not None:
+                return cached
+        data = await _compute_xray()
+        # 仅缓存非降级结果:降级结果下次调用重试,给数据源恢复机会
+        if data.get("status") == "ok" and not data.get("degraded"):
+            _portfolio_cache.set("xray", data, ttl=_XRAY_CACHE_TTL)
+        return data
+    except Exception as e:
+        logger.warning(f"get_portfolio_xray failed: {e}")
+        return {
+            "schema_version": pxray.SCHEMA_VERSION,
+            "funds": [], "overlap_matrix": [], "stock_exposure": [],
+            "concentration_warnings": [], "missing_funds": [],
+            "data_as_of": {}, "degraded": True, "status": "insufficient_data",
+            "message": f"X-Ray 计算异常: {e}",
             "generated_at": _now_iso(),
         }
