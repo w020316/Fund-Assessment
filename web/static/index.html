@@ -1159,6 +1159,19 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
             </table>
           </div>
         </div>
+
+        <!-- ===== STAGE5: signal-progress ===== 五信号评估分步进度(P1-3/K8)。
+             三步均对应真实网络请求(数据获取/五信号计算/结论汇总),无假延时;
+             单步失败展示已得结论并标注缺失。 -->
+        <div class="card mt-16" id="hudSignalCard">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+            <span>五信号评估(分步)</span>
+            <button class="btn btn-sm btn-primary" id="hudSignalRunBtn" onclick="SignalProgress.run()">开始评估</button>
+          </div>
+          <div id="hudSignalBody">
+            <div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px;">点击"开始评估",分步查看数据获取 → 五信号计算 → 结论汇总</div>
+          </div>
+        </div>
       </div>
 
       <!-- ==================== 4. 交易执行 ==================== -->
@@ -1487,6 +1500,22 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
             </div>
             <button class="btn btn-sm btn-primary" style="width:100%;margin-top:12px;" onclick="addFundPosition()">添加持仓</button>
             <button class="btn btn-sm" style="width:100%;margin-top:8px;" onclick="openUploadModal()">上传持仓文件/截图</button>
+          </div>
+        </div>
+
+        <!-- ===== STAGE5: sectors ===== 板块聚合视图(P2-2/US-6)。
+             按 CPO/PCB/存储/半导体(配置化映射)聚合集中度与当日收益,未映射归"其他";
+             列表/板块视图可切换。数据懒加载:首次点击"板块"时拉取。 -->
+        <div class="card mb-16" id="hudSectorCard">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span>板块聚合</span>
+            <div class="hud-subtabs" id="hudSectorTabs" role="tablist" aria-label="板块视图切换">
+              <span class="hud-subtab active" data-view="sector" role="button" tabindex="0" onclick="SectorView.switchView('sector')">板块视图</span>
+              <span class="hud-subtab" data-view="list" role="button" tabindex="0" onclick="SectorView.switchView('list')">列表视图</span>
+            </div>
+          </div>
+          <div id="hudSectorBody">
+            <div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px;">切换上方视图查看板块集中度与当日收益</div>
           </div>
         </div>
       </div>
@@ -2126,6 +2155,8 @@ async function loadIndexData() {
         <span style="color:${color};">${sign}${fmtNum(idx.change)}</span>
         <span style="color:${color};">${sign}${fmtNum(idx.change_pct)}%</span>
       </div>
+      <!-- ===== STAGE5: freshness ===== K6:数值卡"截至 HH:mm"标识(统一组件) -->
+      <div style="margin-top:8px;">${Freshness.html({ asOf: new Date().toTimeString().slice(0,5) })}</div>
     </div>`;
   }).join('');
 
@@ -3148,7 +3179,14 @@ async function loadFundData() {
       <td>${safeName}</td>
       <td>${p.shares}</td>
       <td>${(p.cost_nav || 0).toFixed(4)}</td>
-      <td>${(p.current_nav || 0).toFixed(4)}</td>
+      <td>${(p.current_nav || 0).toFixed(4)}
+        <!-- ===== STAGE5: freshness ===== K6:净值"截至日期/滞后"标识 + 置信度(P0-2) -->
+        <div>${Freshness.html({
+          asOf: p.nav_date || '',
+          estimated: p.confidence === 'low' && !p.nav_date,
+          note: p.confidence === 'low' ? (p.confidence_reason || '') : ''
+        })}${p.confidence === 'low' ? ` <button class="btn btn-sm" style="padding:2px 8px;color:var(--color-warning);" title="进入补录向导复核该基金" onclick="FundWizard.open('${escapeHtml(p.fund_code)}')">复核</button>` : ''}</div>
+      </td>
       <td style="color:${changeColorStr};">${(p.change_pct || 0).toFixed(2)}%</td>
       <!-- (2026-07-31) P2-9 修复: pnl_amount 为 0 时不应显示 "+", 改为 > 0 才加正号 -->
       <td style="color:${pnlColor};">${(p.pnl_amount > 0 ? '+' : '') + (p.pnl_amount || 0).toFixed(2)}<br><span style="font-size:11px;">(${(p.pnl_pct >= 0 ? '+' : '') + (p.pnl_pct || 0).toFixed(2)}%)</span></td>
@@ -5700,5 +5738,11 @@ document.addEventListener('DOMContentLoaded', () => {
 </script>
 <!-- ===== STAGE5: wizard ===== 补录向导模块(P0-1) -->
 <script src="/static/js/wizard.js"></script>
+<!-- ===== STAGE5: freshness ===== 新鲜度徽章全局组件(P1-4/K6) -->
+<script src="/static/js/freshness.js"></script>
+<!-- ===== STAGE5: signal-progress ===== 五信号分步进度(P1-3/K8) -->
+<script src="/static/js/signal-progress.js"></script>
+<!-- ===== STAGE5: sectors ===== 板块聚合视图(P2-2) -->
+<script src="/static/js/sectors.js"></script>
 </body>
 </html>
