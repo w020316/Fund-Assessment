@@ -2161,8 +2161,8 @@ async function loadHotStocks(type) {
     const color = changeColor(s.change_pct);
     const sign = changeSign(s.change_pct);
     return `<tr>
-      <td style="color:var(--accent-cyan);cursor:pointer;">${s.code}</td>
-      <td>${s.name}</td>
+      <td style="color:var(--accent-cyan);cursor:pointer;">${escapeHtml(s.code)}</td>
+      <td>${escapeHtml(s.name)}</td>
       <td style="color:${color}">${fmtNum(s.price)}</td>
       <td style="color:${color}">${sign}${fmtNum(s.change_pct)}%</td>
       <td>${fmtMoney(s.volume)}</td>
@@ -2197,7 +2197,7 @@ async function loadSectorRanking() {
 
     const sign = changeSign(pct);
     return `<div class="heatmap-cell" style="background:${bg};color:${color};">
-      <div style="font-weight:500;">${s.name}</div>
+      <div style="font-weight:500;">${escapeHtml(s.name)}</div>
       <div style="font-size:11px;">${sign}${fmtNum(pct)}%</div>
     </div>`;
   }).join('');
@@ -3510,7 +3510,7 @@ async function handleUploadFile(file) {
   // P2-3 修复(2026-07-30):新建 AbortController 用于取消上传,并在 UI 中显示取消按钮
   _uploadAbortController = new AbortController();
   resultEl.style.display = 'block';
-  resultEl.innerHTML = `<div style="padding:12px;text-align:center;color:var(--text-muted);">识别中... ${file.name} (${sizeMb}MB)<br><span style="font-size:11px;">${isImage ? '调用AI视觉识别,约10-20秒' : '解析表格中'}</span><br><button class="btn btn-sm" style="margin-top:8px;" onclick="cancelUpload()">取消上传</button></div>`;
+  resultEl.innerHTML = `<div style="padding:12px;text-align:center;color:var(--text-muted);">识别中... ${escapeHtml(file.name)} (${sizeMb}MB)<br><span style="font-size:11px;">${isImage ? '调用AI视觉识别,约10-20秒' : '解析表格中'}</span><br><button class="btn btn-sm" style="margin-top:8px;" onclick="cancelUpload()">取消上传</button></div>`;
   // 上传中禁用文件选择,避免重复提交(api()已用 AbortController 但 UI 也需反馈)
   fileInput.disabled = true;
 
@@ -3931,7 +3931,7 @@ async function multiAgentAnalyze(fundCode, fundName, costNav, shares) {
   } catch (e) {
     // P1-2 修复(2026-07-31):modal 已关闭时不写入 DOM(避免旧请求 catch 污染新显示)
     if (_fundAnalyzeClosed) return;
-    bodyEl.innerHTML = `<div style="padding:24px;text-align:center;color:var(--color-up);">分析失败: ${e.message}</div>`;
+    bodyEl.innerHTML = `<div style="padding:24px;text-align:center;color:var(--color-up);">分析失败: ${escapeHtml(e.message)}</div>`;
   }
 }
 
@@ -4547,7 +4547,7 @@ async function loadPortfolioRisk() {
       </div>
     `;
   } catch (e) {
-    body.innerHTML = `<div style="color:var(--accent-blue);text-align:center;padding:20px 0;">分析失败: ${e.message || e}</div>`;
+    body.innerHTML = `<div style="color:var(--accent-blue);text-align:center;padding:20px 0;">分析失败: ${escapeHtml(e.message || e)}</div>`;
   }
 }
 
