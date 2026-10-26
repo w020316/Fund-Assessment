@@ -134,10 +134,6 @@ app.add_middleware(
     expose_headers=["X-Trace-Id"],
 )
 
-# ===== 请求追踪 trace ID(借鉴 open-telemetry/opentelemetry-python 2.0K Star)=====
-# 每个请求生成唯一 trace_id,贯穿日志,响应头返回便于前端/排查关联
-app.middleware("http")(trace_middleware)
-
 # ===== 安全响应头(借鉴 TypeError/secure 0.7K Star 安全头列表)=====
 # 防 XSS/点击劫持/降级攻击,6 个标准安全头
 @app.middleware("http")
@@ -173,6 +169,17 @@ async def log_requests(request: Request, call_next):
         trace_id = get_trace_id()
         logger.info(f"[{trace_id}] {request.method} {path} - {response.status_code} ({duration_ms:.0f}ms)")
     return response
+
+
+# ===== 请求追踪 trace ID(借鉴 open-telemetry/opentelemetry-python 2.0K Star)=====
+# P2 修复(2026-10-26)：trace 中间件必须**最后注册**（即最外层）。
+# Starlette 的 app.middleware("http") 每次把中间件插到最前面，因此"最后注册 = 最外层"。
+# 原先 trace 注册在最内层，而 log_requests 在它外层：log_requests 通过 call_next 调进
+# 子任务后，trace_middleware 在**子任务**里 set 的 ContextVar 不会回传到父任务上下文，
+# 于是 get_trace_id() 恒为空——实测 22/22 条访问日志 trace 段为空（形如 `[] GET /api/...`），
+# 而响应头 X-Trace-Id 却是正常的，属于"看起来有、实际没有"。
+# 放到最外层后，ContextVar 在进入内层任务前就已赋值，内层均可读到。
+app.middleware("http")(trace_middleware)
 
 from web.routes import agent as agent_route
 from web.routes import config as config_route

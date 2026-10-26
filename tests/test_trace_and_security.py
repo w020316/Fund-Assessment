@@ -167,3 +167,40 @@ class TestRateLimitKey:
     def test_missing_client_returns_unknown(self):
         from web.rate_limiter import client_ip_key
         assert client_ip_key(self._req(None)) == "unknown"
+
+
+class TestTraceIdInAccessLog:
+    """trace_id 必须真正落进访问日志（2026-10-26 P2 修复回归）
+
+    缺陷：trace 中间件注册在最内层，其 set 的 ContextVar 在子任务里，
+    回不到 log_requests 所在的父任务上下文 → 实测 22/22 条访问日志 trace 段为空
+    （形如 `[] GET /api/...`），而响应头 X-Trace-Id 却正常 —— "看起来有、实际没有"。
+    """
+
+    def test_access_log_contains_hex_trace_id(self, client):
+        from loguru import logger
+
+        msgs: list[str] = []
+        sink_id = logger.add(lambda m: msgs.append(m.record["message"]), level="INFO")
+        try:
+            client.get("/api/health")
+        finally:
+            logger.remove(sink_id)
+
+        hits = [m for m in msgs if "GET /api/health" in m]
+        assert hits, f"未捕获到访问日志，实际日志: {msgs[:5]}"
+        assert re.search(r"\[[0-9a-f]{16}\]", hits[-1]), f"访问日志缺少 trace_id: {hits[-1]}"
+
+    def test_access_log_echoes_client_trace_id(self, client):
+        """客户端透传的 trace_id 应出现在日志里（便于跨系统关联）"""
+        from loguru import logger
+
+        msgs: list[str] = []
+        sink_id = logger.add(lambda m: msgs.append(m.record["message"]), level="INFO")
+        try:
+            client.get("/api/health", headers={"X-Trace-Id": "abcd1234ef567890"})
+        finally:
+            logger.remove(sink_id)
+
+        hits = [m for m in msgs if "GET /api/health" in m]
+        assert hits and "abcd1234ef567890" in hits[-1]
