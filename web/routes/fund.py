@@ -203,7 +203,11 @@ async def delete_position(fund_code: str):
 
 # ============ 基金建议 ============
 
-@router.get("/advice")
+# 安全修复(2026-10-26):advice 系列返回的是**持仓派生数据**
+# (fund_code/fund_name/shares/cost_nav/pnl_amount),与 /positions 属同一份私有数据,
+# 但此前未挂鉴权依赖,导致匿名即可读取完整基金持仓。
+# 现与 /positions 对齐,统一要求管理员令牌;公开行情类端点(search/realtime/history)保持匿名。
+@router.get("/advice", dependencies=[Depends(require_admin)])
 async def get_advice():
     """获取基金建议(基于大盘/板块/盈亏的规则引擎)。"""
     try:
@@ -216,7 +220,7 @@ async def get_advice():
         return {"error": "获取基金建议失败,请稍后重试", "advice": None}
 
 
-@router.get("/advice-v2")
+@router.get("/advice-v2", dependencies=[Depends(require_admin)])
 async def get_advice_v2():
     """获取基金建议v2(五信号融合:技术面/基本面/消息面/重仓股板块/大盘环境)。"""
     try:

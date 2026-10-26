@@ -215,3 +215,58 @@ class TestFundSearch:
         assert data["data"][0]["code"] == "110022"
         assert data["data"][0]["name"] == "易方达消费"
         assert data["data"][0]["type"] == "股票型"
+
+
+class TestAdviceAuth:
+    """GET /api/fund/advice & /advice-v2 鉴权回归（2026-10-26 安全修复）
+
+    背景：advice 系列返回持仓派生数据（fund_code/fund_name/shares/cost_nav/pnl_amount），
+    与 /positions 属同一份私有数据，此前未挂鉴权依赖，匿名即可读取完整基金持仓。
+    本类锁定修复后的行为：生产环境必须携带管理员令牌。
+    """
+
+    @pytest.fixture(autouse=True)
+    def _isolate_global_metrics(self):
+        """本类会刻意触发 401 响应，会污染 web.middleware.metrics 的全局计数。
+
+        该单例的 status_distribution 由所有测试共享，而 test_metrics 中
+        `status_distribution["200"] >= request_count` 这类相对断言隐含「所有请求都是 200」。
+        为避免跨文件污染，本类结束后重置指标（仅影响后续计数，不改变任何断言）。
+        """
+        yield
+        from web.middleware.metrics import metrics as _global_metrics
+        _global_metrics.reset()
+
+    @pytest.mark.parametrize("path", ["/api/fund/advice", "/api/fund/advice-v2"])
+    def test_advice_requires_token_in_production(self, client, path):
+        """生产环境已配置令牌但未携带 Authorization → 401"""
+        with patch.dict(os.environ, {"APP_ENV": "production", "ADMIN_TOKEN": "unit-test-token"}, clear=False):
+            resp = client.get(path)
+        assert resp.status_code == 401
+        assert "Authorization" in resp.json()["detail"]
+
+    @pytest.mark.parametrize("path", ["/api/fund/advice", "/api/fund/advice-v2"])
+    def test_advice_rejects_wrong_token(self, client, path):
+        """生产环境令牌不匹配 → 401"""
+        with patch.dict(os.environ, {"APP_ENV": "production", "ADMIN_TOKEN": "unit-test-token"}, clear=False):
+            resp = client.get(path, headers={"Authorization": "Bearer wrong-token"})
+        assert resp.status_code == 401
+        assert resp.json()["detail"] == "令牌无效"
+
+    def test_advice_v2_allows_valid_token(self, client):
+        """携带正确令牌 → 200，且返回持仓建议结构"""
+        mock_result = {"positions_advice": [{"fund_code": "110022", "shares": 1000.0}], "summary": "ok"}
+        with patch.dict(os.environ, {"APP_ENV": "production", "ADMIN_TOKEN": "unit-test-token"}, clear=False), \
+             patch("web.routes.fund._load_positions", return_value=_MOCK_POSITIONS), \
+             patch("src.analysis.fund_advisor_v2.generate_fund_advice_v2", return_value=mock_result):
+            resp = client.get("/api/fund/advice-v2", headers={"Authorization": "Bearer unit-test-token"})
+        assert resp.status_code == 200
+        assert resp.json()["summary"] == "ok"
+
+    def test_advice_still_allows_dev_mode(self, client):
+        """回归保护：开发模式（APP_ENV=dev 且未配置令牌）仍放行，避免本地开发被打断"""
+        with patch.dict(os.environ, {"APP_ENV": "dev"}, clear=False):
+            os.environ.pop("ADMIN_TOKEN", None)
+            with patch("src.analysis.fund_advisor.generate_fund_advice", return_value=_MOCK_ADVICE):
+                resp = client.get("/api/fund/advice")
+        assert resp.status_code == 200
