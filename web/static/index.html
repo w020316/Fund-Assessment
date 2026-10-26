@@ -3584,23 +3584,36 @@ async function importUploadedToPositions() {
   if (!_uploadedHoldings.length) return;
   // P0 修复(2026-07-30):原代码写入 /api/config/user_positions(股票端点)会覆盖用户股票持仓数据
   // 正确做法:写入 /api/fund/positions(基金端点),且需先读取现有持仓再合并去重,避免覆盖
-  const uploaded = _uploadedHoldings.map(h => ({
-    fund_code: (h.code || '').toString().trim(),
-    fund_name: h.name || '',
-    shares: 0,
-    cost_nav: 0,
-    buy_date: '',
-    note: `上传识别导入(占比${h.weight || 0}%${h.amount ? `,市值${h.amount}元` : ''})`
-  })).filter(p => p.fund_code);
 
   // 1. 读取现有基金持仓(避免覆盖)
   const existing = await api('/api/fund/positions');
   const existingPositions = (existing && existing.positions) || [];
-  // 2. 合并:同 fund_code 以上传为准(覆盖),其余保留原数据
-  const uploadedCodes = new Set(uploaded.map(p => p.fund_code));
+  const existingByCode = new Map(existingPositions.map(p => [String(p.fund_code || ''), p]));
+
+  // P0 修复(2026-10-26)：导入识别结果里**只有代码/名称/占比**，没有份额与成本
+  // （表格解析与截图 OCR 都拿不到用户的份额）。
+  // 原实现把 shares/cost_nav 硬编码为 0 并在合并时"以上传为准"覆盖同代码持仓 →
+  // 用户上传一份含自己已有基金的 CSV，会把该基金的份额与成本**清零**，
+  // 等于用一次"导入"抹掉真实持仓（实测已发生：110022/161725 的 shares、cost_nav 被清 0）。
+  // 现在：同代码持仓保留原有 shares/cost_nav/buy_date/note，上传信息只用于补名称与新增条目。
+  const uploaded = _uploadedHoldings.map(h => {
+    const code = (h.code || '').toString().trim();
+    const prev = existingByCode.get(code);
+    const importNote = `上传识别导入(占比${h.weight || 0}%${h.amount ? `,市值${h.amount}元` : ''})`;
+    return {
+      fund_code: code,
+      fund_name: h.name || (prev && prev.fund_name) || '',
+      shares: (prev && prev.shares) || 0,
+      cost_nav: (prev && prev.cost_nav) || 0,
+      buy_date: (prev && prev.buy_date) || '',
+      note: (prev && prev.note) || importNote,
+    };
+  }).filter(p => p.fund_code);
+
+  // 2. 合并:上传条目已在上一步带上原有份额/成本；其余原有持仓原样保留
   const merged = [
     ...existingPositions
-      .filter(p => !uploadedCodes.has(p.fund_code))
+      .filter(p => !uploaded.some(u => u.fund_code === String(p.fund_code || '')))
       .map(p => ({
         fund_code: p.fund_code || '',
         fund_name: p.fund_name || '',
@@ -3619,6 +3632,10 @@ async function importUploadedToPositions() {
   if (resp && resp.success) {
     showToast(`成功导入 ${uploaded.length} 条基金持仓(已合并去重,共 ${merged.length} 条)`, 'success');
     document.getElementById('uploadModal').style.display = 'none';
+    // 修复(2026-10-26)：导入的是**基金**持仓，原代码只调 loadPositions()（股票持仓列表），
+    // 于是弹窗关闭后基金表仍是导入前的旧数据，用户以为没生效、只能自己再点「刷新持仓」。
+    // 这里改为刷新基金列表；loadPositions 保留（无副作用，兼容从股票页发起的情形）。
+    if (typeof loadFundData === 'function') loadFundData();
     if (typeof loadPositions === 'function') loadPositions();
   } else {
     showToast('导入失败: ' + (resp && resp.message ? resp.message : '未知错误'), 'error');
@@ -3646,6 +3663,22 @@ async function viewHoldings(fundCode, fundName) {
   const sectorRotation = data.sector_rotation || data.sector_signal || {};
   const navImpact = data.nav_impact || {};
   const sectors = data.sectors || data.sector_distribution || data.sector_exposure || [];
+
+  // (2026-10-26) 空数据必须直说，不能画成 0.00%。
+  // 原实现无此分支：holdings 为空时仍渲染"前5集中度 0.00% / 前10 0.00%"，
+  // 而 0% 集中度在现实中不可能（等于持有无限分散），会被理解成"极度分散、风险极低"，
+  // 属把"没有数据"伪装成"一个很安全的数值"。后端 concentration.level 已给出"无数据"。
+  if (!holdings.length) {
+    bodyEl.innerHTML = `
+      <div style="padding:28px 20px;text-align:center;color:var(--text-muted);">
+        <div style="font-size:14px;margin-bottom:6px;">暂无该基金的重仓股数据</div>
+        <div style="font-size:12px;line-height:1.7;">
+          可能原因：该基金尚未披露季报，或上游数据源暂时不可用。<br>
+          可稍后重试，或换一个基金代码再试。
+        </div>
+      </div>`;
+    return;
+  }
 
   // 重仓股表格
   const holdingsRows = holdings.slice(0, 10).map((h, i) => {
