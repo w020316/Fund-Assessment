@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import datetime as _dt
 import os
+import re
 import secrets
 from typing import Any
 
@@ -31,9 +32,14 @@ from src.core import webhook_push as wpush
 from src.core.cache import DataCache
 from src.utils.auth import require_admin
 from src.utils.convert import safe_float as _safe_float, safe_str as _safe_str
+from src.utils.file_io import atomic_write_json, safe_read_json
 
 # 复用 fund 路由的持仓读取与净值置信度规则(唯一可信源仍是 user_fund_positions.json)
 from web.routes import fund as fund_route
+
+# 账本聚合涉及的其余存量文件(只引用模块属性,测试可 monkeypatch 重定向)
+from web.routes import config as config_route
+from web.routes import monitor as monitor_route
 
 router = APIRouter()
 
@@ -697,3 +703,264 @@ async def webhook_scan(req: ScanRequest | None = None):
         "error": result.error,
         "message": result.message,
     }
+
+
+# ==================================================================
+# STAGE6: ledger-io 账本 JSON 全量导入导出(批次 A 功能 #9)
+# ==================================================================
+
+LEDGER_SCHEMA_VERSION: int = 1
+
+#: 凭据字段名黑名单(导出时一律置空,导入时一律拒绝非空值)
+_CREDENTIAL_KEY_RE = re.compile(r"(sendkey|secret|token|password|apikey|api_key|webhook_url)", re.IGNORECASE)
+
+
+def _scrub_credentials(obj: Any) -> Any:
+    """递归将凭据字段置空字符串(导出安全:SendKey/Webhook URL 等永不入导出文件)。"""
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            if _CREDENTIAL_KEY_RE.search(str(k)):
+                out[k] = ""
+            else:
+                out[k] = _scrub_credentials(v)
+        return out
+    if isinstance(obj, list):
+        return [_scrub_credentials(x) for x in obj]
+    return obj
+
+
+def _collect_ledger_sections() -> dict[str, Any]:
+    """聚合全量账本各分区(存量文件缺失时给默认空结构,保证 schema 完整)。"""
+    fund_raw = safe_read_json(fund_route._FUND_POSITIONS_FILE, default=None)
+    stock_raw = safe_read_json(config_route._USER_POSITIONS_FILE, default=None)
+    watchlist_raw = safe_read_json(monitor_route._WATCHLIST_FILE, default=None)
+    return {
+        "fund_positions": fund_raw if isinstance(fund_raw, dict) else {"positions": []},
+        "stock_positions": stock_raw if isinstance(stock_raw, dict) else {"positions": [], "available_cash": 0.0},
+        "watchlist": watchlist_raw if isinstance(watchlist_raw, dict) else {},
+        "portfolio_config": {
+            "webhook": pstore.load_webhook_config(),
+        },
+    }
+
+
+class LedgerImportRequest(BaseModel):
+    """导入请求:先 dry_run 预览 diff,再 confirm=true 执行(阶段5 五段式确认范式)。"""
+
+    payload: dict[str, Any] = Field(..., description="export 端点导出的全量 JSON")
+    dry_run: bool = Field(True, description="true=只校验+diff 预览,不落盘")
+    confirm: bool = Field(False, description="false=拒绝执行破坏性导入")
+
+
+def _validate_fund_positions(section: Any) -> tuple[list[str], list[dict]]:
+    """校验 fund_positions 分区,返回 (errors, normalized_positions)。"""
+    errors: list[str] = []
+    positions: list[dict] = []
+    if not isinstance(section, dict) or not isinstance(section.get("positions"), list):
+        return ["fund_positions 需为 {\"positions\": [...]} 结构"], []
+    seen: set[str] = set()
+    for i, p in enumerate(section["positions"]):
+        if not isinstance(p, dict):
+            errors.append(f"fund_positions[{i}] 需为对象")
+            continue
+        code = _safe_str(p.get("fund_code"))
+        if not re.fullmatch(r"\d{6}", code):
+            errors.append(f"fund_positions[{i}].fund_code 非法: {code!r}")
+            continue
+        if code in seen:
+            errors.append(f"fund_positions[{i}].fund_code 重复: {code}")
+            continue
+        seen.add(code)
+        shares = _safe_float(p.get("shares"), -1.0)
+        cost_nav = _safe_float(p.get("cost_nav"), -1.0)
+        if shares < 0:
+            errors.append(f"fund_positions[{i}].shares 非法(需 ≥0)")
+            continue
+        if cost_nav < 0:
+            errors.append(f"fund_positions[{i}].cost_nav 非法(需 ≥0)")
+            continue
+        positions.append({
+            "fund_code": code,
+            "fund_name": _safe_str(p.get("fund_name"))[:50],
+            "shares": shares,
+            "cost_nav": cost_nav,
+            "buy_date": _safe_str(p.get("buy_date")),
+            "note": _safe_str(p.get("note"))[:200],
+        })
+    return errors, positions
+
+
+def _validate_ledger_payload(payload: Any) -> tuple[list[str], dict[str, Any]]:
+    """schema 校验:版本、分区类型、凭据字段拒绝非空。返回 (errors, normalized)。"""
+    errors: list[str] = []
+    normalized: dict[str, Any] = {}
+    if not isinstance(payload, dict):
+        return ["payload 需为 JSON 对象"], {}
+    if payload.get("schema_version") != LEDGER_SCHEMA_VERSION:
+        return [f"schema_version 不支持: {payload.get('schema_version')!r}(当前支持 {LEDGER_SCHEMA_VERSION})"], {}
+    sections = payload.get("sections")
+    if not isinstance(sections, dict):
+        return ["缺少 sections 分区"], {}
+
+    # fund_positions(必填分区)
+    errs, positions = _validate_fund_positions(sections.get("fund_positions"))
+    errors += errs
+    normalized["fund_positions"] = {"positions": positions}
+
+    # stock_positions(可选)
+    stock = sections.get("stock_positions")
+    if stock is not None:
+        if isinstance(stock, dict) and isinstance(stock.get("positions", []), list):
+            normalized["stock_positions"] = stock
+        else:
+            errors.append("stock_positions 需为对象(含 positions 数组)")
+    # watchlist(可选)
+    watchlist = sections.get("watchlist")
+    if watchlist is not None:
+        if isinstance(watchlist, dict):
+            normalized["watchlist"] = watchlist
+        else:
+            errors.append("watchlist 需为对象")
+
+    # portfolio_config(可选,webhook 白名单校验,凭据字段拒绝非空)
+    pc = sections.get("portfolio_config")
+    if pc is not None:
+        if not isinstance(pc, dict):
+            errors.append("portfolio_config 需为对象")
+        else:
+            webhook = pc.get("webhook")
+            if webhook is not None:
+                if not isinstance(webhook, dict):
+                    errors.append("portfolio_config.webhook 需为对象")
+                else:
+                    cleaned = pstore.DEFAULT_WEBHOOK_CONFIG.copy()
+                    cleaned["thresholds"] = dict(pstore.DEFAULT_WEBHOOK_CONFIG["thresholds"])
+                    if webhook.get("channel") in wpush._VALID_CHANNELS:
+                        cleaned["channel"] = webhook["channel"]
+                    cleaned["enabled"] = bool(webhook.get("enabled", False))
+                    th = webhook.get("thresholds") or {}
+                    for k in cleaned["thresholds"]:
+                        v = th.get(k)
+                        if isinstance(v, (int, float)) and v >= 0:
+                            cleaned["thresholds"][k] = float(v)
+                    normalized["portfolio_config"] = {"webhook": cleaned}
+    return errors, normalized
+
+
+def _diff_ledger(normalized: dict[str, Any]) -> dict[str, Any]:
+    """与现网数据的 diff 预览(只读;fund_positions 复用阶段5 字段级 diff)。"""
+    diff: dict[str, Any] = {}
+    if "fund_positions" in normalized:
+        existing = fund_route._load_positions()
+        incoming = normalized["fund_positions"]["positions"]
+        diff["fund_positions"] = fund_route._diff_positions(existing, incoming)
+    if "stock_positions" in normalized:
+        cur = safe_read_json(config_route._USER_POSITIONS_FILE, default={}) or {}
+        diff["stock_positions"] = {
+            "current_count": len(cur.get("positions", []) or []),
+            "incoming_count": len(normalized["stock_positions"].get("positions", []) or []),
+        }
+    if "watchlist" in normalized:
+        cur = safe_read_json(monitor_route._WATCHLIST_FILE, default={}) or {}
+        diff["watchlist"] = {
+            "current_count": len(cur),
+            "incoming_count": len(normalized["watchlist"]),
+        }
+    if "portfolio_config" in normalized:
+        cur = pstore.load_webhook_config()
+        incoming = normalized["portfolio_config"]["webhook"]
+        diff["portfolio_config"] = {
+            "enabled": {"current": cur["enabled"], "incoming": incoming["enabled"]},
+            "channel": {"current": cur["channel"], "incoming": incoming["channel"]},
+        }
+    return diff
+
+
+@router.get("/export", dependencies=[Depends(require_admin)])
+async def export_ledger():
+    """账本全量导出(单 JSON,带版本号;凭据字段一律置空)。"""
+    sections = _collect_ledger_sections()
+    sections = _scrub_credentials(sections)  # 双保险:即使配置文件未来混入凭据字段也置空
+    return {
+        "schema_version": LEDGER_SCHEMA_VERSION,
+        "app": "QuantFlow Pro",
+        "exported_at": _now_iso(),
+        "sections": sections,
+    }
+
+
+@router.post("/import", dependencies=[Depends(require_admin)])
+async def import_ledger(req: LedgerImportRequest):
+    """账本全量导入恢复(破坏性操作,阶段5 五段式确认范式)。
+
+    流程: dry_run=true → schema 校验 + diff 预览(不落盘)
+          → 用户逐项确认 → dry_run=false + confirm=true → 执行导入。
+    执行前自动备份现有文件到 data/backup/import_backup_<ts>/。
+    校验失败整包拒绝(不部分写入)。
+    """
+    errors, normalized = _validate_ledger_payload(req.payload)
+    if errors:
+        return {"success": False, "errors": errors, "applied": None,
+                "message": "schema 校验失败,整包拒绝(未做任何写入)"}
+
+    if req.dry_run:
+        return {
+            "success": True,
+            "dry_run": True,
+            "diff": _diff_ledger(normalized),
+            "applied": None,
+            "message": "校验通过。请核对上方 diff 后,以 dry_run=false + confirm=true 再次提交执行导入",
+        }
+
+    if not req.confirm:
+        return {
+            "success": False,
+            "requires_confirm": True,
+            "errors": [],
+            "applied": None,
+            "message": "破坏性操作:请先 dry_run=true 预览 diff 并逐项确认,再带 confirm=true 执行",
+        }
+
+    # 执行前备份现有文件(安全网)
+    backup_files = [
+        fund_route._FUND_POSITIONS_FILE,
+        config_route._USER_POSITIONS_FILE,
+        monitor_route._WATCHLIST_FILE,
+        pstore.WEBHOOK_CONFIG_FILE,
+    ]
+    backup_dir = pstore.backup_files(backup_files, backup_name="import_backup")
+
+    applied: dict[str, Any] = {}
+    try:
+        if "fund_positions" in normalized:
+            ok = fund_route._save_positions(normalized["fund_positions"]["positions"])
+            applied["fund_positions"] = ok
+            if not ok:
+                return {"success": False, "errors": ["fund_positions 写入失败,请查看日志(已自动备份,可回滚)"],
+                        "applied": applied, "backup_dir": str(backup_dir or "")}
+        if "stock_positions" in normalized:
+            atomic_write_json(config_route._USER_POSITIONS_FILE, normalized["stock_positions"])
+            applied["stock_positions"] = True
+        if "watchlist" in normalized:
+            atomic_write_json(monitor_route._WATCHLIST_FILE, normalized["watchlist"])
+            applied["watchlist"] = True
+        if "portfolio_config" in normalized:
+            applied["portfolio_config"] = pstore.save_webhook_config(normalized["portfolio_config"]["webhook"])
+        counts = {k: (len(v.get("positions", [])) if isinstance(v, dict) and "positions" in v else "-")
+                  for k, v in normalized.items()}
+        return {
+            "success": True,
+            "dry_run": False,
+            "applied": applied,
+            "backup_dir": str(backup_dir or ""),
+            "message": f"导入完成: {counts}",
+        }
+    except Exception as e:
+        logger.error(f"import_ledger failed: {e}")
+        return {
+            "success": False,
+            "errors": [f"导入执行异常: {e}(已自动备份,可用备份目录回滚)"],
+            "applied": applied,
+            "backup_dir": str(backup_dir or ""),
+        }
