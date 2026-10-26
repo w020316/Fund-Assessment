@@ -13,15 +13,21 @@ from __future__ import annotations
 
 import asyncio
 import datetime as _dt
+import os
+import secrets
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import status as _status
 from loguru import logger
+from pydantic import BaseModel, Field
 
 from src.core import data_source_v2 as ds2
 from src.core import fund_nav_source as fns
+from src.core import portfolio_store as pstore
 from src.analysis import portfolio_risk as prisk
 from src.analysis import portfolio_xray as pxray
+from src.core import webhook_push as wpush
 from src.core.cache import DataCache
 from src.utils.auth import require_admin
 from src.utils.convert import safe_float as _safe_float, safe_str as _safe_str
@@ -484,3 +490,210 @@ async def get_portfolio_xray(force: bool = Query(False, description="跳过缓�
             "message": f"X-Ray 计算异常: {e}",
             "generated_at": _now_iso(),
         }
+
+
+# ==================================================================
+# STAGE6: webhook-push 净值/估值异动推送(批次 A 功能 #2)
+# ==================================================================
+
+
+class WebhookConfigRequest(BaseModel):
+    """Webhook 配置更新(密钥不入此模型,凭据走 Render env)。"""
+
+    channel: str | None = Field(None, description="推送渠道: serverchan | generic")
+    enabled: bool | None = Field(None, description="是否启用推送")
+    thresholds: dict[str, float] | None = Field(None, description="预警阈值,如 est_pct_abs")
+
+
+class ScanRequest(BaseModel):
+    """scan 请求体(幂等,force 仅为人工调试预留)。"""
+
+    force: bool = Field(False, description="跳过节流强制推送(仅人工调试用)")
+
+
+def _require_scan_key(
+    x_api_key: str | None = Header(default=None, alias="X-Api-Key"),
+) -> None:
+    """scan 端点专用鉴权: X-Api-Key 头 == env PORTFOLIO_SCAN_KEY。
+
+    与 require_admin 同范式:
+    - env 未配置 → 500 fail-closed(生产裸奔拒绝)
+    - 头缺失/不匹配 → 401,secrets.compare_digest 防时序攻击
+    """
+    expected = os.getenv("PORTFOLIO_SCAN_KEY", "").strip()
+    if not expected:
+        logger.error("PORTFOLIO_SCAN_KEY 未配置, scan 端点拒绝服务(fail-closed)")
+        raise HTTPException(
+            status_code=_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="服务端鉴权未配置, 请设置 PORTFOLIO_SCAN_KEY",
+        )
+    if not x_api_key or not x_api_key.strip():
+        raise HTTPException(status_code=_status.HTTP_401_UNAUTHORIZED, detail="缺少 X-Api-Key 请求头")
+    if not secrets.compare_digest(x_api_key.strip(), expected):
+        # 日志脱敏:只记长度,不记内容(与 require_admin 同范式)
+        logger.warning(f"scan 鉴权失败: X-Api-Key 不匹配 (len={len(x_api_key)})")
+        raise HTTPException(status_code=_status.HTTP_401_UNAUTHORIZED, detail="X-Api-Key 无效")
+
+
+@router.get("/webhook/config", dependencies=[Depends(require_admin)])
+async def get_webhook_config():
+    """读取 Webhook 配置(密钥只写不读——GET 不返回任何凭据,仅返回是否已配置)。"""
+    config = pstore.load_webhook_config()
+    channel = wpush.get_channel(config["channel"])
+    return {
+        "success": True,
+        "config": {
+            "channel": config["channel"],
+            "enabled": config["enabled"],
+            "thresholds": config["thresholds"],
+            "sendkey_configured": channel.is_configured(),  # 布尔值,不含凭据
+        },
+        "generated_at": _now_iso(),
+    }
+
+
+@router.put("/webhook/config", dependencies=[Depends(require_admin)])
+async def put_webhook_config(req: WebhookConfigRequest):
+    """更新 Webhook 配置(仅 channel/enabled/thresholds 白名单字段落盘)。"""
+    if req.channel is not None and req.channel not in wpush._VALID_CHANNELS:
+        return {"success": False, "message": f"未知推送渠道: {req.channel},支持 {wpush._VALID_CHANNELS}"}
+    config = pstore.load_webhook_config()
+    if req.channel is not None:
+        config["channel"] = req.channel
+    if req.enabled is not None:
+        config["enabled"] = req.enabled
+    if req.thresholds is not None:
+        config["thresholds"].update({k: v for k, v in req.thresholds.items() if k in config["thresholds"]})
+    ok = pstore.save_webhook_config(config)
+    return {
+        "success": ok,
+        "message": "已保存" if ok else "保存失败,请查看日志",
+        "config": {
+            "channel": config["channel"],
+            "enabled": config["enabled"],
+            "thresholds": config["thresholds"],
+        },
+    }
+
+
+@router.post("/webhook/test", dependencies=[Depends(require_admin)])
+async def test_webhook():
+    """向配置渠道发送测试消息(人工验发)。"""
+    config = pstore.load_webhook_config()
+    result = wpush.push(
+        "QuantFlow Pro 测试推送",
+        f"这是一条测试消息。\n\n- 时间: {_now_iso()}\n- 渠道: {config['channel']}\n\n收到即代表推送链路正常。",
+        channel=config["channel"],
+    )
+    return {
+        "success": result.success,
+        "channel": result.channel,
+        "status_code": result.status_code,
+        "message": result.message,
+        "error": result.error,
+    }
+
+
+def _build_scan_alerts(watchboard: dict, threshold: float) -> tuple[list[dict], list[dict]]:
+    """阈值判断:估算涨跌绝对值 ≥ est_pct_abs 的基金触发预警。
+
+    Returns:
+        (triggered, skipped): triggered 为待推送项;skipped 为
+        {fund_code, reason} 列表(reason= throttled | below_threshold | no_data)。
+    """
+    triggered: list[dict] = []
+    skipped: list[dict] = []
+    for item in watchboard.get("positions", []):
+        code = item.get("fund_code", "")
+        est_pct = item.get("est_pct")
+        if est_pct is None:
+            skipped.append({"fund_code": code, "reason": "no_data"})
+            continue
+        if pstore.is_throttled(f"est_{code}"):
+            # 幂等:2h 窗口内该基金已推送过,跳过(文件级节流,重启不丢)
+            skipped.append({"fund_code": code, "reason": "throttled"})
+            continue
+        if abs(float(est_pct)) < threshold:
+            skipped.append({"fund_code": code, "reason": "below_threshold"})
+            continue
+        triggered.append(item)
+    return triggered, skipped
+
+
+@router.post("/webhook/scan", dependencies=[Depends(_require_scan_key)])
+async def webhook_scan(req: ScanRequest | None = None):
+    """预警扫描 + 推送(GitHub Actions cron 每 30min 调用,X-Api-Key 鉴权)。
+
+    幂等保障(主理人拍板):
+    - 文件级节流 2h(webhook_throttle.json 持久化,重启不丢):
+      同一基金 2h 内不重复推送,偶发重复触发无害
+    - 推送成功才落时间戳,失败下次重试
+    - 推送内容含: 触发时间/基金/阈值/当前估值涨跌/置信度(不含持仓金额明细)
+    """
+    body = req or ScanRequest()
+    config = pstore.load_webhook_config()
+    if not config["enabled"]:
+        return {
+            "success": True, "pushed": False, "triggered": [], "skipped": [],
+            "reason": "disabled", "channel": config["channel"],
+            "message": "推送未启用(webhook config enabled=false)",
+        }
+
+    # scan 始终取实时数据(不走 60s watchboard 缓存,保证触发判断新鲜)
+    watchboard = await _compute_watchboard()
+    threshold = float(config["thresholds"].get("est_pct_abs", 2.0))
+    triggered, skipped = _build_scan_alerts(watchboard, threshold)
+
+    if not triggered:
+        return {
+            "success": True, "pushed": False, "triggered": [], "skipped": skipped,
+            "reason": "no_trigger", "channel": config["channel"],
+            "message": f"无基金触发阈值(±{threshold}%)",
+        }
+
+    # 组装推送内容(Server酱 desp 为 Markdown)
+    lines = [
+        f"**触发时间**: {_now_iso()}",
+        f"**阈值**: 估算涨跌 ±{threshold}%",
+        "",
+        "| 基金 | 估算涨跌 | 估算净值 | 置信度 |",
+        "| --- | --- | --- | --- |",
+    ]
+    for it in triggered:
+        est_nav = it.get("est_nav")
+        lines.append(
+            f"| {it.get('fund_name') or it.get('fund_code')} ({it.get('fund_code')}) "
+            f"| {it.get('est_pct')}% "
+            f"| {est_nav if est_nav is not None else '—'} "
+            f"| {it.get('confidence', 'low')} |"
+        )
+    lines += ["", "> 估算≠净值,确认以官方净值为准"]
+    title = f"估值预警: {len(triggered)} 只基金波动超阈值"
+    result = wpush.push(title, "\n".join(lines), channel=config["channel"])
+
+    if result.success:
+        for it in triggered:
+            pstore.mark_pushed(f"est_{it.get('fund_code', '')}")
+    else:
+        # 失败不落节流时间戳,GitHub Actions 下个周期重试
+        logger.warning(f"webhook_scan push failed: {result.error}")
+
+    return {
+        "success": result.success,
+        "pushed": result.success,
+        "triggered": [
+            {
+                "fund_code": it.get("fund_code"),
+                "fund_name": it.get("fund_name"),
+                "est_pct": it.get("est_pct"),
+                "est_nav": it.get("est_nav"),
+                "confidence": it.get("confidence"),
+            }
+            for it in triggered
+        ],
+        "skipped": skipped,
+        "threshold": threshold,
+        "channel": result.channel,
+        "error": result.error,
+        "message": result.message,
+    }
