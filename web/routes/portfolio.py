@@ -20,6 +20,7 @@ from loguru import logger
 
 from src.core import data_source_v2 as ds2
 from src.core import fund_nav_source as fns
+from src.analysis import portfolio_risk as prisk
 from src.core.cache import DataCache
 from src.utils.auth import require_admin
 from src.utils.convert import safe_float as _safe_float, safe_str as _safe_str
@@ -288,3 +289,120 @@ async def get_watchboard(force: bool = Query(False, description="跳过缓存强
     except Exception as e:
         logger.warning(f"get_watchboard failed: {e}")
         return _watchboard_from_last_known(f"聚合异常: {e}")
+
+
+# ==================================================================
+# STAGE6: risk-panel 组合风险指标(批次 A 功能 #3)
+# ==================================================================
+
+_RISK_CACHE_TTL = 3600          # 历史净值日级数据,1h 缓存(架构文档 §3.3)
+_RISK_EMPTY_METRICS: dict[str, Any] = {
+    "total_return": None, "annual_return": None, "max_drawdown": None,
+    "annual_vol": None, "sharpe": None, "sortino": None, "calmar": None,
+    "nav_points": 0,
+}
+
+
+def _fetch_fund_nav_series(code: str, period: str) -> list[dict]:
+    """单基金历史净值(带 1h 进程内缓存,备源 akshare 由 fund_nav_source 内部降级)。"""
+    cache_key = f"pf_risk_nav_{code}_{period}"
+    cached = _portfolio_cache.get(cache_key)
+    if cached is not None:
+        return list(cached)
+    try:
+        data = fns.get_fund_nav_history(code, period)
+    except Exception as e:
+        logger.warning(f"_fetch_fund_nav_series {code} failed: {e}")
+        data = []
+    if data:
+        _portfolio_cache.set(cache_key, data, ttl=_RISK_CACHE_TTL)
+    return data
+
+
+@router.get("/risk", dependencies=[Depends(require_admin)])
+async def get_portfolio_risk(
+    window: str = Query("3m", max_length=8, description="窗口: 1m|3m|6m|1y|3y|max"),
+):
+    """组合与单基金风险指标(批次 A 功能 #3)。
+
+    口径(架构文档 §5,主理人拍板): rf=2.0%、年化 244 交易日、样本 ≤250 点;
+    组合层为"当前份额静态合成"(method=static-shares),忽略申赎现金流。
+    任一基金历史缺失 → 该基金指标为 None + degraded 标识,绝不 500。
+    """
+    try:
+        period = prisk.resolve_period(window)
+    except ValueError as e:
+        return {"error": str(e), "window": window, "portfolio": None, "funds": []}
+
+    try:
+        positions = fund_route._load_positions()
+        if not positions:
+            return {
+                "window": window,
+                "rf": prisk.RISK_FREE_RATE,
+                "trading_days": prisk.TRADING_DAYS_PER_YEAR,
+                "method": "static-shares",
+                "portfolio": dict(_RISK_EMPTY_METRICS),
+                "funds": [],
+                "degraded": False,
+                "note": "暂无持仓",
+                "generated_at": _now_iso(),
+            }
+
+        funds_out: list[dict] = []
+        series_map: dict[str, list[tuple[str, float]]] = {}
+        shares_map: dict[str, float] = {}
+        degraded = False
+
+        for p in positions:
+            code = p.get("fund_code", "")
+            shares = _safe_float(p.get("shares"))
+            name = p.get("fund_name", "")
+            if not code or shares <= 0:
+                continue
+            shares_map[code] = shares
+            series = _fetch_fund_nav_series(code, period)
+            if series:
+                seq = [(_safe_str(row.get("date")), _safe_float(row.get("acc_nav"), _safe_float(row.get("nav")))) for row in series]
+                seq = [(d, v) for d, v in seq if d and v > 0]
+                series_map[code] = seq
+                metrics = prisk.compute_risk_metrics([v for _, v in seq])
+            else:
+                metrics = dict(_RISK_EMPTY_METRICS)
+                degraded = True
+            funds_out.append({
+                "fund_code": code,
+                "fund_name": name,
+                "window": window,
+                **metrics,
+            })
+
+        # 组合层:当前份额静态加权合成
+        combined = prisk.combine_portfolio_nav(series_map, shares_map)
+        portfolio_metrics = prisk.compute_risk_metrics([v for _, v in combined]) if combined else dict(_RISK_EMPTY_METRICS)
+
+        return {
+            "window": window,
+            "rf": prisk.RISK_FREE_RATE,
+            "trading_days": prisk.TRADING_DAYS_PER_YEAR,
+            "method": "static-shares",
+            "portfolio": portfolio_metrics,
+            "funds": funds_out,
+            "degraded": degraded,
+            "note": "按当前份额静态合成,忽略申赎现金流;估算≠净值" if combined else "历史净值不足,无法合成组合序列",
+            "generated_at": _now_iso(),
+        }
+    except Exception as e:
+        logger.warning(f"get_portfolio_risk failed: {e}")
+        # 降级:绝不 500
+        return {
+            "window": window,
+            "rf": prisk.RISK_FREE_RATE,
+            "trading_days": prisk.TRADING_DAYS_PER_YEAR,
+            "method": "static-shares",
+            "portfolio": dict(_RISK_EMPTY_METRICS),
+            "funds": [],
+            "degraded": True,
+            "note": f"风险计算异常: {e}",
+            "generated_at": _now_iso(),
+        }
