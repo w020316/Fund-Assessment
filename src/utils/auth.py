@@ -104,7 +104,11 @@ def require_admin(authorization: str | None = Header(default=None)) -> None:
 
     # 使用 secrets.compare_digest 防止时序攻击
     if not secrets.compare_digest(token, expected):
-        logger.warning(f"鉴权失败: 令牌不匹配 (prefix={token[:4]}...)")
+        # 安全修复(2026-10-26):原日志记录 `prefix={token[:4]}`，会把攻击者尝试的令牌
+        # 前 4 位写进日志。日志常被转发到第三方平台、也常被截图贴到工单里，
+        # 这等于给爆破提供了逐步逼近的反馈，且泄露了「用户可能输错的那个令牌」片段。
+        # 只保留不可逆的元信息（长度），足以区分"空令牌/明显过短/长度正确但不匹配"。
+        logger.warning(f"鉴权失败: 令牌不匹配 (len={len(token)})")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="令牌无效",

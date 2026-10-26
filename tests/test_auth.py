@@ -167,3 +167,27 @@ class TestRequireAdmin:
                 headers={"Authorization": "Bearer abcdefgh00000000"},
             )
             assert resp.status_code == 401
+
+
+class TestAuthLogHygiene:
+    """鉴权失败日志不得泄露令牌片段（2026-10-26 安全修复回归）
+
+    缺陷：原实现记录 `prefix={token[:4]}`，把攻击者尝试的令牌前 4 位写进日志。
+    日志常被转发/截图，等于为爆破提供逐步逼近的反馈。
+    """
+
+    def test_failed_auth_log_has_no_token_prefix(self):
+        from loguru import logger
+
+        msgs: list[str] = []
+        sink_id = logger.add(lambda m: msgs.append(m.record["message"]), level="WARNING")
+        try:
+            with patch.dict(os.environ, {"APP_ENV": "production", "ADMIN_TOKEN": "correct-token-123"}, clear=False):
+                client = TestClient(_build_app())
+                client.get("/protected", headers={"Authorization": "Bearer SECRETVALUE"})
+        finally:
+            logger.remove(sink_id)
+
+        joined = " ".join(msgs)
+        assert "SECRE" not in joined, f"日志泄露了令牌前缀: {joined}"
+        assert "len=11" in joined, f"应只记录不可逆的元信息(长度): {joined}"
