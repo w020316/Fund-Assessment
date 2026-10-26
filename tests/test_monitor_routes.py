@@ -256,3 +256,32 @@ class TestNorthbound:
         assert data["total_net_inflow"] == 0
         assert data["top_stocks"] == []
         assert data["data_quality"] == "degraded"
+
+
+class TestAlertsAuth:
+    """GET /api/monitor/alerts 鉴权（2026-10-26 安全修复回归）
+
+    缺陷：该端点无鉴权，而不带 stock_code 时会走 _generate_default_alerts()，
+    该函数读取**自选股列表**——等于匿名即可间接拿到 /api/monitor/watchlist
+    （同名数据、已挂鉴权）的内容，属"同一份私有数据两条路径、一条敞开"。
+    """
+
+    def test_alerts_requires_token_in_production(self, client):
+        """生产环境未带令牌 → 401"""
+        with patch.dict(os.environ, {"APP_ENV": "production", "ADMIN_TOKEN": "unit-test-token"}, clear=False):
+            resp = client.get("/api/monitor/alerts")
+        assert resp.status_code == 401
+
+    def test_alerts_rejects_wrong_token(self, client):
+        with patch.dict(os.environ, {"APP_ENV": "production", "ADMIN_TOKEN": "unit-test-token"}, clear=False):
+            resp = client.get("/api/monitor/alerts", headers={"Authorization": "Bearer wrong"})
+        assert resp.status_code == 401
+
+    def test_alerts_allows_valid_token(self, client):
+        """携带正确令牌 → 200（返回值结构不变）"""
+        with patch.dict(os.environ, {"APP_ENV": "production", "ADMIN_TOKEN": "unit-test-token"}, clear=False), \
+             patch("web.routes.monitor._generate_default_alerts", return_value=[]):
+            resp = client.get("/api/monitor/alerts",
+                              headers={"Authorization": "Bearer unit-test-token"})
+        assert resp.status_code == 200
+        assert resp.json() == []

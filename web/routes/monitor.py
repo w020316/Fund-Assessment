@@ -97,8 +97,16 @@ def _save_watchlist(data: dict[str, list[str]]) -> bool:
         return False
 
 
-@router.get("/alerts", response_model=list[AlertItem])
+@router.get("/alerts", response_model=list[AlertItem], dependencies=[Depends(require_admin)])
 async def alerts(stock_code: str = ""):
+    """告警列表。
+
+    安全修复(2026-10-26):此端点此前无鉴权，而不带 stock_code 时会走
+    `_generate_default_alerts()` —— 该函数读取**自选股列表**并按市况生成告警，
+    等于匿名即可间接拿到 `/api/monitor/watchlist`（同名数据、已挂鉴权）的内容，
+    属于"同一份私有数据两条路径、一条敞开"的鉴权不一致。
+    前端 loadAlerts() 本就做了令牌预检，这里补齐后二者一致。
+    """
     if not stock_code:
         return await _generate_default_alerts()
     if not _HAS_MONITOR:
