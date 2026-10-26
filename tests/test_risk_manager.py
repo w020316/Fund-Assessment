@@ -352,3 +352,33 @@ class TestTradeRecord:
             amount=10_000.0, profit=0.0, is_stop_loss=False,
         )
         assert trade.timestamp is not None
+
+
+class TestPositionReductionMarker:
+    """仓位缩减判定入口（2026-10-26 P2 修复回归）
+
+    缺陷：执行器用 `"仓位缩减" in reason` 匹配中文字面量决定"是否按比例改数量"。
+    这是隐式契约——文案改一个字（措辞优化/错别字修正）就静默失效，
+    数量不再缩减、风控形同虚设，且没有任何测试能发现。
+    """
+
+    def test_helper_matches_reduction_reason(self):
+        assert RiskManager.is_position_reduction("连续3次止损，买入仓位缩减至50%") is True
+
+    def test_helper_rejects_normal_reason(self):
+        assert RiskManager.is_position_reduction("风控检查通过") is False
+
+    def test_helper_handles_empty(self):
+        assert RiskManager.is_position_reduction("") is False
+        assert RiskManager.is_position_reduction(None) is False
+
+    def test_check_order_reduction_reason_is_recognised(self, risk_manager):
+        """文案漂移守卫：check_order 返回的缩减理由必须能被唯一判定入口识别。
+
+        若将来有人改了那句 reason 的措辞而没同步常量，这条会直接挂掉，
+        而不是让"仓位缩减"在生产里悄悄失效。
+        """
+        risk_manager._consecutive_stop_losses = 3
+        passed, reason = risk_manager.check_order({"side": "buy"})
+        assert passed is True
+        assert RiskManager.is_position_reduction(reason), f"文案与判定不一致: {reason}"

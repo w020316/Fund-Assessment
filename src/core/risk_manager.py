@@ -19,6 +19,13 @@ _DAILY_LOSS_THRESHOLD = 0.05
 _CONSECUTIVE_STOP_LOSS_LIMIT = 3
 _POSITION_REDUCTION_RATIO = 0.5
 
+# P2 修复(2026-10-26)：执行器原先用 `"仓位缩减" in reason` 做字符串匹配来决定
+# "是否按缩减比例改数量"。这类隐式契约只要文案改一个字（措辞优化、错别字修正）就静默失效，
+# 而且没有任何测试能发现——数量不再缩减，风控形同虚设。
+# 现在把标记集中成一个常量，并提供 is_position_reduction() 作为唯一判定入口；
+# 同时补一条测试：check_order 返回的缩减理由必须能被该判定识别（文案漂移即挂）。
+POSITION_REDUCTION_MARKER = "仓位缩减"
+
 
 class RiskLevel(Enum):
     NORMAL = "normal"
@@ -313,9 +320,19 @@ class RiskManager:
                 if side.lower() in ("buy", "买入"):
                     self._position_reduction = _POSITION_REDUCTION_RATIO
                     self._save_state()
-                    return True, f"连续{_CONSECUTIVE_STOP_LOSS_LIMIT}次止损，买入仓位缩减至{_POSITION_REDUCTION_RATIO:.0%}"
+                    return True, f"连续{_CONSECUTIVE_STOP_LOSS_LIMIT}次止损，买入{POSITION_REDUCTION_MARKER}至{_POSITION_REDUCTION_RATIO:.0%}"
 
             return True, "风控检查通过"
+
+    @staticmethod
+    def is_position_reduction(reason: str) -> bool:
+        """判断风控理由是否为"仓位缩减"。
+
+        这是**唯一**判定入口（执行器改数量前必须走这里），避免散落的字符串字面量。
+        仍属字符串契约——彻底方案是让 check_order 返回结构化结果，但那会改动
+        公开返回值并波及既有调用方与测试，故先收敛到单一入口 + 文案漂移测试。
+        """
+        return POSITION_REDUCTION_MARKER in (reason or "")
 
     def update_position(self, position: dict[str, Any]) -> None:
         with self._lock:

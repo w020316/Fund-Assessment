@@ -524,7 +524,9 @@ class TradeExecutor:
             self._notifier.notify("订单被风控拒绝", f"{signal.symbol} {signal.side.value}: {reason}")
             return None
 
-        if "仓位缩减" in reason:
+        # P2 修复(2026-10-26):原为 `if "仓位缩减" in reason:` 直接匹配中文字面量。
+        # 改为走风控提供的唯一判定入口——文案改动时不会静默失效，且便于将来结构化解耦。
+        if self._risk_manager.is_position_reduction(reason):
             signal.quantity = int(signal.quantity * self._risk_manager.get_risk_status().position_reduction)
             if signal.quantity <= 0:
                 logger.warning("仓位缩减后数量为0，取消订单")
