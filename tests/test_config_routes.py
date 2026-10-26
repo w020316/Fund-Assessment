@@ -237,3 +237,41 @@ class TestSettingsAuthAndMask:
             with patch("web.routes.config._load_yaml", return_value=_MOCK_SETTINGS):
                 resp = client.get("/api/config/settings")
         assert resp.status_code == 200
+
+
+class TestStrategiesAuthAndBounds:
+    """策略配置鉴权 + 持仓列表边界（2026-10-26 收口）
+
+    - /strategies 读 strategies.yaml（用户自己的策略参数），与 /settings 同属私有配置；
+    - /user_positions 原为裸 list[dict]，无条数上限。
+    """
+
+    def test_strategies_requires_token_in_production(self, client):
+        with patch.dict(os.environ, {"APP_ENV": "production", "ADMIN_TOKEN": "unit-test-token"}, clear=False), \
+             patch("web.routes.config._load_yaml", return_value=_MOCK_STRATEGIES):
+            resp = client.get("/api/config/strategies")
+        assert resp.status_code == 401
+
+    def test_strategies_allows_valid_token(self, client):
+        with patch.dict(os.environ, {"APP_ENV": "production", "ADMIN_TOKEN": "unit-test-token"}, clear=False), \
+             patch("web.routes.config._load_yaml", return_value=_MOCK_STRATEGIES):
+            resp = client.get("/api/config/strategies",
+                              headers={"Authorization": "Bearer unit-test-token"})
+        assert resp.status_code == 200
+        assert resp.json()["strategies"]["ma_cross"]["fast"] == 5
+
+    def test_strategies_still_open_in_dev(self, client):
+        """回归保护：开发模式仍放行"""
+        with patch.dict(os.environ, {"APP_ENV": "dev"}, clear=False):
+            os.environ.pop("ADMIN_TOKEN", None)
+            with patch("web.routes.config._load_yaml", return_value=_MOCK_STRATEGIES):
+                resp = client.get("/api/config/strategies")
+        assert resp.status_code == 200
+
+    def test_positions_rejects_oversized_list(self, client):
+        """超过 500 条持仓应被 422 拒绝，而不是写进文件"""
+        payload = {"positions": [{"code": "600519"} for _ in range(501)]}
+        with patch("web.routes.config.atomic_write_json") as mock_write:
+            resp = client.post("/api/config/user_positions", json=payload)
+        assert resp.status_code == 422
+        mock_write.assert_not_called()

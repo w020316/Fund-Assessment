@@ -7,7 +7,7 @@ from typing import Any
 import yaml
 from fastapi import APIRouter, Depends
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.utils.auth import require_admin
 from src.utils.file_io import atomic_write_json, safe_read_json
@@ -171,8 +171,15 @@ async def update_settings(req: SettingsUpdateRequest):
         return SettingsResponse(settings={})
 
 
-@router.get("/strategies", response_model=StrategiesResponse)
+@router.get("/strategies", response_model=StrategiesResponse, dependencies=[Depends(require_admin)])
 async def get_strategies():
+    """读取策略参数配置。
+
+    安全修复(2026-10-26):此前无鉴权。strategies.yaml 里是用户自己的策略参数
+    （均线周期、突破阈值、启用开关等），与 /settings 同属私有配置，
+    且与本文件其他读接口的鉴权口径不一致。
+    注：/api/strategy/list（策略**目录**，硬编码常量）保持匿名——它不暴露任何用户状态。
+    """
     try:
         data = _load_yaml("strategies.yaml")
         return StrategiesResponse(strategies=data)
@@ -248,8 +255,17 @@ async def get_user_positions():
 
 
 class SavePositionsRequest(BaseModel):
-    positions: list[dict]
-    available_cash: float = 800000.0
+    """保存用户持仓。
+
+    P2 加固(2026-10-26)：原定义是裸 `list[dict]`，既无条数上限也无元素约束——
+    超长列表可把 JSON 撑大、异常结构会写进文件并在后续读取时引发 KeyError/500。
+    这里补条数上限与"元素必须是对象"的约束；具体字段仍由业务层兼容处理
+    （持仓字段前后端约定较松，强 schema 会打断既有客户端）。
+    """
+
+    positions: list[dict] = Field(default_factory=list, max_length=500,
+                                 description="持仓列表，最多 500 条")
+    available_cash: float = Field(800000.0, ge=0, le=1e12)
 
 
 @router.post("/user_positions", dependencies=[Depends(require_admin)])
