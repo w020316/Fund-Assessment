@@ -103,6 +103,9 @@
   function loadWatchboard(force) {
     const body = document.getElementById('st6WbBody');
     if (!body) return;
+    // QA Bug 修复(批次A 低危):推送设置卡 DOM 在 page-watchboard 内,
+    // 直接进盯盘页也必须加载;此前只在 loadRiskTab 触发,导致"永远加载中"。
+    loadPushSettings();
     renderStatus(body, 'loading');
     callApi('/api/portfolio/watchboard' + (force ? '?force=true' : ''))
       .then(function (data) {
