@@ -1289,6 +1289,8 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
             <button class="btn btn-sm" onclick="loadMarketThermometer()">大盘温度</button>
             <button class="btn btn-sm" onclick="loadNewsFeed()">消息面</button>
             <button class="btn btn-sm" onclick="loadFundAdviceV2()">五信号建议</button>
+            <!-- ===== STAGE5: wizard ===== 持仓补录向导入口(P0-1,分步引导防"份额清零"事故) -->
+            <button class="btn btn-sm btn-outline" onclick="FundWizard.open()">持仓补录向导</button>
           </div>
         </div>
         <div class="grid-4 mb-16">
@@ -1700,6 +1702,9 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 
 <!-- Toast容器 -->
 <div class="toast-container" id="toastContainer"></div>
+
+<!-- ===== STAGE5: wizard ===== 持仓补录向导挂载点(wizard.js 按需填充) -->
+<div id="fundWizardRoot"></div>
 
 <!-- 快捷键提示条 -->
 <div class="shortcut-hint" id="shortcutHint">
@@ -5608,5 +5613,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 </script>
+<!-- ===== STAGE5: wizard ===== 补录向导模块(P0-1) -->
+<script src="/static/js/wizard.js"></script>
 </body>
 </html>
