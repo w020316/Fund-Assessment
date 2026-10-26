@@ -154,6 +154,12 @@ body {
   border-radius:2px;
 }
 .grid-2 { display:grid; grid-template-columns:repeat(2,1fr); gap:16px; }
+/* (2026-10-26) 修复移动端内容被裁切：CSS Grid 的 item 默认 min-width:auto，
+   会按内容（这里含多列表格）的 min-content 撑宽轨道 —— 实测 #page-fund 在 375px 视口下
+   轨道被撑到 532px，卡片溢出 157px 且因 body overflow-x:hidden 而无滚动条，
+   "操作"列与按钮直接点不到。给 grid item 补 min-width:0 后轨道回到 351px，
+   表格由 .table-wrap 内部横向滚动承载（其本身即 overflow-x:auto）。 */
+.grid-2 > *, .grid-3 > *, .grid-4 > * { min-width:0; }
 .grid-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
 /* (2026-10-26) CLS 修复：首屏容器在异步回填前高度为 0（或远小于终态），数据到达后撑开，
    导致下方内容整体下移。实测桌面 CLS 0.03–0.37（中位数 0.23，远超 0.1 阈值）。
