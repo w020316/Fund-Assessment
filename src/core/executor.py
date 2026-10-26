@@ -166,6 +166,14 @@ class SimulatedBroker(BrokerAPI):
             )
             self._orders[order_id] = order
 
+            # 纵深防御(2026-10-26 P0 修复):即使上游漏检,券商层也绝不以非正价成交。
+            # 原实现直接filled_price = price,price=0 时 amount 为 0、成本价被记为 0。
+            if not (0 < price < 1e9) or not (quantity > 0):
+                order.status = OrderStatus.REJECTED
+                order.updated_at = datetime.now()
+                logger.warning(f"SimulatedBroker: 买入被拒绝，委托价格/数量非法 (price={price}, qty={quantity})")
+                return order
+
             filled_price = price
             amount = filled_price * quantity
             commission, stamp_tax = self._calc_commission(amount, OrderSide.BUY)
@@ -227,6 +235,13 @@ class SimulatedBroker(BrokerAPI):
                 order_type=order_type,
             )
             self._orders[order_id] = order
+
+            # 纵深防御(2026-10-26 P0 修复):同 buy,非正价/非正量一律拒绝
+            if not (0 < price < 1e9) or not (quantity > 0):
+                order.status = OrderStatus.REJECTED
+                order.updated_at = datetime.now()
+                logger.warning(f"SimulatedBroker: 卖出被拒绝，委托价格/数量非法 (price={price}, qty={quantity})")
+                return order
 
             pos = self._positions.get(symbol)
             if pos is None or pos["available_quantity"] < quantity:

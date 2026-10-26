@@ -363,3 +363,70 @@ class TestTradeExecutor:
         # int(1 * 0.5) = 0
         order = executor.execute_signal(signal)
         assert order is None
+
+
+class TestZeroPriceGuard:
+    """零价 / 非法价成交防护（2026-10-26 P0 修复回归）
+
+    缺陷：市价单以 price=0 下单时，broker 直接把 0 当作成交价，
+    amount=0、成本价记为 0，只扣 5 元最低佣金即可建仓任意数量。
+    本类锁定三层防护：券商层拒绝、风控层拒绝、执行器不透传。
+    """
+
+    @pytest.mark.parametrize("bad_price", [0.0, -1.0])
+    def test_broker_buy_rejects_non_positive_price(self, broker, bad_price):
+        """券商层：非正价买入必须被拒，且不产生持仓"""
+        order = broker.buy("600519", bad_price, 100_000)
+        assert order.status is OrderStatus.REJECTED
+        assert broker.get_positions() == []
+        assert broker.get_balance().available_cash == 1_000_000.0
+
+    @pytest.mark.parametrize("bad_price", [0.0, -1.0])
+    def test_broker_sell_rejects_non_positive_price(self, broker, bad_price):
+        """券商层：先正常建仓，再以非正价卖出必须被拒，持仓不变"""
+        broker.buy("600519", 100.0, 100)
+        order = broker.sell("600519", bad_price, 100)
+        assert order.status is OrderStatus.REJECTED
+        assert broker.get_positions()[0].quantity == 100
+
+    def test_broker_rejects_non_positive_quantity(self, broker):
+        """券商层：非正数量必须被拒"""
+        order = broker.buy("600519", 100.0, 0)
+        assert order.status is OrderStatus.REJECTED
+        assert broker.get_positions() == []
+
+    def test_risk_manager_rejects_zero_price_with_explicit_reason(self, risk_manager):
+        """风控层：price=0 必须被拒，且理由明确指向价格"""
+        passed, reason = risk_manager.check_order(
+            {"symbol": "600519", "side": "buy", "price": 0.0, "quantity": 100}
+        )
+        assert passed is False
+        assert "价格" in reason
+
+    def test_risk_manager_rejects_negative_quantity(self, risk_manager):
+        """风控层：数量为负必须被拒"""
+        passed, reason = risk_manager.check_order(
+            {"symbol": "600519", "side": "buy", "price": 100.0, "quantity": -100}
+        )
+        assert passed is False
+        assert "数量" in reason
+
+    def test_risk_manager_rejects_infinite_price(self, risk_manager):
+        """风控层：inf 价格必须被拒（防止资金校验被绕过）"""
+        passed, reason = risk_manager.check_order(
+            {"symbol": "600519", "side": "buy", "price": float("inf"), "quantity": 100}
+        )
+        assert passed is False
+
+    def test_execute_signal_drops_zero_price_order(self, broker, risk_manager, tmp_path):
+        """执行器层：零价信号不成交、不落库、不改持仓"""
+        executor = TradeExecutor(
+            broker=broker, risk_manager=risk_manager, db_path=tmp_path / "t.db"
+        )
+        result = executor.execute_signal(
+            Signal(symbol="600519", side=OrderSide.BUY, price=0.0, quantity=100_000,
+                   order_type=OrderType.MARKET)
+        )
+        assert result is None
+        assert broker.get_positions() == []
+        assert executor.get_trade_history() == []

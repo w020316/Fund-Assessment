@@ -268,6 +268,26 @@ class RiskManager:
             if self._is_paused:
                 return False, f"系统暂停中，恢复日期: {self._pause_until}"
 
+            # 订单级校验(2026-10-26 P0 修复):
+            # 此前 check_order 只做账户级判断(紧急停止/暂停/回撤/日亏/连亏),
+            # 完全不校验价格与数量 —— 价格 0 的委托因此通过风控,被 broker 以 0 元成交,
+            # 等价于「5 元佣金买入任意数量、成本价为 0」。
+            # 仅在字段存在时校验,兼容 {"side": "buy"} 这类只关心账户状态的轻量调用。
+            if "price" in order:
+                try:
+                    price = float(order.get("price") or 0.0)
+                except (TypeError, ValueError):
+                    return False, "委托价格格式非法"
+                if not (0 < price < 1e9):
+                    return False, "委托价格必须为正数且有限(市价单需先解析最新价)"
+            if "quantity" in order:
+                try:
+                    quantity = float(order.get("quantity") or 0.0)
+                except (TypeError, ValueError):
+                    return False, "委托数量格式非法"
+                if not (quantity > 0):
+                    return False, "委托数量必须为正数"
+
             drawdown = self._calc_drawdown()
             if drawdown > _SYSTEM_DRAWDOWN_THRESHOLD:
                 self._is_paused = True

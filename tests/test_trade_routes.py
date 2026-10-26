@@ -198,3 +198,80 @@ class TestCancel:
             resp = client.post("/api/trade/cancel", json={"order_id": "ORD999"})
         assert resp.status_code == 200
         assert resp.json()["success"] is False
+
+
+class TestMarketOrderPriceResolution:
+    """市价单价格解析（2026-10-26 P0 修复回归）
+
+    缺陷：前端「委托价格留空」提交 price=0 表示市价单，后端此前把 0 原样下传，
+    broker 以 0 元成交。修复后市价单先解析最新价；解析不到则保持 0，
+    交由风控/券商层拒绝，绝不产生 0 价成交。
+    """
+
+    def test_market_order_resolves_latest_price(self, client):
+        """price=0 时应以实时最新价构造 Signal"""
+        mock_order = _make_mock_order(order_id="ORD_MKT", side="buy", status="filled")
+        mock_executor = MagicMock()
+        mock_executor.execute_signal.return_value = mock_order
+        mock_ds = MagicMock()
+        mock_ds.get_realtime_quote.return_value = MagicMock(price=1700.0)
+        mock_state = {"executor": mock_executor, "data_source": mock_ds}
+        with patch("web.routes.trade._HAS_EXECUTOR", True), \
+             patch("web.routes.trade._get_state", return_value=mock_state):
+            resp = client.post("/api/trade/buy", json={
+                "stock_code": "600519", "amount": 100, "price": 0.0,
+            })
+        assert resp.status_code == 200
+        signal = mock_executor.execute_signal.call_args[0][0]
+        assert signal.price == 1700.0, "市价单必须解析为最新价，而不是以 0 价下单"
+        assert signal.order_type.value == "market"
+
+    def test_market_order_without_price_source_stays_zero(self, client):
+        """数据源不可用时不得编造价格，保持 0 交由风控拒绝"""
+        mock_executor = MagicMock()
+        mock_executor.execute_signal.return_value = None
+        mock_state = {"executor": mock_executor, "data_source": None}
+        with patch("web.routes.trade._HAS_EXECUTOR", True), \
+             patch("web.routes.trade._get_state", return_value=mock_state):
+            resp = client.post("/api/trade/buy", json={
+                "stock_code": "600519", "amount": 100, "price": 0.0,
+            })
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "rejected"
+        signal = mock_executor.execute_signal.call_args[0][0]
+        assert signal.price == 0.0
+
+    def test_market_order_rejects_absurd_price_from_source(self, client):
+        """数据源返回异常价格(0/inf)时不得采信"""
+        mock_executor = MagicMock()
+        mock_executor.execute_signal.return_value = None
+        mock_ds = MagicMock()
+        mock_ds.get_realtime_quote.return_value = MagicMock(price=0.0)
+        mock_state = {"executor": mock_executor, "data_source": mock_ds}
+        with patch("web.routes.trade._HAS_EXECUTOR", True), \
+             patch("web.routes.trade._get_state", return_value=mock_state):
+            client.post("/api/trade/buy", json={"stock_code": "600519", "amount": 100, "price": 0.0})
+        assert mock_executor.execute_signal.call_args[0][0].price == 0.0
+
+    def test_limit_order_price_not_overridden(self, client):
+        """限价单价格不得被实时价覆盖"""
+        mock_order = _make_mock_order(order_id="ORD_LMT", side="buy", status="filled")
+        mock_executor = MagicMock()
+        mock_executor.execute_signal.return_value = mock_order
+        mock_ds = MagicMock()
+        mock_ds.get_realtime_quote.return_value = MagicMock(price=9999.0)
+        mock_state = {"executor": mock_executor, "data_source": mock_ds}
+        with patch("web.routes.trade._HAS_EXECUTOR", True), \
+             patch("web.routes.trade._get_state", return_value=mock_state):
+            client.post("/api/trade/buy", json={"stock_code": "600519", "amount": 100, "price": 1688.0})
+        signal = mock_executor.execute_signal.call_args[0][0]
+        assert signal.price == 1688.0
+        assert signal.order_type.value == "limit"
+
+    def test_price_above_upper_bound_rejected_by_validation(self, client):
+        """超过价格上界的请求应被 422 拒绝（挡 inf/NaN 与异常报价）"""
+        with patch("web.routes.trade._HAS_EXECUTOR", True):
+            resp = client.post("/api/trade/buy", json={
+                "stock_code": "600519", "amount": 100, "price": 1000001.0,
+            })
+        assert resp.status_code == 422
