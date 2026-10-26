@@ -196,3 +196,44 @@ class TestUserPositions:
         data = resp.json()
         assert data["success"] is True
         assert "持仓已保存" in data["message"]
+
+
+class TestSettingsAuthAndMask:
+    """GET /api/config/settings 鉴权与整体掩码（2026-10-26 安全修复回归）
+
+    缺陷：该端点此前无鉴权，匿名可枚举全部配置键名，并拿到 11 个密钥字段的
+    首尾各 4 个字符（对 32 位 Key 相当于泄露 25% 空间）。
+    """
+
+    @pytest.mark.parametrize("token_header", [None, "Bearer wrong-token"])
+    def test_settings_requires_valid_token_in_production(self, client, token_header):
+        """生产环境：无令牌/错误令牌 → 401"""
+        headers = {"Authorization": token_header} if token_header else {}
+        with patch.dict(os.environ, {"APP_ENV": "production", "ADMIN_TOKEN": "unit-test-token"}, clear=False), \
+             patch("web.routes.config._load_yaml", return_value=_MOCK_SETTINGS):
+            resp = client.get("/api/config/settings", headers=headers)
+        assert resp.status_code == 401
+
+    def test_settings_masks_whole_secret_without_prefix_leak(self, client):
+        """掩码必须是整体定长，不得泄露任何原文片段"""
+        with patch.dict(os.environ, {"APP_ENV": "production", "ADMIN_TOKEN": "unit-test-token"}, clear=False), \
+             patch("web.routes.config._load_yaml", return_value=_MOCK_SETTINGS):
+            resp = client.get("/api/config/settings",
+                              headers={"Authorization": "Bearer unit-test-token"})
+        assert resp.status_code == 200
+        settings = resp.json()["settings"]
+        token = settings["tushare"]["token"]
+        assert token == "********", f"期望整体掩码，实际 {token!r}"
+        # 原实现会泄露前 4 位 "abcd" 与后 4 位 "5678"
+        assert "abcd" not in token
+        assert "5678" not in token
+        # 非敏感字段保持可读（前端要显示）
+        assert settings["app"]["name"] == "QuantFlow"
+
+    def test_settings_still_accessible_in_dev_mode(self, client):
+        """回归保护：开发模式仍放行，本地开发不被阻断"""
+        with patch.dict(os.environ, {"APP_ENV": "dev"}, clear=False):
+            os.environ.pop("ADMIN_TOKEN", None)
+            with patch("web.routes.config._load_yaml", return_value=_MOCK_SETTINGS):
+                resp = client.get("/api/config/settings")
+        assert resp.status_code == 200

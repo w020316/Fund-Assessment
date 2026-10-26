@@ -31,9 +31,17 @@ MASK_PATTERN = "****"
 
 
 def _mask_value(val: str) -> str:
-    if not isinstance(val, str) or len(val) <= 8:
+    """敏感值一律整体掩码。
+
+    安全修复(2026-10-26):原实现对长度 > 8 的值返回 `val[:4]****val[-4:]`，
+    即**泄露首尾各 4 个字符**——对 32 位 API Key 相当于暴露 25% 的密钥空间，
+    显著降低爆破难度；而该端点当时还没有鉴权。
+    现改为定长掩码，不再泄露任何原文片段（前端只需要识别"已配置"这一状态，
+    不需要靠片段辨认值，`_strip_masked` 也只需匹配 **** 即可判断"未修改"）。
+    """
+    if not isinstance(val, str) or not val:
         return MASK_PATTERN
-    return f"{val[:4]}{MASK_PATTERN}{val[-4:]}"
+    return MASK_PATTERN * 2
 
 
 def _mask_sensitive(data: Any) -> Any:
@@ -133,8 +141,15 @@ def _save_yaml(filename: str, data: dict[str, Any]) -> None:
         raise
 
 
-@router.get("/settings", response_model=SettingsResponse)
+@router.get("/settings", response_model=SettingsResponse, dependencies=[Depends(require_admin)])
 async def get_settings():
+    """读取系统配置（敏感字段整体掩码）。
+
+    安全修复(2026-10-26):此端点此前**无鉴权**，匿名即可枚举全部配置键名，
+    并拿到 11 个密钥字段的首尾各 4 个字符。虽然值已掩码，但"有哪些密钥、
+    各是哪种服务、片段是什么"本身就是有效侦察信息；前端 loadSettings()
+    也早已做了令牌预检，这里补上鉴权是让实现与前端预期一致。
+    """
     try:
         data = _load_yaml("settings.yaml")
         return SettingsResponse(settings=_mask_sensitive(data))
