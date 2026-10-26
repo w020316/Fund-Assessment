@@ -30,3 +30,6 @@ primary_region = "sin"
   PYTHONUNBUFFERED = "1"
   HOST = "0.0.0.0"
   PORT = "8000"
+  # 2026-10-26：与 render.yaml 对齐，避免换平台后 CORS 回落 localhost、限流键退化为代理 IP
+  CORS_ORIGINS = "https://fund-assessment.onrender.com"
+  FORWARDED_ALLOW_IPS = "*"

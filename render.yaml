@@ -12,7 +12,16 @@ services:
         value: "1"
       - key: HOST
         value: "0.0.0.0"
+      # CORS 白名单（2026-10-26 修复：原值为 "*"）
+      # 前端由本服务同源托管（/static/index.html），跨域本无必要；
+      # 配成 "*" 会让任意站点跨域读取 API 响应（实测 Origin 被原样回显）。
+      # 如后续加自定义域名，把域名追加在这里（逗号分隔）。
       - key: CORS_ORIGINS
+        value: "https://fund-assessment.onrender.com"
+      # 反向代理信任链（2026-10-26 新增）
+      # uvicorn 默认 forwarded_allow_ips=127.0.0.1，而 Render 的反代不是本机地址，
+      # 导致 X-Forwarded-For 被忽略、限流键退化为代理 IP（全站共用一个桶）。
+      - key: FORWARDED_ALLOW_IPS
         value: "*"
       # AI 分析所需(至少配置一个)
       - key: AGNES_API_KEY

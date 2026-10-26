@@ -36,6 +36,20 @@ def _parse_arg(name: str, default=None, cast=str):
 
 
 if __name__ == "__main__":
+    # 单 worker 自检(2026-10-26)：模拟持仓/风控状态/限流计数/缓存均在进程内，
+    # 多 worker 会让状态各持一份，表现为"持仓消失、限流翻倍、风控错乱"。
+    # 注意：本启动器**不会**把 --workers 转发给 uvicorn.run（始终单进程），
+    # 这里只做提示——真正的风险在有人直接改用 `uvicorn web.api:app --workers N`。
+    _workers = _parse_arg("--workers", 1, int) or 1
+    if _workers > 1:
+        print(
+            f"[WARN] 检测到 --workers {_workers}：本启动器始终单进程，该参数不会转发给 uvicorn。"
+            "本应用的模拟持仓/风控/限流/缓存状态均在进程内，若改用 "
+            f"`uvicorn web.api:app --workers {_workers}` 会让状态各持一份"
+            "（持仓消失、限流额度翻倍、风控错乱）；确需多进程请先把这些状态外置到 SQLite。",
+            file=sys.stderr,
+        )
+
     uvicorn.run(
         "web.api:app",
         host=_parse_arg("--host", "0.0.0.0"),
