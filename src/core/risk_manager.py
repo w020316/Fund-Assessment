@@ -326,7 +326,24 @@ class RiskManager:
             self._daily_pnl = self._total_assets - self._daily_start_assets
             self._save_state()
 
-    def record_trade(self, trade: TradeRecord) -> None:
+    def record_trade(self, trade: TradeRecord, total_assets: float | None = None) -> None:
+        """记录一笔成交。
+
+        P1 修复(2026-10-26):新增 total_assets 参数，用于消除"已实现盈亏被计两次"的缺陷。
+
+        缺陷成因：execute_signal 在成交后先调用 update_position(broker 权益)，
+        把券商真值（已包含该笔卖出所得）写入 _total_assets；紧接着 record_trade
+        又执行 `_total_assets += trade.profit`，同一笔毛利被加了两遍。
+        实测：买 1000 股 @10、再以 12 卖出（毛利 2000），
+        risk_manager 权益 1,003,978 vs 券商 1,001,978，虚高正好 2000；
+        _peak_assets 同步被抬高 → 15% 回撤阈值失真。
+
+        Args:
+            trade: 成交记录
+            total_assets: 成交后券商返回的真实总权益。传入时以该值**覆盖**权益曲线
+                （并同步推定当日盈亏），不再按 profit 自增；不传时保持原有
+                "按流水推进权益"的旧行为（兼容独立调用与既有单测）。
+        """
         with self._lock:
             today = date.today()
             if self._last_trade_date != today:
@@ -334,8 +351,14 @@ class RiskManager:
                 self._daily_pnl = 0.0
                 self._last_trade_date = today
 
-            self._daily_pnl += trade.profit
-            self._total_assets += trade.profit
+            if total_assets is None:
+                # 旧行为：仅凭交易流水推进权益(忽略手续费/浮盈)，供独立调用场景使用
+                self._daily_pnl += trade.profit
+                self._total_assets += trade.profit
+            else:
+                # 生产路径：以券商实际权益为唯一真值，避免重复计账
+                self._total_assets = total_assets
+                self._daily_pnl = self._total_assets - self._daily_start_assets
             if self._total_assets > self._peak_assets:
                 self._peak_assets = self._total_assets
 

@@ -5,7 +5,7 @@ import threading
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
@@ -137,7 +137,9 @@ class SimulatedBroker(BrokerAPI):
         # 避免并发执行 buy/sell 时资金超扣、持仓超卖、成本价计算错误。
         # buy 中 "if total_cost > self._cash" 检查与 "self._cash -= total_cost" 更新非原子,
         # 多策略并发执行信号会导致竞态。
-        self._lock = threading.Lock()
+        # P1 修复(2026-10-26):改为 RLock。读路径(get_positions/get_balance)同样需要
+        # 持锁遍历,而它们可能被已持锁的写路径间接调用;RLock 可重入,避免自锁死。
+        self._lock = threading.RLock()
         self._cash: float = initial_cash
         self._initial_cash: float = initial_cash
         self._positions: dict[str, dict[str, Any]] = {}
@@ -292,8 +294,13 @@ class SimulatedBroker(BrokerAPI):
         return True
 
     def get_positions(self) -> list[Position]:
+        # P1 修复(2026-10-26):持锁读取。路由层用 asyncio.to_thread 并发调用本方法，
+        # 而 buy/sell 会在另一线程 del self._positions[symbol]，
+        # 无锁遍历会抛 "dictionary changed size during iteration" → 偶发 500。
+        with self._lock:
+            snapshot = [dict(p) for p in self._positions.values()]
         positions: list[Position] = []
-        for pos in self._positions.values():
+        for pos in snapshot:
             current_price = pos["current_price"]
             cost_price = pos["cost_price"]
             qty = pos["quantity"]
@@ -316,13 +323,16 @@ class SimulatedBroker(BrokerAPI):
         return positions
 
     def get_balance(self) -> Balance:
-        market_value = sum(p["current_price"] * p["quantity"] for p in self._positions.values())
-        total_assets = self._cash + market_value
+        # P1 修复(2026-10-26):持锁取值，避免与 buy/sell 的现金/持仓变更交错读到中间态
+        with self._lock:
+            cash = self._cash
+            market_value = sum(p["current_price"] * p["quantity"] for p in self._positions.values())
+        total_assets = cash + market_value
         profit = total_assets - self._initial_cash
         profit_pct = profit / self._initial_cash if self._initial_cash > 0 else 0.0
         return Balance(
             total_assets=total_assets,
-            available_cash=self._cash,
+            available_cash=cash,
             market_value=market_value,
             profit=profit,
             profit_pct=profit_pct,
@@ -332,8 +342,12 @@ class SimulatedBroker(BrokerAPI):
         return list(self._orders.values())
 
     def update_price(self, symbol: str, price: float) -> None:
-        if symbol in self._positions:
-            self._positions[symbol]["current_price"] = price
+        # P1 修复(2026-10-26):持锁更新，避免与 sell 的 del self._positions[symbol] 竞争
+        # 导致 KeyError；用 get() 兜底处理持仓已清空的情况。
+        with self._lock:
+            pos = self._positions.get(symbol)
+            if pos is not None:
+                pos["current_price"] = price
 
 
 class LiveBroker(BrokerAPI):
@@ -379,6 +393,27 @@ class TradeExecutor:
         # 避免多策略并发时快照后、sell 前持仓被其他策略修改,导致 profit 计算基于过期
         # 快照,或 _pre_sell_snapshot 实例属性被并发请求互相覆盖
         self._lock = threading.Lock()
+        # A 股 T+1(2026-10-26 新增):当日买入的份额当日不可卖出。
+        # 刻意放在**执行器(业务规则层)**而非 SimulatedBroker(撮合机制层)：
+        # 券商保持"即时交割"的机制语义，T+1 是交易所业务规则，两者不应耦合。
+        self._t_day: date | None = None
+        self._today_bought: dict[str, float] = {}
+
+    def _roll_trading_day(self) -> None:
+        """跨日时清空"当日买入台账"，恢复全部份额可卖。"""
+        today = date.today()
+        if self._t_day != today:
+            self._t_day = today
+            self._today_bought.clear()
+
+    def _available_for_sell(self, symbol: str) -> float:
+        """可卖数量 = 当前持仓 - 当日买入数量（不小于 0）。"""
+        try:
+            holding = sum(p.quantity for p in self._broker.get_positions() if p.symbol == symbol)
+        except Exception as e:
+            logger.warning(f"_available_for_sell({symbol}) 读取持仓失败: {e}")
+            return 0.0
+        return max(0.0, holding - self._today_bought.get(symbol, 0.0))
 
     def _get_conn(self) -> sqlite3.Connection:
         return sqlite3.connect(self._db_path)
@@ -495,6 +530,23 @@ class TradeExecutor:
                 logger.warning("仓位缩减后数量为0，取消订单")
                 return None
 
+        # A 股 T+1(2026-10-26 新增):当日买入的份额当日不可卖出。
+        # 此前 available_quantity 在买入时即等于持仓量，导致"当日买→当日卖"可行，
+        # 与 A 股规则不符，会让日内策略的回测/实盘对照完全失真。
+        self._roll_trading_day()
+        if signal.side == OrderSide.SELL:
+            available = self._available_for_sell(signal.symbol)
+            if signal.quantity > available:
+                logger.warning(
+                    f"T+1 限制：{signal.symbol} 可卖 {available:g} 股"
+                    f"（当日买入份额不可卖出），本次委托 {signal.quantity:g} 股，已拒绝"
+                )
+                self._notifier.notify(
+                    "委托被拒(T+1)",
+                    f"{signal.symbol} 可卖 {available:g} 股，当日买入的份额需次日才能卖出",
+                )
+                return None
+
         order: Optional[Order] = None
         # 修复(2026-07-31): 用局部变量保存 SELL 前快照,避免实例属性 _pre_sell_snapshot
         # 被并发请求互相覆盖。配合 _lock 保证快照与 sell 的原子性。
@@ -533,7 +585,10 @@ class TradeExecutor:
 
         if order.status == OrderStatus.FILLED:
             balance = self._broker.get_balance()
-            self._risk_manager.update_position({"total_assets": balance.total_assets})
+            # P1 修复(2026-10-26):原来这里先 update_position(broker 权益) 再 record_trade
+            # (其内部又 _total_assets += profit)，同一笔已实现盈亏被计了两次，
+            # 实测风控权益比券商真值虚高整整一个毛利额，回撤/日亏阈值随之失真。
+            # 现在只调用一次 record_trade，并把券商权益作为唯一真值传入（覆盖而非自增）。
 
             # 修复:中文不需要 lower(),且 SELL 后持仓已被削减,需用执行前的快照计算 profit
             # 修复(2026-07-31): 改用局部变量 pre_sell_snapshot_local,避免实例属性被并发覆盖
@@ -553,7 +608,13 @@ class TradeExecutor:
                 profit=profit,
                 is_stop_loss=is_stop_loss,
             )
-            self._risk_manager.record_trade(trade_record)
+            self._risk_manager.record_trade(trade_record, total_assets=balance.total_assets)
+
+            # A 股 T+1：登记当日买入数量，供后续卖出校验可卖额度
+            if signal.side == OrderSide.BUY:
+                self._today_bought[signal.symbol] = (
+                    self._today_bought.get(signal.symbol, 0.0) + order.filled_quantity
+                )
 
             # 修复(2026-07-29): 原代码 commission/stamp_tax 硬编码为 0,
             # 导致交易记录无手续费,回测与风控统计失真。

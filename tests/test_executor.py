@@ -11,8 +11,9 @@
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
+import threading
 from unittest.mock import MagicMock
 
 import pytest
@@ -430,3 +431,141 @@ class TestZeroPriceGuard:
         assert result is None
         assert broker.get_positions() == []
         assert executor.get_trade_history() == []
+
+
+class TestAssetSingleSource:
+    """风控权益单一来源（2026-10-26 P1 修复回归）
+
+    缺陷：execute_signal 先 update_position(broker 权益) 再 record_trade（内部又
+    _total_assets += profit），同一笔已实现盈亏被计两次。
+    实测：买 1000 股 @10、12 元卖出（毛利 2000）后，
+    risk_manager 权益 1,003,978 vs 券商真值 1,001,978，虚高正好一个毛利额。
+    """
+
+    def test_total_assets_matches_broker_after_sell(self, broker, risk_manager, tmp_path):
+        """卖出后风控总资产必须等于券商实际总资产"""
+        executor = TradeExecutor(broker=broker, risk_manager=risk_manager, db_path=tmp_path / "t.db")
+        executor.execute_signal(Signal(symbol="000001", side=OrderSide.BUY, price=10.0, quantity=1000))
+
+        buy_assets = risk_manager.get_risk_status().total_assets
+        assert abs(buy_assets - broker.get_balance().total_assets) < 0.01, "买入后即应一致（手续费也应计入）"
+
+        # 次日卖出，规避 T+1
+        executor._t_day = date.today() - timedelta(days=1)
+        executor.execute_signal(Signal(symbol="000001", side=OrderSide.SELL, price=12.0, quantity=1000))
+
+        risk_assets = risk_manager.get_risk_status().total_assets
+        broker_assets = broker.get_balance().total_assets
+        assert abs(risk_assets - broker_assets) < 0.01, (
+            f"风控权益 {risk_assets:.2f} 与券商 {broker_assets:.2f} 不一致"
+            f"（差额 {risk_assets - broker_assets:.2f}，非零即为重复计账）"
+        )
+
+    def test_daily_pnl_not_doubled(self, broker, risk_manager, tmp_path):
+        """当日盈亏不得重复累加"""
+        executor = TradeExecutor(broker=broker, risk_manager=risk_manager, db_path=tmp_path / "t.db")
+        executor.execute_signal(Signal(symbol="000001", side=OrderSide.BUY, price=10.0, quantity=1000))
+        executor._t_day = date.today() - timedelta(days=1)
+        executor.execute_signal(Signal(symbol="000001", side=OrderSide.SELL, price=12.0, quantity=1000))
+
+        status = risk_manager.get_risk_status()
+        # 毛利 2000，扣除买/卖佣金与印花税后应略小于 2000，绝不应接近 4000
+        assert 0 < status.daily_pnl < 2100, f"当日盈亏 {status.daily_pnl:.2f} 疑似重复计账"
+
+    def test_record_trade_without_assets_keeps_legacy_behaviour(self, risk_manager):
+        """回归保护：不传 total_assets 时仍按流水推进（既有单测契约不变）"""
+        from src.core.risk_manager import TradeRecord
+        before = risk_manager.get_risk_status().total_assets
+        risk_manager.record_trade(TradeRecord(
+            symbol="600519", side="sell", price=100.0, quantity=100,
+            amount=10_000.0, profit=500.0, is_stop_loss=False,
+        ))
+        assert risk_manager.get_risk_status().total_assets == before + 500.0
+
+
+class TestTPlusOne:
+    """A 股 T+1 可卖规则（2026-10-26 新增）
+
+    缺陷：买入后 available_quantity 立即等于持仓量，当日买入即可当日全部卖出，
+    与 A 股 T+1 规则不符，日内策略回测/实盘对照失真。
+    """
+
+    def _executor(self, broker, risk_manager, tmp_path):
+        return TradeExecutor(broker=broker, risk_manager=risk_manager, db_path=tmp_path / "t.db")
+
+    def test_same_day_sell_is_rejected(self, broker, risk_manager, tmp_path):
+        """当日买入的份额当日卖出应被拒（返回 None）"""
+        executor = self._executor(broker, risk_manager, tmp_path)
+        executor.execute_signal(Signal(symbol="600519", side=OrderSide.BUY, price=100.0, quantity=100))
+        result = executor.execute_signal(
+            Signal(symbol="600519", side=OrderSide.SELL, price=110.0, quantity=100)
+        )
+        assert result is None, "T+1 规则下当日买入份额不得当日卖出"
+        assert broker.get_positions()[0].quantity == 100, "被拒后持仓不应变化"
+
+    def test_next_day_sell_is_allowed(self, broker, risk_manager, tmp_path):
+        """次日（台账重置后）卖出应成交"""
+        executor = self._executor(broker, risk_manager, tmp_path)
+        executor.execute_signal(Signal(symbol="600519", side=OrderSide.BUY, price=100.0, quantity=100))
+        # 模拟跨日：把台账日期回拨，下一次调用会触发 _roll_trading_day 清空当日买入
+        executor._t_day = date.today() - timedelta(days=1)
+        result = executor.execute_signal(
+            Signal(symbol="600519", side=OrderSide.SELL, price=110.0, quantity=100)
+        )
+        assert result is not None
+        assert result.status == OrderStatus.FILLED
+
+    def test_mixed_holding_only_yesterday_part_sellable(self, broker, risk_manager, tmp_path):
+        """昨日持仓 100 + 今日买入 100 → 最多只能卖 100"""
+        broker.buy("600519", 100.0, 100)          # 昨日持仓（绕过执行器，不进当日台账）
+        executor = self._executor(broker, risk_manager, tmp_path)
+        executor._t_day = date.today()
+        executor.execute_signal(Signal(symbol="600519", side=OrderSide.BUY, price=100.0, quantity=100))
+
+        assert executor._available_for_sell("600519") == 100.0
+        assert executor.execute_signal(
+            Signal(symbol="600519", side=OrderSide.SELL, price=110.0, quantity=150)
+        ) is None, "超出可卖额度应被拒"
+
+        ok = executor.execute_signal(Signal(symbol="600519", side=OrderSide.SELL, price=110.0, quantity=100))
+        assert ok is not None and ok.status == OrderStatus.FILLED
+        assert broker.get_positions()[0].quantity == 100, "剩余当日买入的 100 股不可卖"
+
+
+class TestBrokerConcurrency:
+    """并发读写下持仓/余额读取的稳定性（2026-10-26 P1 修复回归）
+
+    缺陷：get_positions/get_balance/update_price 无锁遍历 dict，
+    而 buy/sell 会在另一线程 del self._positions[symbol]，
+    路由层又用 asyncio.to_thread 并发调用 → 偶发
+    "dictionary changed size during iteration" 500。
+    """
+
+    def test_concurrent_read_write_no_runtime_error(self, broker):
+        errors: list[BaseException] = []
+
+        def writer():
+            try:
+                for i in range(60):
+                    code = f"60{i % 5:04d}"
+                    broker.buy(code, 100.0, 100)
+                    broker.sell(code, 101.0, 100)
+                    broker.update_price(code, 102.0)
+            except BaseException as e:  # noqa: BLE001
+                errors.append(e)
+
+        def reader():
+            try:
+                for _ in range(200):
+                    broker.get_positions()
+                    broker.get_balance()
+            except BaseException as e:  # noqa: BLE001
+                errors.append(e)
+
+        threads = [threading.Thread(target=writer) for _ in range(2)] + \
+                  [threading.Thread(target=reader) for _ in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert not errors, f"并发读写抛异常: {errors[:3]}"
