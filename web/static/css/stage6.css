@@ -1,0 +1,123 @@
+/* ===== STAGE6: 基础 ===== 阶段六批次A 前端样式(仅新增,零改动存量)
+   约定:沿用阶段5 —— 44px 触摸目标、红涨绿跌(--hud-up #F87171 /
+   --hud-down #34D399)、hud-theme 变量兼容(带字面量回退)。 */
+
+.st6-up { color: var(--hud-up, #F87171); }
+.st6-down { color: var(--hud-down, #34D399); }
+.st6-flat { color: var(--text-muted, #8b92a8); }
+
+/* ===== STAGE6: watchboard ===== 盯盘页 */
+
+.st6-summary-card {
+  background: var(--bg-card, rgba(255,255,255,0.04));
+  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.st6-summary-big {
+  font-size: 26px; font-weight: 700; line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+}
+.st6-summary-meta {
+  font-size: 12px; color: var(--text-muted, #8b92a8); margin-top: 4px;
+  display: flex; gap: 12px; flex-wrap: wrap; align-items: center;
+}
+
+.st6-estimate-list { display: flex; flex-direction: column; gap: 10px; }
+.st6-estimate-card {
+  background: var(--bg-card, rgba(255,255,255,0.04));
+  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  border-radius: 10px;
+  padding: 12px;
+}
+.st6-estimate-top {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 8px; flex-wrap: wrap;
+}
+.st6-estimate-name { font-size: 14px; font-weight: 600; }
+.st6-estimate-code { font-size: 11px; color: var(--text-muted, #8b92a8); margin-left: 6px; }
+.st6-estimate-pct { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.st6-estimate-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 4px 16px; margin-top: 8px;
+}
+.st6-estimate-grid .st6-kv {
+  display: flex; justify-content: space-between; gap: 8px; min-width: 0;
+}
+.st6-estimate-grid .st6-k { font-size: 11px; color: var(--text-muted, #8b92a8); flex-shrink: 0; }
+.st6-estimate-grid .st6-v { font-size: 12px; font-weight: 600; text-align: right; }
+
+/* ===== STAGE6: confidence ===== 置信度徽标(前端强制显示) */
+
+.st6-conf {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; padding: 1px 8px; border-radius: 10px;
+  border: 1px solid var(--border, rgba(255,255,255,0.12));
+  color: var(--text-secondary, #c3c9d9);
+}
+.st6-conf-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.st6-conf-high .st6-conf-dot { background: var(--hud-down, #34D399); }
+.st6-conf-medium .st6-conf-dot { background: #f59e0b; }
+.st6-conf-low .st6-conf-dot { background: var(--hud-up, #F87171); }
+.st6-stale-mark {
+  font-size: 11px; color: #f59e0b; border: 1px dashed #f59e0b;
+  border-radius: 4px; padding: 1px 6px;
+}
+
+/* ===== STAGE6: risk-panel ===== 风险页 */
+
+.st6-window-tabs {
+  display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 12px;
+}
+.st6-window-tab {
+  min-height: 44px; min-width: 44px; display: inline-flex; align-items: center;
+  justify-content: center; padding: 8px 14px; border-radius: 6px;
+  cursor: pointer; font-size: 13px; color: var(--text-secondary, #c3c9d9);
+  background: rgba(255,255,255,0.03); border: 1px solid transparent;
+}
+.st6-window-tab.active {
+  background: var(--accent-blue, #3b82f6); color: #fff;
+}
+.st6-metric-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px; margin-bottom: 14px;
+}
+.st6-metric-card {
+  background: var(--bg-card, rgba(255,255,255,0.04));
+  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  border-radius: 10px; padding: 10px 12px;
+}
+.st6-metric-label { font-size: 11px; color: var(--text-muted, #8b92a8); }
+.st6-metric-value { font-size: 18px; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.st6-metric-hint { font-size: 11px; color: var(--text-muted, #8b92a8); margin-top: 2px; }
+.st6-risk-deep { color: var(--hud-up, #F87171); }   /* 深回撤等警示值 */
+.st6-note {
+  font-size: 11px; color: var(--text-muted, #8b92a8); margin-top: 6px;
+}
+
+/* ===== STAGE6: xray-report ===== 重叠矩阵与暴露表 */
+
+.st6-xray-warn {
+  border-left: 3px solid #f59e0b; padding: 6px 10px; margin-bottom: 6px;
+  font-size: 12px; color: var(--text-secondary, #c3c9d9);
+  background: rgba(245, 158, 11, 0.08); border-radius: 0 6px 6px 0;
+}
+.st6-xray-table-wrap { overflow-x: auto; max-width: 100%; }
+.st6-xray-table { min-width: 420px; width: 100%; }
+.st6-xray-table td, .st6-xray-table th { font-size: 12px; padding: 6px 8px; }
+.st6-cell-heat-0 { background: transparent; }
+.st6-cell-heat-1 { background: rgba(245, 158, 11, 0.15); }
+.st6-cell-heat-2 { background: rgba(245, 158, 11, 0.30); }
+.st6-cell-heat-3 { background: rgba(245, 158, 11, 0.48); }
+
+/* ===== STAGE6: ledger-io ===== 账本导入导出 */
+
+.st6-ledger-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.st6-diff-block { margin-top: 10px; font-size: 12px; }
+.st6-diff-title { font-weight: 600; margin: 8px 0 4px; }
+.st6-diff-item { padding: 2px 0; }
+.st6-confirm-row {
+  display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap;
+}
+.st6-confirm-row input[type="checkbox"] { width: 18px; height: 18px; min-width: 18px; min-height: 18px; }

@@ -862,6 +862,8 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 </style>
 <!-- ===== STAGE5: hud-theme ===== HUD 深空指挥舱主题(T05;移除 body 的 hud-theme 类即整体回退) -->
 <link rel="stylesheet" href="/static/css/hud.css">
+<!-- ===== STAGE6: 基础 ===== 阶段六批次A 样式(盯盘/风险/X-Ray/账本;独立文件净增) -->
+<link rel="stylesheet" href="/static/css/stage6.css">
 <!-- 性能优化:lightweight-charts 改为懒加载(仅在用户点击"走势"时加载),避免阻塞首屏 -->
 <link rel="preconnect" href="https://unpkg.com" crossorigin>
 <link rel="dns-prefetch" href="https://unpkg.com">
@@ -932,11 +934,78 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
             <span class="hud-subtab active" data-page="position" role="button" tabindex="0" onclick="switchPage('position')">持仓管理</span>
             <span class="hud-subtab" data-page="fund" role="button" tabindex="0" onclick="switchPage('fund')">基金管理</span>
             <span class="hud-subtab" data-page="trade" role="button" tabindex="0" onclick="switchPage('trade')">交易执行</span>
+            <!-- ===== STAGE6: watchboard ===== 阶段六批次A 新增二级 Tab(联动逻辑见 stage6-portfolio.js 的 switchPage 包装) -->
+            <span class="hud-subtab" data-page="watchboard" role="button" tabindex="0" onclick="switchPage('watchboard')">盯盘</span>
+            <span class="hud-subtab" data-page="risk" role="button" tabindex="0" onclick="switchPage('risk')">风险</span>
           </div>
           <!-- 二级操作区:补录向导(P0-1)+ 导入入口(P1-2,低可见,非底栏/一级按钮) -->
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <button class="btn btn-sm btn-outline" onclick="FundWizard.open()">持仓补录向导</button>
             <button class="btn btn-sm btn-outline" onclick="openUploadModal()">导入持仓</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== STAGE6: watchboard ===== 盯盘二级页(阶段六批次A;内容由 stage6-portfolio.js 渲染) -->
+      <div class="page" id="page-watchboard">
+        <div class="st6-summary-card">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
+            <div>
+              <div style="font-size:12px;color:var(--text-muted);">组合估算当日盈亏(元)</div>
+              <div class="st6-summary-big st6-flat" id="st6WbSummaryBig">—</div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button class="btn btn-sm btn-primary" onclick="St6Portfolio.loadWatchboard(true)">刷新</button>
+            </div>
+          </div>
+          <div class="st6-summary-meta" id="st6WbSummaryMeta">加载中…</div>
+        </div>
+        <!-- 推送设置(Server酱;凭据走 Render env,前端只读写开关与阈值) -->
+        <div class="card mb-16">
+          <div class="card-title">估值异动推送(Server酱)</div>
+          <div id="st6PushBody"><div style="color:var(--text-muted);font-size:12px;">加载中…</div></div>
+        </div>
+        <div id="st6WbBody">
+          <div style="color:var(--text-muted);text-align:center;padding:20px 0;font-size:13px;">点击上方「刷新」加载盘中估值</div>
+        </div>
+      </div>
+
+      <!-- ===== STAGE6: risk-panel ===== 风险二级页(风险指标 + X-Ray + 账本备份;内容由 stage6-portfolio.js 渲染) -->
+      <div class="page" id="page-risk">
+        <div class="hud-group-header">
+          <div class="st6-window-tabs" role="tablist" aria-label="风险窗口切换">
+            <span class="st6-window-tab" data-window="1m" role="button" tabindex="0" onclick="St6Portfolio.loadRisk('1m')">1月</span>
+            <span class="st6-window-tab active" data-window="3m" role="button" tabindex="0" onclick="St6Portfolio.loadRisk('3m')">3月</span>
+            <span class="st6-window-tab" data-window="1y" role="button" tabindex="0" onclick="St6Portfolio.loadRisk('1y')">1年</span>
+            <span class="st6-window-tab" data-window="max" role="button" tabindex="0" onclick="St6Portfolio.loadRisk('max')">全部</span>
+          </div>
+        </div>
+        <div class="st6-metric-grid" id="st6RiskSummary"></div>
+        <div class="card mb-16">
+          <div class="card-title">单基金风险指标</div>
+          <div id="st6RiskBody">
+            <div style="color:var(--text-muted);text-align:center;padding:20px 0;font-size:13px;">切换上方窗口加载风险指标</div>
+          </div>
+        </div>
+        <div class="card mb-16">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+            <span>持仓重叠 X-Ray(前十大重仓)</span>
+            <button class="btn btn-sm btn-primary" onclick="St6Portfolio.loadXray()">分析</button>
+          </div>
+          <div id="st6XrayBody">
+            <div style="color:var(--text-muted);text-align:center;padding:20px 0;font-size:13px;">点击「分析」计算基金两两重叠度与集中度预警</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">账本备份(JSON 全量)</div>
+          <div class="st6-ledger-actions">
+            <button class="btn btn-sm btn-primary" onclick="St6Portfolio.downloadExport()">导出账本</button>
+            <input type="file" id="st6LedgerFile" accept=".json" style="display:none;" onchange="St6Portfolio.ledgerFileChosen(this)">
+            <button class="btn btn-sm" onclick="document.getElementById('st6LedgerFile').click()">选择账本文件</button>
+            <button class="btn btn-sm" onclick="St6Portfolio.ledgerPreview()">预览影响</button>
+          </div>
+          <div id="st6LedgerDiff">
+            <div class="st6-note">导出含基金持仓/股票持仓/自选/推送配置;凭据字段永不入导出文件。导入前自动备份到 data/backup/。</div>
           </div>
         </div>
       </div>
@@ -5883,5 +5952,7 @@ document.addEventListener('DOMContentLoaded', () => {
 <script src="/static/js/signal-progress.js"></script>
 <!-- ===== STAGE5: sectors ===== 板块聚合视图(P2-2) -->
 <script src="/static/js/sectors.js"></script>
+<!-- ===== STAGE6: watchboard ===== 阶段六批次A(盯盘/风险/X-Ray/账本;含 switchPage 二级 Tab 包装) -->
+<script src="/static/js/stage6-portfolio.js"></script>
 </body>
 </html>
