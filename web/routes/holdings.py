@@ -160,6 +160,23 @@ def _parse_excel_holdings(contents: bytes) -> list[dict]:
     return _normalize_holdings_df(df)
 
 
+# P2 修复(2026-10-26):xlsx 本质是 zip，10MB 的压缩包解压后可达数 GB（解压炸弹）。
+# 原实现只限制**压缩前** 10MB，pandas 解压时会把内存撑爆，Render Free 512MB 直接 OOM。
+# 这里在下钻到解析前先读中央目录里的 file_size（只算不读，代价极低）。
+_XLSX_MAX_UNCOMPRESSED = 80 * 1024 * 1024  # 80MB，正常持仓表远小于此
+
+
+def _xlsx_uncompressed_size(contents: bytes) -> int:
+    """返回 xlsx 解压后的总体积；非 zip 或读取失败返回 0（交由后续解析兜底）。"""
+    try:
+        import zipfile
+
+        with zipfile.ZipFile(io.BytesIO(contents)) as zf:
+            return sum(info.file_size for info in zf.infolist())
+    except Exception:
+        return 0
+
+
 @router.post("/upload", dependencies=[Depends(require_admin)])
 @limiter.limit("3/minute")
 async def upload_holdings_file(request: Request, file: UploadFile = File(...)) -> dict[str, Any]:
@@ -194,6 +211,18 @@ async def upload_holdings_file(request: Request, file: UploadFile = File(...)) -
         holdings = await asyncio.to_thread(_parse_csv_holdings, contents)
         source = "csv"
     elif ext in _ALLOWED_EXCEL_EXTS:
+        # 解压炸弹防护(2026-10-26)：先看解压后体积，再决定是否交给 pandas
+        if ext == ".xlsx":
+            uncompressed = _xlsx_uncompressed_size(contents)
+            if uncompressed > _XLSX_MAX_UNCOMPRESSED:
+                logger.warning(
+                    f"拒绝可疑 xlsx: 压缩 {len(contents)} B 解压后 {uncompressed} B，"
+                    f"超过上限 {_XLSX_MAX_UNCOMPRESSED} B"
+                )
+                raise HTTPException(
+                    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    "表格解压后体积过大,疑似构造文件,请提供正常导出的持仓表",
+                )
         holdings = await asyncio.to_thread(_parse_excel_holdings, contents)
         source = "excel"
     elif ext in _ALLOWED_IMAGE_EXTS:

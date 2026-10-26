@@ -341,3 +341,46 @@ class TestRecognizeHoldingsImage:
         with patch.object(ai_service.requests, "post", return_value=mock_resp):
             result = ai_service.recognize_holdings_from_image(b"fake", "image/png")
         assert result == []
+
+
+class TestXlsxBombGuard:
+    """xlsx 解压炸弹防护（2026-10-26 P2 修复回归）
+
+    缺陷：上传只限制**压缩前** 10MB，而 xlsx 是 zip，10MB 可解压成数 GB，
+    pandas 解压时把 512MB 的 Render Free 实例直接打爆。
+    """
+
+    @staticmethod
+    def _make_zip(payload_size: int) -> bytes:
+        import io
+        import zipfile
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("xl/worksheets/sheet1.xml", b"0" * payload_size)
+        return buf.getvalue()
+
+    def test_measures_uncompressed_size(self):
+        from web.routes.holdings import _xlsx_uncompressed_size
+
+        data = self._make_zip(1024 * 1024)
+        assert _xlsx_uncompressed_size(data) >= 1024 * 1024
+        assert len(data) < 100 * 1024, "构造的样本应高度可压缩，才能体现'压缩比异常'"
+
+    def test_rejects_when_uncompressed_exceeds_limit(self, client):
+        data = self._make_zip(1024 * 1024)
+        with patch("web.routes.holdings._XLSX_MAX_UNCOMPRESSED", 1024):
+            resp = client.post(
+                "/api/holdings/upload",
+                files={"file": ("holdings.xlsx", data,
+                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+            )
+        assert resp.status_code == 413
+        assert "解压后体积过大" in resp.json()["detail"]
+
+    def test_normal_small_xlsx_not_blocked(self, client):
+        """回归保护：正常体积不应被误杀（这里用超小 csv 走同一条 413 前置逻辑）"""
+        from web.routes.holdings import _xlsx_uncompressed_size
+
+        data = self._make_zip(2048)
+        assert _xlsx_uncompressed_size(data) < 80 * 1024 * 1024
