@@ -34,13 +34,26 @@ def _get_lock(path: str) -> threading.Lock:
         return _file_locks[path]
 
 
-def atomic_write_json(file_path: str | Path, data: Any, indent: int = 2) -> None:
+def atomic_write_json(
+    file_path: str | Path,
+    data: Any,
+    indent: int = 2,
+    default: Any = None,
+) -> None:
     """原子写入 JSON 文件(防止崩溃导致数据损坏)。
 
     流程:
     1. 写入 <path>.tmp 临时文件,fsync 保证落盘
     2. 同步备份现有主文件到 <path>.bak
     3. os.replace 原子替换(POSIX/Windows 均保证原子性)
+
+    Args:
+        file_path: 目标文件路径
+        data: 待序列化数据
+        indent: 缩进
+        default: 传给 json.dump 的 default 回调,仅在遇到无法原生序列化的
+            叶子类型时被调用(2026-10-26 新增)。**不要**拿它做整体转换——
+            对整体调用会把 list/dict 提前变成字符串,读回时类型丢失。
 
     Raises:
         OSError/IOError: 文件系统错误(空间不足/权限拒绝)
@@ -53,7 +66,7 @@ def atomic_write_json(file_path: str | Path, data: Any, indent: int = 2) -> None
     with lock:
         # 1. 写入 .tmp 临时文件(若存在残留则覆盖)
         with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=indent)
+            json.dump(data, f, ensure_ascii=False, indent=indent, default=default)
             f.flush()
             try:
                 os.fsync(f.fileno())

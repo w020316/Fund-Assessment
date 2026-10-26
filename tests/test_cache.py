@@ -285,3 +285,49 @@ class TestCacheDirCreation:
         assert not cache_dir.exists()
         DataCache(cache_dir=str(cache_dir))
         assert cache_dir.exists()
+
+
+class TestFileLayerTypeFidelity:
+    """文件层类型保真（2026-10-26 P1 修复回归）
+
+    缺陷：DataCache.set 对整个 value 调 _serialize()，而 _serialize 的兜底分支是
+    str(obj)，导致 list/dict 被整体转成 Python repr 字符串写入文件。
+    内存层命中时无感知，但进程重启或 LRU 淘汰后回落到文件层即读回字符串，
+    表现为接口返回 "[{...}]" 这样的字符串而非数组。
+    本类锁定：跨实例（模拟进程重启）读回必须保持原始 JSON 类型。
+    """
+
+    def test_list_survives_new_instance(self, tmp_path):
+        """list 经文件层跨实例读回应仍为 list"""
+        from src.core.cache import DataCache
+
+        cache_dir = str(tmp_path / "c")
+        payload = [{"date": "2026-07-28", "nav": 2.71}, {"date": "2026-07-29", "nav": 2.724}]
+        DataCache(cache_dir=cache_dir, default_ttl=300).set("fund_history:110022:1y", payload, ttl=300)
+
+        got = DataCache(cache_dir=cache_dir, default_ttl=300).get("fund_history:110022:1y")
+        assert isinstance(got, list), f"期望 list，实际 {type(got).__name__}: {got!r}"
+        assert got == payload
+
+    def test_nested_dict_survives_new_instance(self, tmp_path):
+        """嵌套 dict（行情快照典型结构）跨实例读回结构不丢"""
+        from src.core.cache import DataCache
+
+        cache_dir = str(tmp_path / "c")
+        payload = {"top_gainers": [{"code": "600519", "change_pct": 3.2}], "count": 1}
+        DataCache(cache_dir=cache_dir, default_ttl=300).set("market:hot_stocks", payload, ttl=300)
+
+        got = DataCache(cache_dir=cache_dir, default_ttl=300).get("market:hot_stocks")
+        assert isinstance(got, dict), f"期望 dict，实际 {type(got).__name__}: {got!r}"
+        assert got["top_gainers"][0]["code"] == "600519"
+        assert got["count"] == 1
+
+    def test_pydantic_model_still_serialized(self, tmp_path):
+        """Pydantic 模型仍可写入（回归保护）"""
+        from src.core.cache import DataCache
+
+        cache_dir = str(tmp_path / "c")
+        DataCache(cache_dir=cache_dir, default_ttl=300).set("stock", _Item(code="600519", price=1688.0))
+
+        got = DataCache(cache_dir=cache_dir, default_ttl=300).get("stock")
+        assert got == {"code": "600519", "price": 1688.0}

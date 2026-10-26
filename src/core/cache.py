@@ -143,15 +143,20 @@ class DataCache:
         # 1. 写内存层(后续命中走内存)
         self._memory.set(key, value, ttl=effective_ttl)
         # 2. 写文件层(原子写入,防止并发写损坏)
-        # 先序列化 value(Pydantic model/set/bytes 等),确保 JSON 可序列化
-        serialized = _serialize(value)
+        # P1 修复(2026-10-26):原实现对**整个 value** 调用 _serialize(),
+        # 而 _serialize 的兜底分支是 str(obj) —— 于是 list/dict 被整体转成
+        # Python repr 字符串写入文件(如 "[{'date': '2026-07-28', ...}]")。
+        # 内存层命中时看不出问题,但一旦进程重启或 LRU 淘汰后回落到文件层,
+        # 读回的就是 str 而非 list/dict,前端会拿到字符串 → 渲染异常/"暂无数据"。
+        # 现改为:value 原样写入,仅把 _serialize 作为 json.dump 的 default 回调,
+        # 只在遇到 Pydantic 模型/set/bytes 等无法原生序列化的叶子时触发。
         path = self.cache_dir / f"{self._safe_key(key)}.json"
         data = {
-            "value": serialized,
+            "value": value,
             "_timestamp": time.time(),
             "_ttl": effective_ttl,
         }
-        atomic_write_json(path, data)
+        atomic_write_json(path, data, default=_serialize)
 
     def delete(self, key: str):
         self._memory.delete(key)
