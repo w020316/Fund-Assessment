@@ -397,3 +397,33 @@ class TestFundCodeValidation:
         with patch("web.routes.holdings.analyze_fund_holdings", return_value={"holdings": []}):
             resp = client.get("/api/holdings/110022")
         assert resp.status_code == 200
+
+
+class TestEmptyHoldingsNotCached:
+    """空重仓股结果不得缓存、不得报满分质量（2026-10-26 阶段 4 修复）
+
+    缺陷：analyze_fund_holdings 返回空时，路由无条件 cache.set 并走
+    _build_meta(cached=False) → quality=80；命中缓存后 cached=True → quality=**100**。
+    等于把"上游拿不到数据"标成"数据质量最好"，还让空结果污染缓存 5 分钟，
+    用户期间再怎么点都是同一个空结果。
+    """
+
+    def test_empty_holdings_not_cached_and_quality_zero(self, client):
+        with patch("web.routes.holdings.analyze_fund_holdings", return_value={"holdings": []}), \
+             patch("web.routes.holdings.cache") as mock_cache:
+            mock_cache.get.return_value = None      # 未命中缓存（必须在请求前设置）
+            resp = client.get("/api/holdings/110022")
+        assert resp.status_code == 200
+        assert resp.json()["_meta"]["quality_score"] == 0.0
+        assert resp.json()["_meta"]["cached"] is False
+        mock_cache.set.assert_not_called()
+
+    def test_non_empty_holdings_still_cached(self, client):
+        """回归保护：有数据时仍正常缓存"""
+        payload = {"holdings": [{"code": "600519", "name": "贵州茅台", "weight": 0.098}]}
+        with patch("web.routes.holdings.analyze_fund_holdings", return_value=payload), \
+             patch("web.routes.holdings.cache") as mock_cache:
+            mock_cache.get.return_value = None
+            resp = client.get("/api/holdings/110022")
+        assert resp.status_code == 200
+        mock_cache.set.assert_called_once()

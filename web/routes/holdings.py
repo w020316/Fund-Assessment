@@ -65,6 +65,15 @@ async def fund_holdings_analysis(
 
     try:
         data = await analyze_fund_holdings(fund_code)
+        # P1 修复(2026-10-26)：空结果不写缓存，且质量分记 0。
+        # 原实现无条件 cache.set + _build_meta(cached=False) → 空结果 quality=80；
+        # 一旦被缓存，后续命中走 cached=True 分支，quality 反而变成 **100（满分）**——
+        # 等于把"上游拿不到数据"标成"数据质量最好"，还让空结果污染 5 分钟。
+        # 实测：110022/161725/000001/519674 四个代码全部返回 holdings=[] 且 quality=100。
+        holdings_count = len((data or {}).get("holdings") or [])
+        if holdings_count == 0:
+            logger.info(f"holdings {fund_code} 返回空数据，不写缓存（避免空值污染 + 质量分虚高）")
+            return {"data": data, "_meta": _build_meta("em_fund+akshare", cached=False, quality_score=0.0)}
         # 缓存5分钟(持仓数据变化慢,但净值影响需刷新)
         cache.set(f"holdings:{fund_code}", data, ttl=300)
         return {"data": data, "_meta": _build_meta("em_fund+akshare", cached=False)}
