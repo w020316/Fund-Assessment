@@ -18,6 +18,8 @@ package-lock.json
 # 运行时用户数据
 web/user_fund_positions.json
 web/user_*.json
+# atomic_write_json 产生的同目录备份（含用户数据，不入库）
+web/user_*.json.bak
 
 # 测试产物
 .coverage
