@@ -384,3 +384,16 @@ class TestXlsxBombGuard:
 
         data = self._make_zip(2048)
         assert _xlsx_uncompressed_size(data) < 80 * 1024 * 1024
+
+
+class TestFundCodeValidation:
+    """路径参数基金代码校验（2026-10-26 A-15）"""
+
+    def test_rejects_non_numeric_fund_code(self, client):
+        resp = client.get("/api/holdings/not-a-code")
+        assert resp.status_code == 422
+
+    def test_accepts_six_digit_fund_code(self, client):
+        with patch("web.routes.holdings.analyze_fund_holdings", return_value={"holdings": []}):
+            resp = client.get("/api/holdings/110022")
+        assert resp.status_code == 200

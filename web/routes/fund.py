@@ -297,11 +297,17 @@ async def search_fund(q: str = Query(..., min_length=1, description="基金代�
 # ============ 基金实时行情聚合 ============
 
 @router.get("/realtime")
-async def fund_realtime(codes: str = Query(..., description="基金代码,逗号分隔")):
+async def fund_realtime(codes: str = Query(..., max_length=200,
+                                           description="基金代码,逗号分隔（最多约 20 个 6 位数字代码）")):
     """基金实时行情(腾讯接口,支持批量)。"""
     code_list = [c.strip() for c in codes.split(",") if c.strip()]
     if not code_list:
         return {"data": []}
+    # P2 加固(2026-10-26)：代码会拼进外部请求 URL 并作缓存键，先做格式校验，
+    # 避免任意字符串进入上游请求与缓存文件（空串仍放行，保持原有"空列表返回空数据"语义）。
+    invalid = [c for c in code_list if not re.fullmatch(r"\d{6}", c)]
+    if invalid:
+        return {"data": [], "error": f"基金代码需为 6 位数字: {invalid[:3]}"}
     # P2-4 修复:实时行情缓存 10s(实时性优先,但避免 1s 内多次刷新打爆腾讯接口)
     cache_key = f"fund_realtime:{codes.strip()}"
     cached = _fund_cache.get(cache_key)
@@ -321,7 +327,8 @@ async def fund_realtime(codes: str = Query(..., description="基金代码,逗号
 # ============ 基金历史净值 ============
 
 @router.get("/history")
-async def fund_history(code: str = Query(...), period: str = Query("1y")):
+async def fund_history(code: str = Query(..., pattern=r"^\d{6}$", description="6 位基金代码"),
+                       period: str = Query("1y", max_length=8, description="周期，如 1y/6m/3y")):
     """基金历史净值。"""
     # P2-4 修复:历史净值缓存 300s(日级更新数据,5分钟足够,避免重复拉取)
     cache_key = f"fund_history:{code}:{period}"

@@ -270,3 +270,35 @@ class TestAdviceAuth:
             with patch("src.analysis.fund_advisor.generate_fund_advice", return_value=_MOCK_ADVICE):
                 resp = client.get("/api/fund/advice")
         assert resp.status_code == 200
+
+
+class TestCodeFormatValidation:
+    """基金代码格式校验（2026-10-26 A-15）
+
+    缺陷：代码未校验就拼进外部请求 URL 与缓存键，任意字符串可进入上游请求与缓存文件名。
+    """
+
+    def test_history_rejects_non_numeric_code(self, client):
+        resp = client.get("/api/fund/history", params={"code": "abc", "period": "1y"})
+        assert resp.status_code == 422
+
+    def test_history_rejects_wrong_length(self, client):
+        resp = client.get("/api/fund/history", params={"code": "11002", "period": "1y"})
+        assert resp.status_code == 422
+
+    def test_history_accepts_six_digit_code(self, client):
+        with patch("web.routes.fund.get_fund_history_tencent", return_value=_MOCK_HISTORY):
+            resp = client.get("/api/fund/history", params={"code": "110022", "period": "1y"})
+        assert resp.status_code == 200
+
+    def test_realtime_flags_invalid_codes(self, client):
+        resp = client.get("/api/fund/realtime", params={"codes": "110022,abc"})
+        assert resp.status_code == 200
+        assert resp.json()["data"] == []
+        assert "6 位数字" in resp.json()["error"]
+
+    def test_realtime_keeps_empty_codes_compatible(self, client):
+        """回归保护：空 codes 仍返回空数据而不是报错"""
+        resp = client.get("/api/fund/realtime", params={"codes": ""})
+        assert resp.status_code == 200
+        assert resp.json()["data"] == []

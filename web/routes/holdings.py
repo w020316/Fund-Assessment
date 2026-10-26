@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Any
 
 import pandas as pd
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, Request, UploadFile, status
 from loguru import logger
 
 from src.analysis.fund_holdings import (
@@ -43,7 +43,7 @@ def _build_meta(data_source: str, cached: bool = False, quality_score: float | N
 
 @router.get("/{fund_code}")
 async def fund_holdings_analysis(
-    fund_code: str,
+    fund_code: str = Path(..., pattern=r"^\d{6}$", description="6 位基金代码"),
     refresh: bool = Query(False, description="强制刷新(忽略缓存)"),
 ):
     """基金重仓股板块分析
