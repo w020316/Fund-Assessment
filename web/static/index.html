@@ -778,6 +778,25 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
   margin-bottom: 4px;
   animation: skeleton-pulse 1.5s ease-in-out infinite;
 }
+
+/* ===== STAGE5: ia-merge ===== 聚合容器二级 tab 栏(T03) */
+.hud-group-header {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-bottom: 14px; flex-wrap: wrap;
+}
+.hud-subtabs {
+  display: flex; gap: 4px; flex-wrap: wrap;
+  background: rgba(255,255,255,0.03); border-radius: 8px; padding: 4px;
+}
+.hud-subtab {
+  min-height: 44px; display: inline-flex; align-items: center;
+  padding: 8px 16px; border-radius: 6px; cursor: pointer;
+  color: var(--text-secondary); font-size: 13px; font-weight: 500;
+  transition: var(--transition);
+}
+.hud-subtab:hover { color: var(--text-primary); }
+.hud-subtab.active { background: var(--accent-blue); color: #fff; }
+
 </style>
 <!-- 性能优化:lightweight-charts 改为懒加载(仅在用户点击"走势"时加载),避免阻塞首屏 -->
 <link rel="preconnect" href="https://unpkg.com" crossorigin>
@@ -805,42 +824,83 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 
   <div class="main-layout">
     <!-- ========== 左侧导航 ========== -->
+    <!-- ===== STAGE5: ia-merge ===== 一级导航 10→5(旧 10 页经 STAGE5_PAGE_MAP 兼容映射,无死链) -->
     <nav class="sidebar">
       <!-- (2026-07-31) P2-2 无障碍: nav-item 添加 role/tabindex/aria-label -->
-      <div class="nav-item active" data-page="market" role="button" tabindex="0" aria-label="行情总览" onclick="switchPage('market')">
-        <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg></span><span>行情总览</span><span class="kbd" style="margin-left:auto;">1</span>
+      <div class="nav-item active" data-page="hud-market" role="button" tabindex="0" aria-label="行情" onclick="switchPage('hud-market')">
+        <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg></span><span>行情</span><span class="kbd" style="margin-left:auto;">1</span>
       </div>
-      <div class="nav-item" data-page="ai" role="button" tabindex="0" aria-label="智能分析" onclick="switchPage('ai')">
-        <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/></svg></span><span>智能分析</span><span class="kbd" style="margin-left:auto;">2</span>
+      <div class="nav-item" data-page="hud-holdings" role="button" tabindex="0" aria-label="持仓" onclick="switchPage('hud-holdings')">
+        <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></svg></span><span>持仓</span><span class="kbd" style="margin-left:auto;">2</span>
       </div>
-      <div class="nav-item" data-page="strategy" role="button" tabindex="0" aria-label="策略中心" onclick="switchPage('strategy')">
-        <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg></span><span>策略中心</span><span class="kbd" style="margin-left:auto;">3</span>
+      <div class="nav-item" data-page="hud-strategy" role="button" tabindex="0" aria-label="策略" onclick="switchPage('hud-strategy')">
+        <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg></span><span>策略</span><span class="kbd" style="margin-left:auto;">3</span>
       </div>
-      <div class="nav-item" data-page="trade" role="button" tabindex="0" aria-label="交易执行" onclick="switchPage('trade')">
-        <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 7-7"/><path d="M17 7h4v4"/></svg></span><span>交易执行</span><span class="kbd" style="margin-left:auto;">4</span>
+      <div class="nav-item" data-page="hud-monitor" role="button" tabindex="0" aria-label="监控" onclick="switchPage('hud-monitor')">
+        <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></span><span>监控</span><span class="kbd" style="margin-left:auto;">4</span>
       </div>
-      <div class="nav-item" data-page="position" role="button" tabindex="0" aria-label="持仓管理" onclick="switchPage('position')">
-        <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></svg></span><span>持仓管理</span><span class="kbd" style="margin-left:auto;">5</span>
-      </div>
-      <div class="nav-item" data-page="fund" role="button" tabindex="0" aria-label="基金管理" onclick="switchPage('fund')">
-        <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg></span><span>基金管理</span><span class="kbd" style="margin-left:auto;">6</span>
-      </div>
-      <div class="nav-item" data-page="global" role="button" tabindex="0" aria-label="国际市场" onclick="switchPage('global')">
-        <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18"/><path d="M12 3a15 15 0 0 0 0 18"/></svg></span><span>国际市场</span><span class="kbd" style="margin-left:auto;">7</span>
-      </div>
-      <div class="nav-item" data-page="data" role="button" tabindex="0" aria-label="数据中心" onclick="switchPage('data')">
-        <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg></span><span>数据中心</span><span class="kbd" style="margin-left:auto;">8</span>
-      </div>
-      <div class="nav-item" data-page="monitor" role="button" tabindex="0" aria-label="监控预警" onclick="switchPage('monitor')">
-        <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></span><span>监控预警</span><span class="kbd" style="margin-left:auto;">9</span>
-      </div>
-      <div class="nav-item" data-page="config" role="button" tabindex="0" aria-label="系统配置" onclick="switchPage('config')">
-        <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg></span><span>系统配置</span><span class="kbd" style="margin-left:auto;">0</span>
+      <div class="nav-item" data-page="hud-settings" role="button" tabindex="0" aria-label="设置" onclick="switchPage('hud-settings')">
+        <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg></span><span>设置</span><span class="kbd" style="margin-left:auto;">5</span>
       </div>
     </nav>
 
     <!-- ========== 主内容区 ========== -->
     <main class="content" id="mainContent">
+
+      <!-- ===== STAGE5: ia-merge ===== 5 个一级聚合容器(IA 10→5)。
+           设计决策(最小变更):存量 10 个 page div 原地零搬动,聚合容器仅承载
+           二级 tab 栏与操作入口,与子页以"兄弟同时 active"方式联动显示
+           (switchPage 父子联动,见下方 JS 的 STAGE5_PAGE_MAP)。
+           主理人拍板:旧「交易执行」页并入「持仓」聚合容器(trade → hud-holdings)。 -->
+      <div class="page active" id="page-hud-market">
+        <div class="hud-group-header">
+          <div class="hud-subtabs" role="tablist" aria-label="行情二级导航">
+            <span class="hud-subtab active" data-page="market" role="button" tabindex="0" onclick="switchPage('market')">行情总览</span>
+            <span class="hud-subtab" data-page="global" role="button" tabindex="0" onclick="switchPage('global')">国际市场</span>
+            <span class="hud-subtab" data-page="data" role="button" tabindex="0" onclick="switchPage('data')">深度数据</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="page" id="page-hud-holdings">
+        <div class="hud-group-header">
+          <div class="hud-subtabs" role="tablist" aria-label="持仓二级导航">
+            <span class="hud-subtab active" data-page="position" role="button" tabindex="0" onclick="switchPage('position')">持仓管理</span>
+            <span class="hud-subtab" data-page="fund" role="button" tabindex="0" onclick="switchPage('fund')">基金管理</span>
+            <span class="hud-subtab" data-page="trade" role="button" tabindex="0" onclick="switchPage('trade')">交易执行</span>
+          </div>
+          <!-- 二级操作区:补录向导(P0-1)+ 导入入口(P1-2,低可见,非底栏/一级按钮) -->
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn btn-sm btn-outline" onclick="FundWizard.open()">持仓补录向导</button>
+            <button class="btn btn-sm btn-outline" onclick="openUploadModal()">导入持仓</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="page" id="page-hud-strategy">
+        <div class="hud-group-header">
+          <div class="hud-subtabs" role="tablist" aria-label="策略二级导航">
+            <span class="hud-subtab active" data-page="strategy" role="button" tabindex="0" onclick="switchPage('strategy')">策略中心</span>
+            <span class="hud-subtab" data-page="ai" role="button" tabindex="0" onclick="switchPage('ai')">智能分析</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="page" id="page-hud-monitor">
+        <div class="hud-group-header">
+          <div class="hud-subtabs" role="tablist" aria-label="监控二级导航">
+            <span class="hud-subtab active" data-page="monitor" role="button" tabindex="0" onclick="switchPage('monitor')">监控预警</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="page" id="page-hud-settings">
+        <div class="hud-group-header">
+          <div class="hud-subtabs" role="tablist" aria-label="设置二级导航">
+            <span class="hud-subtab active" data-page="config" role="button" tabindex="0" onclick="switchPage('config')">系统配置</span>
+          </div>
+        </div>
+      </div>
 
       <!-- ==================== 1. 行情总览 ==================== -->
       <div class="page active" id="page-market">
@@ -1653,48 +1713,29 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
     </main>
   </div>
 
-  <!-- 底部标签栏（移动端）— 全新设计(2026-08-01) -->
+  <!-- 底部标签栏（移动端）— 阶段5 IA 10→5:5 tab 每项 ≥20% 宽度,天然满足 44px(K2/K3) -->
+  <!-- ===== STAGE5: ia-merge ===== -->
   <nav class="bottom-tab-bar">
     <div class="tab-items">
-      <div class="bottom-tab-item active" data-page="market" onclick="switchPage('market')">
+      <div class="bottom-tab-item active" data-page="hud-market" onclick="switchPage('hud-market')">
         <span class="tab-indicator"></span>
         <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg></span><span>行情</span>
       </div>
-      <div class="bottom-tab-item" data-page="ai" onclick="switchPage('ai')">
-        <span class="tab-indicator"></span>
-        <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/></svg></span><span>分析</span>
-      </div>
-      <div class="bottom-tab-item" data-page="strategy" onclick="switchPage('strategy')">
-        <span class="tab-indicator"></span>
-        <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg></span><span>策略</span>
-      </div>
-      <div class="bottom-tab-item" data-page="trade" onclick="switchPage('trade')">
-        <span class="tab-indicator"></span>
-        <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 7-7"/><path d="M17 7h4v4"/></svg></span><span>交易</span>
-      </div>
-      <div class="bottom-tab-item" data-page="position" onclick="switchPage('position')">
+      <div class="bottom-tab-item" data-page="hud-holdings" onclick="switchPage('hud-holdings')">
         <span class="tab-indicator"></span>
         <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></svg></span><span>持仓</span>
       </div>
-      <div class="bottom-tab-item" data-page="fund" onclick="switchPage('fund')">
+      <div class="bottom-tab-item" data-page="hud-strategy" onclick="switchPage('hud-strategy')">
         <span class="tab-indicator"></span>
-        <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg></span><span>基金</span>
+        <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg></span><span>策略</span>
       </div>
-      <div class="bottom-tab-item" data-page="global" onclick="switchPage('global')">
-        <span class="tab-indicator"></span>
-        <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18"/><path d="M12 3a15 15 0 0 0 0 18"/></svg></span><span>国际</span>
-      </div>
-      <div class="bottom-tab-item" data-page="data" onclick="switchPage('data')">
-        <span class="tab-indicator"></span>
-        <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg></span><span>数据</span>
-      </div>
-      <div class="bottom-tab-item" data-page="monitor" onclick="switchPage('monitor')">
+      <div class="bottom-tab-item" data-page="hud-monitor" onclick="switchPage('hud-monitor')">
         <span class="tab-indicator"></span>
         <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></span><span>监控</span>
       </div>
-      <div class="bottom-tab-item" data-page="config" onclick="switchPage('config')">
+      <div class="bottom-tab-item" data-page="hud-settings" onclick="switchPage('hud-settings')">
         <span class="tab-indicator"></span>
-        <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg></span><span>配置</span>
+        <span class="tab-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg></span><span>设置</span>
       </div>
     </div>
   </nav>
@@ -1708,7 +1749,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 
 <!-- 快捷键提示条 -->
 <div class="shortcut-hint" id="shortcutHint">
-  <span><span class="kbd">1</span>-<span class="kbd">8</span> 切换页面</span>
+  <span><span class="kbd">1</span>-<span class="kbd">5</span> 切换页面</span>
   <span><span class="kbd">Ctrl</span>+<span class="kbd">K</span> 搜索</span>
   <span><span class="kbd">?</span> 快捷键</span>
 </div>
@@ -1906,6 +1947,32 @@ function renderEmpty(container, msg='暂无数据', hint='') {
 
 /* ========== 页面切换 ========== */
 function switchPage(name) {
+  /* ===== STAGE5: ia-merge ===== IA 10→5 父子联动。
+     STAGE5_PAGE_MAP(唯一权威来源,QA 按此走查无死链):
+     旧 10 个 pageId → 所属一级聚合容器;二级 tab 高亮直接用旧 pageId。
+     主理人拍板:trade 并入「持仓」聚合容器(hud-holdings)。 */
+  const STAGE5_PAGE_MAP = {
+    market:   { parent: 'hud-market' },
+    global:   { parent: 'hud-market' },
+    data:     { parent: 'hud-market' },
+    position: { parent: 'hud-holdings' },
+    fund:     { parent: 'hud-holdings' },
+    trade:    { parent: 'hud-holdings' },
+    ai:       { parent: 'hud-strategy' },
+    strategy: { parent: 'hud-strategy' },
+    monitor:  { parent: 'hud-monitor' },
+    config:   { parent: 'hud-settings' },
+  };
+  // 一级聚合容器 id 翻译为其默认子页(容器本身只承载二级 tab 栏)
+  const STAGE5_GROUP_DEFAULT = {
+    'hud-market': 'market',
+    'hud-holdings': 'position',
+    'hud-strategy': 'strategy',
+    'hud-monitor': 'monitor',
+    'hud-settings': 'config',
+  };
+  if (STAGE5_GROUP_DEFAULT[name]) name = STAGE5_GROUP_DEFAULT[name];
+
   // P2-1 修复(2026-07-30):离开 market 页面时清理 marketRefreshTimer,
   // 避免后台持续 15s 轮询占用带宽与 API 配额(原代码只在 loadMarketData 内
   // clearInterval 重建,切走后旧 timer 仍持续运行)。
@@ -1942,6 +2009,23 @@ function switchPage(name) {
   if (name === 'trade') loadTradeData();
   if (name === 'data') loadDataTab();
   if (name === 'ai') { loadLlmProvider(); loadScriptLibrary(); }
+
+  /* ===== STAGE5: ia-merge ===== 父子联动:
+     ① 旧 pageId 的父聚合容器保持 active(否则二级 tab 栏消失);
+     ② 一级导航/移动底栏高亮父容器项(旧 pageId 在 5 项导航中无对应项);
+     ③ 二级 tab 高亮当前子页。 */
+  const st5Entry = STAGE5_PAGE_MAP[name];
+  if (st5Entry) {
+    const parentPage = document.getElementById('page-' + st5Entry.parent);
+    if (parentPage) parentPage.classList.add('active');
+    const navItem = document.querySelector(`.nav-item[data-page="${st5Entry.parent}"]`);
+    if (navItem) navItem.classList.add('active');
+    const tabItem = document.querySelector(`.bottom-tab-item[data-page="${st5Entry.parent}"]`);
+    if (tabItem) tabItem.classList.add('active');
+    document.querySelectorAll('.hud-subtab').forEach(t => t.classList.remove('active'));
+    const subtab = document.querySelector(`.hud-subtab[data-page="${name}"]`);
+    if (subtab) subtab.classList.add('active');
+  }
 }
 
 /* ========== 系统时间 ========== */
@@ -5524,7 +5608,8 @@ async function loadLlmProvider() {
 }
 
 /* ========== 键盘快捷键 ========== */
-const pageKeys = ['market','ai','strategy','trade','position','fund','global','data','monitor','config'];
+/* ===== STAGE5: ia-merge ===== 数字键 1-5 对应 5 个一级聚合容器(switchPage 内部翻译为默认子页) */
+const pageKeys = ['hud-market','hud-holdings','hud-strategy','hud-monitor','hud-settings'];
 let shortcutHintTimer = null;
 
 document.addEventListener('keydown', (e) => {
@@ -5552,7 +5637,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  // 数字键 1-9、0 切换页面（不在输入框中时，0 跳转 config）
+  // 数字键 1-9、0 切换页面（不在输入框中时;阶段5 后 1-5 对应 5 个一级容器,6-9/0 无效）
   if (!e.ctrlKey && !e.metaKey && !e.altKey && ((e.key >= '1' && e.key <= '9') || e.key === '0')) {
     const tag = e.target.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
