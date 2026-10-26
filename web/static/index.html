@@ -817,6 +817,34 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 .bottom-tab-bar .tab-items { flex: 1 1 auto; width: 100%; }
 .bottom-tab-item { flex: 1 1 0; min-width: 44px; }
 
+/* ===== STAGE5: fund-cards ===== PRD P1-1:持仓表移动端卡片式(桌面保留表格)。
+   <768px 隐藏 8 列表格、显示卡片列表(无横向滚动);卡片间距 12px 防误触;
+   关键数字右侧对齐,当日收益红涨绿跌语义色块化。 */
+.fund-card-list { display: none; }
+.fund-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-card);
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.fund-card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.fund-card-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 6px 16px; margin-top: 10px;
+}
+.fund-card .fc-item {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  min-width: 0;
+}
+.fund-card .fc-label { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+.fund-card .fc-value { font-size: 13px; font-weight: 600; text-align: right; }
+@media (max-width: 768px) {
+  #fundPositionTableWrap { display: none; }
+  .fund-card-list { display: block; }
+}
+
+
 
 
 </style>
@@ -1481,12 +1509,15 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
           <!-- 基金持仓列表 -->
           <div class="card">
             <div class="card-title">基金持仓 <span style="font-size:11px;color:var(--text-muted);font-weight:500;margin-left:6px;">点击"分析"/"深度"查看P1新功能</span></div>
-            <div class="table-wrap" style="max-height:400px;overflow-y:auto;">
+            <!-- ===== STAGE5: fund-cards ===== 桌面保留表格(P1-1);<768px 由下方卡片列表替代 -->
+            <div class="table-wrap" id="fundPositionTableWrap" style="max-height:400px;overflow-y:auto;">
               <table>
                 <thead><tr><th>代码</th><th>名称</th><th>份额</th><th>成本</th><th>现净值</th><th>涨跌幅</th><th>盈亏</th><th>操作</th></tr></thead>
                 <tbody id="fundPositionBody"></tbody>
               </table>
             </div>
+            <!-- ===== STAGE5: fund-cards ===== PRD P1-1:移动端卡片式持仓(与表格同源渲染,loadFundData 填充) -->
+            <div class="fund-card-list" id="fundPositionCards"></div>
           </div>
 
           <!-- 添加基金 -->
@@ -3193,6 +3224,48 @@ async function loadSectorRotation() {
 /* ========== 6. 基金管理 ========== */
 let _fundSearchTimer = null;
 
+// ===== STAGE5: fund-cards ===== PRD P1-1:<768px 持仓卡片模板(与表格同源数据)。
+// 卡片含:代码/名称、份额、成本净值、现价(带 Freshness 新鲜度标识)、市值、
+// 当日收益(口径与后端一致:市值-市值/(1+涨幅),红涨绿跌语义色);
+// 置信度低条目带"⚠ 置信度低"标识与"复核"按钮(直达补录向导,P0-2)。
+function _fundCardHtml(p) {
+  const safeName = escapeHtml(p.fund_name || '—');
+  const safeCode = escapeHtml(p.fund_code || '');
+  const mv = p.market_value || 0;
+  const chg = p.change_pct || 0;
+  const todayPnl = (p.current_nav > 0 && chg !== 0) ? mv - mv / (1 + chg / 100) : 0;
+  const pnlColor = changeColor(todayPnl);
+  const low = p.confidence === 'low';
+  const fresh = Freshness.html({
+    asOf: p.nav_date || '',
+    estimated: low && !p.nav_date,
+    note: low ? (p.confidence_reason || '') : '',
+  });
+  const lowBadge = low
+    ? ` <span style="color:var(--color-warning);border:1px dashed var(--color-warning);padding:1px 6px;border-radius:10px;font-size:11px;">⚠ 置信度低</span>`
+      + ` <button class="btn btn-sm" style="padding:2px 8px;color:var(--color-warning);" title="进入补录向导复核该基金" onclick="FundWizard.open('${safeCode}')">复核</button>`
+    : '';
+  return `<div class="fund-card">
+    <div class="fund-card-top">
+      <div style="min-width:0;">
+        <div style="font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${safeName}</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${safeCode}${lowBadge}</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0;">
+        <div style="font-size:16px;font-weight:700;color:${pnlColor};padding:2px 8px;border-radius:6px;background:rgba(255,255,255,0.04);">${(todayPnl > 0 ? '+' : '') + todayPnl.toFixed(2)}</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">当日收益</div>
+      </div>
+    </div>
+    ${fresh ? `<div style="margin-top:6px;">${fresh}</div>` : ''}
+    <div class="fund-card-grid">
+      <div class="fc-item"><span class="fc-label">份额</span><span class="fc-value">${fmtNum(p.shares)}</span></div>
+      <div class="fc-item"><span class="fc-label">成本净值</span><span class="fc-value">${(p.cost_nav || 0).toFixed(4)}</span></div>
+      <div class="fc-item"><span class="fc-label">现价</span><span class="fc-value">${(p.current_nav || 0).toFixed(4)}</span></div>
+      <div class="fc-item"><span class="fc-label">市值</span><span class="fc-value">${fmtMoney(mv)}</span></div>
+    </div>
+  </div>`;
+}
+
 async function loadFundData() {
   const data = await api('/api/fund/positions');
   if (!data) return;
@@ -3208,8 +3281,12 @@ async function loadFundData() {
   document.getElementById('fundCount').textContent = summary.count || 0;
 
   const body = document.getElementById('fundPositionBody');
+  // ===== STAGE5: fund-cards ===== 移动端卡片列表同源渲染(P1-1);桌面由 CSS 只显示表格
+  const cardsEl = document.getElementById('fundPositionCards');
+  if (cardsEl) cardsEl.innerHTML = positions.map(_fundCardHtml).join('');
   if (!positions.length) {
     body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px;">暂无基金持仓,请在右侧添加</td></tr>';
+    if (cardsEl) cardsEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);">暂无基金持仓,请在右侧添加</div>';
     return;
   }
   body.innerHTML = positions.map(p => {
