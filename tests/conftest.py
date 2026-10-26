@@ -51,6 +51,27 @@ def _clear_global_caches():
         pass
 
 
+@pytest.fixture(autouse=True)
+def _isolate_request_metrics():
+    """每个测试前重置全局请求指标单例（2026-10-26 新增测试隔离）
+
+    `web.middleware.metrics.metrics` 是模块级单例，所有经由 TestClient 的请求都会累加。
+    test_metrics.py::test_health_metrics_records_this_request 用的是相对断言
+    （`status_distribution["200"] >= request_count`），隐含"本测试期内所有请求都是 200"。
+    而其他文件里大量鉴权/校验用例会刻意产生 401/422，使 request_count 增长快于 200 计数，
+    于是该用例在**全量运行**时随机失败、单独运行必过——属于典型的全局单例未隔离。
+
+    这里在每次测试前清零（只影响全局单例；test_metrics 中其余用例自带
+    RequestMetrics() 局部实例，不受影响）。
+    """
+    try:
+        from web.middleware.metrics import metrics as _global_metrics
+        _global_metrics.reset()
+    except Exception:
+        pass
+    yield
+
+
 @pytest.fixture
 def sample_quote():
     """示例行情数据"""
