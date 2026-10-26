@@ -809,6 +809,15 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 .bottom-tab-item { min-height: 52px; }
 .nav-item { min-height: 44px; }
 
+/* ===== STAGE5: touch-target ===== K2 修复(QA Bug S1,2026-10-26):
+   @media(max-width:768px) 使 .bottom-tab-bar 成为 flex 容器,而 .tab-items
+   无宽度定义收缩为 151px、.bottom-tab-item(flex:1 0 auto; min-width:0)
+   被压缩到 27px 宽。此处令 .tab-items 撑满整行、5 项均分(flex-basis 0 +
+   min-width 44px),375px 下每项约 73×52px,满足 K2 与 PRD"每项 ≥20% 宽度"。 */
+.bottom-tab-bar .tab-items { flex: 1 1 auto; width: 100%; }
+.bottom-tab-item { flex: 1 1 0; min-width: 44px; }
+
+
 
 </style>
 <!-- ===== STAGE5: hud-theme ===== HUD 深空指挥舱主题(T05;移除 body 的 hud-theme 类即整体回退) -->
