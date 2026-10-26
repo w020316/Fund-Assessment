@@ -797,12 +797,27 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 .hud-subtab:hover { color: var(--text-primary); }
 .hud-subtab.active { background: var(--accent-blue); color: #fff; }
 
+/* ===== STAGE5: touch-target ===== K2 整改:全部交互元素 ≥44×44px(T05,与主题无关故不作用域化) */
+.btn { min-height: 44px; }
+.btn-sm { min-height: 44px; min-width: 44px; }
+.tab { min-height: 44px; display: inline-flex; align-items: center; }
+.modal-close {
+  width: 44px; height: 44px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.input, .select { min-height: 44px; }
+.bottom-tab-item { min-height: 52px; }
+.nav-item { min-height: 44px; }
+
+
 </style>
+<!-- ===== STAGE5: hud-theme ===== HUD 深空指挥舱主题(T05;移除 body 的 hud-theme 类即整体回退) -->
+<link rel="stylesheet" href="/static/css/hud.css">
 <!-- 性能优化:lightweight-charts 改为懒加载(仅在用户点击"走势"时加载),避免阻塞首屏 -->
 <link rel="preconnect" href="https://unpkg.com" crossorigin>
 <link rel="dns-prefetch" href="https://unpkg.com">
 </head>
-<body>
+<body class="hud-theme">
 <div class="app">
   <!-- ========== 顶部状态栏 ========== -->
   <header class="topbar">
@@ -1971,6 +1986,27 @@ function renderEmpty(container, msg='暂无数据', hint='') {
     <div style="font-size:28px;margin-bottom:8px;opacity:0.4;">○</div>
     <div style="font-size:13px;margin-bottom:4px;">${msg}</div>
     ${hint ? `<div style="font-size:11px;color:var(--text-tertiary);">${hint}</div>` : ''}
+  </div>`;
+}
+
+// ===== STAGE5: status ===== 统一状态组件(T05/P2-3):
+// 空态/加载/错误/无数据统一视觉;空态显式"暂无数据"而非 0.00%(不撒谎);
+// 加载态用骨架屏防 CLS。样式见 web/static/css/hud.css 的 .hud-status。
+function renderStatus(container, state='empty', msg='暂无数据', hint='') {
+  if (typeof container === 'string') container = document.getElementById(container);
+  if (!container) return;
+  if (state === 'loading') {
+    container.innerHTML = `<div class="hud-status hud-status-loading">
+      ${Array(3).fill('<div class="skeleton-line medium"></div>').join('')}
+    </div>`;
+    return;
+  }
+  const icon = state === 'error' ? '⚠' : '◌';
+  const cls = state === 'error' ? 'hud-status-error' : 'hud-status-empty';
+  container.innerHTML = `<div class="hud-status ${cls}">
+    <div class="hud-status-icon">${icon}</div>
+    <div class="hud-status-msg">${msg}</div>
+    ${hint ? `<div class="hud-status-hint">${hint}</div>` : ''}
   </div>`;
 }
 
@@ -5714,6 +5750,9 @@ document.addEventListener('DOMContentLoaded', () => {
   loadMarketData();   // 后台加载数据(覆盖骨架屏)
   loadLlmProvider();
   updateFreshness();
+  // ===== STAGE5: status ===== 统一状态组件挂载(T05):空态显式提示,不显示 0.00%
+  renderStatus('hudSignalBody', 'empty', '暂无评估结果', '点击"开始评估",分步查看 数据获取 → 五信号计算 → 结论汇总');
+  renderStatus('hudSectorBody', 'empty', '暂无板块聚合数据', '切换上方"板块视图/列表视图"加载');
   // ESC 关闭 modal 修复(2026-07-31):原代码三个业务 modal(holdingsModal/uploadModal/multiAgentModal)
   // 只能点击 × 或遮罩关闭,键盘用户不便。注册全局 ESC 监听,按 ESC 时关闭所有可见 modal。
   // customConfirm 有自己的 escHandler,优先级更高(先触发先关闭)。

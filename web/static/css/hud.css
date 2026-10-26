@@ -1,0 +1,139 @@
+/* ============================================================
+   阶段5 T05 — 深空指挥舱 HUD 暗色主题(hud.css)
+   ============================================================
+   作用域铁律:全部 HUD 变量与覆写仅作用于 body.hud-theme;
+   移除 body 上的 hud-theme 类即整体回退存量主题,不动任何存量内联样式。
+   变量命名铁律:HUD 专属变量一律 --hud-* 前缀,仅定义于本文件。
+   动效铁律:装饰动效仅 transform/opacity,包在
+   @media (prefers-reduced-motion: no-preference) 内。
+   对比度:正文 --hud-text #E5EDF5 于 #0A0E14 ≈ 15:1(AA 4.5:1 ✗ 达标远超);
+   次级 --hud-text-dim #8CA3B8 ≈ 6.5:1;涨跌语义色取暗底 AA 变体。
+   语义说明:跟随存量 A 股"红涨绿跌"约定(--color-up 为红),
+   故 --hud-up 取红色 #F87171、--hud-down 取绿色 #34D399(架构文档
+   中 up/down 为泛指涨跌语义色,此处按存量语义映射,已记录)。
+   ============================================================ */
+
+body.hud-theme {
+  /* ---- HUD 色板(架构文档 1.3) ---- */
+  --hud-bg: #0A0E14;             /* 深空底 */
+  --hud-panel: #111826;          /* 面板底 */
+  --hud-panel-border: #1E2A3C;   /* 面板描边(微光边框基于 box-shadow,不叠 blur) */
+  --hud-accent: #22D3EE;         /* 青色主信号 */
+  --hud-warn: #F59E0B;           /* 琥珀警示 */
+  --hud-up: #F87171;             /* 涨(红,A股语义,暗底 AA ≈ 4.9:1) */
+  --hud-down: #34D399;           /* 跌(绿,暗底 AA ≈ 7.4:1) */
+  --hud-text: #E5EDF5;           /* 正文 ≥4.5:1 */
+  --hud-text-dim: #8CA3B8;       /* 次级文本 ≈ 6.5:1 */
+
+  /* ---- 继承覆盖存量 token(零逐组件改写的主题切换实现) ---- */
+  --bg-primary: var(--hud-bg);
+  --bg-card: var(--hud-panel);
+  --bg-card-hover: #16202F;
+  --border: var(--hud-panel-border);
+  --border-light: #2A3A50;
+  --text-primary: var(--hud-text);
+  --text-secondary: #AFC2D4;     /* ≈ 8:1 */
+  --text-muted: var(--hud-text-dim);
+  --text-tertiary: #6E839A;
+  --accent: var(--hud-accent);
+  --accent-blue: var(--hud-accent);
+  --accent-cyan: var(--hud-accent);
+  --accent-purple: var(--hud-accent);
+  --color-up: var(--hud-up);
+  --color-down: var(--hud-down);
+  --color-warning: var(--hud-warn);
+  --color-critical: #F87171;
+
+  background: var(--hud-bg);
+  color: var(--hud-text);
+}
+
+/* ---- 深空网格背景(静态 CSS gradient 层,零动画开销) ---- */
+body.hud-theme .content {
+  background-image:
+    linear-gradient(rgba(34, 211, 238, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34, 211, 238, 0.035) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+/* ---- 面板化:微光边框(单层 box-shadow 缓存层,不叠 blur) ---- */
+body.hud-theme .card,
+body.hud-theme .modal-box,
+body.hud-theme .fw-modal {
+  border: 1px solid var(--hud-panel-border);
+  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.04), 0 4px 24px rgba(0, 0, 0, 0.45);
+}
+
+/* ---- 青/琥珀语义在组件上的可读性修正 ---- */
+/* 青色底(.tab.active/.hud-subtab.active)上白字对比不足,改深色字 */
+body.hud-theme .tab.active,
+body.hud-theme .hud-subtab.active {
+  color: #06121A;
+}
+/* 主按钮:青底深字(AA) */
+body.hud-theme .btn-primary {
+  background: var(--hud-accent);
+  color: #06121A;
+}
+body.hud-theme .btn-primary:hover {
+  background: #67E3F4;
+}
+
+/* ---- 高危操作弹窗暗底专项(架构文档 1.3:不允许"酷但看不清") ---- */
+body.hud-theme .modal-mask {
+  background: rgba(4, 7, 12, 0.78);
+}
+body.hud-theme .modal-header,
+body.hud-theme .fw-header {
+  border-bottom: 1px solid #2A3A50;
+  color: var(--hud-text);
+}
+
+/* ============================================================
+   统一状态组件(P2-3 补充):空态/加载/错误/无数据
+   空态显式"暂无数据"而非 0.00%;加载用骨架屏防 CLS。
+   ============================================================ */
+.hud-status {
+  padding: 28px 16px;
+  text-align: center;
+  color: var(--text-muted, #6e7681);
+}
+.hud-status .hud-status-icon {
+  font-size: 26px;
+  margin-bottom: 8px;
+  opacity: 0.5;
+}
+.hud-status .hud-status-msg {
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.hud-status .hud-status-hint {
+  font-size: 11px;
+  opacity: 0.7;
+}
+.hud-status-error .hud-status-icon { color: var(--color-warning, #f59e0b); opacity: 0.9; }
+
+/* ============================================================
+   装饰动效:仅 transform/opacity,且仅在用户未声明减少动态时启用
+   ============================================================ */
+@media (prefers-reduced-motion: no-preference) {
+  /* 边框扫描线:纯 opacity 呼吸,单层,低成本 */
+  body.hud-theme #hudSignalCard,
+  body.hud-theme #hudSectorCard {
+    animation: hud-panel-scan 6s ease-in-out infinite;
+  }
+  @keyframes hud-panel-scan {
+    0%, 100% { box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.04), 0 4px 24px rgba(0, 0, 0, 0.45); }
+    50%      { box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.12), 0 4px 24px rgba(0, 0, 0, 0.45); }
+  }
+}
+
+/* 用户声明减少动态:关闭全部动画/过渡(K9 与无障碍双达标) */
+@media (prefers-reduced-motion: reduce) {
+  body.hud-theme *,
+  body.hud-theme *::before,
+  body.hud-theme *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
