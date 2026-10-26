@@ -155,12 +155,21 @@ body {
 }
 .grid-2 { display:grid; grid-template-columns:repeat(2,1fr); gap:16px; }
 .grid-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
-/* (2026-10-26) CLS 修复：首屏三块数据容器在异步回填前高度为 0，数据到达后撑开，
+/* (2026-10-26) CLS 修复：首屏容器在异步回填前高度为 0（或远小于终态），数据到达后撑开，
    导致下方内容整体下移。实测桌面 CLS 0.03–0.37（中位数 0.23，远超 0.1 阈值）。
-   预留最小高度 + 布局隔离，把位移锁进容器内部，不改视觉。 */
-#indexCards { min-height:108px; }
+   下面的高度全部来自 Playwright 实测的"空态 vs 填充后"渲染高度，不是估算：
+     桌面 1440：indexCards 159→139、sectorHeatmap 220→507、热股表容器 199→360
+     移动 390 ：indexCards 159→388、sectorHeatmap →734
+   策略：能定高的定高（min=max），内容多于预期时容器内滚动，保证任何一次回填都不改变外部布局。 */
+#indexCards { min-height:160px; }
 #indexCards > .card { contain:layout; }
-#sectorHeatmap { min-height:220px; }
+#sectorHeatmap { min-height:510px; max-height:510px; overflow-y:auto; }
+#hotStockWrap { min-height:360px; }
+@media (max-width:768px) {
+  #indexCards { min-height:392px; }
+  /* 移动端热力图在首屏视口外，预留过大只会留白，故取较小定高 + 内部滚动 */
+  #sectorHeatmap { min-height:420px; max-height:420px; }
+}
 .grid-4 { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; }
 .flex-between { display:flex; justify-content:space-between; align-items:center; }
 .mb-16 { margin-bottom:16px; }
@@ -846,7 +855,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
               <div class="tab" role="button" tabindex="0" aria-label="跌幅TOP10" onclick="switchHotTab('loss')">跌幅TOP10</div>
               <div class="tab" role="button" tabindex="0" aria-label="成交额TOP10" onclick="switchHotTab('volume')">成交额TOP10</div>
             </div>
-            <div class="table-wrap" style="max-height:360px;overflow-y:auto;">
+            <div class="table-wrap" id="hotStockWrap" style="max-height:360px;overflow-y:auto;">
               <table>
                 <thead><tr><th>代码</th><th>名称</th><th>价格</th><th>涨跌幅</th><th>成交额</th></tr></thead>
                 <tbody id="hotStockBody"></tbody>
