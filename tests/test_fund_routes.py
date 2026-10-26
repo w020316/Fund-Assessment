@@ -97,7 +97,10 @@ class TestSavePositions:
     def test_save_positions_calls_save(self, client):
         """保存持仓调用 _save_positions 并返回成功"""
         # P1 修复(2026-07-30):_save_positions 现返回 bool,mock 需显式 return_value=True
-        with patch("web.routes.fund._save_positions", return_value=True) as mock_save:
+        # 阶段5(2026-10-26):save_positions 增加 diff 计算,需 mock _load_positions,
+        # 避免测试读到真实持仓文件(web/user_fund_positions.json)
+        with patch("web.routes.fund._load_positions", return_value=list(_MOCK_POSITIONS)), \
+             patch("web.routes.fund._save_positions", return_value=True) as mock_save:
             resp = client.post("/api/fund/positions", json={
                 "positions": [
                     {"fund_code": "161725", "fund_name": "招商白酒",
@@ -110,6 +113,38 @@ class TestSavePositions:
         mock_save.assert_called_once()
         saved = mock_save.call_args[0][0]
         assert saved[0]["fund_code"] == "161725"
+
+    def test_save_positions_backward_compatible_fields(self, client):
+        """阶段5 响应增强回归:新增 summary 字段,存量 success/message 字段语义不变"""
+        with patch("web.routes.fund._load_positions", return_value=list(_MOCK_POSITIONS)), \
+             patch("web.routes.fund._save_positions", return_value=True):
+            resp = client.post("/api/fund/positions", json={
+                "positions": [
+                    {"fund_code": "161725", "fund_name": "招商白酒",
+                     "shares": 5000.0, "cost_nav": 0.85, "buy_date": "2026-02-20", "note": ""}
+                ]
+            })
+        data = resp.json()
+        # 存量字段(向后兼容铁律)
+        assert data["success"] is True
+        assert isinstance(data["message"], str) and data["message"]
+        # 新增字段:summary{added, updated, deleted, deleted_codes}
+        assert set(data["summary"]) == {"added", "updated", "deleted", "deleted_codes"}
+        assert data["summary"]["added"] == 1
+
+    def test_add_position_backward_compatible_fields(self, client):
+        """阶段5 响应增强回归:/positions/add 新增 changes 字段,存量字段不变"""
+        with patch("web.routes.fund._load_positions", return_value=list(_MOCK_POSITIONS)), \
+             patch("web.routes.fund._save_positions", return_value=True):
+            resp = client.post("/api/fund/positions/add", json={
+                "fund_code": "110022", "fund_name": "易方达消费",
+                "shares": 2000.0, "cost_nav": 2.5, "buy_date": "2026-01-15", "note": "",
+            })
+        data = resp.json()
+        assert data["success"] is True
+        assert data["message"] == "已添加 110022"
+        assert data["changes"]["old"]["shares"] == 1000.0
+        assert data["changes"]["new"]["shares"] == 2000.0
 
 
 class TestDeletePosition:
@@ -138,7 +173,8 @@ class TestDeletePosition:
 
     def test_save_positions_failure_returns_false(self, client):
         """P1 回归:_save_positions 失败时返回 success=False(避免静默吞异常误导用户)"""
-        with patch("web.routes.fund._save_positions", return_value=False):
+        with patch("web.routes.fund._load_positions", return_value=list(_MOCK_POSITIONS)), \
+             patch("web.routes.fund._save_positions", return_value=False):
             resp = client.post("/api/fund/positions", json={
                 "positions": [
                     {"fund_code": "161725", "fund_name": "招商白酒",

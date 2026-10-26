@@ -242,6 +242,29 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     return base
 
 
+@router.get("/sector-map", dependencies=[Depends(require_admin)])
+async def get_sector_map():
+    """读取基金→板块映射配置(阶段5 T01/P2-2,只读)。
+
+    板块聚合计算在前端(sectors.js),后端仅提供映射;UI 维护端点(PUT)进 backlog。
+    配置缺失/损坏时返回空 sectors(前端全部归入 unmapped_label"其他"),不抛 500。
+    """
+    try:
+        data = _load_yaml("sector_map.yaml")
+    except Exception as e:
+        logger.warning(f"get_sector_map failed: {e}")
+        data = {}
+    sectors = data.get("sectors") if isinstance(data, dict) else None
+    if not isinstance(sectors, dict):
+        sectors = {}
+    unmapped_label = data.get("unmapped_label") if isinstance(data, dict) else None
+    return {
+        "success": True,
+        "sectors": sectors,
+        "unmapped_label": unmapped_label if isinstance(unmapped_label, str) and unmapped_label else "其他",
+    }
+
+
 _USER_POSITIONS_FILE = Path(__file__).resolve().parent.parent / "user_positions.json"
 
 

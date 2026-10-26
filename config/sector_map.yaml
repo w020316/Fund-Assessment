@@ -1,0 +1,10 @@
+# 基金代码 → 板块映射（阶段5 P2-2）。
+# 未列出的基金归入 unmapped_label 对应板块（默认"其他"）。
+# 维护方式：本期仅手工编辑本文件（经 GET /api/config/sector-map 读取），
+# 设置页 UI 维护端点（PUT）进 backlog。
+sectors:
+  CPO: ["002891"]        # 示例，按实际持仓维护
+  PCB: []
+  存储: []
+  半导体: []
+unmapped_label: 其他
