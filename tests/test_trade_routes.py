@@ -271,3 +271,24 @@ class TestMarketOrderPriceResolution:
                 "stock_code": "600519", "amount": 100, "price": 1000001.0,
             })
         assert resp.status_code == 422
+
+
+class TestHistoryLimitBounds:
+    """成交历史分页边界（2026-10-26 加固）
+
+    缺陷：`limit: int = 50` 无上下界，?limit=10000000 会把整表读进内存并整段序列化。
+    """
+
+    @pytest.mark.parametrize("bad_limit", [0, -1, 1001, 10_000_000])
+    def test_rejects_out_of_range_limit(self, client, bad_limit):
+        with patch("web.routes.trade._HAS_EXECUTOR", True):
+            resp = client.get("/api/trade/history", params={"limit": bad_limit})
+        assert resp.status_code == 422
+
+    def test_accepts_limit_within_range(self, client):
+        mock_executor = MagicMock()
+        mock_executor.get_trade_history.return_value = []
+        with patch("web.routes.trade._HAS_EXECUTOR", True), \
+             patch("web.routes.trade._get_state", return_value={"executor": mock_executor}):
+            resp = client.get("/api/trade/history", params={"limit": 1000})
+        assert resp.status_code == 200

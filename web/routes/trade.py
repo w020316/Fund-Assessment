@@ -4,7 +4,7 @@ from typing import Any
 
 import asyncio
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -179,7 +179,11 @@ async def orders(request: Request):
 
 
 @router.get("/history", response_model=list[TradeHistoryItem], dependencies=[Depends(require_admin)])
-async def history(request: Request, symbol: str = "", limit: int = 50):
+async def history(request: Request,
+                  symbol: str = Query("", max_length=16, description="按代码过滤"),
+                  limit: int = Query(50, ge=1, le=1000, description="返回条数上限")):
+    # P2 加固(2026-10-26)：原 `limit: int = 50` 无上下界，?limit=10000000 会把整表读进内存
+    # 并整段序列化（单进程实例上等同于一次小规模 DoS）。加 ge/le 后由 FastAPI 直接 422。
     if not _HAS_EXECUTOR:
         return []
     state = _get_state(request)
