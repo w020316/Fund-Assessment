@@ -389,3 +389,39 @@ class TestFileSweep:
             c.set(f"key_{i}", {"i": i}, ttl=60)
             time.sleep(0.01)  # 保证 mtime 可区分
         assert (c.cache_dir / "key_9.json").exists(), "最新写入的文件不应被清理"
+
+
+class TestMemoryBudget:
+    """内存硬预算回归(阶段六批次A QA 补测):内存层 LRU 上限 200 条(架构文档 §6)。"""
+
+    def test_memory_layer_evicts_beyond_maxsize(self, tmp_path):
+        """超过 maxsize 的条目按 LRU 淘汰,内存层 size 不超上限。"""
+        from src.core.cache import DataCache
+
+        c = DataCache(cache_dir=str(tmp_path / "mb"), default_ttl=60,
+                      memory_maxsize=200, max_files=200)
+        for i in range(250):
+            c.set(f"pf_key_{i}", {"i": i}, ttl=60)
+        stats = c._memory.stats()
+        assert stats["size"] == 200, f"内存条目应恒为 200,实际 {stats['size']}"
+        assert stats["maxsize"] == 200
+
+    def test_memory_lru_keeps_recent_and_drops_oldest(self, tmp_path):
+        """LRU 语义(直接对内存层断言):命中可续命,最久未用者被淘汰。
+
+        注意:不能经 DataCache.get 验证淘汰——内存 miss 会从文件层回填(设计如此),
+        因此这里直接操作 _memory 层验证纯 LRU 行为。
+        """
+        from src.core.cache import DataCache
+
+        c = DataCache(cache_dir=str(tmp_path / "mb2"), default_ttl=60,
+                      memory_maxsize=10, max_files=10)
+        mem = c._memory
+        for i in range(10):
+            mem.set(f"k_{i}", i, ttl=60)
+        assert mem.get("k_0") == 0  # 续命 k_0(移到最近使用端)
+        mem.set("k_10", 10, ttl=60)  # 挤掉最久未用的 k_1
+        assert mem.get("k_0") == 0, "被访问过的 k_0 不应被淘汰"
+        assert mem.get("k_1") is None, "最久未用的 k_1 应被 LRU 淘汰"
+        assert mem.get("k_10") == 10
+        assert mem.stats()["size"] == 10
