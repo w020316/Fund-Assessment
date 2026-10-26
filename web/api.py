@@ -106,11 +106,24 @@ app.add_middleware(SlowAPIMiddleware)
 # 浏览器自动解压,前端无感知;CPU 开销可忽略(512MB 实例足够)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-_cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000").split(",")
+_cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000").split(",") if o.strip()]
+# 安全修复(2026-10-26):CORS 规范明确禁止 allow_origins=["*"] 与 allow_credentials=True 并用。
+# 原实现直接把环境变量里的 "*" 传进去，配合 allow_credentials=True，Starlette 会对带 Cookie
+# 的请求**回显任意 Origin**（实测 Origin: https://evil.example 被原样写回
+# access-control-allow-origin），等于任意站点都能跨域读取 API 响应。
+# 现在做两道处理：① 检出通配符就把 credentials 关掉（保持规范合法）；② 记 error 日志，
+# 让"生产环境配了 *"这件事在日志里可见，而不是静默降级。
+_cors_allow_credentials = True
+if "*" in _cors_origins:
+    _cors_allow_credentials = False
+    logger.error(
+        "CORS_ORIGINS 含通配符 '*'，已强制 allow_credentials=False。"
+        "生产环境请配置为具体前端域名（如 https://<app>.onrender.com）"
+    )
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
-    allow_credentials=True,
+    allow_credentials=_cors_allow_credentials,
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Content-Type", "Authorization", "X-Admin-Token", "X-Trace-Id"],
     expose_headers=["X-Trace-Id"],
