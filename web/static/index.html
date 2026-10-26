@@ -1143,7 +1143,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
           <div class="card-title">当前委托</div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>时间</th><th>代码</th><th>方向</th><th>数量</th><th>价格</th><th>状态</th><th>操作</th></tr></thead>
+              <thead><tr><th>时间</th><th>代码</th><th>方向</th><th>数量</th><th>价格</th><th>状态</th></tr></thead>
               <tbody id="orderBody"></tbody>
             </table>
           </div>
@@ -2901,27 +2901,14 @@ async function loadTradeHistory() {
         <td>${o.quantity || 0}</td>
         <td>${fmtNum(o.price || 0)}</td>
         <td><span style="color:var(--color-warning);">${statusMap[o.status] || o.status || '未知'}</span></td>
-        <td><button class="btn btn-sm btn-outline" onclick="cancelOrder('${o.order_id}')">撤单</button></td>
       </tr>`;
     }).join('');
   } else {
     // mock 回退修复(2026-07-31):原代码回退到 defaultOrders mock(假委托单),
     // 用户误以为有 pending 订单。改为显示空状态。
-    orderBody.innerHTML = '<tr><td colspan="7" style="color:var(--text-muted);text-align:center;padding:20px 0;">暂无委托单</td></tr>';
+    // (2026-10-26) 撤单端点已下线，表格由 7 列减为 6 列
+    orderBody.innerHTML = '<tr><td colspan="6" style="color:var(--text-muted);text-align:center;padding:20px 0;">暂无委托单</td></tr>';
   }
-}
-
-async function cancelOrder(orderId) {
-  // (2026-07-31) P2-17 修复: 空参数校验, 避免无 orderId 仍发起请求
-  if (!orderId) return;
-  const result = await api('/api/trade/cancel', {
-    method: 'POST',
-    body: JSON.stringify({order_id: orderId})
-  });
-  // 修复(2026-07-31):未检查返回值时,api() 失败(鉴权/网络/超时)仍显示"已提交"误导用户
-  if (!result) return;
-  showToast('撤单请求已提交', 'info');
-  loadTradeHistory();
 }
 
 /* ========== 5. 持仓管理 ========== */

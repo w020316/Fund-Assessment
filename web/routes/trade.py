@@ -43,10 +43,6 @@ class SellRequest(BaseModel):
     strategy: str = Field("", max_length=200, description="策略备注,限200字符")
 
 
-class CancelRequest(BaseModel):
-    order_id: str
-
-
 class OrderResponse(BaseModel):
     order_id: str
     symbol: str
@@ -73,11 +69,6 @@ class TradeHistoryItem(BaseModel):
     strategy: str
     reason: str
     created_at: str
-
-
-class MessageResponse(BaseModel):
-    success: bool
-    message: str
 
 
 def _get_state(request: Request) -> dict[str, Any]:
@@ -126,18 +117,12 @@ async def sell(req: SellRequest, request: Request):
     return await asyncio.to_thread(_execute_order, req, OrderSide.SELL, request)
 
 
-@router.post("/cancel", response_model=MessageResponse, dependencies=[Depends(require_admin)])
-async def cancel(req: CancelRequest, request: Request):
-    if not _HAS_EXECUTOR:
-        return MessageResponse(success=False, message="交易功能未启用, 无法撤单")
-    state = _get_state(request)
-    broker = state["broker"]
-    # P1 修复(2026-07-30):broker.cancel_order 同步方法,包裹到线程池
-    success = await asyncio.to_thread(broker.cancel_order, req.order_id)
-    return MessageResponse(
-        success=success,
-        message="撤单成功" if success else "撤单失败，订单不存在或已成交",
-    )
+# 撤单端点已下线(2026-10-26):
+# SimulatedBroker 的 buy/sell 在同一次加锁内完成"建单→判定→置终态"，
+# 订单从不进入 PENDING，因此 cancel_order 恒返回 False、撤单按钮点了必然失败。
+# 与其保留一个永远失败的按钮（比没有按钮更伤），选择下线该端点与 UI 入口。
+# 若将来需要真实挂单/撤单，应连带实现撮合循环（订单保持 PENDING 并有成交驱动），
+# 届时以新端点恢复，而不是让现有前端继续对着 dead path 发请求。
 
 
 def _execute_order(req: BuyRequest | SellRequest, side: OrderSide, request: Request) -> OrderResponse | JSONResponse:

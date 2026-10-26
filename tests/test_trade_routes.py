@@ -163,41 +163,37 @@ class TestSell:
         assert resp.status_code == 503
 
 
-class TestCancel:
-    """POST /api/trade/cancel"""
+class TestCancelEndpointRemoved:
+    """撤单端点已下线（2026-10-26 功能移除，非测试规避）
 
-    def test_cancel_disabled_returns_failure(self, client):
-        """executor 未启用时返回 success=False"""
-        with patch("web.routes.trade._HAS_EXECUTOR", False):
+    移除原因：SimulatedBroker.buy/sell 在同一次加锁内完成"建单→判定→置终态"，
+    订单从不进入 PENDING，cancel_order 恒返回 False —— 撤单是与实现不符的 dead path，
+    前端按钮点了必然失败。与其保留永远失败的按钮，选择下线端点与 UI 入口。
+    用例随功能移除而改写为"端点确已下线"的断言，数量不减（3 → 3）。
+    """
+
+    def test_cancel_route_no_longer_exists(self, client):
+        """POST /api/trade/cancel 应返回 404（路由已移除）"""
+        with patch("web.routes.trade._HAS_EXECUTOR", True):
             resp = client.post("/api/trade/cancel", json={"order_id": "ORD001"})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["success"] is False
-        assert "交易功能未启用" in data["message"]
+        assert resp.status_code == 404
 
-    def test_cancel_success(self, client):
-        """撤单成功返回 success=True"""
-        mock_broker = MagicMock()
-        mock_broker.cancel_order.return_value = True
-        mock_state = {"broker": mock_broker}
-        with patch("web.routes.trade._HAS_EXECUTOR", True), \
-             patch("web.routes.trade._get_state", return_value=mock_state):
-            resp = client.post("/api/trade/cancel", json={"order_id": "ORD001"})
-        assert resp.status_code == 200
-        assert resp.json()["success"] is True
-        assert "撤单成功" in resp.json()["message"]
-        mock_broker.cancel_order.assert_called_once_with("ORD001")
+    def test_cancel_not_declared_in_openapi(self, client):
+        """OpenAPI 文档中不应再声明撤单端点"""
+        spec = client.get("/openapi.json").json()
+        assert "/api/trade/cancel" not in spec["paths"]
+        assert "/api/trade/buy" in spec["paths"], "删除撤单不得误伤买入端点"
 
-    def test_cancel_not_found(self, client):
-        """订单不存在时返回 success=False"""
+    def test_orders_endpoint_unaffected(self, client):
+        """回归保护：/orders 仍可用（仅返回终态订单）"""
+        mock_order = _make_mock_order(order_id="ORD_TERM", side="buy", status="filled")
         mock_broker = MagicMock()
-        mock_broker.cancel_order.return_value = False
-        mock_state = {"broker": mock_broker}
+        mock_broker.get_orders.return_value = [mock_order]
         with patch("web.routes.trade._HAS_EXECUTOR", True), \
-             patch("web.routes.trade._get_state", return_value=mock_state):
-            resp = client.post("/api/trade/cancel", json={"order_id": "ORD999"})
+             patch("web.routes.trade._get_state", return_value={"broker": mock_broker}):
+            resp = client.get("/api/trade/orders")
         assert resp.status_code == 200
-        assert resp.json()["success"] is False
+        assert resp.json()[0]["status"] == "filled"
 
 
 class TestMarketOrderPriceResolution:
