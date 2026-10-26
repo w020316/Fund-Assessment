@@ -111,14 +111,19 @@ _cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:
 # 原实现直接把环境变量里的 "*" 传进去，配合 allow_credentials=True，Starlette 会对带 Cookie
 # 的请求**回显任意 Origin**（实测 Origin: https://evil.example 被原样写回
 # access-control-allow-origin），等于任意站点都能跨域读取 API 响应。
-# 现在做两道处理：① 检出通配符就把 credentials 关掉（保持规范合法）；② 记 error 日志，
-# 让"生产环境配了 *"这件事在日志里可见，而不是静默降级。
+#
+# 处理策略：**对通配符 fail-closed** —— 把 "*" 从白名单里摘掉，而不是"保留通配但关掉
+# credentials"。原因：本前端由本服务同源托管（/static/index.html），跨域访问没有合法场景；
+# 而保留 "*" 时，任意站点仍可携带猜测的 Authorization 头发起请求，借 200/401 的差异
+# 做令牌探测（oracle）。摘掉之后跨域一律不放行，成本为零、收益确定。
+# 若确有跨域客户端，请在 CORS_ORIGINS 里显式列出域名（逗号分隔）。
 _cors_allow_credentials = True
 if "*" in _cors_origins:
+    _cors_origins = [o for o in _cors_origins if o != "*"]
     _cors_allow_credentials = False
     logger.error(
-        "CORS_ORIGINS 含通配符 '*'，已强制 allow_credentials=False。"
-        "生产环境请配置为具体前端域名（如 https://<app>.onrender.com）"
+        "CORS_ORIGINS 含通配符 '*'，已忽略通配符并拒绝跨域访问（allow_credentials=False）。"
+        "如需跨域，请显式配置具体域名（如 https://<app>.onrender.com，逗号分隔）"
     )
 app.add_middleware(
     CORSMiddleware,
