@@ -36,14 +36,53 @@ def _build_meta(
     data_source: str,
     cached: bool = False,
     quality_score: float | None = None,
+    stale: bool = False,
 ) -> dict:
     """构建响应元数据"""
-    return ResponseMeta(
+    meta = ResponseMeta(
         data_source=data_source,
         quality_score=quality_score if quality_score is not None else (100.0 if cached else 80.0),
         cached=cached,
         timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     ).model_dump()
+    # 2026-10-26：stale=True 表示"这份数据已过 TTL，正在后台刷新"，
+    # 前端可据此显示"数据稍有延迟"，也便于线上排查命中路径。
+    if stale:
+        meta["stale"] = True
+    return meta
+
+
+# ===== stale-while-revalidate（2026-10-26）=====
+# 背景：/api/market/hot_stocks 冷态实测 0.999s、/sector_ranking 0.586s，
+# 而 TTL 分别只有 60s —— 每逢过期的那一位用户就要等完整一轮外部请求，
+# 这正是首屏 LCP 被拉到 1.3s+ 的直接原因（阶段 0 §4.3）。
+# 策略：过期但在容忍窗口内 → 立即返回旧数据并投递后台刷新任务；
+# 同一 key 只允许一个在途刷新，避免并发过期时打爆上游。
+_refreshing: set[str] = set()
+
+
+def _schedule_refresh(cache_key: str, fetcher, describe: str) -> None:
+    """后台刷新缓存（fire-and-forget，异常只记日志）。"""
+    if cache_key in _refreshing:
+        return
+    _refreshing.add(cache_key)
+
+    async def _run() -> None:
+        try:
+            data = await fetcher()
+            if data is not None:
+                cache.set(cache_key, data)
+                logger.debug(f"SWR 后台刷新完成: {cache_key}")
+        except Exception as e:
+            logger.warning(f"SWR 后台刷新失败 {describe}: {type(e).__name__}: {e}")
+        finally:
+            _refreshing.discard(cache_key)
+
+    try:
+        asyncio.create_task(_run())
+    except RuntimeError as e:  # 无事件循环（如同步调用场景）
+        _refreshing.discard(cache_key)
+        logger.warning(f"SWR 无法投递后台任务 {describe}: {e}")
 
 
 class StockRealtimeItem(BaseModel):
@@ -323,38 +362,44 @@ async def index_realtime():
         return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
 
 
+async def _fetch_hot_stocks() -> dict:
+    """抓取三大排行（三个外部请求并行）。抽出来供"首次请求"与"后台刷新"复用。"""
+    top_gainers_data, top_losers_data, top_volume_data = await asyncio.gather(
+        asyncio.to_thread(ds2.get_stock_ranking_em, "f3", 0, 10),
+        asyncio.to_thread(ds2.get_stock_ranking_em, "f3", 1, 10),
+        asyncio.to_thread(ds2.get_stock_ranking_em, "f6", 0, 10),
+    )
+
+    def _to_item(item: dict) -> HotStocksItem:
+        return HotStocksItem(
+            code=_safe_str(item.get("code")),
+            name=_safe_str(item.get("name")),
+            price=_safe_float(item.get("price")),
+            change_pct=_safe_float(item.get("change_pct")),
+            volume=_safe_float(item.get("volume")),
+            amount=_safe_float(item.get("amount")),
+        )
+
+    return HotStocksResponse(
+        top_gainers=[_to_item(i) for i in top_gainers_data],
+        top_losers=[_to_item(i) for i in top_losers_data],
+        top_volume=[_to_item(i) for i in top_volume_data],
+    ).model_dump()
+
+
 @router.get("/hot_stocks")
 async def hot_stocks():
     cache_key = "market:hot_stocks"
-    cached = cache.get(cache_key)
+    cached, is_stale = cache.get_with_stale(cache_key, max_stale=600)
     if cached is not None:
-        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
+        if is_stale:
+            _schedule_refresh(cache_key, _fetch_hot_stocks, "hot_stocks")
+        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True, stale=is_stale)}
     # P1 修复(2026-07-31):整个函数体包裹,确保模型构造/cache.set 异常也返回空数据而非 500
     try:
-        # 三个排行并行获取(用 asyncio.to_thread 避免阻塞事件循环)
-        top_gainers_data, top_losers_data, top_volume_data = await asyncio.gather(
-            asyncio.to_thread(ds2.get_stock_ranking_em, "f3", 0, 10),
-            asyncio.to_thread(ds2.get_stock_ranking_em, "f3", 1, 10),
-            asyncio.to_thread(ds2.get_stock_ranking_em, "f6", 0, 10),
-        )
-
-        def _to_item(item: dict) -> HotStocksItem:
-            return HotStocksItem(
-                code=_safe_str(item.get("code")),
-                name=_safe_str(item.get("name")),
-                price=_safe_float(item.get("price")),
-                change_pct=_safe_float(item.get("change_pct")),
-                volume=_safe_float(item.get("volume")),
-                amount=_safe_float(item.get("amount")),
-            )
-
-        result = HotStocksResponse(
-            top_gainers=[_to_item(i) for i in top_gainers_data],
-            top_losers=[_to_item(i) for i in top_losers_data],
-            top_volume=[_to_item(i) for i in top_volume_data],
-        )
-        cache.set(cache_key, result.model_dump())
-        return {"data": result.model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
+        payload = await _fetch_hot_stocks()
+        cache.set(cache_key, payload)
+        return {"data": payload, "_meta": _build_meta("eastmoney", cached=False)}
     except Exception as e:
         logger.warning(f"hot_stocks failed: {e}")
         return {"data": HotStocksResponse(top_gainers=[], top_losers=[], top_volume=[]).model_dump(), "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
@@ -625,15 +670,21 @@ async def hot_stocks_signal():
         return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
 
 
+async def _fetch_sector_ranking() -> list:
+    data = await asyncio.to_thread(ds2.get_sector_ranking)
+    return [SectorRankingItem(**item) for item in data]
+
+
 @router.get("/sector_ranking")
 async def sector_ranking():
     cache_key = "market:sector_ranking"
-    cached = cache.get(cache_key)
+    cached, is_stale = cache.get_with_stale(cache_key, max_stale=600)
     if cached is not None:
-        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
+        if is_stale:
+            _schedule_refresh(cache_key, _fetch_sector_ranking, "sector_ranking")
+        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True, stale=is_stale)}
     try:
-        data = await asyncio.to_thread(ds2.get_sector_ranking)
-        result = [SectorRankingItem(**item) for item in data]
+        result = await _fetch_sector_ranking()
         cache.set(cache_key, result)
         return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
     except Exception as e:

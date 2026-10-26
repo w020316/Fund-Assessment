@@ -103,12 +103,26 @@ class _MemoryLayer:
 
 
 class DataCache:
-    def __init__(self, cache_dir: str = "data/cache", default_ttl: int = 300, memory_maxsize: int = 512):
+    def __init__(
+        self,
+        cache_dir: str = "data/cache",
+        default_ttl: int = 300,
+        memory_maxsize: int = 512,
+        max_files: int = 512,
+        sweep_every: int = 50,
+    ):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.default_ttl = default_ttl
         # 内存层 LRU+TTL(命中时跳过文件 I/O,减少事件循环阻塞)
         self._memory = _MemoryLayer(maxsize=memory_maxsize)
+        # P2 修复(2026-10-26)：文件层此前**只增不减** —— set 每次写一个 json，
+        # 过期后 get 只删内存条目（注释明确"文件由后续 set 覆盖或后台清理"），
+        # 但"后台清理"从未实现。以基金代码/搜索词作 key 时可被无限撑大磁盘。
+        # 现在按 max_files 上限做周期性清理（按 mtime 淘汰最旧），代价是每 N 次写入扫一次目录。
+        self.max_files = max_files
+        self.sweep_every = max(sweep_every, 1)
+        self._set_count = 0
 
     def _safe_key(self, key: str) -> str:
         """将缓存键中的非法文件名字符替换为下划线（Windows兼容）"""
@@ -157,6 +171,67 @@ class DataCache:
             "_ttl": effective_ttl,
         }
         atomic_write_json(path, data, default=_serialize)
+        self._maybe_sweep()
+
+    def _maybe_sweep(self) -> None:
+        """周期性清理文件层，把文件数控制在 max_files 以内（淘汰最旧）。"""
+        self._set_count += 1
+        if self._set_count % self.sweep_every:
+            return
+        try:
+            files = sorted(self.cache_dir.glob("*.json"), key=lambda p: p.stat().st_mtime)
+        except OSError as e:
+            logger.debug(f"cache sweep 列目录失败: {e}")
+            return
+        overflow = len(files) - self.max_files
+        if overflow <= 0:
+            return
+        removed = 0
+        for f in files[:overflow]:
+            try:
+                f.unlink(missing_ok=True)
+                removed += 1
+            except OSError as e:
+                logger.debug(f"cache sweep 删除失败 {f}: {e}")
+        if removed:
+            logger.info(f"cache sweep: 文件数 {len(files)} 超过上限 {self.max_files}，已清理最旧 {removed} 个")
+
+    def get_with_stale(self, key: str, max_stale: int = 300) -> tuple[Any | None, bool]:
+        """读取缓存，允许返回"已过期但仍可用"的旧值。
+
+        P2 新增(2026-10-26)，用于 stale-while-revalidate：
+        首屏接口（如 /api/market/hot_stocks）冷态要 1s，而 TTL 只有 60s，
+        过期瞬间的那位用户就得等完整一轮外部请求。改成"先返回旧值、后台刷新"后，
+        用户侧看到的是十几毫秒。
+
+        Returns:
+            (value, is_stale)
+            - (None, False)：无可用数据（内存/文件都没有，或超出 max_stale 容忍窗口）
+            - (value, False)：新鲜命中（已回填内存层）
+            - (value, True)：过期但在容忍窗口内，调用方应立即响应并触发后台刷新
+        """
+        mem_val = self._memory.get(key)
+        if mem_val is not None:
+            return mem_val, False
+
+        path = self.cache_dir / f"{self._safe_key(key)}.json"
+        data = safe_read_json(path)
+        if data is None:
+            return None, False
+        try:
+            value = data.get("value")
+            ttl = data.get("_ttl", self.default_ttl)
+            age = time.time() - data.get("_timestamp", 0)
+            if age <= ttl:
+                self._memory.set(key, value, ttl=ttl)
+                return value, False
+            if max_stale > 0 and age <= ttl + max_stale:
+                # 刻意不回填内存层：避免把过期数据"续命"，下次仍走文件层判断
+                return value, True
+            return None, False
+        except Exception as e:
+            logger.debug(f"cache get_with_stale 解析失败 {key}: {e}")
+            return None, False
 
     def delete(self, key: str):
         self._memory.delete(key)

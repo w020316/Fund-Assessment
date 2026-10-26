@@ -331,3 +331,61 @@ class TestFileLayerTypeFidelity:
 
         got = DataCache(cache_dir=cache_dir, default_ttl=300).get("stock")
         assert got == {"code": "600519", "price": 1688.0}
+
+
+class TestStaleWhileRevalidate:
+    """get_with_stale：过期仍可用的旧值（2026-10-26 A-11 新增）
+
+    背景：首屏 /api/market/hot_stocks 冷态 0.999s、TTL 仅 60s，
+    每逢过期的那位用户要等完整一轮外部请求。SWR 让过期数据先顶上、后台再刷新。
+    """
+
+    def test_fresh_value_reports_not_stale(self, cache):
+        cache.set("k", {"v": 1}, ttl=100)
+        value, stale = cache.get_with_stale("k", max_stale=600)
+        assert value == {"v": 1}
+        assert stale is False
+
+    def test_expired_within_window_reports_stale(self, cache):
+        cache.set("k", [1, 2, 3], ttl=60)
+        cache._memory.clear()  # 强制走文件层，验证跨进程场景
+        with patch("src.core.cache.time.time", return_value=time.time() + 120):
+            value, stale = cache.get_with_stale("k", max_stale=600)
+        assert value == [1, 2, 3]
+        assert stale is True, "过期但在容忍窗口内应返回旧值并标记 stale"
+
+    def test_expired_beyond_window_returns_none(self, cache):
+        cache.set("k", "v", ttl=60)
+        cache._memory.clear()
+        with patch("src.core.cache.time.time", return_value=time.time() + 10_000):
+            value, stale = cache.get_with_stale("k", max_stale=600)
+        assert value is None
+        assert stale is False
+
+    def test_missing_key_returns_none(self, cache):
+        assert cache.get_with_stale("nope", max_stale=600) == (None, False)
+
+
+class TestFileSweep:
+    """文件层按上限清理（2026-10-26 A-08 修复回归）
+
+    缺陷：set 每次写一个 json，过期只删内存不删文件，"后台清理"从未实现 → 磁盘只增不减。
+    """
+
+    def test_sweep_bounds_file_count(self, tmp_path):
+        from src.core.cache import DataCache
+
+        c = DataCache(cache_dir=str(tmp_path / "c"), default_ttl=60, max_files=5, sweep_every=1)
+        for i in range(20):
+            c.set(f"key_{i}", {"i": i}, ttl=60)
+        files = list(c.cache_dir.glob("*.json"))
+        assert len(files) <= 5, f"文件数 {len(files)} 应被限制在 5 以内"
+
+    def test_sweep_keeps_newest(self, tmp_path):
+        from src.core.cache import DataCache
+
+        c = DataCache(cache_dir=str(tmp_path / "c"), default_ttl=60, max_files=3, sweep_every=1)
+        for i in range(10):
+            c.set(f"key_{i}", {"i": i}, ttl=60)
+            time.sleep(0.01)  # 保证 mtime 可区分
+        assert (c.cache_dir / "key_9.json").exists(), "最新写入的文件不应被清理"
