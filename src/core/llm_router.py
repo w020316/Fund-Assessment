@@ -514,6 +514,12 @@ class LLMRouter:
         """返回可用的Provider名称列表"""
         return [p.name for p in self._providers if p.is_available]
 
+    @staticmethod
+    def _is_rate_limited(exc: Exception) -> bool:
+        """请求被上游限流(HTTP 429)时返回 True。"""
+        response = getattr(exc, "response", None)
+        return getattr(response, "status_code", None) == 429
+
     def chat(
         self,
         messages: list[dict[str, str]],
@@ -570,6 +576,12 @@ class LLMRouter:
                     return response
                 except Exception as e:
                     last_error = e
+                    # 429 是上游限流而非 Provider 故障:官方建议平台过载时拉开重试间隔,
+                    # 1s/2s 原地重试救不回来(线上实测白等 37.5s 才降级),直接切下一个。
+                    if self._is_rate_limited(e):
+                        provider.record_failure()
+                        logger.warning(f"LLM Provider [{provider.name}] 触发限流(429),跳过重试切换下一个: {e}")
+                        break
                     if attempt < max_attempts - 1:
                         delay = provider.retry_delay * (2 ** attempt)
                         logger.warning(f"LLM Provider [{provider.name}] 第{attempt+1}次失败: {e},{delay:.1f}s后重试")

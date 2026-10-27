@@ -494,6 +494,126 @@ class TestChatWithRateLimit:
         # 应分别使用 k1, k2, k3
         assert captured_auths == ["Bearer k1", "Bearer k2", "Bearer k3"]
 
+    def test_chat_429_skips_retry_and_switches_provider(self):
+        """429 限流应立即切换下一 Provider,而不是原地重试 3 次。
+
+        线上实测(2026-10-27):智谱 GLM-4.7-Flash 免费档高峰期返回 429(code 1305
+        平台过载),1s/2s 原地重试全部失败,用户请求被拖到 37.5s 才降级。
+        """
+        with patch.dict("os.environ", {}, clear=True):
+            router = LLMRouter()
+
+        provider_a = LLMProvider(
+            name="throttled",
+            provider_type=ProviderType.OPENAI,
+            base_url="https://a.test.com/v1",
+            api_key="k-a",
+            model="m-a",
+            max_retries=2,
+            retry_delay=0.01,
+            priority=0,
+        )
+        provider_b = LLMProvider(
+            name="healthy",
+            provider_type=ProviderType.OPENAI,
+            base_url="https://b.test.com/v1",
+            api_key="k-b",
+            model="m-b",
+            priority=1,
+        )
+        router.add_provider(provider_a)
+        router.add_provider(provider_b)
+
+        calls = {"a": 0, "b": 0}
+
+        def mock_post(url, **kwargs):
+            if "a.test.com" in url:
+                calls["a"] += 1
+                resp = MagicMock()
+                resp.status_code = 429
+                raise requests.exceptions.HTTPError(
+                    "429 Client Error: Too Many Requests", response=resp
+                )
+            calls["b"] += 1
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.json.return_value = {
+                "choices": [{"message": {"content": "from-b"}}],
+                "usage": {},
+            }
+            return resp
+
+        with patch("requests.post", side_effect=mock_post):
+            result = router.chat([{"role": "user", "content": "429-fast-fail"}])
+
+        assert result.provider == "healthy"
+        assert calls["a"] == 1, "429 不应原地重试"
+        assert provider_a._fail_count == 1
+        assert provider_b._fail_count == 0
+
+    def test_chat_non_429_still_retries(self):
+        """非 429 的瞬时错误(如 ConnectionError)仍按指数退避重试。"""
+        with patch.dict("os.environ", {}, clear=True):
+            router = LLMRouter()
+        provider = LLMProvider(
+            name="flaky",
+            provider_type=ProviderType.OPENAI,
+            base_url="https://flaky.test.com/v1",
+            api_key="k",
+            model="m",
+            max_retries=2,
+            retry_delay=0.01,
+        )
+        router.add_provider(provider)
+
+        calls = {"n": 0}
+
+        def mock_post(url, **kwargs):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise requests.exceptions.ConnectionError("fail")
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.json.return_value = {
+                "choices": [{"message": {"content": "ok"}}],
+                "usage": {},
+            }
+            return resp
+
+        with patch("requests.post", side_effect=mock_post):
+            result = router.chat([{"role": "user", "content": "non-429-retry"}])
+
+        assert result.content == "ok"
+        assert calls["n"] == 3
+
+    def test_chat_429_opens_circuit_after_3_requests(self):
+        """连续 3 次请求都被 429 时仍应熔断,避免继续打满上游。"""
+        with patch.dict("os.environ", {}, clear=True):
+            router = LLMRouter()
+        provider = LLMProvider(
+            name="always_429",
+            provider_type=ProviderType.OPENAI,
+            base_url="https://rl.test.com/v1",
+            api_key="k",
+            model="m",
+            max_retries=2,
+            retry_delay=0.01,
+        )
+        router.add_provider(provider)
+
+        def mock_post(url, **kwargs):
+            resp = MagicMock()
+            resp.status_code = 429
+            raise requests.exceptions.HTTPError("429 Client Error", response=resp)
+
+        with patch("requests.post", side_effect=mock_post):
+            for i in range(3):
+                with pytest.raises(RuntimeError):
+                    router.chat([{"role": "user", "content": f"429-circuit-{i}"}])
+                assert provider._fail_count == i + 1
+        assert provider._circuit_open is True
+        assert provider.is_available is False
+
     def test_health_check_returns_all_fields(self):
         """健康检查应返回完整字段"""
         with patch.dict("os.environ", {}, clear=True):

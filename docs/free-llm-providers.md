@@ -69,3 +69,12 @@ zhipu_glm(-1, 用户指定优先) > ttapi(0) > gemini(2) > anthropic(3) > ollama
 - 每个 Provider 有独立令牌桶：智谱 30 RPM、硅基流动 1000 RPM、星火 30 RPM、千帆 60 RPM（对应 QPS 1）、Groq 30 RPM、Cerebras 5 RPM、OpenRouter 20 RPM。
 - 连续 3 次失败熔断 30 秒后自动半开；`GET /api/health/llm` 可看 `circuit_open` / `fail_count`。
 - `chat()` 命中响应缓存时不消耗任何额度（`GET /api/health/llm` 的 `response_cache` 字段）。
+
+### 429 的语义（2026-10-27 修正）
+
+智谱把限流分成两类：**1302 = 本账户并发超限**，**1305 = 平台服务过载**（与单个账户行为无关）。两者都返回 HTTP 429。官方建议 1305 时「拉开重试间隔，避免立即高频重试」（https://docs.bigmodel.cn/cn/api/rate-limit）。
+
+因此 `chat()` 对 429 的处理是：**不原地重试，立即切换下一个 Provider**；仍计入熔断计数（防持续打满上游）。非 429 的瞬时错误（ConnectionError / 5xx）保持 1s→2s 指数退避重试。
+
+> 线上实测（2026-10-27 12:26）：智谱免费档高峰期 429 时，旧逻辑 3 次原地重试全部失败，用户请求被拖到 **37.5s** 才降级；修正后降级耗时回到「两个 Provider 各一次请求」的量级。**429 不代表 Key 无效**——同一把 Key 在低峰期探测 `ok=true`。
+
