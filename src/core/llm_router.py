@@ -336,7 +336,7 @@ class LLMRouter:
                 api_key=zhipu_keys[0],
                 api_keys=zhipu_keys,
                 model=os.getenv("ZHIPU_MODEL", "glm-4.7-flash"),
-                priority=100,
+                priority=-1,  # 用户指定优先使用智谱免费模型:负数保证排在所有 Provider 之前
                 rpm=30,  # 智谱限制30并发
                 timeout=30,  # 快速失败,避免 Render 免费实例超时
                 free_tier=True,

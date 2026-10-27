@@ -121,8 +121,8 @@ class TestMultiKeyAndPriority:
         router = _build(monkeypatch, env)
         names = [p.name for p in router._providers]
         assert names == [
-            "openrouter", "cerebras", "groq", "qianfan_ernie",
-            "aliyun_qwen", "spark_lite", "siliconflow", "zhipu_glm",
+            "zhipu_glm", "openrouter", "cerebras", "groq", "qianfan_ernie",
+            "aliyun_qwen", "spark_lite", "siliconflow",
         ]
         assert [p.priority for p in router._providers] == sorted(p.priority for p in router._providers)
 

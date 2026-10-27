@@ -55,14 +55,14 @@
 ## 五、默认优先级（数值越小越先被调用）
 
 ```
-ttapi(0) > gemini(2) > anthropic(3) > ollama(10)
+zhipu_glm(-1, 用户指定优先) > ttapi(0) > gemini(2) > anthropic(3) > ollama(10)
 > cloudflare_ai(65) > deepseek(70) > openrouter(75) > cerebras(78)
 > groq(80) > qianfan_ernie(82) > aliyun_qwen(85) > spark_lite(88)
-> agnes(90) > siliconflow(95) > zhipu_glm(100)
+> agnes(90) > siliconflow(95)
 ```
 
-免费 Provider 排在付费/自建之后，只有在前面全部不可用（未配置、熔断、限流超时）时才会被用到；
-若希望某个免费 Provider 优先，把它的 `priority` 调小即可（或删掉高优先级 Provider 的 Key）。
+智谱免费模型排在最前；注意 `ZHIPU_MODEL` 若在部署平台被显式设置，会覆盖代码默认值。
+其余免费 Provider 排在付费/自建之后，只有在前序 Provider 全部不可用（未配置、熔断、限流超时）时才会被用到。
 
 ## 六、限流与熔断保护
 

@@ -294,7 +294,7 @@ class TestFreeProviderLoading:
             assert len(zhipu) == 1
             assert zhipu[0].model == "glm-4.7-flash"
             assert zhipu[0].rpm == 30
-            assert zhipu[0].priority == 100
+            assert zhipu[0].priority == -1  # 用户指定:智谱免费模型优先
             assert "zhipu_glm" in router._token_buckets  # 已创建令牌桶
 
     def test_siliconflow_loading(self):
@@ -396,12 +396,14 @@ class TestFreeProviderLoading:
             router = LLMRouter()
             priorities = [p.priority for p in router._providers]
             assert priorities == sorted(priorities)
-            # priority: cloudflare=65 < deepseek=70 < openrouter=75 < groq=80
-            #          < aliyun=85 < siliconflow=95 < zhipu=100
-            assert router._providers[0].name == "cloudflare_ai"
-            assert router._providers[0].priority == 65
-            assert router._providers[-1].name == "zhipu_glm"
-            assert router._providers[-1].priority == 100
+            # priority: zhipu=-1(用户指定优先) < cloudflare=65 < deepseek=70
+            #          < openrouter=75 < groq=80 < aliyun=85 < siliconflow=95
+            assert router._providers[0].name == "zhipu_glm"
+            assert router._providers[0].priority == -1
+            assert router._providers[1].name == "cloudflare_ai"
+            assert router._providers[1].priority == 65
+            assert router._providers[-1].name == "siliconflow"
+            assert router._providers[-1].priority == 95
 
 
 class TestChatWithRateLimit:
