@@ -422,6 +422,63 @@ async def get_portfolio_risk(
 
 
 # ==================================================================
+# STAGE6: groups 持仓分组(批次 B 功能 #8)
+# ==================================================================
+
+
+class GroupsUpdateRequest(BaseModel):
+    """分组配置全量更新(白名单字段,不触碰基金持仓文件)。"""
+
+    groups: list[dict[str, Any]] = Field(..., description="分组列表,必须含 default")
+    fund_groups: dict[str, str] = Field(default_factory=dict, description="基金代码 → 分组 id")
+
+
+def _groups_response(config: dict[str, Any]) -> dict[str, Any]:
+    """附录有效的基金→分组映射(仅当前持仓;未配置回退 default)。"""
+    positions = fund_route._load_positions()
+    effective: dict[str, str] = {}
+    for p in positions:
+        code = _safe_str(p.get("fund_code"))
+        if code:
+            effective[code] = pstore.group_for_fund(config, code)
+    return {
+        "success": True,
+        "schema_version": config.get("schema_version", 1),
+        "groups": config.get("groups", []),
+        "fund_groups": config.get("fund_groups", {}),
+        "effective": effective,
+        "generated_at": _now_iso(),
+    }
+
+
+@router.get("/groups", dependencies=[Depends(require_admin)])
+async def get_groups():
+    """读取持仓分组配置;旧数据无配置 → 全部归默认组,绝不 500。"""
+    return _groups_response(pstore.load_groups())
+
+
+@router.put("/groups", dependencies=[Depends(require_admin)])
+async def put_groups(req: GroupsUpdateRequest):
+    """全量保存分组配置(校验失败整包拒绝,不部分写入)。"""
+    payload = {
+        "schema_version": 1,
+        "groups": req.groups,
+        "fund_groups": req.fund_groups,
+    }
+    errors, cleaned = pstore.normalize_groups(payload)
+    if errors:
+        return {"success": False, "errors": errors, "message": "分组配置校验失败,未保存"}
+    ok = pstore.save_groups(cleaned)
+    if not ok:
+        return {"success": False, "errors": ["分组配置写入失败,请查看日志"],
+                "message": "保存失败"}
+    return {
+        **_groups_response(cleaned),
+        "message": "分组配置已保存",
+    }
+
+
+# ==================================================================
 # STAGE6: xray-report 持仓重叠 X-Ray(批次 A 功能 #4,简化版)
 # ==================================================================
 
@@ -741,6 +798,7 @@ def _collect_ledger_sections() -> dict[str, Any]:
         "watchlist": watchlist_raw if isinstance(watchlist_raw, dict) else {},
         "portfolio_config": {
             "webhook": pstore.load_webhook_config(),
+            "groups": pstore.load_groups(),
         },
     }
 
@@ -823,12 +881,13 @@ def _validate_ledger_payload(payload: Any) -> tuple[list[str], dict[str, Any]]:
         else:
             errors.append("watchlist 需为对象")
 
-    # portfolio_config(可选,webhook 白名单校验,凭据字段拒绝非空)
+    # portfolio_config(可选,webhook/groups 白名单校验,凭据字段拒绝非空)
     pc = sections.get("portfolio_config")
     if pc is not None:
         if not isinstance(pc, dict):
             errors.append("portfolio_config 需为对象")
         else:
+            normalized_pc: dict[str, Any] = {}
             webhook = pc.get("webhook")
             if webhook is not None:
                 if not isinstance(webhook, dict):
@@ -844,7 +903,15 @@ def _validate_ledger_payload(payload: Any) -> tuple[list[str], dict[str, Any]]:
                         v = th.get(k)
                         if isinstance(v, (int, float)) and v >= 0:
                             cleaned["thresholds"][k] = float(v)
-                    normalized["portfolio_config"] = {"webhook": cleaned}
+                    normalized_pc["webhook"] = cleaned
+            groups_cfg = pc.get("groups")
+            if groups_cfg is not None:
+                g_errs, g_cleaned = pstore.normalize_groups(groups_cfg)
+                errors.extend([f"portfolio_config.groups: {e}" for e in g_errs])
+                if not g_errs:
+                    normalized_pc["groups"] = g_cleaned
+            if normalized_pc:
+                normalized["portfolio_config"] = normalized_pc
     return errors, normalized
 
 
@@ -868,12 +935,23 @@ def _diff_ledger(normalized: dict[str, Any]) -> dict[str, Any]:
             "incoming_count": len(normalized["watchlist"]),
         }
     if "portfolio_config" in normalized:
-        cur = pstore.load_webhook_config()
-        incoming = normalized["portfolio_config"]["webhook"]
-        diff["portfolio_config"] = {
-            "enabled": {"current": cur["enabled"], "incoming": incoming["enabled"]},
-            "channel": {"current": cur["channel"], "incoming": incoming["channel"]},
-        }
+        incoming_pc = normalized["portfolio_config"]
+        diff_pc: dict[str, Any] = {}
+        if "webhook" in incoming_pc:
+            cur = pstore.load_webhook_config()
+            incoming = incoming_pc["webhook"]
+            diff_pc["enabled"] = {"current": cur["enabled"], "incoming": incoming["enabled"]}
+            diff_pc["channel"] = {"current": cur["channel"], "incoming": incoming["channel"]}
+        if "groups" in incoming_pc:
+            cur_groups = pstore.load_groups()
+            incoming_groups = incoming_pc["groups"]
+            diff_pc["groups"] = {
+                "current_groups": len(cur_groups.get("groups", [])),
+                "incoming_groups": len(incoming_groups.get("groups", [])),
+                "current_mappings": len(cur_groups.get("fund_groups", {})),
+                "incoming_mappings": len(incoming_groups.get("fund_groups", {})),
+            }
+        diff["portfolio_config"] = diff_pc
     return diff
 
 
@@ -928,6 +1006,7 @@ async def import_ledger(req: LedgerImportRequest):
         config_route._USER_POSITIONS_FILE,
         monitor_route._WATCHLIST_FILE,
         pstore.WEBHOOK_CONFIG_FILE,
+        pstore.GROUPS_FILE,
     ]
     backup_dir = pstore.backup_files(backup_files, backup_name="import_backup")
 
@@ -946,7 +1025,11 @@ async def import_ledger(req: LedgerImportRequest):
             atomic_write_json(monitor_route._WATCHLIST_FILE, normalized["watchlist"])
             applied["watchlist"] = True
         if "portfolio_config" in normalized:
-            applied["portfolio_config"] = pstore.save_webhook_config(normalized["portfolio_config"]["webhook"])
+            incoming_pc = normalized["portfolio_config"]
+            if "webhook" in incoming_pc:
+                applied["portfolio_config"] = pstore.save_webhook_config(incoming_pc["webhook"])
+            if "groups" in incoming_pc:
+                applied["groups"] = pstore.save_groups(incoming_pc["groups"])
         counts = {k: (len(v.get("positions", [])) if isinstance(v, dict) and "positions" in v else "-")
                   for k, v in normalized.items()}
         return {

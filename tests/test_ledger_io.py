@@ -41,6 +41,7 @@ def isolated_state(tmp_path, monkeypatch):
     monkeypatch.setattr("web.routes.config._USER_POSITIONS_FILE", tmp_path / "stock_positions.json")
     monkeypatch.setattr("web.routes.monitor._WATCHLIST_FILE", str(tmp_path / "watchlist.json"))
     monkeypatch.setattr(pstore, "WEBHOOK_CONFIG_FILE", tmp_path / "webhook_config.json")
+    monkeypatch.setattr(pstore, "GROUPS_FILE", tmp_path / "groups.json")
     monkeypatch.setattr(pstore, "BACKUP_DIR", tmp_path / "backup")
     yield
     (tmp_path / "backup")
@@ -89,6 +90,23 @@ class TestLedgerExport:
         assert s["watchlist"] == {"600519": ["price_surge"]}
         assert "stock_positions" in s
         assert "portfolio_config" in s
+        # 批次 B:分组默认值随账本导出(旧数据自动归 default)
+        assert s["portfolio_config"]["groups"]["groups"] == [{"id": "default", "name": "我的持仓"}]
+        assert s["portfolio_config"]["groups"]["fund_groups"] == {}
+
+    def test_export_includes_custom_groups(self, client, tmp_path):
+        """自定义分组与映射随账本导出(批次 B 功能 #8)。"""
+        (tmp_path / "groups.json").write_text(json.dumps({
+            "schema_version": 1,
+            "groups": [{"id": "default", "name": "我的持仓"},
+                       {"id": "core", "name": "核心仓"}],
+            "fund_groups": {"110022": "core"},
+        }, ensure_ascii=False), encoding="utf-8")
+        resp = client.get("/api/portfolio/export")
+        assert resp.status_code == 200
+        groups = resp.json()["sections"]["portfolio_config"]["groups"]
+        assert [g["id"] for g in groups["groups"]] == ["default", "core"]
+        assert groups["fund_groups"] == {"110022": "core"}
 
     def test_export_scrubs_credentials(self, client, tmp_path):
         """凭据字段置空:即使配置文件被塞入 sendkey,导出也一律置空(双保险)。"""
@@ -206,3 +224,78 @@ class TestLedgerImport:
         assert resp.status_code == 200
         raw = json.loads((tmp_path / "webhook_config.json").read_text(encoding="utf-8"))
         assert "sendkey" not in raw  # 白名单落盘,凭据字段不可能出现
+
+
+# ============ 分组配置随账本往返(批次 B) ============
+
+
+class TestLedgerGroups:
+    def test_import_confirm_restores_groups(self, client, tmp_path):
+        """confirm 导入恢复分组配置,并备份旧 groups.json。"""
+        (tmp_path / "groups.json").write_text(json.dumps({
+            "schema_version": 1,
+            "groups": [{"id": "default", "name": "旧默认"}],
+            "fund_groups": {"000001": "default"},
+        }, ensure_ascii=False), encoding="utf-8")
+        payload = _payload(
+            _VALID_POSITIONS,
+            portfolio_config={"groups": {
+                "schema_version": 1,
+                "groups": [{"id": "default", "name": "我的持仓"},
+                           {"id": "core", "name": "核心仓"}],
+                "fund_groups": {"110022": "core", "008984": "default"},
+            }},
+        )
+        resp = client.post("/api/portfolio/import",
+                           json={"payload": payload, "dry_run": False, "confirm": True})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["applied"]["groups"] is True
+        saved = json.loads((tmp_path / "groups.json").read_text(encoding="utf-8"))
+        assert [g["id"] for g in saved["groups"]] == ["default", "core"]
+        assert saved["fund_groups"] == {"110022": "core", "008984": "default"}
+        # 旧分组文件已进入自动备份
+        from pathlib import Path
+        backup_dir = Path(data["backup_dir"])
+        assert (backup_dir / "groups.json").exists()
+
+    def test_import_invalid_groups_rejected(self, client, tmp_path):
+        """分组配置非法(缺 default / 未知分组映射)→ 整包拒绝,不落盘。"""
+        for bad_groups in [
+            {"groups": [{"id": "core", "name": "核心仓"}], "fund_groups": {}},
+            {"groups": [{"id": "default", "name": "我的持仓"}],
+             "fund_groups": {"110022": "ghost"}},
+            {"groups": [{"id": "BadId", "name": "非法 id"}], "fund_groups": {}},
+            {"groups": [], "fund_groups": {}},
+        ]:
+            payload = _payload(_VALID_POSITIONS,
+                               portfolio_config={"groups": bad_groups})
+            resp = client.post("/api/portfolio/import",
+                               json={"payload": payload, "dry_run": True})
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["success"] is False, f"应拒绝: {bad_groups}"
+            assert any("groups" in e for e in data["errors"])
+        assert not (tmp_path / "groups.json").exists()
+        assert not (tmp_path / "fund_positions.json").exists()
+
+    def test_import_dry_run_previews_group_counts(self, client, tmp_path):
+        """dry-run diff 展示分组数量对比,不落盘。"""
+        payload = _payload(
+            _VALID_POSITIONS,
+            portfolio_config={"groups": {
+                "groups": [{"id": "default", "name": "我的持仓"},
+                           {"id": "core", "name": "核心仓"}],
+                "fund_groups": {"110022": "core"},
+            }},
+        )
+        resp = client.post("/api/portfolio/import", json={"payload": payload, "dry_run": True})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        diff = data["diff"]["portfolio_config"]["groups"]
+        assert diff["current_groups"] == 1
+        assert diff["incoming_groups"] == 2
+        assert diff["incoming_mappings"] == 1
+        assert not (tmp_path / "groups.json").exists()

@@ -142,6 +142,16 @@ class TestPortfolioStore:
         raw = json.loads(f.read_text(encoding="utf-8"))
         assert raw["est_110022"] == 123.0
 
+    def test_saves_create_missing_parent_dir(self, tmp_path):
+        """Render 临时磁盘首次部署 data/portfolio 不存在:配置与节流写入需自动建目录。"""
+        cfg_file = tmp_path / "portfolio" / "webhook_config.json"
+        thr_file = tmp_path / "portfolio" / "webhook_throttle.json"
+        assert pstore.save_webhook_config({"enabled": True}, path=cfg_file) is True
+        assert pstore.mark_pushed("k", now=123.0, path=thr_file) is True
+        assert cfg_file.exists()
+        assert thr_file.exists()
+
+
 # ============ 路由层 ============
 
 
