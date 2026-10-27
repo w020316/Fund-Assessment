@@ -66,8 +66,9 @@ class TestProbeEndpoint:
         )
         assert resp.status_code == 200
         body = resp.json()
-        assert body["ok_count"] == 1
-        assert body["results"][0]["provider"] == "zhipu_glm"
+        # 一个 ZHIPU_API_KEY 会加载两个免费模型槽位(4.7-Flash + 4.5-Flash 兜底)
+        assert body["ok_count"] == 2
+        assert [r["provider"] for r in body["results"]] == ["zhipu_glm", "zhipu_glm_45"]
 
     def test_unknown_provider_returns_404(self, monkeypatch, probe_client):
         client, _ = probe_client

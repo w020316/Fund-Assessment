@@ -27,7 +27,7 @@
 
 | Provider | 环境变量 | 默认模型 | 免费额度 | 核实 | 核实来源 |
 | --- | --- | --- | --- | --- | --- |
-| 智谱 GLM | `ZHIPU_API_KEY` | `glm-4.7-flash` | GLM-4.7-Flash 输入/输出/缓存全免费，200K 上下文；另有 `glm-4.5-flash`(128K)、`glm-4.6v-flash`(128K，多模态) 同属免费 | 官方确认 | https://docs.bigmodel.cn/cn/guide/start/model-overview |
+| 智谱 GLM | `ZHIPU_API_KEY` | `glm-4.7-flash`（兜底 `glm-4.5-flash`） | GLM-4.7-Flash 输入/输出/缓存全免费，200K 上下文；GLM-4.5-Flash(128K)、GLM-4.6V-Flash(128K，多模态) 同属免费。前者与后者是**两个独立模型**，高峰期可互为兜底（`zhipu_glm_45`，同 Key） | 官方确认 | https://docs.bigmodel.cn/cn/guide/start/model-overview |
 | 硅基流动 SiliconFlow | `SILICONFLOW_API_KEY` | `Qwen/Qwen2-7B-Instruct` | 7 个模型免费：`Qwen/Qwen2-7B-Instruct`、`Qwen/Qwen2-1.5B-Instruct`、`Qwen/Qwen1.5-7B-Chat`、`THUDM/glm-4-9b-chat`、`THUDM/chatglm3-6b`、`internlm/internlm2_5-7b-chat`、`mistralai/Mistral-7B-Instruct-v0.2`（均 32K），需实名；新用户另赠 ¥16 | 官方确认 | https://docs.siliconflow.com/quickstart/models |
 | 讯飞星火 Lite | `SPARK_API_KEY` | `lite` | Lite 免费；OpenAI 兼容地址 `https://spark-api-open.xf-yun.com/v1`，`Authorization: Bearer <APIPassword>` | 官方确认 | https://www.xfyun.cn/doc/spark/HTTP调用文档.html |
 | 百度千帆 | `QIANFAN_API_KEY` | `ernie-speed-128k` | ERNIE-Speed / ERNIE-Lite 永久免费，免费档 QPS≈1；OpenAI 兼容地址 `https://qianfan.baidubce.com/v2`，`Authorization: Bearer <API Key>`；新用户另有每模型 100 万 tokens（3 个月） | 官方确认（模型 ID 与地址）+ 第三方（永久免费表述） | https://cloud.baidu.com/doc/qianfan/s/rmh4stp0j |
@@ -55,13 +55,15 @@
 ## 五、默认优先级（数值越小越先被调用）
 
 ```
-zhipu_glm(-1, 用户指定优先) > ttapi(0) > gemini(2) > anthropic(3) > ollama(10)
+zhipu_glm(-1, 用户指定优先) > ttapi(0) > zhipu_glm_45(1, 智谱免费兜底)
+> gemini(2) > anthropic(3) > ollama(10)
 > cloudflare_ai(65) > deepseek(70) > openrouter(75) > cerebras(78)
 > groq(80) > qianfan_ernie(82) > aliyun_qwen(85) > spark_lite(88)
 > agnes(90) > siliconflow(95)
 ```
 
-智谱免费模型排在最前；注意 `ZHIPU_MODEL` 若在部署平台被显式设置，会覆盖代码默认值。
+智谱免费模型排在最前；`zhipu_glm_45` 复用同一个 `ZHIPU_API_KEY`，模型可用 `ZHIPU_MODEL_FALLBACK` 覆盖（默认 `glm-4.5-flash`）。
+注意 `ZHIPU_MODEL` 若在部署平台被显式设置，会覆盖代码默认值。
 其余免费 Provider 排在付费/自建之后，只有在前序 Provider 全部不可用（未配置、熔断、限流超时）时才会被用到。
 
 ## 六、限流与熔断保护

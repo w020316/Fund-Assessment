@@ -20,7 +20,7 @@ ALL_LLM_ENV = [
     "GEMINI_API_KEY", "GEMINI_BASE_URL", "GEMINI_MODEL",
     "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL",
     "OLLAMA_BASE_URL", "OLLAMA_MODEL",
-    "ZHIPU_API_KEY", "ZHIPU_API_KEYS", "ZHIPU_MODEL", "ZHIPU_BASE_URL",
+    "ZHIPU_API_KEY", "ZHIPU_API_KEYS", "ZHIPU_MODEL", "ZHIPU_MODEL_FALLBACK", "ZHIPU_BASE_URL",
     "SILICONFLOW_API_KEY", "SILICONFLOW_API_KEYS", "SILICONFLOW_MODEL", "SILICONFLOW_BASE_URL",
     "SPARK_API_KEY", "SPARK_API_KEYS", "SPARK_MODEL", "SPARK_BASE_URL",
     "DASHSCOPE_API_KEY", "DASHSCOPE_API_KEYS", "DASHSCOPE_MODEL", "DASHSCOPE_BASE_URL",
@@ -121,10 +121,26 @@ class TestMultiKeyAndPriority:
         router = _build(monkeypatch, env)
         names = [p.name for p in router._providers]
         assert names == [
-            "zhipu_glm", "openrouter", "cerebras", "groq", "qianfan_ernie",
-            "aliyun_qwen", "spark_lite", "siliconflow",
+            "zhipu_glm", "zhipu_glm_45", "openrouter", "cerebras", "groq",
+            "qianfan_ernie", "aliyun_qwen", "spark_lite", "siliconflow",
         ]
         assert [p.priority for p in router._providers] == sorted(p.priority for p in router._providers)
+
+    def test_zhipu_glm_45_loading(self, monkeypatch):
+        """GLM-4.5-Flash 与 4.7-Flash 共用 Key,作为同平台限流兜底。"""
+        router = _build(monkeypatch, {"ZHIPU_API_KEY": "zhipu-test-key"})
+        provider = _only(router, "zhipu_glm_45")
+        assert provider.model == "glm-4.5-flash"
+        assert provider.priority == 1
+        assert provider.free_tier is True
+        assert provider.api_key == "zhipu-test-key"
+        assert provider.rpm == 30
+
+    def test_zhipu_fallback_model_env_override(self, monkeypatch):
+        router = _build(monkeypatch, {
+            "ZHIPU_API_KEY": "k", "ZHIPU_MODEL_FALLBACK": "glm-4.5-air",
+        })
+        assert _only(router, "zhipu_glm_45").model == "glm-4.5-air"
 
     def test_free_tier_visible_in_health_check(self, monkeypatch):
         router = _build(monkeypatch, {
@@ -144,8 +160,10 @@ class TestProbe:
         monkeypatch.setattr(router, "_call_provider", lambda p, *a, **kw: self._ok_response(p))
         result = router.probe()
         assert result["status"] == "ok"
-        assert result["total"] == 2
-        assert result["ok_count"] == 2
+        # 智谱会加载两个免费模型槽位(zhipu_glm + zhipu_glm_45),加 groq 共 3 个
+        assert result["total"] == 3
+        assert result["ok_count"] == 3
+        assert [r["provider"] for r in result["results"]] == ["zhipu_glm", "zhipu_glm_45", "groq"]
         assert all(r["latency_ms"] == 12.5 for r in result["results"])
         assert {r["sample"] for r in result["results"]} == {"pong"}
 

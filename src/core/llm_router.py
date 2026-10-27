@@ -346,6 +346,20 @@ class LLMRouter:
                 timeout=30,  # 快速失败,避免 Render 免费实例超时
                 free_tier=True,
             ))
+            # GLM-4.5-Flash 同为免费(128K)。与 4.7-Flash 共用 Key 但模型独立,
+            # 高峰期某个免费模型被平台限流(429/1305)时作为同平台兜底。
+            self.add_provider(LLMProvider(
+                name="zhipu_glm_45",
+                provider_type=ProviderType.OPENAI,
+                base_url=os.getenv("ZHIPU_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"),
+                api_key=zhipu_keys[0],
+                api_keys=zhipu_keys,
+                model=os.getenv("ZHIPU_MODEL_FALLBACK", "glm-4.5-flash"),
+                priority=1,
+                rpm=30,
+                timeout=30,
+                free_tier=True,
+            ))
 
         # 硅基流动 SiliconFlow (Qwen2-7B 等 7 个模型免费,1000 RPM)
         siliconflow_keys = self._parse_api_keys("SILICONFLOW_API_KEY", "SILICONFLOW_API_KEYS")

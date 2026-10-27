@@ -274,7 +274,7 @@ class TestFreeProviderLoading:
             "GEMINI_API_KEY", "GEMINI_BASE_URL", "GEMINI_MODEL",
             "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL",
             "OLLAMA_BASE_URL", "OLLAMA_MODEL",
-            "ZHIPU_API_KEY", "ZHIPU_API_KEYS", "ZHIPU_MODEL", "ZHIPU_BASE_URL",
+            "ZHIPU_API_KEY", "ZHIPU_API_KEYS", "ZHIPU_MODEL", "ZHIPU_MODEL_FALLBACK", "ZHIPU_BASE_URL",
             "SILICONFLOW_API_KEY", "SILICONFLOW_API_KEYS", "SILICONFLOW_MODEL", "SILICONFLOW_BASE_URL",
             "DASHSCOPE_API_KEY", "DASHSCOPE_API_KEYS", "DASHSCOPE_MODEL", "DASHSCOPE_BASE_URL",
             "GROQ_API_KEY", "GROQ_API_KEYS", "GROQ_MODEL", "GROQ_BASE_URL",
@@ -396,12 +396,15 @@ class TestFreeProviderLoading:
             router = LLMRouter()
             priorities = [p.priority for p in router._providers]
             assert priorities == sorted(priorities)
-            # priority: zhipu=-1(用户指定优先) < cloudflare=65 < deepseek=70
-            #          < openrouter=75 < groq=80 < aliyun=85 < siliconflow=95
+            # priority: zhipu=-1(用户指定优先) < zhipu_45=1(同平台免费兜底)
+            #          < cloudflare=65 < deepseek=70 < openrouter=75 < groq=80
+            #          < aliyun=85 < siliconflow=95
             assert router._providers[0].name == "zhipu_glm"
             assert router._providers[0].priority == -1
-            assert router._providers[1].name == "cloudflare_ai"
-            assert router._providers[1].priority == 65
+            assert router._providers[1].name == "zhipu_glm_45"
+            assert router._providers[1].priority == 1
+            assert router._providers[2].name == "cloudflare_ai"
+            assert router._providers[2].priority == 65
             assert router._providers[-1].name == "siliconflow"
             assert router._providers[-1].priority == 95
 
