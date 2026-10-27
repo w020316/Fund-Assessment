@@ -292,7 +292,7 @@ class TestFreeProviderLoading:
             router = LLMRouter()
             zhipu = [p for p in router._providers if p.name == "zhipu_glm"]
             assert len(zhipu) == 1
-            assert zhipu[0].model == "glm-4-flash"
+            assert zhipu[0].model == "glm-4.7-flash"
             assert zhipu[0].rpm == 30
             assert zhipu[0].priority == 100
             assert "zhipu_glm" in router._token_buckets  # 已创建令牌桶
@@ -304,7 +304,7 @@ class TestFreeProviderLoading:
             router = LLMRouter()
             sf = [p for p in router._providers if p.name == "siliconflow"]
             assert len(sf) == 1
-            assert sf[0].model == "Qwen/Qwen2.5-7B-Instruct"
+            assert sf[0].model == "Qwen/Qwen2-7B-Instruct"
             assert sf[0].rpm == 1000
             assert sf[0].priority == 95
 

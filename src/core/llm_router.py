@@ -2,6 +2,12 @@
 
 参考: ZhuLinsen/daily_stock_analysis 的 LiteLLM Router 设计
 支持: OpenAI兼容(TTAPI/Agnes/通义千问)、Gemini、Anthropic、Ollama本地模型
+
+免费 Provider(默认模型均为核实过的免费档,来源与核实日期见
+docs/free-llm-providers.md):
+  国内 - 智谱 GLM-4.7-Flash、硅基流动、讯飞星火 Lite、百度千帆 ERNIE-Speed、阿里百炼
+  海外 - Groq、Cerebras、OpenRouter(免费模型)、Agnes
+未配置 API Key 的 Provider 不会加载,也不影响既有调用链。
 """
 from __future__ import annotations
 
@@ -38,6 +44,7 @@ class LLMProvider:
     priority: int = 0  # 越小优先级越高
     enabled: bool = True
     rpm: int = 0  # 每分钟请求数限制(0=不限),用于令牌桶限流
+    free_tier: bool = False  # 是否使用免费档(仅用于状态展示,不影响调度)
     api_keys: list = field(default_factory=list)  # 多Key轮换(逗号分隔的多个key)
     _fail_count: int = field(default=0, repr=False)
     _last_fail_time: float = field(default=0.0, repr=False)
@@ -278,6 +285,7 @@ class LLMRouter:
                 model=os.getenv("AGNES_MODEL", "agnes-2.0-flash"),
                 priority=90,
                 timeout=30,
+                free_tier=True,
             ))
 
         # Gemini
@@ -316,9 +324,9 @@ class LLMRouter:
                 timeout=120,
             ))
 
-        # ===== P1 新增:免费 LLM Provider(8个,全部OpenAI兼容) =====
+        # ===== 免费 LLM Provider(11个,全部OpenAI兼容) =====
 
-        # 智谱 GLM (永久免费,无token上限,30并发)
+        # 智谱 GLM (GLM-4.7-Flash 免费,200K 上下文)
         zhipu_keys = self._parse_api_keys("ZHIPU_API_KEY", "ZHIPU_API_KEYS")
         if zhipu_keys:
             self.add_provider(LLMProvider(
@@ -327,13 +335,14 @@ class LLMRouter:
                 base_url=os.getenv("ZHIPU_BASE_URL", "https://open.bigmodel.cn/api/paas/v4/"),
                 api_key=zhipu_keys[0],
                 api_keys=zhipu_keys,
-                model=os.getenv("ZHIPU_MODEL", "glm-4-flash"),
+                model=os.getenv("ZHIPU_MODEL", "glm-4.7-flash"),
                 priority=100,
                 rpm=30,  # 智谱限制30并发
                 timeout=30,  # 快速失败,避免 Render 免费实例超时
+                free_tier=True,
             ))
 
-        # 硅基流动 SiliconFlow (9B以下永久免费,1000 RPM)
+        # 硅基流动 SiliconFlow (Qwen2-7B 等 7 个模型免费,1000 RPM)
         siliconflow_keys = self._parse_api_keys("SILICONFLOW_API_KEY", "SILICONFLOW_API_KEYS")
         if siliconflow_keys:
             self.add_provider(LLMProvider(
@@ -342,12 +351,29 @@ class LLMRouter:
                 base_url=os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1"),
                 api_key=siliconflow_keys[0],
                 api_keys=siliconflow_keys,
-                model=os.getenv("SILICONFLOW_MODEL", "Qwen/Qwen2.5-7B-Instruct"),
+                model=os.getenv("SILICONFLOW_MODEL", "Qwen/Qwen2-7B-Instruct"),
                 priority=95,
                 rpm=1000,
+                free_tier=True,
             ))
 
-        # 阿里云百炼 DashScope (qwen-turbo永久免费)
+        # 讯飞星火 Lite (免费,OpenAI兼容,Bearer <APIPassword>)
+        spark_keys = self._parse_api_keys("SPARK_API_KEY", "SPARK_API_KEYS")
+        if spark_keys:
+            self.add_provider(LLMProvider(
+                name="spark_lite",
+                provider_type=ProviderType.OPENAI,
+                base_url=os.getenv("SPARK_BASE_URL", "https://spark-api-open.xf-yun.com/v1"),
+                api_key=spark_keys[0],
+                api_keys=spark_keys,
+                model=os.getenv("SPARK_MODEL", "lite"),
+                priority=88,
+                rpm=30,
+                timeout=30,
+                free_tier=True,
+            ))
+
+        # 阿里云百炼 DashScope (qwen-turbo 新人免费额度,90 天)
         dashscope_keys = self._parse_api_keys("DASHSCOPE_API_KEY", "DASHSCOPE_API_KEYS")
         if dashscope_keys:
             self.add_provider(LLMProvider(
@@ -358,6 +384,23 @@ class LLMRouter:
                 api_keys=dashscope_keys,
                 model=os.getenv("DASHSCOPE_MODEL", "qwen-turbo"),
                 priority=85,
+                free_tier=True,
+            ))
+
+        # 百度千帆 ERNIE-Speed (永久免费,OpenAI兼容 Bearer API Key)
+        qianfan_keys = self._parse_api_keys("QIANFAN_API_KEY", "QIANFAN_API_KEYS")
+        if qianfan_keys:
+            self.add_provider(LLMProvider(
+                name="qianfan_ernie",
+                provider_type=ProviderType.OPENAI,
+                base_url=os.getenv("QIANFAN_BASE_URL", "https://qianfan.baidubce.com/v2"),
+                api_key=qianfan_keys[0],
+                api_keys=qianfan_keys,
+                model=os.getenv("QIANFAN_MODEL", "ernie-speed-128k"),
+                priority=82,
+                rpm=60,  # 免费档 QPS 1,按 60 RPM 保守限流
+                timeout=30,
+                free_tier=True,
             ))
 
         # Groq (国内可直连,极速,30 RPM)
@@ -372,9 +415,26 @@ class LLMRouter:
                 model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
                 priority=80,
                 rpm=30,
+                free_tier=True,
             ))
 
-        # OpenRouter (聚合26+免费模型,20 RPM)
+        # Cerebras Inference (免费 5 RPM / 100万 tokens/日)
+        cerebras_keys = self._parse_api_keys("CEREBRAS_API_KEY", "CEREBRAS_API_KEYS")
+        if cerebras_keys:
+            self.add_provider(LLMProvider(
+                name="cerebras",
+                provider_type=ProviderType.OPENAI,
+                base_url=os.getenv("CEREBRAS_BASE_URL", "https://api.cerebras.ai/v1"),
+                api_key=cerebras_keys[0],
+                api_keys=cerebras_keys,
+                model=os.getenv("CEREBRAS_MODEL", "gpt-oss-120b"),
+                priority=78,
+                rpm=5,
+                timeout=30,
+                free_tier=True,
+            ))
+
+        # OpenRouter (聚合免费模型,20 RPM)
         openrouter_keys = self._parse_api_keys("OPENROUTER_API_KEY", "OPENROUTER_API_KEYS")
         if openrouter_keys:
             self.add_provider(LLMProvider(
@@ -383,9 +443,10 @@ class LLMRouter:
                 base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
                 api_key=openrouter_keys[0],
                 api_keys=openrouter_keys,
-                model=os.getenv("OPENROUTER_MODEL", "qwen/qwen-3-235b:free"),
+                model=os.getenv("OPENROUTER_MODEL", "google/gemma-4-31b-it:free"),
                 priority=75,
                 rpm=20,
+                free_tier=True,
             ))
 
         # DeepSeek (低价兜底)
@@ -732,6 +793,72 @@ class LLMRouter:
             latency_ms=latency,
         )
 
+    @staticmethod
+    def _sanitize_error(error: Exception, provider: LLMProvider) -> str:
+        """错误信息脱敏:剔除可能被上游回显的 API Key,并截断长度"""
+        text = str(error) or error.__class__.__name__
+        for key in [provider.api_key, *provider.api_keys]:
+            if key and len(key) >= 8:
+                text = text.replace(key, "***")
+        return text[:200]
+
+    def probe(self, name: str | None = None, timeout: int = 20) -> dict:
+        """对指定(或全部)Provider 发一条最小请求,验证 Key/网络/模型是否可用
+
+        与 chat() 的区别:不做故障切换、不读不写响应缓存、不重试,
+        每个 Provider 只打一次并原样返回失败原因,用于定位"哪个 Key 没配好"。
+        """
+        if name:
+            targets = [p for p in self._providers if p.name == name]
+            if not targets:
+                return {"status": "error", "message": f"未配置 Provider: {name}", "results": []}
+        else:
+            targets = list(self._providers)
+            if not targets:
+                return {"status": "error", "message": "未配置任何 Provider", "results": []}
+
+        results = []
+        for provider in targets:
+            bucket = self._token_buckets.get(provider.name)
+            if bucket and not bucket.acquire(timeout=3):
+                results.append({
+                    "provider": provider.name, "model": provider.model, "ok": False,
+                    "latency_ms": 0, "error": "令牌桶限流中,请稍后重试",
+                })
+                continue
+            start = time.monotonic()
+            try:
+                resp = self._call_provider(
+                    provider,
+                    [{"role": "user", "content": "ping"}],
+                    temperature=0.0,
+                    timeout=timeout,
+                )
+                provider.record_success()
+                results.append({
+                    "provider": provider.name,
+                    "model": resp.model,
+                    "ok": True,
+                    "latency_ms": round(resp.latency_ms or (time.monotonic() - start) * 1000, 1),
+                    "sample": (resp.content or "")[:40],
+                })
+            except Exception as e:
+                provider.record_failure()
+                results.append({
+                    "provider": provider.name,
+                    "model": provider.model,
+                    "ok": False,
+                    "latency_ms": round((time.monotonic() - start) * 1000, 1),
+                    "error": self._sanitize_error(e, provider),
+                })
+
+        return {
+            "status": "ok",
+            "total": len(results),
+            "ok_count": sum(1 for r in results if r["ok"]),
+            "results": results,
+        }
+
     def health_check(self) -> dict:
         """检查所有Provider的健康状态
 
@@ -749,6 +876,7 @@ class LLMRouter:
                 "rpm": provider.rpm,
                 "has_multi_keys": len(provider.api_keys) > 1,
                 "provider_type": provider.provider_type.value,
+                "free_tier": provider.free_tier,
             }
         return result
 
