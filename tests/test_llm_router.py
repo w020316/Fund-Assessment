@@ -554,6 +554,58 @@ class TestChatWithRateLimit:
         assert provider_a._fail_count == 1
         assert provider_b._fail_count == 0
 
+    def test_chat_timeout_skips_retry_and_switches_provider(self):
+        """读取超时应直接切下一 Provider,而不是把超时预算再花一遍。
+
+        线上实测(2026-10-27):智谱 4.7-Flash 高峰期首个请求读超时 30s,
+        随后原地重试才拿到 429,用户共等 31s 才降级。
+        """
+        with patch.dict("os.environ", {}, clear=True):
+            router = LLMRouter()
+        provider_a = LLMProvider(
+            name="slow",
+            provider_type=ProviderType.OPENAI,
+            base_url="https://slow.test.com/v1",
+            api_key="k-a",
+            model="m-a",
+            max_retries=2,
+            retry_delay=0.01,
+            priority=0,
+        )
+        provider_b = LLMProvider(
+            name="healthy",
+            provider_type=ProviderType.OPENAI,
+            base_url="https://b.test.com/v1",
+            api_key="k-b",
+            model="m-b",
+            priority=1,
+        )
+        router.add_provider(provider_a)
+        router.add_provider(provider_b)
+
+        calls = {"a": 0, "b": 0}
+
+        def mock_post(url, **kwargs):
+            if "slow.test.com" in url:
+                calls["a"] += 1
+                raise requests.exceptions.ReadTimeout("Read timed out. (read timeout=30)")
+            calls["b"] += 1
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.json.return_value = {
+                "choices": [{"message": {"content": "from-b"}}],
+                "usage": {},
+            }
+            return resp
+
+        with patch("requests.post", side_effect=mock_post):
+            result = router.chat([{"role": "user", "content": "timeout-fast-switch"}])
+
+        assert result.provider == "healthy"
+        assert calls["a"] == 1, "超时不应原地重试"
+        assert provider_a._fail_count == 1
+        assert provider_b._fail_count == 0
+
     def test_chat_non_429_still_retries(self):
         """非 429 的瞬时错误(如 ConnectionError)仍按指数退避重试。"""
         with patch.dict("os.environ", {}, clear=True):

@@ -534,6 +534,11 @@ class LLMRouter:
         response = getattr(exc, "response", None)
         return getattr(response, "status_code", None) == 429
 
+    @staticmethod
+    def _is_timeout(exc: Exception) -> bool:
+        """请求在超时预算内未拿到响应(连接/读取超时)时返回 True。"""
+        return isinstance(exc, requests.exceptions.Timeout)
+
     def chat(
         self,
         messages: list[dict[str, str]],
@@ -592,9 +597,17 @@ class LLMRouter:
                     last_error = e
                     # 429 是上游限流而非 Provider 故障:官方建议平台过载时拉开重试间隔,
                     # 1s/2s 原地重试救不回来(线上实测白等 37.5s 才降级),直接切下一个。
+                    # 超时同理:该 Provider 已耗满超时预算(线上实测首个 Provider 白等 30s),
+                    # 再原地重试只会让用户等待翻倍。
                     if self._is_rate_limited(e):
+                        switch_reason = "触发限流(429)"
+                    elif self._is_timeout(e):
+                        switch_reason = "请求超时"
+                    else:
+                        switch_reason = None
+                    if switch_reason:
                         provider.record_failure()
-                        logger.warning(f"LLM Provider [{provider.name}] 触发限流(429),跳过重试切换下一个: {e}")
+                        logger.warning(f"LLM Provider [{provider.name}] {switch_reason},跳过重试切换下一个: {e}")
                         break
                     if attempt < max_attempts - 1:
                         delay = provider.retry_delay * (2 ** attempt)
