@@ -121,3 +121,99 @@
   display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap;
 }
 .st6-confirm-row input[type="checkbox"] { width: 18px; height: 18px; min-width: 18px; min-height: 18px; }
+
+/* ===== STAGE6: groups ===== 持仓分组(批次 B 功能 #8)
+   分组条/分组头/小计/管理面板;44px 触摸目标、长名称省略不撑破 375px。 */
+
+.st6-group-bar {
+  display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 4px 0 10px;
+}
+.st6-group-chip {
+  min-height: 44px; display: inline-flex; align-items: center; gap: 4px;
+  padding: 8px 12px; border-radius: 999px; cursor: pointer;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  font-size: 12px; color: var(--text-secondary, #c3c9d9);
+}
+.st6-group-chip.active {
+  background: var(--accent-blue, #3b82f6); color: #fff; border-color: transparent;
+}
+.st6-group-chip b { font-weight: 600; opacity: 0.85; }
+.st6-group-manage-btn { margin-left: auto; min-height: 44px; }
+
+.st6-group-row td {
+  padding: 0 !important; border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  background: rgba(255, 255, 255, 0.03);
+}
+.st6-group-head {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  min-height: 44px; padding: 6px 10px; cursor: pointer; user-select: none;
+}
+.st6-group-head:focus-visible { outline: 2px solid var(--accent-blue, #3b82f6); outline-offset: -2px; }
+.st6-group-head-card {
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: 10px; background: rgba(255, 255, 255, 0.03);
+}
+.st6-group-caret { width: 14px; flex-shrink: 0; color: var(--text-muted, #8b92a8); }
+.st6-group-name { font-size: 13px; font-weight: 600; min-width: 0; }
+.st6-group-count { font-size: 11px; color: var(--text-muted, #8b92a8); font-weight: 400; }
+.st6-group-sub { margin-left: auto; font-size: 12px; color: var(--text-secondary, #c3c9d9); font-variant-numeric: tabular-nums; }
+/* 769-1200px:桌面表格仍在双栏卡片内,右对齐小计会被表格横向滚动裁掉 → 改为紧跟组名 */
+@media (max-width: 1200px) {
+  .st6-group-row .st6-group-sub { margin-left: 8px; }
+}
+.st6-group-block { margin-bottom: 12px; }
+.st6-group-cards { margin-top: 8px; }
+
+.st6-group-manage {
+  border: 1px dashed var(--border, rgba(255, 255, 255, 0.14));
+  border-radius: 10px; padding: 12px; margin-bottom: 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.st6-group-manage-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.st6-group-manage-title span { font-size: 11px; font-weight: 400; color: var(--text-muted, #8b92a8); margin-left: 6px; }
+.st6-group-manage-list { display: flex; flex-direction: column; gap: 6px; }
+.st6-group-manage-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.st6-group-manage-id { font-size: 11px; color: var(--text-muted, #8b92a8); min-width: 64px; }
+.st6-group-name-input { flex: 1 1 160px; min-height: 44px; }
+.st6-group-lock { font-size: 11px; color: var(--text-muted, #8b92a8); }
+.st6-group-manage .btn { min-height: 44px; }
+.st6-group-add-row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.st6-group-add-row .input { flex: 1 1 160px; min-height: 44px; }
+.st6-group-assign-list { display: flex; flex-direction: column; gap: 6px; }
+.st6-group-assign-row { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.st6-group-assign-name {
+  font-size: 12px; min-width: 0; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.st6-group-select { max-width: 160px; min-height: 44px; }
+.st6-group-manage-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+
+/* ===== STAGE6: attribution ===== 收益归因条形列表(批次 B 功能 #5) */
+
+.st6-attr-tabs { flex-wrap: wrap; }
+.st6-attr-total {
+  display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline;
+  font-size: 13px; margin-bottom: 10px;
+}
+.st6-attr-row { padding: 10px 0; border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08)); }
+.st6-attr-row:last-of-type { border-bottom: none; }
+.st6-attr-head {
+  display: flex; justify-content: space-between; gap: 8px;
+  align-items: baseline; flex-wrap: wrap; font-size: 13px;
+}
+.st6-attr-name { font-weight: 600; min-width: 0; }
+.st6-attr-val { font-weight: 700; font-variant-numeric: tabular-nums; }
+.st6-attr-track {
+  height: 10px; border-radius: 5px; background: rgba(255, 255, 255, 0.06);
+  margin-top: 6px; overflow: hidden;
+}
+.st6-attr-bar { height: 100%; border-radius: 5px; transition: width 0.3s ease; }
+.st6-attr-bar-up { background: var(--hud-up, #F87171); }
+.st6-attr-bar-down { background: var(--hud-down, #34D399); }
+.st6-attr-meta { font-size: 11px; color: var(--text-muted, #8b92a8); margin-top: 4px; }
+.st6-attr-partial {
+  font-size: 10px; color: #f59e0b; border: 1px dashed #f59e0b;
+  border-radius: 4px; padding: 0 4px; margin-left: 4px;
+}
+.st6-attr-missing { opacity: 0.7; }

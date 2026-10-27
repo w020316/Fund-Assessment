@@ -241,6 +241,8 @@
       loadRisk('3m');
       loadPushSettings();
     }
+    // 归因卡在风险页内,首次进入即加载(与风险窗口独立)
+    if (!attrState.loaded) loadAttribution(attrState.window);
   }
 
   function loadRisk(window) {
@@ -483,8 +485,16 @@
       });
     }
     if (diff && diff.portfolio_config) {
-      html += '<div class="st6-diff-item">推送配置: enabled ' + String(diff.portfolio_config.enabled.current) +
-        ' → ' + String(diff.portfolio_config.enabled.incoming) + '</div>';
+      const pc = diff.portfolio_config;
+      if (pc.enabled) {
+        html += '<div class="st6-diff-item">推送配置: enabled ' + String(pc.enabled.current) +
+          ' → ' + String(pc.enabled.incoming) + '</div>';
+      }
+      if (pc.groups) {
+        html += '<div class="st6-diff-item">持仓分组: ' + pc.groups.current_groups + ' → ' +
+          pc.groups.incoming_groups + ' 组 · 归组映射 ' + pc.groups.current_mappings + ' → ' +
+          pc.groups.incoming_mappings + ' 条</div>';
+      }
     }
     html += '<div class="st6-note">' + esc(message || '') + '</div>';
     html += '<div class="st6-confirm-row">' +
@@ -516,17 +526,521 @@
     });
   }
 
+  // ===== STAGE6: groups ===== 持仓分组(批次 B 功能 #8)
+  // 设计:表格行/卡片仍由 index.html 原渲染器生成,本模块只**重排 DOM +
+  // 插入分组头/小计**,不改写原渲染逻辑(存量零搬动;接口失败静默平铺)。
+  // 归组真相在 data/portfolio/groups.json;后端 effective 对未归组持仓兜底 default。
+
+  const groupsState = {
+    config: null, effective: {}, positions: [], loaded: false,
+    filter: '__all__', collapsed: null, draft: null, draftMap: null,
+  };
+
+  function _readCollapsed() {
+    if (!groupsState.collapsed) {
+      let ids = [];
+      try { ids = JSON.parse(localStorage.getItem('st6_group_collapsed') || '[]'); } catch (e) { ids = []; }
+      groupsState.collapsed = {};
+      (Array.isArray(ids) ? ids : []).forEach(function (id) { groupsState.collapsed[id] = true; });
+    }
+    return groupsState.collapsed;
+  }
+
+  function _persistCollapsed() {
+    try {
+      const ids = Object.keys(groupsState.collapsed || {}).filter(function (k) { return groupsState.collapsed[k]; });
+      localStorage.setItem('st6_group_collapsed', JSON.stringify(ids));
+    } catch (e) { /* 隐私模式:仅内存态 */ }
+  }
+
+  function _isCollapsed(gid) { return !!_readCollapsed()[gid]; }
+
+  function _groups() {
+    const cfg = groupsState.config || {};
+    const list = Array.isArray(cfg.groups) && cfg.groups.length
+      ? cfg.groups : [{ id: 'default', name: '我的持仓' }];
+    return list.map(function (g) {
+      return { id: String(g.id), name: String(g.name || g.id) };
+    });
+  }
+
+  function _groupOf(code) {
+    const gid = String(groupsState.effective[String(code)] || 'default');
+    const exists = _groups().some(function (g) { return g.id === gid; });
+    return exists ? gid : 'default';
+  }
+
+  /** 分组小计:市值 + 当日盈亏(口径与卡片一致:市值−市值/(1+涨幅)) */
+  function _subtotal(list) {
+    let mv = 0, day = 0;
+    list.forEach(function (p) {
+      const m = Number(p.market_value) || 0;
+      const chg = Number(p.change_pct) || 0;
+      mv += m;
+      if (p.current_nav > 0 && chg !== 0) day += m - m / (1 + chg / 100);
+    });
+    return { mv: mv, day: day, count: list.length };
+  }
+
+  /** 行显隐:内联 display 保存/恢复(走势图行自身也是 display:none,不可覆盖) */
+  function _setRowHidden(row, hide) {
+    if (hide) {
+      if (!row.hasAttribute('data-st6-prev-display')) {
+        row.setAttribute('data-st6-prev-display', row.style.display || '');
+      }
+      row.style.display = 'none';
+    } else if (row.hasAttribute('data-st6-prev-display')) {
+      row.style.display = row.getAttribute('data-st6-prev-display');
+      row.removeAttribute('data-st6-prev-display');
+    }
+  }
+
+  function _headInnerHtml(gid, name, list, totals) {
+    const collapsed = _isCollapsed(gid);
+    return '<span class="st6-group-caret" aria-hidden="true">' + (collapsed ? '▸' : '▾') + '</span>' +
+      '<span class="st6-group-name">' + esc(name) + '</span>' +
+      '<span class="st6-group-count">' + list.length + ' 只</span>' +
+      '<span class="st6-group-sub">市值 ' + fmtMoney(totals.mv) + ' · 当日 ' +
+        '<span class="' + pctCls(totals.day) + '">' + (totals.day > 0 ? '+' : '') + fmtMoney(totals.day) + '</span></span>';
+  }
+
+  function _regroupTable() {
+    const body = document.getElementById('fundPositionBody');
+    if (!body) return;
+    body.querySelectorAll('tr.st6-group-row').forEach(function (n) { n.remove(); });
+    const rowMap = {}, chartMap = {};
+    body.querySelectorAll('tr[data-fund-code]').forEach(function (n) {
+      rowMap[n.getAttribute('data-fund-code')] = n;
+    });
+    body.querySelectorAll('tr[data-chart-for]').forEach(function (n) {
+      chartMap[n.getAttribute('data-chart-for')] = n;
+    });
+    if (!Object.keys(rowMap).length) return;
+
+    const buckets = {};
+    _groups().forEach(function (g) { buckets[g.id] = { list: [], rows: [] }; });
+    (groupsState.positions || []).forEach(function (p) {
+      const code = String(p.fund_code);
+      const gid = _groupOf(code);
+      if (!buckets[gid]) return;
+      buckets[gid].list.push(p);
+      if (rowMap[code]) {
+        buckets[gid].rows.push(rowMap[code]);
+        delete rowMap[code];
+      }
+      if (chartMap[code]) {
+        buckets[gid].rows.push(chartMap[code]);
+        delete chartMap[code];
+      }
+    });
+    // 理论不可达:持仓接口与行渲染同源;残留行归 default,绝不丢行
+    const leftovers = Object.keys(rowMap).map(function (k) { return rowMap[k]; })
+      .concat(Object.keys(chartMap).map(function (k) { return chartMap[k]; }));
+
+    const frag = document.createDocumentFragment();
+    _groups().forEach(function (g) {
+      const b = buckets[g.id];
+      if (!b.list.length) return;
+      const head = document.createElement('tr');
+      head.className = 'st6-group-row';
+      head.setAttribute('data-group-id', g.id);
+      const td = document.createElement('td');
+      td.colSpan = 8;
+      td.innerHTML = '<div class="st6-group-head" role="button" tabindex="0" aria-expanded="' +
+        (!_isCollapsed(g.id)) + '" onclick="St6Groups.toggleGroup(\'' + g.id + '\')" ' +
+        'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();St6Groups.toggleGroup(\'' + g.id + '\');}">' +
+        _headInnerHtml(g.id, g.name, b.list, _subtotal(b.list)) + '</div>';
+      head.appendChild(td);
+      frag.appendChild(head);
+      b.rows.forEach(function (r) {
+        r.setAttribute('data-group-id', g.id);
+        frag.appendChild(r);
+      });
+    });
+    if (leftovers.length) {
+      leftovers.forEach(function (r) {
+        r.setAttribute('data-group-id', 'default');
+        frag.appendChild(r);
+      });
+    }
+    body.appendChild(frag);
+  }
+
+  function _regroupCards() {
+    const cardsEl = document.getElementById('fundPositionCards');
+    if (!cardsEl) return;
+    const cards = Array.prototype.slice.call(cardsEl.querySelectorAll('.fund-card[data-fund-code]'));
+    if (!cards.length) return;
+    const cardMap = {};
+    cards.forEach(function (c) { cardMap[c.getAttribute('data-fund-code')] = c; });
+    cardsEl.innerHTML = '';
+
+    const frag = document.createDocumentFragment();
+    _groups().forEach(function (g) {
+      const list = (groupsState.positions || []).filter(function (p) {
+        return _groupOf(p.fund_code) === g.id;
+      });
+      if (!list.length) return;
+      const block = document.createElement('section');
+      block.className = 'st6-group-block';
+      block.setAttribute('data-group-id', g.id);
+      block.innerHTML = '<div class="st6-group-head st6-group-head-card" role="button" tabindex="0" aria-expanded="' +
+        (!_isCollapsed(g.id)) + '" onclick="St6Groups.toggleGroup(\'' + g.id + '\')" ' +
+        'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();St6Groups.toggleGroup(\'' + g.id + '\');}">' +
+        _headInnerHtml(g.id, g.name, list, _subtotal(list)) + '</div>' +
+        '<div class="st6-group-cards"></div>';
+      const holder = block.querySelector('.st6-group-cards');
+      list.forEach(function (p) {
+        const card = cardMap[String(p.fund_code)];
+        if (card) holder.appendChild(card);
+      });
+      frag.appendChild(block);
+    });
+    cardsEl.appendChild(frag);
+  }
+
+  function _applyVisibility() {
+    const collapsed = _readCollapsed();
+    const filter = groupsState.filter || '__all__';
+    _groups().forEach(function (g) {
+      const visible = filter === '__all__' || filter === g.id;
+      const hideRows = !visible || !!collapsed[g.id];
+      document.querySelectorAll('#fundPositionBody tr.st6-group-row[data-group-id="' + g.id + '"]')
+        .forEach(function (n) { _setRowHidden(n, !visible); });
+      document.querySelectorAll('#fundPositionBody tr[data-group-id="' + g.id + '"]:not(.st6-group-row)')
+        .forEach(function (n) { _setRowHidden(n, hideRows); });
+      document.querySelectorAll('#fundPositionCards .st6-group-block[data-group-id="' + g.id + '"]')
+        .forEach(function (b) {
+          b.style.display = visible ? '' : 'none';
+          const holder = b.querySelector('.st6-group-cards');
+          if (holder) holder.style.display = collapsed[g.id] ? 'none' : '';
+        });
+    });
+  }
+
+  function _regroup() {
+    _regroupTable();
+    _regroupCards();
+    _applyVisibility();
+    renderGroupBar();
+  }
+
+  function renderGroupBar() {
+    const bar = document.getElementById('st6GroupBar');
+    if (!bar) return;
+    const list = _groups();
+    const counts = {};
+    list.forEach(function (g) { counts[g.id] = 0; });
+    (groupsState.positions || []).forEach(function (p) {
+      const gid = _groupOf(p.fund_code);
+      counts[gid] = (counts[gid] || 0) + 1;
+    });
+    const chip = function (id, label, count, active) {
+      return '<span class="st6-group-chip' + (active ? ' active' : '') + '" role="button" tabindex="0" ' +
+        'onclick="St6Groups.setFilter(\'' + id + '\')" ' +
+        'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();St6Groups.setFilter(\'' + id + '\');}">' +
+        esc(label) + ' <b>' + count + '</b></span>';
+    };
+    let html = chip('__all__', '全部', (groupsState.positions || []).length, groupsState.filter === '__all__');
+    list.forEach(function (g) {
+      html += chip(g.id, g.name, counts[g.id] || 0, groupsState.filter === g.id);
+    });
+    html += '<button class="btn btn-sm st6-group-manage-btn" onclick="St6Groups.toggleManage()">分组管理</button>';
+    bar.innerHTML = html;
+  }
+
+  function setFilter(id) {
+    groupsState.filter = id || '__all__';
+    _regroup();
+  }
+
+  function toggleGroup(gid) {
+    const c = _readCollapsed();
+    if (c[gid]) delete c[gid]; else c[gid] = true;
+    _persistCollapsed();
+    _regroup();
+  }
+
+  function loadGroups(force) {
+    if (groupsState.loaded && !force) return Promise.resolve(groupsState.config);
+    return callApi('/api/portfolio/groups')
+      .then(function (data) {
+        if (data && Array.isArray(data.groups)) {
+          groupsState.config = data;
+          groupsState.effective = data.effective || {};
+          groupsState.loaded = true;
+          renderGroupBar();
+          _applyVisibility();
+        }
+        return groupsState.config;
+      })
+      .catch(function () {
+        // 接口不可用:全员归默认组,持仓展示不受影响
+        renderGroupBar();
+        return null;
+      });
+  }
+
+  /** loadFundData 渲染完成后调用:按分组重排 + 小计(幂等,可重复调用) */
+  function applyGroups(positions) {
+    groupsState.positions = Array.isArray(positions) ? positions : [];
+    if (!groupsState.loaded) {
+      loadGroups().then(function () { _regroup(); });
+    }
+    _regroup();
+  }
+
+  // --- 分组管理面板 ---
+
+  function _manageOpen() {
+    const box = document.getElementById('st6GroupManage');
+    return !!box && !box.hasAttribute('hidden');
+  }
+
+  function toggleManage(force) {
+    const box = document.getElementById('st6GroupManage');
+    if (!box) return;
+    const open = typeof force === 'boolean' ? force : box.hasAttribute('hidden');
+    if (!open) {
+      box.setAttribute('hidden', '');
+      box.innerHTML = '';
+      groupsState.draft = null;
+      groupsState.draftMap = null;
+      return;
+    }
+    groupsState.draft = _groups().map(function (g) { return { id: g.id, name: g.name }; });
+    const cfgMap = (groupsState.config && groupsState.config.fund_groups) || {};
+    groupsState.draftMap = Object.assign({}, cfgMap, groupsState.effective || {});
+    box.removeAttribute('hidden');
+    renderManagePanel();
+  }
+
+  function renderManagePanel() {
+    const box = document.getElementById('st6GroupManage');
+    if (!box || !groupsState.draft) return;
+    const draft = groupsState.draft;
+    let html = '<div class="st6-group-manage-title">分组设置 <span>保存后立即生效;未归组的旧持仓自动进入默认分组</span></div>';
+    html += '<div class="st6-group-manage-list">';
+    draft.forEach(function (g, i) {
+      html += '<div class="st6-group-manage-row">' +
+        '<span class="st6-group-manage-id">#' + esc(g.id) + '</span>' +
+        '<input class="input st6-group-name-input" maxlength="20" value="' + esc(g.name) +
+          '" data-group-index="' + i + '" oninput="St6Groups.renameGroup(' + i + ', this.value)" aria-label="分组名称">' +
+        (g.id === 'default'
+          ? '<span class="st6-group-lock">默认组不可删</span>'
+          : '<button class="btn btn-sm" onclick="St6Groups.deleteGroup(' + i + ')">删除</button>') +
+        '</div>';
+    });
+    html += '</div><div class="st6-group-add-row">' +
+      '<input class="input" id="st6NewGroupName" maxlength="20" placeholder="新分组名称(≤20 字)">' +
+      '<button class="btn btn-sm" onclick="St6Groups.addGroup()">添加分组</button></div>';
+
+    html += '<div class="st6-group-manage-title" style="margin-top:12px;">持仓归组</div>';
+    const positions = groupsState.positions || [];
+    if (!positions.length) {
+      html += '<div class="st6-note">暂无持仓;添加持仓后可在此归组。</div>';
+    } else {
+      html += '<div class="st6-group-assign-list">';
+      positions.forEach(function (p) {
+        const code = String(p.fund_code);
+        const cur = groupsState.draftMap[code] || 'default';
+        html += '<div class="st6-group-assign-row">' +
+          '<span class="st6-group-assign-name">' + esc(p.fund_name || code) +
+            ' <span class="st6-group-count">' + esc(code) + '</span></span>' +
+          '<select class="input st6-group-select" aria-label="' + esc(code) + ' 所属分组" ' +
+            'onchange="St6Groups.assignFund(\'' + esc(code) + '\', this.value)">' +
+            draft.map(function (g) {
+              return '<option value="' + esc(g.id) + '"' + (g.id === cur ? ' selected' : '') + '>' + esc(g.name) + '</option>';
+            }).join('') +
+          '</select></div>';
+      });
+      html += '</div>';
+    }
+    html += '<div class="st6-group-manage-actions">' +
+      '<button class="btn btn-sm btn-primary" onclick="St6Groups.saveGroups()">保存分组</button>' +
+      '<button class="btn btn-sm" onclick="St6Groups.toggleManage(false)">取消</button></div>';
+    box.innerHTML = html;
+  }
+
+  function renameGroup(index, value) {
+    if (!groupsState.draft || !groupsState.draft[index]) return;
+    groupsState.draft[index].name = String(value || '');
+  }
+
+  function addGroup() {
+    if (!groupsState.draft) return;
+    const input = document.getElementById('st6NewGroupName');
+    const name = String((input && input.value) || '').trim();
+    if (!name) {
+      if (typeof showToast === 'function') showToast('请先填写分组名称', 'error');
+      return;
+    }
+    let id = 'g' + Date.now().toString(36);
+    while (groupsState.draft.some(function (g) { return g.id === id; })) id += 'x';
+    groupsState.draft.push({ id: id, name: name.slice(0, 20) });
+    renderManagePanel();
+  }
+
+  function deleteGroup(index) {
+    if (!groupsState.draft) return;
+    const g = groupsState.draft[index];
+    if (!g || g.id === 'default') return;
+    groupsState.draft.splice(index, 1);
+    Object.keys(groupsState.draftMap || {}).forEach(function (code) {
+      if (groupsState.draftMap[code] === g.id) delete groupsState.draftMap[code];
+    });
+    renderManagePanel();
+  }
+
+  function assignFund(code, gid) {
+    if (!groupsState.draftMap) return;
+    groupsState.draftMap[String(code)] = String(gid);
+  }
+
+  function saveGroups() {
+    if (!groupsState.draft) return;
+    const names = groupsState.draft.map(function (g) { return String(g.name || '').trim(); });
+    if (names.some(function (n) { return !n || n.length > 20; })) {
+      if (typeof showToast === 'function') showToast('分组名称需为 1-20 字符', 'error');
+      return;
+    }
+    const groups = groupsState.draft.map(function (g, i) { return { id: g.id, name: names[i] }; });
+    callApi('/api/portfolio/groups', {
+      method: 'PUT',
+      body: JSON.stringify({ groups: groups, fund_groups: groupsState.draftMap || {} }),
+    }).then(function (data) {
+      if (!data || !data.success) {
+        if (typeof showToast === 'function') {
+          showToast('分组保存失败: ' + ((data && (data.errors || [data.message])) || []).join('; '), 'error');
+        }
+        return;
+      }
+      groupsState.config = data;
+      groupsState.effective = data.effective || {};
+      groupsState.loaded = true;
+      groupsState.filter = '__all__';
+      toggleManage(false);
+      _regroup();
+      if (typeof showToast === 'function') showToast('分组配置已保存', 'success');
+    }).catch(function (e) {
+      if (typeof showToast === 'function') showToast('分组保存失败: ' + (e && e.message || e), 'error');
+    });
+  }
+
+  // ===== STAGE6: attribution ===== 收益归因(批次 B 功能 #5)
+
+  const attrState = { window: 'mtd', loaded: false };
+
+  function loadAttribution(window) {
+    attrState.window = window || attrState.window || 'mtd';
+    const body = document.getElementById('st6AttrBody');
+    if (!body) return;
+    renderStatus(body, 'loading');
+    document.querySelectorAll('.st6-window-tab[data-attr-window]').forEach(function (t) {
+      t.classList.toggle('active', t.getAttribute('data-attr-window') === attrState.window);
+    });
+    callApi('/api/portfolio/attribution?window=' + encodeURIComponent(attrState.window))
+      .then(function (data) {
+        if (!data) throw new Error('接口无响应');
+        attrState.loaded = true;
+        renderAttribution(data);
+      })
+      .catch(function (e) {
+        renderStatus(body, 'error', '收益归因加载失败', String(e && e.message || e));
+      });
+  }
+
+  function renderAttribution(data) {
+    const p = data.portfolio || {};
+    const summaryEl = document.getElementById('st6AttrSummary');
+    if (summaryEl) {
+      if (!p.start_value) {
+        summaryEl.innerHTML = '';
+      } else {
+        summaryEl.innerHTML =
+          metricCard('区间盈亏', (p.pnl > 0 ? '+' : '') + fmtMoney(p.pnl) + ' 元',
+            (data.window_start || '—') + ' → ' + (data.window_end || '—'), pctCls(p.pnl)) +
+          metricCard('区间收益率', p.total_return == null ? '样本不足' : pctRatio(p.total_return),
+            '期末市值 ' + fmtMoney(p.end_value), pctCls(p.total_return)) +
+          metricCard('期初市值', fmtMoney(p.start_value), '按当前份额静态回推', '') +
+          metricCard('归因基金数', String(p.fund_count || 0) + ' 只', '静态份额法', '');
+      }
+    }
+    const body = document.getElementById('st6AttrBody');
+    if (!body) return;
+    const funds = data.funds || [];
+    if (!funds.length) {
+      renderStatus(body, 'empty', '暂无归因数据', data.note || '持仓或历史净值不足,请稍后重试');
+      return;
+    }
+    const maxAbs = funds.reduce(function (m, f) {
+      return Math.max(m, Math.abs(Number(f.contribution) || 0));
+    }, 0) || 1;
+    const totalPnl = Number(p.pnl) || 0;
+    let html = '<div class="st6-attr-total">组合区间盈亏 <b class="' + pctCls(totalPnl) + '">' +
+      (totalPnl > 0 ? '+' : '') + fmtMoney(totalPnl) + ' 元</b>' +
+      '<span class="st6-note">各基金贡献额之和 = 组合盈亏(忽略区间申赎现金流)</span></div>';
+    funds.forEach(function (f) {
+      const name = esc(f.fund_name || f.fund_code);
+      const code = esc(f.fund_code);
+      if (f.contribution == null) {
+        html += '<div class="st6-attr-row st6-attr-missing">' +
+          '<div class="st6-attr-head"><span class="st6-attr-name">' + name +
+            ' <span class="st6-group-count">' + code + '</span></span>' +
+            '<span class="st6-attr-val st6-flat">历史不足</span></div></div>';
+        return;
+      }
+      const contrib = Number(f.contribution) || 0;
+      const width = Math.max(1.5, Math.abs(contrib) / maxAbs * 100);
+      const share = f.contribution_rate == null ? '—' : pctRatio(f.contribution_rate, 1);
+      const partial = f.partial
+        ? '<span class="st6-attr-partial" title="基金历史起点晚于窗口起点,按可得区间计算">区间不完整</span>' : '';
+      html += '<div class="st6-attr-row">' +
+        '<div class="st6-attr-head">' +
+          '<span class="st6-attr-name">' + name + ' <span class="st6-group-count">' + code + '</span>' + partial + '</span>' +
+          '<span class="st6-attr-val ' + pctCls(contrib) + '">' + (contrib > 0 ? '+' : '') + fmtMoney(contrib) + ' 元</span>' +
+        '</div>' +
+        '<div class="st6-attr-track"><div class="st6-attr-bar ' +
+          (contrib >= 0 ? 'st6-attr-bar-up' : 'st6-attr-bar-down') +
+          '" style="width:' + width.toFixed(1) + '%;"></div></div>' +
+        '<div class="st6-attr-meta">权重 ' + (f.weight == null ? '—' : pctRatio(f.weight, 1)) +
+          ' · 期初 ' + fmtMoney(f.start_value) + ' 元' +
+          ' · 净值 ' + Number(f.start_nav).toFixed(4) + ' → ' + Number(f.end_nav).toFixed(4) +
+          ' (' + esc(f.start_date || '—') + ' → ' + esc(f.end_date || '—') + ')' +
+          ' · 贡献占比 ' + share + '</div></div>';
+    });
+    if ((data.missing_funds || []).length) {
+      html += '<div class="st6-xray-warn">历史净值不足,未纳入归因: ' + esc((data.missing_funds || []).join(', ')) + '</div>';
+    }
+    html += '<div class="st6-note">' + esc(data.note || '') +
+      ' · 累计净值口径(含分红再投) · 窗口 ' + esc(data.window || attrState.window) + '</div>';
+    body.innerHTML = html;
+  }
+
   // ===== STAGE6: expose ===== 全局暴露(inline onclick 绑定)
 
   window.St6Portfolio = {
     loadWatchboard: loadWatchboard,
     loadRisk: loadRisk,
     loadXray: loadXray,
+    loadAttribution: loadAttribution,
     savePushConfig: savePushConfig,
     testPush: testPush,
     downloadExport: downloadExport,
     ledgerFileChosen: ledgerFileChosen,
     ledgerPreview: ledgerPreview,
     ledgerExecute: ledgerExecute,
+  };
+
+  window.St6Groups = {
+    applyGroups: applyGroups,
+    setFilter: setFilter,
+    toggleGroup: toggleGroup,
+    toggleManage: toggleManage,
+    renameGroup: renameGroup,
+    addGroup: addGroup,
+    deleteGroup: deleteGroup,
+    assignFund: assignFund,
+    saveGroups: saveGroups,
   };
 })();

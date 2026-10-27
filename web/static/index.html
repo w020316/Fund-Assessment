@@ -988,6 +988,21 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
           </div>
         </div>
         <div class="card mb-16">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span>收益归因(区间贡献)</span>
+            <!-- ===== STAGE6: attribution ===== 批次B 功能#5:窗口切换(data-attr-window 与风险页 data-window 隔离) -->
+            <div class="st6-window-tabs st6-attr-tabs" role="tablist" aria-label="归因窗口切换" style="margin-bottom:0;">
+              <span class="st6-window-tab active" data-attr-window="mtd" role="button" tabindex="0" onclick="St6Portfolio.loadAttribution('mtd')">本月</span>
+              <span class="st6-window-tab" data-attr-window="ytd" role="button" tabindex="0" onclick="St6Portfolio.loadAttribution('ytd')">本年</span>
+              <span class="st6-window-tab" data-attr-window="max" role="button" tabindex="0" onclick="St6Portfolio.loadAttribution('max')">全部</span>
+            </div>
+          </div>
+          <div class="st6-metric-grid" id="st6AttrSummary"></div>
+          <div id="st6AttrBody">
+            <div style="color:var(--text-muted);text-align:center;padding:20px 0;font-size:13px;">切换上方窗口加载收益归因</div>
+          </div>
+        </div>
+        <div class="card mb-16">
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
             <span>持仓重叠 X-Ray(前十大重仓)</span>
             <button class="btn btn-sm btn-primary" onclick="St6Portfolio.loadXray()">分析</button>
@@ -1590,6 +1605,9 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
           <!-- 基金持仓列表 -->
           <div class="card">
             <div class="card-title">基金持仓 <span style="font-size:11px;color:var(--text-muted);font-weight:500;margin-left:6px;">点击"分析"/"深度"查看P1新功能</span></div>
+            <!-- ===== STAGE6: groups ===== 批次B 功能#8:分组筛选条 + 管理面板(由 stage6-portfolio.js 渲染) -->
+            <div class="st6-group-bar" id="st6GroupBar" role="toolbar" aria-label="持仓分组筛选"></div>
+            <div class="st6-group-manage" id="st6GroupManage" hidden></div>
             <!-- ===== STAGE5: fund-cards ===== 桌面保留表格(P1-1);<768px 由下方卡片列表替代 -->
             <div class="table-wrap" id="fundPositionTableWrap" style="max-height:400px;overflow-y:auto;">
               <table>
@@ -3326,7 +3344,7 @@ function _fundCardHtml(p) {
     ? ` <span style="color:var(--color-warning);border:1px dashed var(--color-warning);padding:1px 6px;border-radius:10px;font-size:11px;">⚠ 置信度低</span>`
       + ` <button class="btn btn-sm" style="padding:2px 8px;color:var(--color-warning);" title="进入补录向导复核该基金" onclick="FundWizard.open('${safeCode}')">复核</button>`
     : '';
-  return `<div class="fund-card">
+  return `<div class="fund-card" data-fund-code="${safeCode}">
     <div class="fund-card-top">
       <div style="min-width:0;">
         <div style="font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${safeName}</div>
@@ -3368,6 +3386,8 @@ async function loadFundData() {
   if (!positions.length) {
     body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px;">暂无基金持仓,请在右侧添加</td></tr>';
     if (cardsEl) cardsEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);">暂无基金持仓,请在右侧添加</div>';
+    // ===== STAGE6: groups ===== 空仓也渲染分组条(可先建组,便于后续归组)
+    if (window.St6Groups) window.St6Groups.applyGroups([]);
     return;
   }
   body.innerHTML = positions.map(p => {
@@ -3377,7 +3397,7 @@ async function loadFundData() {
     // 防止用户输入 <img onerror> 等 HTML 造成 XSS,或单引号破坏 onclick JS 字符串
     const safeName = escapeHtml(p.fund_name || '—');
     const safeNameAttr = escapeHtml(p.fund_name || '');  // 用于 onclick 字符串字面量
-    return `<tr>
+    return `<tr data-fund-code="${escapeHtml(p.fund_code)}">
       <td>${escapeHtml(p.fund_code)}</td>
       <td>${safeName}</td>
       <td>${p.shares}</td>
@@ -3400,12 +3420,14 @@ async function loadFundData() {
         <button class="btn btn-sm" style="color:var(--color-up);padding:3px 8px;" onclick="deleteFundPosition('${escapeHtml(p.fund_code)}')">删</button>
       </td>
     </tr>
-    <tr id="chart-row-${p.fund_code}" style="display:none;">
+    <tr id="chart-row-${p.fund_code}" data-chart-for="${escapeHtml(p.fund_code)}" style="display:none;">
       <td colspan="8" style="padding:0;border:none;">
         <div id="fund-chart-${p.fund_code}" style="height:220px;width:100%;"></div>
       </td>
     </tr>`;
   }).join('');
+  // ===== STAGE6: groups ===== 批次B 功能#8:按分组重排 + 分组小计(失败静默,不影响持仓展示)
+  if (window.St6Groups) window.St6Groups.applyGroups(positions);
 }
 
 async function loadFundAdvice() {
