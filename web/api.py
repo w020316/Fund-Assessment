@@ -4,7 +4,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 # 借鉴 encode/starlette(10.5K Star)内置 GZip 中间件,响应压缩 70%+,零新依赖
 from fastapi.middleware.gzip import GZipMiddleware
@@ -194,6 +194,7 @@ from web.routes import portfolio as portfolio_route
 from web.routes import scripts as scripts_route
 from web.routes import strategy as strategy_route
 from web.routes import trade as trade_route
+from src.utils.auth import require_admin
 
 app.include_router(dashboard_route.router, prefix="/api/dashboard", tags=["仪表盘"])
 app.include_router(strategy_route.router, prefix="/api/strategy", tags=["策略"])
@@ -250,10 +251,23 @@ async def llm_health_check():
         "status": "ok",
         "total_providers": len(providers),
         "available_providers": [name for name, info in providers.items() if info["available"]],
+        "free_providers": [name for name, info in providers.items() if info["free_tier"]],
         "providers": providers,
         # P0:LLM 响应缓存统计(节省免费额度)
         "response_cache": _llm_cache.stats(),
     }
+
+
+@app.post("/api/health/llm/probe")
+def llm_probe(provider: str | None = None, _: None = Depends(require_admin)):
+    """LLM 连通性自检:对单个或全部 Provider 发一条 ping,返回延迟与失败原因"""
+    from fastapi import HTTPException
+    from src.core.llm_router import get_llm_router
+
+    result = get_llm_router().probe(name=provider)
+    if result.get("status") == "error":
+        raise HTTPException(status_code=404, detail=result.get("message"))
+    return result
 
 
 def _get_cache_stats() -> dict:
