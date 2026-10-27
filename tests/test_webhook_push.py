@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import os
 from unittest.mock import patch
@@ -140,7 +141,6 @@ class TestPortfolioStore:
         pstore.mark_pushed("est_110022", now=123.0, path=f)
         raw = json.loads(f.read_text(encoding="utf-8"))
         assert raw["est_110022"] == 123.0
-
 
 # ============ 路由层 ============
 
@@ -306,6 +306,7 @@ class TestWebhookScan:
             return _Resp()
 
         with patch("src.core.data_source_v2.get_fund_realtime_tencent", return_value=_QUOTES), \
+             patch("web.routes.fund._today", return_value=_dt.date(2026, 10, 26)), \
              patch("src.core.webhook_push.httpx.post", side_effect=_fake_post):
             resp = client.post("/api/portfolio/webhook/scan",
                                headers={"X-Api-Key": "scan-secret"}, json={})

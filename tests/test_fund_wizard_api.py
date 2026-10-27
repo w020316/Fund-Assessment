@@ -203,7 +203,8 @@ class TestValidatePositions:
             "110022": "2026-10-26 15:00",  # 正常(周一)
         })
         with patch("web.routes.fund._load_positions", return_value=list(_MOCK_EXISTING)), \
-             patch("web.routes.fund.get_fund_realtime_tencent", return_value=quotes):
+             patch("web.routes.fund.get_fund_realtime_tencent", return_value=quotes), \
+             patch("web.routes.fund._today", return_value=_dt.date(2026, 10, 26)):
             resp = client.post("/api/fund/positions/validate", json={"positions": []})
         data = resp.json()
         warn_codes = [w["fund_code"] for w in data["warnings"]]
