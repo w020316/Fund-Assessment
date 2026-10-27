@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.core.llm_router import LLMProvider, LLMResponse, LLMRouter
+from src.core.llm_router import LLMProvider, LLMResponse, LLMRouter, ProviderType
 
 ALL_LLM_ENV = [
     "TTAPI_API_KEY", "TTAPI_BASE_URL", "TTAPI_MODEL",
@@ -184,3 +184,45 @@ class TestProbe:
         assert "***" in item["error"]
         assert provider._fail_count == 1
         assert result["ok_count"] == 0
+
+
+class TestBaseUrlNormalization:
+    """线上实测:ZHIPU_BASE_URL 默认值带尾斜杠时拼出 .../v4//chat/completions。"""
+
+    def test_trailing_slash_stripped_on_init(self):
+        provider = LLMProvider(
+            name="t", provider_type=ProviderType.OPENAI,
+            base_url="https://example.com/v1/", model="m",
+        )
+        assert provider.base_url == "https://example.com/v1"
+
+    def test_zhipu_default_has_no_trailing_slash(self, monkeypatch):
+        router = _build(monkeypatch, {"ZHIPU_API_KEY": "zhipu-test-key"})
+        assert _only(router, "zhipu_glm").base_url == "https://open.bigmodel.cn/api/paas/v4"
+
+    def test_openai_request_url_has_no_double_slash(self, monkeypatch):
+        captured = {}
+
+        class _Resp:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"choices": [{"message": {"content": "ok"}}], "usage": {}}
+
+        def _fake_post(url, **kwargs):
+            captured["url"] = url
+            return _Resp()
+
+        monkeypatch.setattr("src.core.llm_router.requests.post", _fake_post)
+        provider = LLMProvider(
+            name="t", provider_type=ProviderType.OPENAI,
+            base_url="https://open.bigmodel.cn/api/paas/v4/",
+            api_key="k", model="glm-4.7-flash",
+        )
+        router = _build(monkeypatch, {})
+        router._call_openai_compatible(
+            provider, [{"role": "user", "content": "hi"}], "glm-4.7-flash", 0.7, False, 10,
+        )
+        assert captured["url"] == "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+        assert "//" not in captured["url"].split("://", 1)[1]

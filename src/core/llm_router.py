@@ -55,6 +55,11 @@ class LLMProvider:
     # current_api_key 时 _key_index 丢失更新,导致 key 轮换不公平(多线程选到同一 key)
     _key_lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
+    def __post_init__(self) -> None:
+        # 各 _call_* 用 f"{base_url}/path" 拼接，尾斜杠会拼出 "//"
+        # (线上实测:智谱默认值 .../v4/ → .../v4//chat/completions)
+        self.base_url = self.base_url.rstrip("/")
+
     @property
     def is_available(self) -> bool:
         """检查Provider是否可用（熔断器状态）"""
@@ -332,7 +337,7 @@ class LLMRouter:
             self.add_provider(LLMProvider(
                 name="zhipu_glm",
                 provider_type=ProviderType.OPENAI,
-                base_url=os.getenv("ZHIPU_BASE_URL", "https://open.bigmodel.cn/api/paas/v4/"),
+                base_url=os.getenv("ZHIPU_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"),
                 api_key=zhipu_keys[0],
                 api_keys=zhipu_keys,
                 model=os.getenv("ZHIPU_MODEL", "glm-4.7-flash"),

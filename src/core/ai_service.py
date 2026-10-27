@@ -541,7 +541,7 @@ def recognize_holdings_from_image(image_bytes: bytes, mime_type: str = "image/pn
     ]
     # 去重,确保主模型优先
     models = [primary_model] + [m for m in fallback_models if m and m != primary_model]
-    url = f"{base_url}/chat/completions"
+    url = f"{base_url.rstrip('/')}/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
