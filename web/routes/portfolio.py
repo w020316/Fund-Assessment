@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 from src.core import data_source_v2 as ds2
 from src.core import fund_nav_source as fns
 from src.core import portfolio_store as pstore
+from src.analysis import portfolio_attribution as pattr
 from src.analysis import portfolio_risk as prisk
 from src.analysis import portfolio_xray as pxray
 from src.core import webhook_push as wpush
@@ -52,6 +53,11 @@ _last_known: dict[str, dict] = {}
 
 def _now_iso() -> str:
     return _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _today_date() -> _dt.date:
+    """当前日期(独立封装,便于测试注入,与 fund._today 同范式)。"""
+    return _dt.date.today()
 
 
 # ==================================================================
@@ -419,6 +425,74 @@ async def get_portfolio_risk(
             "note": f"风险计算异常: {e}",
             "generated_at": _now_iso(),
         }
+
+
+# ==================================================================
+# STAGE6: attribution 收益归因(批次 B 功能 #5)
+# ==================================================================
+
+_ATTRIBUTION_PERIOD: dict[str, str] = {"mtd": "1y", "ytd": "1y", "max": "all"}
+
+
+def _attribution_empty(window: str, note: str, degraded: bool = False) -> dict[str, Any]:
+    return {
+        "window": window,
+        "method": pattr.METHOD,
+        "window_start": None,
+        "window_end": None,
+        "portfolio": {
+            "start_value": 0.0, "end_value": 0.0, "pnl": 0.0,
+            "total_return": None, "fund_count": 0,
+        },
+        "funds": [],
+        "missing_funds": [],
+        "partial": False,
+        "degraded": degraded,
+        "note": note,
+        "generated_at": _now_iso(),
+    }
+
+
+@router.get("/attribution", dependencies=[Depends(require_admin)])
+async def get_portfolio_attribution(window: str = Query("mtd", max_length=8)):
+    """收益归因(批次 B 功能 #5):按基金的 MTD/YTD/MAX 区间贡献表。
+
+    口径见 ``portfolio_attribution.py``:贡献额 = 份额 × (期末累计净值 − 期初累计净值),
+    组合区间收益 = Σ贡献额 / Σ期初市值;历史不足的基金显式标注,绝不 500。
+    """
+    window_s = (window or "").strip().lower()
+    if window_s not in pattr.WINDOWS:
+        return {
+            **_attribution_empty(window_s, f"非法窗口: {window_s!r},支持 {list(pattr.WINDOWS)}", degraded=True),
+            "error": f"非法窗口: {window_s!r}",
+        }
+    try:
+        positions = fund_route._load_positions()
+        period = _ATTRIBUTION_PERIOD[window_s]
+        series_map: dict[str, list[tuple[str, float]]] = {}
+        shares_map: dict[str, float] = {}
+        names_map: dict[str, str] = {}
+        for p in positions:
+            code = _safe_str(p.get("fund_code"))
+            shares = _safe_float(p.get("shares"))
+            if not code or shares <= 0:
+                continue
+            series = _fetch_fund_nav_series(code, period)
+            series_map[code] = [
+                (_safe_str(row.get("date")), _safe_float(row.get("acc_nav"), _safe_float(row.get("nav"))))
+                for row in series
+            ]
+            shares_map[code] = shares
+            names_map[code] = _safe_str(p.get("fund_name"))
+
+        result = pattr.compute_attribution(
+            series_map, shares_map, names_map, window_s, today=_today_date(),
+        )
+        result["generated_at"] = _now_iso()
+        return result
+    except Exception as e:
+        logger.warning(f"get_portfolio_attribution failed: {e}")
+        return _attribution_empty(window_s, f"收益归因计算异常: {e}", degraded=True)
 
 
 # ==================================================================
