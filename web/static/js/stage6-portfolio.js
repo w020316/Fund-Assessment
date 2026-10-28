@@ -338,7 +338,7 @@
       '</tr>';
     }).join('');
     body.innerHTML =
-      '<div class="table-wrap"><table>' +
+      '<div class="table-wrap" tabindex="0"><table>' +
       '<thead><tr><th>代码</th><th>名称</th><th>最大回撤</th><th>年化波动</th><th>夏普</th><th>Sortino</th><th>卡玛</th><th>样本</th></tr></thead>' +
       '<tbody>' + rows + '</tbody></table></div>' +
       '<div class="st6-note">' + esc(data.note || '') +
@@ -1157,7 +1157,7 @@
     const suggestions = data.suggestions || [];
     let html = '';
     if (positions.length) {
-      html += '<div class="table-wrap"><table><thead><tr>' +
+      html += '<div class="table-wrap" tabindex="0"><table><thead><tr>' +
         '<th>代码</th><th>名称</th><th>份额</th><th>净值</th><th>市值</th>' +
         '<th>当前%</th><th>目标%</th><th>偏离pp</th></tr></thead><tbody>' +
         positions.map(function (p) {

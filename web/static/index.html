@@ -903,7 +903,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
       <div class="logo-icon">QF</div>
       <span>QuantFlow Pro 基金投资决策辅助</span>
     </div>
-    <div class="index-bar" id="indexBar">
+    <div class="index-bar" id="indexBar" role="group" tabindex="0" aria-label="指数行情(可横向滚动)">
       <!-- 由JS动态填充;首屏占位区分 loading 与空/错态 -->
       <span style="color:var(--text-muted);font-size:12px;">指数加载中…</span>
     </div>
@@ -948,7 +948,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
            主理人拍板:旧「交易执行」页并入「持仓」聚合容器(trade → hud-holdings)。 -->
       <div class="page active" id="page-hud-market">
         <div class="hud-group-header">
-          <div class="hud-subtabs" role="tablist" aria-label="行情二级导航">
+          <div class="hud-subtabs" role="group" aria-label="行情二级导航">
             <span class="hud-subtab active" data-page="market" role="button" tabindex="0" onclick="switchPage('market')">行情总览</span>
             <span class="hud-subtab" data-page="global" role="button" tabindex="0" onclick="switchPage('global')">国际市场</span>
             <span class="hud-subtab" data-page="data" role="button" tabindex="0" onclick="switchPage('data')">深度数据</span>
@@ -958,7 +958,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 
       <div class="page" id="page-hud-holdings">
         <div class="hud-group-header">
-          <div class="hud-subtabs" role="tablist" aria-label="持仓二级导航">
+          <div class="hud-subtabs" role="group" aria-label="持仓二级导航">
             <span class="hud-subtab active" data-page="position" role="button" tabindex="0" onclick="switchPage('position')">持仓管理</span>
             <span class="hud-subtab" data-page="fund" role="button" tabindex="0" onclick="switchPage('fund')">基金管理</span>
             <span class="hud-subtab" data-page="trade" role="button" tabindex="0" onclick="switchPage('trade')">交易执行</span>
@@ -1001,7 +1001,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
       <!-- ===== STAGE6: risk-panel ===== 风险二级页(风险指标 + X-Ray + 账本备份;内容由 stage6-portfolio.js 渲染) -->
       <div class="page" id="page-risk">
         <div class="hud-group-header">
-          <div class="st6-window-tabs" role="tablist" aria-label="风险窗口切换">
+          <div class="st6-window-tabs" role="group" aria-label="风险窗口切换">
             <span class="st6-window-tab" data-window="1m" role="button" tabindex="0" onclick="St6Portfolio.loadRisk('1m')">1月</span>
             <span class="st6-window-tab active" data-window="3m" role="button" tabindex="0" onclick="St6Portfolio.loadRisk('3m')">3月</span>
             <span class="st6-window-tab" data-window="1y" role="button" tabindex="0" onclick="St6Portfolio.loadRisk('1y')">1年</span>
@@ -1019,7 +1019,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
             <span>收益归因(区间贡献)</span>
             <!-- ===== STAGE6: attribution ===== 批次B 功能#5:窗口切换(data-attr-window 与风险页 data-window 隔离) -->
-            <div class="st6-window-tabs st6-attr-tabs" role="tablist" aria-label="归因窗口切换" style="margin-bottom:0;">
+            <div class="st6-window-tabs st6-attr-tabs" role="group" aria-label="归因窗口切换" style="margin-bottom:0;">
               <span class="st6-window-tab active" data-attr-window="mtd" role="button" tabindex="0" onclick="St6Portfolio.loadAttribution('mtd')">本月</span>
               <span class="st6-window-tab" data-attr-window="ytd" role="button" tabindex="0" onclick="St6Portfolio.loadAttribution('ytd')">本年</span>
               <span class="st6-window-tab" data-attr-window="max" role="button" tabindex="0" onclick="St6Portfolio.loadAttribution('max')">全部</span>
@@ -1070,7 +1070,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 
       <div class="page" id="page-hud-strategy">
         <div class="hud-group-header">
-          <div class="hud-subtabs" role="tablist" aria-label="策略二级导航">
+          <div class="hud-subtabs" role="group" aria-label="策略二级导航">
             <span class="hud-subtab active" data-page="strategy" role="button" tabindex="0" onclick="switchPage('strategy')">策略中心</span>
             <span class="hud-subtab" data-page="ai" role="button" tabindex="0" onclick="switchPage('ai')">智能分析</span>
           </div>
@@ -1079,7 +1079,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 
       <div class="page" id="page-hud-monitor">
         <div class="hud-group-header">
-          <div class="hud-subtabs" role="tablist" aria-label="监控二级导航">
+          <div class="hud-subtabs" role="group" aria-label="监控二级导航">
             <span class="hud-subtab active" data-page="monitor" role="button" tabindex="0" onclick="switchPage('monitor')">监控预警</span>
           </div>
         </div>
@@ -1087,7 +1087,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 
       <div class="page" id="page-hud-settings">
         <div class="hud-group-header">
-          <div class="hud-subtabs" role="tablist" aria-label="设置二级导航">
+          <div class="hud-subtabs" role="group" aria-label="设置二级导航">
             <span class="hud-subtab active" data-page="config" role="button" tabindex="0" onclick="switchPage('config')">系统配置</span>
           </div>
         </div>
@@ -1112,7 +1112,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
               <div class="tab" role="button" tabindex="0" aria-label="跌幅TOP10" onclick="switchHotTab('loss')">跌幅TOP10</div>
               <div class="tab" role="button" tabindex="0" aria-label="成交额TOP10" onclick="switchHotTab('volume')">成交额TOP10</div>
             </div>
-            <div class="table-wrap" id="hotStockWrap" style="max-height:360px;overflow-y:auto;">
+            <div class="table-wrap" tabindex="0" id="hotStockWrap" style="max-height:360px;overflow-y:auto;">
               <table>
                 <thead><tr><th>代码</th><th>名称</th><th>价格</th><th>涨跌幅</th><th>成交额</th></tr></thead>
                 <tbody id="hotStockBody"></tbody>
@@ -1121,7 +1121,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
           </div>
           <div class="card">
             <div class="card-title">行业板块排名</div>
-            <div class="heatmap" id="sectorHeatmap"></div>
+            <div class="heatmap" id="sectorHeatmap" role="group" tabindex="0" aria-label="行业板块热力图(可横向滚动)"></div>
           </div>
         </div>
 
@@ -1269,7 +1269,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <!-- 分析历史 -->
         <div class="card">
           <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg> 分析历史</div>
-          <div class="table-wrap" style="max-height:300px;overflow-y:auto;">
+          <div class="table-wrap" tabindex="0" style="max-height:300px;overflow-y:auto;">
             <table>
               <thead><tr><th>时间</th><th>股票</th><th>决策</th><th>置信度</th><th>评分</th></tr></thead>
               <tbody id="aiHistoryBody"></tbody>
@@ -1332,7 +1332,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <!-- 扫描结果 -->
         <div class="card mb-16" id="scanResultCard" style="display:none;">
           <div class="card-title">扫描结果</div>
-          <div class="table-wrap" style="max-height:300px;overflow-y:auto;">
+          <div class="table-wrap" tabindex="0" style="max-height:300px;overflow-y:auto;">
             <table>
               <thead><tr><th>代码</th><th>名称</th><th>价格</th><th>涨跌幅</th><th>成交额</th><th>信号</th></tr></thead>
               <tbody id="scanResultBody"></tbody>
@@ -1343,7 +1343,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <!-- 策略列表 -->
         <div class="card">
           <div class="card-title">策略列表</div>
-          <div class="table-wrap">
+          <div class="table-wrap" tabindex="0">
             <table>
               <thead><tr><th>策略名称</th><th>类型</th><th>状态</th><th>收益率</th><th>最大回撤</th><th>操作</th></tr></thead>
               <tbody id="strategyListBody"></tbody>
@@ -1426,7 +1426,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <!-- 当前委托 -->
         <div class="card mb-16">
           <div class="card-title">当前委托</div>
-          <div class="table-wrap">
+          <div class="table-wrap" tabindex="0">
             <table>
               <thead><tr><th>时间</th><th>代码</th><th>方向</th><th>数量</th><th>价格</th><th>状态</th></tr></thead>
               <tbody id="orderBody"></tbody>
@@ -1437,7 +1437,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <!-- 交易历史 -->
         <div class="card">
           <div class="card-title">交易历史</div>
-          <div class="table-wrap" style="max-height:360px;overflow-y:auto;">
+          <div class="table-wrap" tabindex="0" style="max-height:360px;overflow-y:auto;">
             <table>
               <thead><tr><th>时间</th><th>代码</th><th>方向</th><th>数量</th><th>价格</th><th>金额</th><th>盈亏</th></tr></thead>
               <tbody id="tradeHistoryBody"></tbody>
@@ -1505,7 +1505,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
                 <button class="btn btn-sm" onclick="toggleAddStockForm()">取消</button>
               </div>
             </div>
-            <div class="table-wrap" style="max-height:360px;overflow-y:auto;">
+            <div class="table-wrap" tabindex="0" style="max-height:360px;overflow-y:auto;">
               <table>
                 <thead><tr><th>代码</th><th>名称</th><th>数量</th><th>成本</th><th>现价</th><th>盈亏</th><th>盈亏%</th><th>操作</th></tr></thead>
                 <tbody id="positionBody"></tbody>
@@ -1625,7 +1625,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
               <input class="input" id="dcaAmount" type="number" value="1000" placeholder="1000">
             </div>
             <div>
-              <label style="font-size:11px;color:var(--text-muted);">定投频率</label>
+              <label for="dcaFreq" style="font-size:11px;color:var(--text-muted);">定投频率</label>
               <select class="select" id="dcaFreq">
                 <option value="monthly">每月</option>
                 <option value="weekly">每周</option>
@@ -1655,7 +1655,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
             <div class="st6-group-bar" id="st6GroupBar" role="toolbar" aria-label="持仓分组筛选"></div>
             <div class="st6-group-manage" id="st6GroupManage" hidden></div>
             <!-- ===== STAGE5: fund-cards ===== 桌面保留表格(P1-1);<768px 由下方卡片列表替代 -->
-            <div class="table-wrap" id="fundPositionTableWrap" style="max-height:400px;overflow-y:auto;">
+            <div class="table-wrap" tabindex="0" id="fundPositionTableWrap" style="max-height:400px;overflow-y:auto;">
               <table>
                 <thead><tr><th>代码</th><th>名称</th><th>份额</th><th>成本</th><th>现净值</th><th>涨跌幅</th><th>盈亏</th><th>操作</th></tr></thead>
                 <tbody id="fundPositionBody"></tbody>
@@ -1690,7 +1690,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
                 <input class="input" id="fundCostInput" type="number" step="0.001" placeholder="2.500">
               </div>
               <div>
-                <label style="font-size:11px;color:var(--text-muted);">买入日期</label>
+                <label for="fundDateInput" style="font-size:11px;color:var(--text-muted);">买入日期</label>
                 <input class="input" id="fundDateInput" type="date">
               </div>
               <div>
@@ -1709,7 +1709,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <div class="card mb-16" id="hudSectorCard">
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
             <span>板块聚合</span>
-            <div class="hud-subtabs" id="hudSectorTabs" role="tablist" aria-label="板块视图切换">
+            <div class="hud-subtabs" id="hudSectorTabs" role="group" aria-label="板块视图切换">
               <span class="hud-subtab active" data-view="sector" role="button" tabindex="0" onclick="SectorView.switchView('sector')">板块视图</span>
               <span class="hud-subtab" data-view="list" role="button" tabindex="0" onclick="SectorView.switchView('list')">列表视图</span>
             </div>
@@ -1792,7 +1792,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <div class="grid-2 mb-16">
           <div class="card">
             <div class="card-title">美股热门 <span style="font-size:11px;color:var(--text-muted);font-weight:500;border:1px solid var(--border-light);padding:1px 5px;border-radius:3px;margin-left:2px;">US</span></div>
-            <div class="table-wrap" style="max-height:420px;overflow-y:auto;">
+            <div class="table-wrap" tabindex="0" style="max-height:420px;overflow-y:auto;">
               <table>
                 <thead><tr><th>代码</th><th>名称</th><th>价格</th><th>涨跌幅</th><th>币种</th></tr></thead>
                 <tbody id="usHotBody"><tr><td colspan="5" style="text-align:center;color:var(--text-muted);">加载中...</td></tr></tbody>
@@ -1801,7 +1801,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
           </div>
           <div class="card">
             <div class="card-title">港股热门 <span style="font-size:11px;color:var(--text-muted);font-weight:500;border:1px solid var(--border-light);padding:1px 5px;border-radius:3px;margin-left:2px;">HK</span></div>
-            <div class="table-wrap" style="max-height:420px;overflow-y:auto;">
+            <div class="table-wrap" tabindex="0" style="max-height:420px;overflow-y:auto;">
               <table>
                 <thead><tr><th>代码</th><th>名称</th><th>价格</th><th>涨跌幅</th><th>币种</th></tr></thead>
                 <tbody id="hkHotBody"><tr><td colspan="5" style="text-align:center;color:var(--text-muted);">加载中...</td></tr></tbody>
@@ -1821,7 +1821,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
             <input id="globalCodeInput" class="input" style="flex:1;min-width:200px;" placeholder="输入代码(如 AAPL 或 00700),逗号分隔">
             <button class="btn btn-primary" onclick="queryGlobalStock()">查询</button>
           </div>
-          <div class="table-wrap">
+          <div class="table-wrap" tabindex="0">
             <table>
               <thead><tr><th>代码</th><th>名称</th><th>价格</th><th>涨跌额</th><th>涨跌幅</th><th>最高</th><th>最低</th><th>币种</th></tr></thead>
               <tbody id="globalQueryBody"><tr><td colspan="8" style="text-align:center;color:var(--text-muted);">输入代码后点击查询</td></tr></tbody>
@@ -1845,7 +1845,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
             <input class="input" id="dataCodeInput" placeholder="输入股票代码（可选）" style="max-width:200px;">
             <button class="btn btn-sm btn-primary" onclick="loadDataTab()">查询</button>
           </div>
-          <div class="table-wrap" style="max-height:500px;overflow-y:auto;">
+          <div class="table-wrap" tabindex="0" style="max-height:500px;overflow-y:auto;">
             <table>
               <thead id="dataThead"></thead>
               <tbody id="dataTbody"></tbody>
@@ -1869,7 +1869,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
               <input class="input" id="watchlistInput" placeholder="添加股票代码" style="max-width:160px;" onkeydown="if(event.key==='Enter')addWatchlist()">
               <button class="btn btn-sm btn-primary" onclick="addWatchlist()">添加</button>
             </div>
-            <div class="table-wrap" style="max-height:300px;overflow-y:auto;">
+            <div class="table-wrap" tabindex="0" style="max-height:300px;overflow-y:auto;">
               <table>
                 <thead><tr><th>代码</th><th>名称</th><th>现价</th><th>涨跌幅</th><th>操作</th></tr></thead>
                 <tbody id="watchlistBody"></tbody>
@@ -1887,7 +1887,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
           <!-- 强势股信号 -->
           <div class="card">
             <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> 强势股信号</div>
-            <div class="table-wrap" style="max-height:300px;overflow-y:auto;">
+            <div class="table-wrap" tabindex="0" style="max-height:300px;overflow-y:auto;">
               <table>
                 <thead><tr><th>代码</th><th>名称</th><th>信号</th><th>强度</th></tr></thead>
                 <tbody id="hotSignalBody"></tbody>
@@ -2544,12 +2544,12 @@ async function loadSectorRanking() {
     // 根据涨跌幅计算颜色深浅
     const pct = s.change_pct;
     let bg, color;
-    if (pct > 2) { bg='rgba(239,68,68,0.35)'; color='var(--color-up)'; }
+    if (pct > 2) { bg='rgba(239,68,68,0.35)'; color='var(--color-up-strong, #fca5a5)'; }
     else if (pct > 1) { bg='rgba(239,68,68,0.2)'; color='var(--color-up)'; }
     else if (pct > 0) { bg='rgba(239,68,68,0.08)'; color='var(--color-up)'; }
     else if (pct > -1) { bg='rgba(34,197,94,0.08)'; color='var(--color-down)'; }
     else if (pct > -2) { bg='rgba(34,197,94,0.2)'; color='var(--color-down)'; }
-    else { bg='rgba(34,197,94,0.35)'; color='var(--color-down)'; }
+    else { bg='rgba(34,197,94,0.35)'; color='var(--color-down-strong, #6ee7b7)'; }
 
     const sign = changeSign(pct);
     return `<div class="heatmap-cell" style="background:${bg};color:${color};">
@@ -4150,7 +4150,7 @@ async function viewHoldings(fundCode, fundName) {
     <div class="grid-2">
       <div class="card">
         <div class="card-title">前10大重仓股</div>
-        <div class="table-wrap" style="max-height:300px;overflow-y:auto;">
+        <div class="table-wrap" tabindex="0" style="max-height:300px;overflow-y:auto;">
           <table>
             <thead><tr><th>#</th><th>代码</th><th>名称</th><th>权重</th><th>涨跌幅</th></tr></thead>
             <tbody>${holdingsRows || '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">暂无数据</td></tr>'}</tbody>
@@ -4159,7 +4159,7 @@ async function viewHoldings(fundCode, fundName) {
       </div>
       <div class="card">
         <div class="card-title">板块分布</div>
-        <div class="table-wrap" style="max-height:300px;overflow-y:auto;">
+        <div class="table-wrap" tabindex="0" style="max-height:300px;overflow-y:auto;">
           <table>
             <thead><tr><th>板块</th><th>权重</th><th>平均涨跌</th></tr></thead>
             <tbody>${sectorRows || '<tr><td colspan="3" style="text-align:center;color:var(--text-muted);">暂无数据</td></tr>'}</tbody>
@@ -4982,7 +4982,7 @@ async function loadPortfolioRisk() {
       ${chartHtml}
       <div style="margin-top:12px;">
         <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">持仓权重分布</div>
-        <div class="table-wrap" style="max-height:200px;overflow-y:auto;">
+        <div class="table-wrap" tabindex="0" style="max-height:200px;overflow-y:auto;">
           <table>
             <thead><tr><th>代码</th><th>名称</th><th>权重</th><th>占比</th></tr></thead>
             <tbody>${weightsHtml}</tbody>
