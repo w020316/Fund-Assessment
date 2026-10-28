@@ -84,8 +84,11 @@ def compute_risk_metrics(nav_series: list[float] | np.ndarray) -> dict[str, Any]
     annual_return = float(arr[-1] / arr[0]) ** (TRADING_DAYS_PER_YEAR / periods) - 1.0
 
     daily_ret = np.diff(arr) / arr[:-1]
-    # 年化波动:样本标准差(ddof=1) × √244
-    annual_vol = float(np.std(daily_ret, ddof=1) * np.sqrt(TRADING_DAYS_PER_YEAR))
+    # 仅 1 个日收益时 ddof=1 的样本标准差为 NaN,JSON 序列化会直接 500 → 按 0 处理
+    annual_vol = (
+        float(np.std(daily_ret, ddof=1) * np.sqrt(TRADING_DAYS_PER_YEAR))
+        if daily_ret.size >= 2 else 0.0
+    )
 
     # 最大回撤:相对历史新高的最大跌幅
     running_max = np.maximum.accumulate(arr)

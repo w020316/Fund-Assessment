@@ -83,6 +83,13 @@ class TestComputeRiskMetrics:
             assert m["total_return"] is None
             assert m["sharpe"] is None
 
+    def test_two_point_series_produces_no_nan(self):
+        """2 点序列只有 1 个日收益,ddof=1 样本标准差会得 NaN → 波动按 0,绝不输出 NaN。"""
+        m = prisk.compute_risk_metrics([1.0, 1.1])
+        assert m["annual_vol"] == 0.0
+        assert m["sharpe"] is None
+        assert not any(isinstance(v, float) and math.isnan(v) for v in m.values())
+
     def test_invalid_values_filtered(self):
         """NaN/非正值被剔除,不产生 NaN 结果。"""
         m = prisk.compute_risk_metrics([1.0, float("nan"), 0.0, -1.0, 1.05, 1.10])
