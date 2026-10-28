@@ -883,6 +883,8 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 <link rel="stylesheet" href="/static/css/hud.css">
 <!-- ===== STAGE6: 基础 ===== 阶段六批次A 样式(盯盘/风险/X-Ray/账本;独立文件净增) -->
 <link rel="stylesheet" href="/static/css/stage6.css">
+<!-- ===== STAGE5-R2: design ===== 第二轮阶段 5 增量样式（头部/ticker/口径提示） -->
+<link rel="stylesheet" href="/static/css/stage5-r2.css">
 <!-- 性能优化:lightweight-charts 改为懒加载(仅在用户点击"走势"时加载),避免阻塞首屏 -->
 <link rel="preconnect" href="https://unpkg.com" crossorigin>
 <link rel="dns-prefetch" href="https://unpkg.com">
@@ -1522,15 +1524,13 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
       <!-- ==================== 6. 基金管理 ==================== -->
       <div class="page" id="page-fund">
         <!-- 基金概览 -->
-        <div class="flex-between mb-12">
+        <div class="flex-between mb-12 fund-head">
           <div style="font-size:15px;font-weight:600;display:flex;align-items:center;gap:6px;white-space:nowrap;flex-shrink:0;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg> 我的基金</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <div class="fund-head-actions" style="display:flex;gap:8px;flex-wrap:wrap;">
             <button class="btn btn-sm btn-primary" onclick="loadFundData()">刷新持仓</button>
             <button class="btn btn-sm" onclick="loadMarketThermometer()">大盘温度</button>
             <button class="btn btn-sm" onclick="loadNewsFeed()">消息面</button>
             <button class="btn btn-sm" onclick="loadFundAdviceV2()">五信号建议</button>
-            <!-- ===== STAGE5: wizard ===== 持仓补录向导入口(P0-1,分步引导防"份额清零"事故) -->
-            <button class="btn btn-sm btn-outline" onclick="FundWizard.open()">持仓补录向导</button>
           </div>
         </div>
         <div class="grid-4 mb-16">
