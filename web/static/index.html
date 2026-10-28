@@ -898,7 +898,8 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
       <span>QuantFlow Pro 基金投资决策辅助</span>
     </div>
     <div class="index-bar" id="indexBar">
-      <!-- 由JS动态填充 -->
+      <!-- 由JS动态填充;首屏占位区分 loading 与空/错态 -->
+      <span style="color:var(--text-muted);font-size:12px;">指数加载中…</span>
     </div>
     <div class="topbar-right">
       <span class="data-quality-badge badge-mock" id="dataQualityBadge">模拟</span>
@@ -2308,8 +2309,12 @@ async function loadIndexData() {
   const indices = (data && data.data) ? data.data : defaultIndices;
 
   if (!indices || indices.length === 0) {
-    if (bar) bar.innerHTML = '<span style="color:var(--text-muted);font-size:12px;">指数加载中...</span>';
-    if (container) renderEmpty(container, '指数数据暂无', '请稍后重试或检查数据源');
+    // 失败与空数据分开提示:原实现两者都显示"加载中",用户会误以为请求仍在进行
+    const failed = data === null;
+    if (bar) bar.innerHTML = `<span style="color:var(--text-muted);font-size:12px;">${failed ? '指数数据暂不可用' : '指数暂无数据'}</span>`;
+    if (container) renderEmpty(container,
+      failed ? '指数数据获取失败' : '指数数据暂无',
+      failed ? '请稍后刷新或检查数据源' : '数据源暂未返回行情');
     return;
   }
 
