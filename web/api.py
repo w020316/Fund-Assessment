@@ -154,6 +154,20 @@ async def add_security_headers(request: Request, call_next):
     response.headers["Permissions-Policy"] = "geolocation=(), microphone=()"
     return response
 
+# ===== 静态资源缓存(阶段 5 S5-08)=====
+# 静态文件已有 ETag/Last-Modified 但没有 Cache-Control,浏览器每次访问都要回源验证;
+# 补短缓存减少重复访问往返。HTML 只缓存 60s,避免部署后长时间看到旧页面。
+@app.middleware("http")
+async def add_static_cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if request.method in ("GET", "HEAD") and path.startswith("/static/"):
+        if path.endswith(".html"):
+            response.headers.setdefault("Cache-Control", "public, max-age=60, must-revalidate")
+        else:
+            response.headers.setdefault("Cache-Control", "public, max-age=300")
+    return response
+
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     start = time.monotonic()

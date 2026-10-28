@@ -120,3 +120,13 @@ class TestStaticFiles:
         resp = client.get("/static/index.html")
         assert resp.status_code == 200
         assert "QuantFlow Pro" in resp.text
+
+    def test_static_cache_headers(self, client):
+        """阶段 5:S5-08 静态资源补 Cache-Control;HTML 短缓存,API 不被缓存。"""
+        html = client.get("/static/index.html")
+        assert "max-age=60" in (html.headers.get("cache-control") or "")
+        css = client.get("/static/css/stage5-r2.css")
+        assert css.status_code == 200
+        assert "max-age=300" in (css.headers.get("cache-control") or "")
+        api = client.get("/api/health")
+        assert "cache-control" not in {k.lower() for k in api.headers.keys()}
