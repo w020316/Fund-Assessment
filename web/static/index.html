@@ -881,10 +881,9 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 </style>
 <!-- ===== STAGE5: hud-theme ===== HUD 深空指挥舱主题(T05;移除 body 的 hud-theme 类即整体回退) -->
 <link rel="stylesheet" href="/static/css/hud.css">
-<!-- ===== STAGE6: 基础 ===== 阶段六批次A 样式(盯盘/风险/X-Ray/账本;独立文件净增) -->
+<!-- ===== STAGE6: 基础 ===== 阶段六批次A 样式(盯盘/风险/X-Ray/账本;独立文件净增)
+     第二轮阶段 5 增量样式已并入本文件末尾（避免第三个渲染阻塞请求） -->
 <link rel="stylesheet" href="/static/css/stage6.css">
-<!-- ===== STAGE5-R2: design ===== 第二轮阶段 5 增量样式（头部/ticker/口径提示） -->
-<link rel="stylesheet" href="/static/css/stage5-r2.css">
 <!-- 性能优化:lightweight-charts 改为懒加载(仅在用户点击"走势"时加载),避免阻塞首屏 -->
 <link rel="preconnect" href="https://unpkg.com" crossorigin>
 <link rel="dns-prefetch" href="https://unpkg.com">
