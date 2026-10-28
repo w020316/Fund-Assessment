@@ -7,7 +7,8 @@
 - 窗口:
   - ``mtd``: 本月月初起;期初取月初前最后一个净值点(缺历史则标记 partial)
   - ``ytd``: 本年年初起;口径同上
-  - ``max``: 各基金自可得历史起点(各基金起点可能不同,明确标注)
+  - ``max``: 各基金可得历史的**共同起点**(最晚的首日)起算;
+    起点不同直接相加会让组合收益混合不同区间,故统一对齐后再归因
 
 铁律:历史不足时返回 None/partial + missing_funds,不编数据、不 500。
 """
@@ -85,13 +86,26 @@ def compute_attribution(
     window_starts: list[str] = []
     window_ends: list[str] = []
 
+    cleaned: dict[str, list[tuple[str, float]]] = {}
+    shares_by_code: dict[str, float] = {}
     for code, raw_series in (series_map or {}).items():
         code_s = str(code)
         shares = _safe_positive(shares_map.get(code_s))
         if shares <= 0:
             continue
-        seq = _clean_series(raw_series)
+        cleaned[code_s] = _clean_series(raw_series)
+        shares_by_code[code_s] = shares
+
+    # MAX 窗口没有统一目标日:取各基金可得历史中最晚的首日为共同起点
+    common_start_s: str | None = None
+    if target_s is None:
+        firsts = [seq[0][0] for seq in cleaned.values() if len(seq) >= 2]
+        common_start_s = max(firsts) if firsts else None
+
+    for code_s, raw_seq in cleaned.items():
+        shares = shares_by_code[code_s]
         name = names.get(code_s, "")
+        seq = raw_seq
         if len(seq) < 2:
             missing.append(code_s)
             partial_any = True
@@ -99,6 +113,13 @@ def compute_attribution(
             continue
 
         if target_s is None:
+            start = common_start_s if common_start_s is not None else seq[0][0]
+            seq = [row for row in seq if row[0] >= start]
+            if len(seq) < 2:
+                missing.append(code_s)
+                partial_any = True
+                funds.append(_empty_fund(code_s, name, shares, "window_insufficient"))
+                continue
             start_idx = 0
             fund_partial = False
         else:
@@ -176,6 +197,7 @@ def compute_attribution(
         "degraded": bool(missing),
         "note": (
             "按当前份额静态归因,贡献额=份额×(期末累计净值−期初累计净值),忽略区间申赎现金流"
+            + (";MAX 窗口已按各基金共同起点对齐" if target_s is None else "")
             + (";部分基金历史不足,已标注" if partial_any else "")
         ),
     }

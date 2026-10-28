@@ -80,20 +80,39 @@ class TestComputeAttribution:
         assert f["start_date"] == "2025-12-31"
         assert f["contribution"] == pytest.approx(20.0)  # 50*(2.4-2.0)
 
-    def test_max_uses_each_fund_first_point(self):
-        """MAX:各基金自可得历史起点(起点可不同,按各自区间归因)。"""
+    def test_max_aligns_common_start(self):
+        """MAX:按各基金共同起点(最晚的首日)对齐,不混合不同区间(R2-11)。"""
         series = {
-            "A": [("2024-01-02", 1.0), ("2026-10-08", 2.0)],
+            "A": [("2024-01-02", 1.0), ("2025-06-02", 1.5), ("2026-10-08", 2.0)],
             "B": [("2025-06-02", 3.0), ("2026-10-08", 3.3)],
         }
         out = pa.compute_attribution(
             series, {"A": 10.0, "B": 10.0}, {}, "max", today=dt.date(2026, 10, 27),
         )
         funds = {f["fund_code"]: f for f in out["funds"]}
-        assert funds["A"]["start_date"] == "2024-01-02"
-        assert funds["A"]["contribution"] == pytest.approx(10.0)
+        # 共同起点 = max(2024-01-02, 2025-06-02) → A 截到 2025-06-02 起算
+        assert funds["A"]["start_date"] == "2025-06-02"
+        assert funds["A"]["contribution"] == pytest.approx(5.0)  # 10*(2.0-1.5)
         assert funds["B"]["start_date"] == "2025-06-02"
         assert funds["B"]["contribution"] == pytest.approx(3.0)
+        assert out["window_start"] == "2025-06-02"
+        # 组合收益 = 8 / (10*1.5 + 10*3.0),不再混入 A 的 2024 区间
+        assert out["portfolio"]["total_return"] == pytest.approx(8.0 / 45.0, abs=1e-6)
+        assert "共同起点" in out["note"]
+
+    def test_max_fund_ended_before_common_start_is_missing(self):
+        """基金历史在共同起点前已结束 → window_insufficient,不编造贡献。"""
+        series = {
+            "A": [("2025-01-01", 1.0), ("2026-10-08", 2.0)],
+            "C": [("2023-01-02", 1.0), ("2023-06-01", 1.1)],
+        }
+        out = pa.compute_attribution(
+            series, {"A": 10.0, "C": 10.0}, {}, "max", today=dt.date(2026, 10, 27),
+        )
+        funds = {f["fund_code"]: f for f in out["funds"]}
+        assert funds["C"]["contribution"] is None
+        assert funds["C"]["reason"] == "window_insufficient"
+        assert "C" in out["missing_funds"]
 
     def test_partial_when_history_starts_inside_window(self):
         """历史起点落在窗口内 → 按可得区间计算并标 partial(不假装是整月)。"""
