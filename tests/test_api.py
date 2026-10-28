@@ -95,6 +95,12 @@ class TestStaticFiles:
         resp = client.get("/")
         assert resp.status_code in (200, 307)
 
+    def test_head_root_probe_returns_200(self, client):
+        """HEAD / 探活返回 200 空 body(R2-20:Uptime 类监控默认用 HEAD)。"""
+        resp = client.head("/")
+        assert resp.status_code == 200
+        assert resp.content == b""
+
     def test_index_html_accessible(self, client):
         """测试index.html可访问"""
         resp = client.get("/static/index.html")

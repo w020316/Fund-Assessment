@@ -8,7 +8,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 # 借鉴 encode/starlette(10.5K Star)内置 GZip 中间件,响应压缩 70%+,零新依赖
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.requests import Request
 from loguru import logger
@@ -219,6 +219,12 @@ if _static_dir.is_dir():
 @app.get("/")
 async def root():
     return RedirectResponse(url="/static/index.html")
+
+
+@app.head("/")
+async def root_head():
+    # Uptime 类监控默认用 HEAD 探活;GET-only 路由对 HEAD 返回 405 会被误判宕机
+    return Response(status_code=200)
 
 
 @app.get("/api/health")
