@@ -7,8 +7,8 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta
-from typing import Any, Optional
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import requests
 from loguru import logger
@@ -1634,50 +1634,178 @@ def get_fund_realtime_tencent(codes: list[str]) -> list[dict]:
         return []
 
 
-def get_fund_history_tencent(code: str, period: str = "1y") -> list[dict]:
-    period_days = {"1m": 30, "3m": 90, "6m": 180, "1y": 365, "3y": 1095, "all": 99999}
-    days = period_days.get(period, 365)
-    end_date = datetime.now().strftime("%Y-%m-%d")
-    start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+# ===== 基金历史净值(风险指标 / 走势图) =====
+# 东财 f10/lsjz 的服务端分页:pageSize 参数被忽略,固定 20 条/页,TotalCount 在响应顶层,
+# 且返回按日期倒序。历史实现只取第 1 页 → 任何窗口都只剩最近 ~20 个交易日,倒序输入
+# 又让收益/回撤/夏普符号反转。修复为「pingzhongdata 单请求全量 + lsjz 分页兜底」,
+# 统一在本地做去重、升序排序与窗口过滤,窗口语义不再依赖上游行为。
+_HISTORY_PERIOD_DAYS: dict[str, int] = {
+    "1m": 30, "3m": 90, "6m": 180, "1y": 365, "3y": 1095, "all": 0,
+}
+_LSJZ_PAGE_SIZE: int = 20
+_LSJZ_MAX_PAGES: int = 40  # 安全上限 800 条(≈3.2 年);MAX 窗口由 pingzhongdata 全量兜底
+_CST = timezone(timedelta(hours=8))  # 东财 pingzhongdata 时间戳为北京时间零点
+
+_PZ_NAV_RE = re.compile(r"Data_netWorthTrend\s*=\s*(\[.*?\]);", re.S)
+_PZ_ACC_RE = re.compile(r"Data_ACWorthTrend\s*=\s*(\[.*?\]);", re.S)
+
+
+def _history_start_date(period: str) -> str | None:
+    """period → 窗口起始日(YYYY-MM-DD);all 返回 None 表示不限。"""
+    days = _HISTORY_PERIOD_DAYS.get((period or "1y").strip().lower(), 365)
+    if days <= 0:
+        return None
+    return (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+
+
+def _normalize_history(rows: list[dict], start_date: str | None = None) -> list[dict]:
+    """去重(同日保留最后一条)、按日期升序、窗口过滤,并回填缺失涨跌幅。
+
+    涨跌幅按「前一日 → 当日」计算,因此必须先排序再回填——倒序下回填会得到相反符号。
+    """
+    by_date: dict[str, dict] = {}
+    for row in rows or []:
+        date_str = _safe_str(row.get("date"))[:10]
+        nav = _safe_float(row.get("nav"))
+        if not date_str or nav <= 0:
+            continue
+        if start_date and date_str < start_date:
+            continue
+        acc_nav = _safe_float(row.get("acc_nav"), nav)
+        raw_pct = row.get("change_pct")
+        by_date[date_str] = {
+            "date": date_str,
+            "nav": nav,
+            "acc_nav": acc_nav if acc_nav > 0 else nav,
+            "change_pct": None if raw_pct in (None, "") else _safe_float(raw_pct),
+        }
+    result = [by_date[d] for d in sorted(by_date)]
+    prev_nav: float | None = None
+    for item in result:
+        if item["change_pct"] is None:
+            item["change_pct"] = round((item["nav"] - prev_nav) / prev_nav * 100, 2) if prev_nav else 0.0
+        prev_nav = item["nav"]
+    return result
+
+
+def _ts_to_date(ts_ms: Any) -> str:
+    """北京时间毫秒时间戳 → YYYY-MM-DD(Render 为 UTC,不能直接用本地时区)。"""
     try:
-        url = "https://api.fund.eastmoney.com/f10/lsjz"
+        return datetime.fromtimestamp(float(ts_ms) / 1000.0, tz=_CST).strftime("%Y-%m-%d")
+    except (TypeError, ValueError, OSError, OverflowError):
+        return ""
+
+
+def _fetch_fund_history_pingzhong(code: str) -> list[dict]:
+    """东财 pingzhongdata:单请求返回全量历史(单位净值 + 累计净值),MAX 窗口不截断。"""
+    url = f"https://fund.eastmoney.com/pingzhongdata/{code}.js"
+    resp = _EM_SESSION.get(url, timeout=10, headers={"Referer": "https://fund.eastmoney.com/"})
+    text = resp.text or ""
+    m_nav = _PZ_NAV_RE.search(text)
+    if not m_nav:
+        return []
+    import json
+
+    rows: dict[str, dict] = {}
+    for item in json.loads(m_nav.group(1)):
+        date_str = _ts_to_date(item.get("x"))
+        nav = _safe_float(item.get("y"))
+        if not date_str or nav <= 0:
+            continue
+        raw_pct = item.get("equityReturn")
+        rows[date_str] = {
+            "date": date_str,
+            "nav": nav,
+            "acc_nav": nav,
+            "change_pct": None if raw_pct in (None, "") else _safe_float(raw_pct),
+        }
+    m_acc = _PZ_ACC_RE.search(text)
+    if m_acc:
+        for pair in json.loads(m_acc.group(1)):
+            if not isinstance(pair, (list, tuple)) or len(pair) < 2:
+                continue
+            date_str = _ts_to_date(pair[0])
+            acc = _safe_float(pair[1])
+            if date_str in rows and acc > 0:
+                rows[date_str]["acc_nav"] = acc
+    return list(rows.values())
+
+
+def _fetch_fund_history_lsjz(code: str, start_date: str | None, end_date: str) -> list[dict]:
+    """东财 f10/lsjz 分页历史:按 TotalCount 翻页(固定 20 条/页,pageSize 无效)。"""
+    url = "https://api.fund.eastmoney.com/f10/lsjz"
+    import json
+
+    rows: list[dict] = []
+    page_size = _LSJZ_PAGE_SIZE
+    total_pages = 1
+    page_index = 1
+    while page_index <= min(total_pages, _LSJZ_MAX_PAGES):
         params = {
             "callback": "jQuery",
             "fundCode": code,
-            "pageIndex": 1,
-            "pageSize": 30,
-            "startDate": start_date,
+            "pageIndex": page_index,
+            "pageSize": page_size,
+            "startDate": start_date or "",
             "endDate": end_date,
         }
-        resp = _EM_SESSION.get(url, params=params, timeout=5, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        resp = _EM_SESSION.get(url, params=params, timeout=8, headers={
             "Referer": "https://fund.eastmoney.com/",
         })
-        text = resp.text
-        json_str = re.sub(r"^jQuery\(", "", text).rstrip(")")
-        import json
-        data = json.loads(json_str)
-        items = data.get("Data", {}).get("LSJZList", [])
-        result: list[dict] = []
-        prev_nav: Optional[float] = None
+        payload = json.loads(re.sub(r"^jQuery\(", "", resp.text).rstrip(")"))
+        if page_index == 1:
+            total = int(_safe_float(payload.get("TotalCount"), 0))
+            page_size = int(_safe_float(payload.get("PageSize"), _LSJZ_PAGE_SIZE)) or _LSJZ_PAGE_SIZE
+            total_pages = max(1, math.ceil(total / page_size))
+            if total_pages > _LSJZ_MAX_PAGES:
+                logger.warning(
+                    f"get_fund_history {code}: TotalCount={total} 超过分页上限,"
+                    f"仅取最近 {_LSJZ_MAX_PAGES * page_size} 条"
+                )
+        items = (payload.get("Data") or {}).get("LSJZList") or []
+        if not items:
+            break
         for item in items:
-            nav = _safe_float(item.get("DWJZ"))
-            acc_nav = _safe_float(item.get("LJJZ"), nav)
-            date_str = _safe_str(item.get("FSRQ"))[:10]
-            change_pct = _safe_float(item.get("JZZZL"))
-            if change_pct == 0 and prev_nav is not None and prev_nav != 0:
-                change_pct = round((nav - prev_nav) / prev_nav * 100, 2)
-            result.append({
-                "date": date_str,
-                "nav": nav,
-                "acc_nav": acc_nav,
-                "change_pct": change_pct,
+            rows.append({
+                "date": _safe_str(item.get("FSRQ"))[:10],
+                "nav": _safe_float(item.get("DWJZ")),
+                "acc_nav": _safe_float(item.get("LJJZ")),
+                "change_pct": item.get("JZZZL"),
             })
-            prev_nav = nav
-        if result:
-            return result
+        if len(items) < page_size:
+            break
+        page_index += 1
+        time.sleep(0.05)
+    return rows
+
+
+def get_fund_history_tencent(code: str, period: str = "1y") -> list[dict]:
+    """获取基金历史净值,统一按日期**升序**返回并按 period 窗口过滤。
+
+    主源 pingzhongdata(单请求全量)→ 备源 f10/lsjz(按 TotalCount 翻页)→
+    末位兜底腾讯实时单点。任一层失败仅记日志,不向上抛异常。
+    """
+    code = _safe_str(code).strip()
+    if not code:
+        return []
+    period = (period or "1y").strip().lower()
+    start_date = _history_start_date(period)
+    end_date = datetime.now().strftime("%Y-%m-%d")
+
+    try:
+        data = _normalize_history(_fetch_fund_history_pingzhong(code), start_date)
+        if data:
+            return data
     except Exception as e:
-        logger.warning(f"get_fund_history_tencent eastmoney failed: {e}")
+        logger.warning(f"get_fund_history_tencent {code} pingzhong failed: {e}")
+
+    try:
+        data = _normalize_history(_fetch_fund_history_lsjz(code, start_date, end_date), start_date)
+        if data:
+            return data
+    except Exception as e:
+        logger.warning(f"get_fund_history_tencent {code} lsjz failed: {e}")
+
     try:
         data = get_fund_realtime_tencent([code])
         if data:
@@ -1689,7 +1817,7 @@ def get_fund_history_tencent(code: str, period: str = "1y") -> list[dict]:
                 "change_pct": _safe_float(item.get("change_pct", 0)),
             }]
     except Exception as e:
-        logger.warning(f"get_fund_history_tencent tencent failed: {e}")
+        logger.warning(f"get_fund_history_tencent {code} realtime failed: {e}")
     return []
 
 
