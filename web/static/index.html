@@ -93,6 +93,8 @@ body {
   background: rgba(255,255,255,0.03);
   border-radius:6px;
   font-size:13px;
+  flex:0 0 auto;
+  white-space:nowrap;
 }
 .index-name { color:var(--text-secondary); font-weight:500; }
 .index-price { font-weight:600; font-size:15px; }
@@ -846,12 +848,28 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 
 /* ===== STAGE5: cls-fix ===== K5 修复(QA Bug S2,CLS 0.036→0.061 回退):
    数据填充到达前后不改变布局尺寸 ——
-   ① .index-bar 预留 28px 高 + nowrap + overflow:hidden,填充指数条前后高度恒定;
+   ① .index-bar 预留 28px 高 + nowrap,填充指数条前后高度恒定;
    ② 顶栏与行情页新鲜度文字(#freshnessText/#marketFreshness)预留 96px 宽,
       "—/暂无数据 → 更新于 HH:MM:SS"变宽时不再水平推挤 #sysTime/#connStatus;
    ③ 指数卡骨架屏补齐 T04 新鲜度徽章行的等高占位(见 _renderSkeletons)。
-   注:375px 下 .index-bar 为 display:none,移动端不受影响。 */
-.index-bar { min-height: 28px; flex-wrap: nowrap; overflow: hidden; }
+   注:375px 下 .index-bar 为 display:none,移动端不受影响。
+   阶段三(2026-10-28):8 个指数在 1024~1440 宽下无法单行容纳,原先 .index-item 可被
+   压到 1 字符宽导致名称竖排("证/成/指")。改为条目不收缩 + 指数条成为横向行情带
+   (ticker,隐藏滚动条,首末子项 margin:auto 实现"放得下居中/放不下可横向滚动"),
+   页面级仍无横向滚动;溢出仅发生在该带内部。 */
+.index-bar {
+  min-height: 28px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  /* 居中交给首末子项的 auto 外边距:放得下时居中,放不下时从第 1 项开始可滚动,
+     避免 justify-content:center 在溢出时把左侧内容裁进不可达区域 */
+  justify-content: flex-start;
+}
+.index-bar::-webkit-scrollbar { display: none; }
+.index-bar > :first-child { margin-left: auto; }
+.index-bar > :last-child { margin-right: auto; }
 #freshnessText,
 #marketFreshness span:not(.freshness-icon) { display: inline-block; min-width: 96px; }
 
