@@ -3394,7 +3394,8 @@ async function loadFundData() {
   document.getElementById('fundTotalCost').textContent = fmtMoney(summary.total_cost || 0);
   const pnlEl = document.getElementById('fundTotalPnl');
   const pnl = summary.total_pnl || 0;
-  pnlEl.textContent = (pnl >= 0 ? '+' : '') + fmtMoney(Math.abs(pnl));
+  // 负值必须带 "-":原写法只补 "+" 再取绝对值,浮亏会显示成正数(仅靠绿色隐含方向)
+  pnlEl.textContent = (pnl > 0 ? '+' : pnl < 0 ? '-' : '') + fmtMoney(Math.abs(pnl));
   pnlEl.style.color = changeColor(pnl);
   document.getElementById('fundCount').textContent = summary.count || 0;
 
