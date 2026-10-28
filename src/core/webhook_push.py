@@ -11,16 +11,20 @@
 出站协议:
 - Server酱: HTTPS POST ``https://sctapi.ftqq.com/<SENDKEY>.send``,
   form 字段 ``title``(≤32 字建议)+ ``desp``(Markdown 正文)
-- 通用: HTTPS POST JSON ``{"title", "content"}``
+- 通用: HTTPS POST JSON ``{"title", "content"}``,发送前做 SSRF 校验
+  (仅 https,解析出的 IP 不得为环回/私网/链路本地/保留/组播/未指定)
 
-失败语义: **绝不抛异常**——一切失败(未配置/网络错误/非 2xx)返回
+失败语义: **绝不抛异常**——一切失败(未配置/地址非法/网络错误/非 2xx)返回
 ``PushResult(success=False, error=...)`` 由调用方降级(记日志/站内提示)。
 """
 from __future__ import annotations
 
 import abc
+import ipaddress
 import os
+import socket
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 import httpx
 from loguru import logger
@@ -55,6 +59,53 @@ def _mask_text(text: str | None, *secrets: str) -> str:
         if secret:
             out = out.replace(secret, "****")
     return out[:200]
+
+
+def _resolve_host(host: str, port: int) -> list[str]:
+    """解析主机名到 IP 列表(独立函数便于测试打桩,不发真实 DNS 查询)。"""
+    infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    return [info[4][0] for info in infos]
+
+
+def validate_webhook_url(url: str) -> tuple[bool, str]:
+    """通用 webhook 出站地址校验(SSRF 防护)。
+
+    规则:仅 https;必须带主机名;DNS 解析出的**每个**地址都不得为环回/
+    私网/链路本地/保留/组播/未指定地址(含 IPv6)。每次发送前重新解析,
+    可挡住"域名指向内网/元数据服务"的配置错误。
+
+    局限:不做 IP 钉扎,解析后目标再次变更(DNS rebinding)不在防护范围;
+    该 URL 由主理人通过 env 配置,不在公网输入面上,当前威胁模型下可接受。
+
+    Returns:
+        (是否合法, 失败原因);原因不含 URL 原文,避免 token 泄漏。
+    """
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname
+        port = parsed.port or 443
+    except ValueError as e:
+        return False, f"URL 解析失败: {e}"
+    if parsed.scheme != "https":
+        return False, "仅支持 https"
+    if not host:
+        return False, "缺少主机名"
+    try:
+        addrs = _resolve_host(host, port)
+    except (socket.gaierror, OSError) as e:
+        return False, f"域名解析失败: {e}"
+    if not addrs:
+        return False, "域名无解析结果"
+    for raw in addrs:
+        try:
+            # IPv6 链路本地地址带 zone id(fe80::1%eth0),ip_address 不认
+            addr = ipaddress.ip_address(raw.split("%")[0])
+        except ValueError:
+            return False, f"无法识别的地址: {raw}"
+        if (addr.is_loopback or addr.is_private or addr.is_link_local
+                or addr.is_reserved or addr.is_multicast or addr.is_unspecified):
+            return False, f"目标地址不允许: {addr}"
+    return True, ""
 
 
 class BaseWebhookChannel(abc.ABC):
@@ -125,9 +176,16 @@ class GenericWebhookChannel(BaseWebhookChannel):
         if not url:
             return PushResult(success=False, channel=self.name,
                               error="not_configured", message="WEBHOOK_GENERIC_URL 未配置")
+        ok_url, reason = validate_webhook_url(url)
+        if not ok_url:
+            # 只记原因,不打 URL 原文(可能带 token)
+            logger.warning(f"webhook_push[{self.name}] rejected url: {reason}")
+            return PushResult(success=False, channel=self.name,
+                              error=f"invalid_url: {reason}", message="webhook 地址不合法")
         try:
+            # follow_redirects=False(httpx 默认):30x 不跟随,避免被重定向到内网
             resp = httpx.post(url, json={"title": title, "content": content},
-                              timeout=HTTP_TIMEOUT_SECONDS)
+                              timeout=HTTP_TIMEOUT_SECONDS, follow_redirects=False)
             ok = 200 <= resp.status_code < 300
             logger.info(f"webhook_push[{self.name}] status={resp.status_code}")
             return PushResult(

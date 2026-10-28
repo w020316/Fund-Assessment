@@ -95,7 +95,8 @@ class TestServerChanChannel:
         """通用渠道异常回显 URL → URL 中的 token 必须脱敏。"""
         monkeypatch.setenv("WEBHOOK_GENERIC_URL", "https://hook.example/push?token=TOPSECRET")
         leaked = "ConnectError https://hook.example/push?token=TOPSECRET timeout"
-        with patch("src.core.webhook_push.httpx.post", side_effect=RuntimeError(leaked)):
+        with patch("src.core.webhook_push._resolve_host", return_value=["93.184.216.34"]), \
+             patch("src.core.webhook_push.httpx.post", side_effect=RuntimeError(leaked)):
             r = wpush.GenericWebhookChannel().send("t", "c")
         assert r.success is False
         assert "TOPSECRET" not in r.error
@@ -106,6 +107,103 @@ class TestServerChanChannel:
         assert wpush.mask_secret("SCT123456789") == "****"
         assert wpush.mask_secret("") == "****"
         assert wpush.mask_secret(None) == "****"
+
+
+class TestGenericWebhookSSRF:
+    """通用 webhook 出站地址校验(阶段七,借鉴 apprise 的渠道校验)。
+
+    铁律:非法地址在发出请求前就被拒绝(httpx.post 不被调用),
+    且错误信息不回显 URL 原文(可能带 token)。
+    """
+
+    def test_validate_rejects_http_scheme(self):
+        ok, reason = wpush.validate_webhook_url("http://hook.example/push")
+        assert ok is False
+        assert reason == "仅支持 https"
+
+    def test_validate_rejects_missing_host(self):
+        ok, reason = wpush.validate_webhook_url("https:///path")
+        assert ok is False
+        assert reason == "缺少主机名"
+
+    def test_validate_invalid_port_does_not_raise(self):
+        ok, reason = wpush.validate_webhook_url("https://hook.example:abc/x")
+        assert ok is False
+        assert "URL 解析失败" in reason
+
+    @pytest.mark.parametrize("addr", [
+        "127.0.0.1",       # 回环
+        "10.0.0.5",        # 私网 A
+        "192.168.1.1",     # 私网 C
+        "169.254.169.254", # 云元数据(链路本地)
+        "0.0.0.0",         # 未指定
+        "224.0.0.1",       # 组播
+        "::1",             # IPv6 回环
+        "fd00::1",         # IPv6 ULA(私网)
+        "fe80::1",         # IPv6 链路本地
+    ])
+    def test_validate_rejects_non_public_addresses(self, addr):
+        with patch("src.core.webhook_push._resolve_host", return_value=[addr]):
+            ok, reason = wpush.validate_webhook_url("https://hook.example/push")
+        assert ok is False
+        assert "目标地址不允许" in reason
+
+    def test_validate_rejects_if_any_resolved_address_is_private(self):
+        """多 A 记录里混入一个内网地址也必须拒绝(DNS 轮询不能绕过)。"""
+        with patch("src.core.webhook_push._resolve_host",
+                   return_value=["93.184.216.34", "10.1.2.3"]):
+            ok, reason = wpush.validate_webhook_url("https://hook.example/push")
+        assert ok is False
+        assert "10.1.2.3" in reason
+
+    def test_validate_dns_failure(self):
+        with patch("src.core.webhook_push._resolve_host",
+                   side_effect=__import__("socket").gaierror("no such host")):
+            ok, reason = wpush.validate_webhook_url("https://hook.example/push")
+        assert ok is False
+        assert "域名解析失败" in reason
+
+    def test_validate_allows_public_ip_literal(self):
+        # 数字地址不触发 DNS,离线可跑
+        ok, reason = wpush.validate_webhook_url("https://93.184.216.34/hook")
+        assert ok is True
+        assert reason == ""
+
+    def test_send_rejects_before_http(self, monkeypatch):
+        monkeypatch.setenv("WEBHOOK_GENERIC_URL", "https://127.0.0.1:8080/hook")
+        with patch("src.core.webhook_push.httpx.post") as post:
+            r = wpush.GenericWebhookChannel().send("t", "c")
+        post.assert_not_called()
+        assert r.success is False
+        assert r.error.startswith("invalid_url:")
+        assert "目标地址不允许" in r.error
+        assert r.message == "webhook 地址不合法"
+
+    def test_send_error_does_not_echo_token(self, monkeypatch):
+        monkeypatch.setenv("WEBHOOK_GENERIC_URL", "http://hook.example/push?token=TOPSECRET")
+        r = wpush.GenericWebhookChannel().send("t", "c")
+        assert r.success is False
+        assert "TOPSECRET" not in r.error
+
+    def test_send_public_url_posts_without_redirects(self, monkeypatch):
+        monkeypatch.setenv("WEBHOOK_GENERIC_URL", "https://hook.example/push?token=T")
+        captured = {}
+
+        class _Resp:
+            status_code = 200
+
+        def _fake_post(url, json=None, timeout=None, follow_redirects=None):
+            captured.update(url=url, json=json, follow_redirects=follow_redirects)
+            return _Resp()
+
+        with patch("src.core.webhook_push._resolve_host",
+                   return_value=["93.184.216.34"]), \
+             patch("src.core.webhook_push.httpx.post", side_effect=_fake_post):
+            r = wpush.GenericWebhookChannel().send("标题", "正文")
+
+        assert r.success is True
+        assert captured["json"] == {"title": "标题", "content": "正文"}
+        assert captured["follow_redirects"] is False
 
 
 class TestChannelSelection:
