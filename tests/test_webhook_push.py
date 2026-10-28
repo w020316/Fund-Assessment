@@ -102,7 +102,8 @@ class TestServerChanChannel:
         assert "****" in r.error
 
     def test_mask_secret(self):
-        assert wpush.mask_secret("SCT123456789") == "SCT1****"
+        # B-07 口径:定长掩码,不泄露任何原文片段
+        assert wpush.mask_secret("SCT123456789") == "****"
         assert wpush.mask_secret("") == "****"
         assert wpush.mask_secret(None) == "****"
 

@@ -43,11 +43,8 @@ class PushResult:
 
 
 def mask_secret(secret: str | None) -> str:
-    """凭据脱敏(日志安全):仅保留前 4 位,其余以 **** 代替。"""
-    s = secret or ""
-    if len(s) <= 4:
-        return "****"
-    return s[:4] + "****"
+    """凭据脱敏(日志安全):定长 "****",不泄露任何原文片段(B-07 口径)。"""
+    return "****"
 
 
 def _mask_text(text: str | None, *secrets: str) -> str:
