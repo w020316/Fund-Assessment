@@ -5811,7 +5811,9 @@ async function testNotify(type) {
 function loadHealthStatus() {
   const container = document.getElementById('healthPanel');
 
-  api('/api/health').then(data => {
+  // 阶段七:系统健康 + 数据源健康度(借鉴 zvt recorder 状态)一并渲染,
+  // 数据源接口不可达时不追加区块,不伪造"数据源正常"。
+  Promise.all([api('/api/health'), api('/api/data/health')]).then(([data, dh]) => {
     // mock 数据误导修复(2026-07-31):原代码 API 失败时回退到 mock 检查项
     // (API服务 ok / 数据库 ok / 行情数据源 ok / 分析引擎 warn / 磁盘空间 42% 等),
     // 用户误以为系统健康。改为:API 失败时显示失败状态。
@@ -5828,7 +5830,7 @@ function loadHealthStatus() {
       checks.push({name:'分析引擎', status: hasKey ? 'ok' : 'warn', detail: hasKey ? '已就绪' : '未配置'});
     }
 
-    container.innerHTML = checks.map(c => {
+    let html = checks.map(c => {
       const dotClass = c.status === 'ok' ? 'health-ok' : c.status === 'warn' ? 'health-warn' : 'health-err';
       return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
         <span class="health-dot ${dotClass}"></span>
@@ -5836,6 +5838,24 @@ function loadHealthStatus() {
         <span style="color:var(--text-muted);font-size:12px;">${c.detail}</span>
       </div>`;
     }).join('');
+
+    if (dh && Array.isArray(dh.sources) && dh.sources.length) {
+      const dotMap = {ok:'health-ok', degraded:'health-warn', down:'health-err', unknown:'health-warn'};
+      const textMap = {ok:'正常', degraded:'降级', down:'中断', unknown:'未探测'};
+      html += '<div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border);font-size:12px;font-weight:600;color:var(--text-muted);">数据源健康度</div>';
+      html += dh.sources.map(s => {
+        let detail;
+        if (s.status === 'down') detail = `连续失败 ${s.consecutive_failures} 次`;
+        else if (s.status === 'unknown') detail = '本进程尚未抓取';
+        else detail = `${s.last_success_age_s}s 前 · ${s.last_count} 条`;
+        return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);" title="${escapeHtml(s.last_error || '')}">
+          <span class="health-dot ${dotMap[s.status] || 'health-warn'}"></span>
+          <span style="flex:1;font-weight:500;">${escapeHtml(s.label)}</span>
+          <span style="color:var(--text-muted);font-size:12px;">${textMap[s.status] || ''} · ${detail}</span>
+        </div>`;
+      }).join('');
+    }
+    container.innerHTML = html;
   });
 }
 

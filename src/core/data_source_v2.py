@@ -13,6 +13,8 @@ from typing import Any
 import requests
 from loguru import logger
 
+from src.core import data_health
+
 try:
     from mootdx.quotes import Quotes
     _HAS_MOOTDX = True
@@ -411,10 +413,16 @@ def get_index_realtime() -> list[dict]:
                 "amount": _safe_float(parts[37]),
             })
         result = [r for r in result if r.get("code")]
+        if result:
+            data_health.record_success("index_realtime", len(result))
+        else:
+            # 上游 200 但解析不出条目(字段变更/被风控降级页)也算失败,否则健康度会假绿
+            data_health.record_failure("index_realtime", "empty result")
         _cache_set("index_realtime", result, 5)
         return result
     except Exception as e:
         logger.warning(f"get_index_realtime failed: {e}")
+        data_health.record_failure("index_realtime", str(e))
         return []
 
 
@@ -908,6 +916,7 @@ def get_sector_ranking() -> list[dict]:
                 "small_pct": _safe_float(item.get("f87", 0)),
             })
         if result:
+            data_health.record_success("sector_ranking", len(result))
             _cache_set("sector_ranking", result, 30)
             return result
     except Exception as e:
@@ -938,11 +947,16 @@ def get_sector_ranking() -> list[dict]:
                 "small_pct": _safe_float(item.get("f87", 0)),
             })
         if result2:
+            data_health.record_success("sector_ranking", len(result2))
             _cache_set("sector_ranking", result2, 30)
             return result2
     except Exception as e:
         logger.warning(f"get_sector_ranking concept fallback failed: {e}")
     result = _get_sector_ranking_sina()
+    if result:
+        data_health.record_success("sector_ranking", len(result))
+    else:
+        data_health.record_failure("sector_ranking", "all sources empty")
     _cache_set("sector_ranking", result, 30)
     return result
 
@@ -1377,10 +1391,15 @@ def get_global_news() -> list[dict]:
                 "url": _safe_str(item.get("url", item.get("newsUrl", ""))),
             })
         if result:
+            data_health.record_success("global_news", len(result))
             return result
     except Exception as e:
         logger.warning(f"get_global_news failed: {e}")
     result = _get_global_news_sina()
+    if result:
+        data_health.record_success("global_news", len(result))
+    else:
+        data_health.record_failure("global_news", "all sources empty")
     _cache_set("global_news", result, 120)
     return result
 
@@ -1628,9 +1647,14 @@ def get_fund_realtime_tencent(codes: list[str]) -> list[dict]:
                 "change_pct": round(change_pct, 2),
                 "update_time": update_time,
             })
+        if result:
+            data_health.record_success("fund_realtime", len(result))
+        else:
+            data_health.record_failure("fund_realtime", "empty result")
         return result
     except Exception as e:
         logger.warning(f"get_fund_realtime_tencent failed: {e}")
+        data_health.record_failure("fund_realtime", str(e))
         return []
 
 
@@ -1795,6 +1819,7 @@ def get_fund_history_tencent(code: str, period: str = "1y") -> list[dict]:
     try:
         data = _normalize_history(_fetch_fund_history_pingzhong(code), start_date)
         if data:
+            data_health.record_success("fund_history", len(data))
             return data
     except Exception as e:
         logger.warning(f"get_fund_history_tencent {code} pingzhong failed: {e}")
@@ -1802,6 +1827,7 @@ def get_fund_history_tencent(code: str, period: str = "1y") -> list[dict]:
     try:
         data = _normalize_history(_fetch_fund_history_lsjz(code, start_date, end_date), start_date)
         if data:
+            data_health.record_success("fund_history", len(data))
             return data
     except Exception as e:
         logger.warning(f"get_fund_history_tencent {code} lsjz failed: {e}")
@@ -1810,6 +1836,7 @@ def get_fund_history_tencent(code: str, period: str = "1y") -> list[dict]:
         data = get_fund_realtime_tencent([code])
         if data:
             item = data[0]
+            data_health.record_success("fund_history", 1)
             return [{
                 "date": _safe_str(item.get("update_time", ""))[:10],
                 "nav": _safe_float(item.get("nav", 0)),
@@ -1818,6 +1845,7 @@ def get_fund_history_tencent(code: str, period: str = "1y") -> list[dict]:
             }]
     except Exception as e:
         logger.warning(f"get_fund_history_tencent {code} realtime failed: {e}")
+    data_health.record_failure("fund_history", f"{code}: all sources failed")
     return []
 
 

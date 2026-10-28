@@ -198,6 +198,7 @@ app.middleware("http")(trace_middleware)
 from web.routes import agent as agent_route
 from web.routes import config as config_route
 from web.routes import dashboard as dashboard_route
+from web.routes import data_health as data_health_route
 from web.routes import fund as fund_route
 from web.routes import global_market as global_route
 from web.routes import holdings as holdings_route
@@ -222,6 +223,8 @@ app.include_router(global_route.router, prefix="/api/global", tags=["国际市�
 app.include_router(scripts_route.router, prefix="/api/scripts", tags=["话术库"])
 app.include_router(news_route.router, prefix="/api/news", tags=["消息面"])
 app.include_router(holdings_route.router, prefix="/api/holdings", tags=["重仓股板块"])
+# 阶段七:数据源健康度(借鉴 zvt recorder 状态;只读,无需鉴权)
+app.include_router(data_health_route.router, prefix="/api/data", tags=["数据源健康"])
 # 阶段六批次A:组合盯盘/风险/X-Ray/Webhook/账本导入导出(全部挂 require_admin,scan 例外见路由内说明)
 app.include_router(portfolio_route.router, prefix="/api/portfolio", tags=["组合阶段六"])
 
