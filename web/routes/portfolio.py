@@ -315,6 +315,7 @@ async def get_watchboard(force: bool = Query(False, description="跳过缓存强
 # ==================================================================
 
 _RISK_CACHE_TTL = 3600          # 历史净值日级数据,1h 缓存(架构文档 §3.3)
+_RISK_FETCH_CONCURRENCY = 4     # 并发拉净值上限(东财反爬 + Render Free 0.1 核)
 _RISK_EMPTY_METRICS: dict[str, Any] = {
     "total_return": None, "annual_return": None, "max_drawdown": None,
     "annual_vol": None, "sharpe": None, "sortino": None, "calmar": None,
@@ -373,14 +374,26 @@ async def get_portfolio_risk(
         shares_map: dict[str, float] = {}
         degraded = False
 
-        for p in positions:
-            code = p.get("fund_code", "")
-            shares = _safe_float(p.get("shares"))
-            name = p.get("fund_name", "")
-            if not code or shares <= 0:
-                continue
+        held = [
+            (_safe_str(p.get("fund_code")), _safe_float(p.get("shares")), _safe_str(p.get("fund_name")))
+            for p in positions
+        ]
+        held = [(code, shares, name) for code, shares, name in held if code and shares > 0]
+
+        # 并发拉净值:单基金主源 1 请求、备源多页翻页,串行会顶穿前端超时
+        sem = asyncio.Semaphore(_RISK_FETCH_CONCURRENCY)
+
+        async def _load(code: str) -> list[dict]:
+            async with sem:
+                return await asyncio.to_thread(_fetch_fund_nav_series, code, period)
+
+        fetched = await asyncio.gather(*(_load(code) for code, _s, _n in held), return_exceptions=True)
+
+        for (code, shares, name), series in zip(held, fetched):
+            if isinstance(series, BaseException):
+                logger.warning(f"get_portfolio_risk {code} 历史拉取失败: {series}")
+                series = []
             shares_map[code] = shares
-            series = _fetch_fund_nav_series(code, period)
             seq = sorted(
                 (
                     (_safe_str(row.get("date")), _safe_float(row.get("acc_nav"), _safe_float(row.get("nav"))))

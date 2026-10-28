@@ -248,6 +248,32 @@ class TestRiskRoute:
         assert data["funds"][0]["sharpe"] is None
         assert data["portfolio"]["nav_points"] == 0
 
+    def test_risk_fetches_history_concurrently(self, client, tmp_path):
+        """多基金净值应并发拉取:用 Barrier 证明两个请求同时在途。"""
+        import threading
+
+        (tmp_path / "positions.json").write_text(
+            '{"positions":[{"fund_code":"110022","fund_name":"消费","shares":100.0,"cost_nav":2.0},'
+            '{"fund_code":"008984","fund_name":"科技","shares":50.0,"cost_nav":1.5}]}',
+            encoding="utf-8",
+        )
+        barrier = threading.Barrier(2, timeout=3)
+
+        def _fake_history(code, period):
+            barrier.wait()  # 串行执行时第二个请求永远不到,Barrier 超时抛错
+            return [
+                {"date": "2026-10-26", "nav": 1.0, "acc_nav": 1.0},
+                {"date": "2026-10-27", "nav": 1.05, "acc_nav": 1.05},
+                {"date": "2026-10-28", "nav": 1.1, "acc_nav": 1.1},
+            ]
+
+        with patch("src.core.fund_nav_source.get_fund_nav_history", side_effect=_fake_history):
+            resp = client.get("/api/portfolio/risk")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["degraded"] is False
+        assert len(data["funds"]) == 2
+
     def test_risk_invalid_window(self, client):
         resp = client.get("/api/portfolio/risk", params={"window": "10y"})
         assert resp.status_code == 200
