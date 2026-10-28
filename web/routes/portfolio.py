@@ -381,18 +381,27 @@ async def get_portfolio_risk(
                 continue
             shares_map[code] = shares
             series = _fetch_fund_nav_series(code, period)
-            if series:
-                seq = [(_safe_str(row.get("date")), _safe_float(row.get("acc_nav"), _safe_float(row.get("nav")))) for row in series]
-                seq = [(d, v) for d, v in seq if d and v > 0]
+            seq = sorted(
+                (
+                    (_safe_str(row.get("date")), _safe_float(row.get("acc_nav"), _safe_float(row.get("nav"))))
+                    for row in series
+                ),
+                key=lambda item: item[0],
+            )
+            seq = [(d, v) for d, v in seq if d and v > 0]
+            fund_degraded = len(seq) < 2  # 单点序列无法计算收益/波动,显式降级
+            if fund_degraded:
+                metrics = dict(_RISK_EMPTY_METRICS)
+                metrics["nav_points"] = len(seq)
+                degraded = True
+            else:
                 series_map[code] = seq
                 metrics = prisk.compute_risk_metrics([v for _, v in seq])
-            else:
-                metrics = dict(_RISK_EMPTY_METRICS)
-                degraded = True
             funds_out.append({
                 "fund_code": code,
                 "fund_name": name,
                 "window": window,
+                "degraded": fund_degraded,
                 **metrics,
             })
 

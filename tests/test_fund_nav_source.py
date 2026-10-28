@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import datetime as dt
 from unittest.mock import patch
 
 import pandas as pd
@@ -205,6 +206,40 @@ class TestNavHistory:
         with patch("src.core.data_source_v2.get_fund_history_tencent", return_value=main):
             out = fns.get_fund_nav_history("110022", "3m")
         assert out == main
+
+    def test_main_source_sorted_ascending(self, monkeypatch):
+        """主源返回顺序不可信 → 统一升序(风险计算依赖时间方向)。"""
+        main = [
+            {"date": "2026-10-23", "nav": 2.0, "acc_nav": 3.0, "change_pct": 1.0},
+            {"date": "2026-10-22", "nav": 1.9, "acc_nav": 2.9, "change_pct": -1.0},
+        ]
+        with patch("src.core.data_source_v2.get_fund_history_tencent", return_value=main):
+            out = fns.get_fund_nav_history("110022", "3m")
+        assert [r["date"] for r in out] == ["2026-10-22", "2026-10-23"]
+
+    def test_fallback_filters_period_window(self, monkeypatch):
+        """akshare 备源返回全量历史 → 本地裁剪到 period 窗口内。"""
+        today = dt.date.today()
+        old = (today - dt.timedelta(days=400)).isoformat()
+        recent = (today - dt.timedelta(days=30)).isoformat()
+        latest = (today - dt.timedelta(days=29)).isoformat()
+        df = pd.DataFrame([
+            {"净值日期": old, "累计净值": 1.0},
+            {"净值日期": latest, "累计净值": 1.111},
+            {"净值日期": recent, "累计净值": 1.1},
+        ])
+
+        class _FakeAk:
+            @staticmethod
+            def fund_open_fund_info_em(symbol, indicator):
+                assert indicator == "累计净值"
+                return df
+
+        with patch("src.core.data_source_v2.get_fund_history_tencent", return_value=[]):
+            monkeypatch.setattr(fns, "_import_akshare", lambda: _FakeAk)
+            out = fns.get_fund_nav_history("110022", "3m")
+        assert [r["date"] for r in out] == [recent, latest]
+        assert out[1]["change_pct"] == pytest.approx(1.0, abs=0.01)
 
     def test_fallback_to_akshare(self, monkeypatch):
         """主源空 → 备源 akshare 累计净值,升序输出并推导涨跌。"""

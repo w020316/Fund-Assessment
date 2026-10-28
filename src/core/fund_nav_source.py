@@ -242,12 +242,33 @@ def fit_estimate_from_holdings(
 
 # ===== 历史净值(风险指标数据源) =====
 
+_HISTORY_PERIOD_DAYS: dict[str, int] = {
+    "1m": 30, "3m": 90, "6m": 180, "1y": 365, "3y": 1095, "all": 0,
+}
+
+
+def _period_start(period: str) -> str:
+    """period → 窗口起始日(YYYY-MM-DD);all 返回空串表示不限。"""
+    days = _HISTORY_PERIOD_DAYS.get((period or "1y").strip().lower(), 365)
+    if days <= 0:
+        return ""
+    return (_dt.date.today() - _dt.timedelta(days=days)).isoformat()
+
+
+def _sorted_rows(rows: list[dict]) -> list[dict]:
+    """统一按日期升序(上游分页/备源返回顺序不可信,风险计算依赖时间方向)。"""
+    return sorted(
+        (r for r in rows if _safe_str(r.get("date"))),
+        key=lambda r: _safe_str(r.get("date")),
+    )
+
 
 def get_fund_nav_history(code: str, period: str = "1y") -> list[dict]:
-    """获取基金历史净值(主源东财/腾讯,备源 akshare 累计净值)。
+    """获取基金历史净值(主源东财,备源 akshare 累计净值)。
 
     Returns:
-        按日期升序的 [{"date", "nav", "acc_nav", "change_pct"}];无数据返回 []。
+        按日期**升序**、限定在 period 窗口内的 [{"date", "nav", "acc_nav", "change_pct"}];
+        无数据返回 [](调用方需将样本 <2 点标记为降级,不编数据)。
 
     测试注意:缓存实例可通过 monkeypatch ``fund_nav_source._nav_history_cache`` 指向 tmp。
     """
@@ -259,11 +280,11 @@ def get_fund_nav_history(code: str, period: str = "1y") -> list[dict]:
     if cached is not None:
         return list(cached)
 
-    # 主源: 现有东财历史净值(失败时内部已降级到腾讯单点)
+    # 主源: 东财历史净值(内部已按窗口过滤并升序;失败时降级到腾讯单点)
     from src.core.data_source_v2 import get_fund_history_tencent
 
     try:
-        data = get_fund_history_tencent(code, period)
+        data = _sorted_rows(get_fund_history_tencent(code, period))
     except Exception as e:
         logger.warning(f"get_fund_nav_history {code} 主源失败: {e}")
         data = []
@@ -271,7 +292,7 @@ def get_fund_nav_history(code: str, period: str = "1y") -> list[dict]:
         _nav_history_cache.set(cache_key, data, ttl=NAV_HISTORY_CACHE_TTL)
         return list(data)
 
-    # 备源: akshare 累计净值(复权口径)
+    # 备源: akshare 累计净值(复权口径,返回全量历史,需本地按窗口裁剪)
     try:
         ak = _import_akshare()
         df = ak.fund_open_fund_info_em(symbol=code, indicator="累计净值")
@@ -285,13 +306,20 @@ def get_fund_nav_history(code: str, period: str = "1y") -> list[dict]:
     try:
         if df is None or df.empty:
             return []
-        result: list[dict] = []
-        prev_acc: float | None = None
+        start = _period_start(period)
+        points: list[tuple[str, float]] = []
         for _, row in df.iterrows():
             date_str = _safe_str(row.get("净值日期"))[:10]
             acc = _safe_float(row.get("累计净值"))
             if not date_str or acc <= 0:
                 continue
+            if start and date_str < start:
+                continue
+            points.append((date_str, acc))
+        points.sort(key=lambda x: x[0])
+        result: list[dict] = []
+        prev_acc: float | None = None
+        for date_str, acc in points:
             change_pct = 0.0
             if prev_acc is not None and prev_acc > 0:
                 change_pct = round((acc - prev_acc) / prev_acc * 100, 2)

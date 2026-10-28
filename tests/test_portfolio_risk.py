@@ -207,7 +207,25 @@ class TestRiskRoute:
         assert len(data["funds"]) == 2
         for f in data["funds"]:
             assert f["nav_points"] == 30
+            assert f["degraded"] is False
             assert f["max_drawdown"] is not None
+
+    def test_risk_single_point_degrades(self, client, tmp_path):
+        """仅 1 个净值点 → 该基金显式 degraded,nav_points 如实为 1,指标 None。"""
+        (tmp_path / "positions.json").write_text(
+            '{"positions":[{"fund_code":"110022","fund_name":"消费","shares":100.0,"cost_nav":2.0}]}',
+            encoding="utf-8",
+        )
+        one = [{"date": "2026-10-27", "nav": 2.0, "acc_nav": 2.0}]
+        with patch("src.core.fund_nav_source.get_fund_nav_history", return_value=one):
+            resp = client.get("/api/portfolio/risk")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["degraded"] is True
+        assert data["funds"][0]["degraded"] is True
+        assert data["funds"][0]["nav_points"] == 1
+        assert data["funds"][0]["sharpe"] is None
+        assert data["portfolio"]["nav_points"] == 0
 
     def test_risk_history_missing_degrades(self, client, tmp_path):
         """历史缺失 → degraded=True,该基金指标 None,仍 200。"""
