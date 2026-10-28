@@ -41,6 +41,7 @@ verify_full.py
 # 本地 AI 协作工作目录（会话态，不入库）
 .workbuddy/
 .workbuddy-ai/
+.qoder-credits/
 
 # 质量评估产出（阶段报告含未修复缺陷的可利用细节，公开仓库暂不入库；
 # 待对应缺陷全部修复上线后可按需解除忽略）
