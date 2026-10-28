@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import os
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -187,6 +187,24 @@ class TestWatchboard:
         items = {p["fund_code"]: p for p in data["positions"]}
         assert items["110022"]["stale"] is True
         assert items["110022"]["est_pct"] == 2.0  # last-known 值
+
+    def test_all_stale_marks_degraded(self, client, tmp_path):
+        """全仓回放 last-known(stale)必须标 degraded,置信度计入 low(R2-08)。"""
+        _write_positions(tmp_path, _POSITIONS)
+        with patch("src.core.data_source_v2.get_fund_realtime_tencent", return_value=_QUOTES):
+            client.get("/api/portfolio/watchboard")
+        # 主源返回空 + 备源拟合不可用 → 全部走 last-known 回放
+        with patch("src.core.data_source_v2.get_fund_realtime_tencent", return_value=[]), \
+             patch("web.routes.portfolio._fit_fallback_estimate", new=AsyncMock(return_value=None)):
+            resp = client.get("/api/portfolio/watchboard", params={"force": "true"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["degraded"] is True
+        assert "滞后" in data["degraded_reason"]
+        summary = data["summary"]
+        assert summary["stale_count"] == 2
+        assert summary["confidence_counts"] == {"high": 0, "medium": 0, "low": 2}
+        assert all(p["stale"] is True for p in data["positions"])
 
     def test_source_failure_without_last_known(self, client, tmp_path):
         """从未成功过 + 接口异常 → low 置信度空数据,仍 200 不 500。"""

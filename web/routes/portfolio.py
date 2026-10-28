@@ -145,13 +145,19 @@ async def _fit_fallback_estimate(code: str, fund_name: str) -> dict | None:
 def _summarize_watchboard(items: list[dict]) -> dict:
     counts = {"high": 0, "medium": 0, "low": 0}
     total_pnl = 0.0
+    stale_count = 0
     for it in items:
-        counts[it.get("confidence", "low")] = counts.get(it.get("confidence", "low"), 0) + 1
+        # stale = last-known 回放,不代表当前行情 → 置信度一律按 low 计
+        level = "low" if it.get("stale") else it.get("confidence", "low")
+        counts[level] = counts.get(level, 0) + 1
+        if it.get("stale"):
+            stale_count += 1
         total_pnl += _safe_float(it.get("est_day_pnl"))
     return {
         "total_est_day_pnl": round(total_pnl, 2),
         "count": len(items),
         "confidence_counts": counts,
+        "stale_count": stale_count,
     }
 
 
@@ -281,10 +287,19 @@ async def _compute_watchboard() -> dict:
             _last_known[code] = dict(item)  # 更新 last-known(仅内存)
         items.append(item)
 
+    missing_n = sum(1 for it in items if it["source"] == "none")
+    stale_n = sum(1 for it in items if it.get("stale"))
+    reasons = []
+    if missing_n:
+        reasons.append(f"{missing_n} 只基金无任何可用数据")
+    if stale_n:
+        reasons.append(f"{stale_n} 只基金回放 last-known(滞后)")
     return {
         "positions": items,
         "summary": _summarize_watchboard(items),
-        "degraded": any(it["source"] == "none" for it in items),
+        # stale 的 last-known 数据不代表当前行情,必须与 source=none 同等视为降级
+        "degraded": bool(reasons),
+        "degraded_reason": ";".join(reasons),
         "generated_at": _now_iso(),
         "note": "估算≠净值,确认以官方净值为准",
     }
