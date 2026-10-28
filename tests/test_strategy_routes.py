@@ -291,13 +291,13 @@ class TestAuth:
     """鉴权场景(analyze 与 backtest 端点依赖 require_admin)"""
 
     def test_analyze_rejected_in_production_without_token(self, client, monkeypatch):
-        """生产环境未配置 ADMIN_TOKEN 时 analyze 返回 500(fail-closed)"""
+        """生产环境未配置 ADMIN_TOKEN 时 analyze 返回 503(fail-closed)"""
         monkeypatch.setenv("APP_ENV", "production")
         monkeypatch.delenv("ADMIN_TOKEN", raising=False)
         resp = client.post("/api/strategy/analyze", json={
             "stock_code": "600519", "strategy_type": "comprehensive"
         })
-        assert resp.status_code == 500
+        assert resp.status_code == 503
 
     def test_analyze_rejected_with_wrong_token(self, client, monkeypatch):
         """配置 ADMIN_TOKEN 但请求携带错误 token 时返回 401"""
