@@ -39,3 +39,16 @@
   mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 20px), transparent 100%);
   -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 20px), transparent 100%);
 }
+
+/* ===== STAGE5-R2: coarse pointer ===== 触摸设备交互目标 >=48px（设计系统 44px 的移动增强） */
+@media (pointer: coarse) {
+  .btn,
+  .tab,
+  .hud-subtab,
+  .st6-window-tab,
+  .bottom-tab-item,
+  .nav-item {
+    min-height: 48px;
+    min-width: 48px;
+  }
+}
