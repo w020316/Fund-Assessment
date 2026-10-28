@@ -152,6 +152,50 @@ class TestLedgerImport:
         # 拒绝后未产生任何写入
         assert not (tmp_path / "fund_positions.json").exists()
 
+    def test_import_deep_validates_stock_positions(self, client, tmp_path):
+        """stock_positions 元素必须是对象、available_cash 合法 → 否则整包拒绝。"""
+        for bad in (
+            {"positions": ["not-a-dict"]},
+            {"positions": [], "available_cash": -1},
+        ):
+            resp = client.post("/api/portfolio/import", json={
+                "payload": _payload(_VALID_POSITIONS, stock_positions=bad), "dry_run": True})
+            data = resp.json()
+            assert data["success"] is False
+            assert any("stock_positions" in e for e in data["errors"]), bad
+        assert not (tmp_path / "stock_positions.json").exists()
+
+    def test_import_deep_validates_watchlist(self, client, tmp_path):
+        """watchlist 需为 {6位代码: [规则字符串]} → 否则整包拒绝。"""
+        for bad in (
+            {"60051": ["price_surge"]},           # 非 6 位代码
+            {"600519": "price_surge"},            # 规则不是数组
+            {"600519": [1, 2]},                   # 规则非字符串
+            {"600519": ["r"] * 21},               # 规则数超限
+        ):
+            resp = client.post("/api/portfolio/import", json={
+                "payload": _payload(_VALID_POSITIONS, watchlist=bad), "dry_run": True})
+            data = resp.json()
+            assert data["success"] is False
+            assert any("watchlist" in e for e in data["errors"]), bad
+
+    def test_import_item_count_cap(self, client, tmp_path):
+        """持仓条数 > 500 → 整包拒绝(不写入)。"""
+        payload = _payload([_VALID_POSITIONS[0]] * 501)
+        resp = client.post("/api/portfolio/import", json={"payload": payload, "dry_run": True})
+        data = resp.json()
+        assert data["success"] is False
+        assert "超限" in data["errors"][0]
+
+    def test_import_payload_size_cap(self, client, tmp_path):
+        """请求体序列化后 > 2MB → 整包拒绝。"""
+        payload = _payload(_VALID_POSITIONS)
+        payload["sections"]["junk"] = "x" * (2 * 1024 * 1024)
+        resp = client.post("/api/portfolio/import", json={"payload": payload, "dry_run": True})
+        data = resp.json()
+        assert data["success"] is False
+        assert "过大" in data["errors"][0]
+
     def test_import_dry_run_no_write(self, client, tmp_path):
         """dry-run:校验 + diff 预览,不落盘。"""
         _write_fund_positions(tmp_path, [_VALID_POSITIONS[0]])  # 现网只有 110022

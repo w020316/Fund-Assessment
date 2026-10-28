@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as _dt
+import json
 import os
 import re
 import secrets
@@ -23,7 +24,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi import status as _status
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from src.core import data_source_v2 as ds2
 from src.core import fund_nav_source as fns
@@ -892,6 +893,11 @@ async def webhook_scan(req: ScanRequest | None = None):
 
 LEDGER_SCHEMA_VERSION: int = 1
 
+#: 导入防护:单分区条数上限、请求体序列化大小上限、watchlist 单只规则数上限
+LEDGER_MAX_ITEMS: int = 500
+LEDGER_MAX_BYTES: int = 2 * 1024 * 1024
+WATCHLIST_MAX_RULES: int = 20
+
 #: 凭据字段名黑名单(导出时一律置空,导入时一律拒绝非空值)
 _CREDENTIAL_KEY_RE = re.compile(r"(sendkey|secret|token|password|apikey|api_key|webhook_url)", re.IGNORECASE)
 
@@ -941,6 +947,8 @@ def _validate_fund_positions(section: Any) -> tuple[list[str], list[dict]]:
     positions: list[dict] = []
     if not isinstance(section, dict) or not isinstance(section.get("positions"), list):
         return ["fund_positions 需为 {\"positions\": [...]} 结构"], []
+    if len(section["positions"]) > LEDGER_MAX_ITEMS:
+        return [f"fund_positions 条数超限(最多 {LEDGER_MAX_ITEMS} 条)"], []
     seen: set[str] = set()
     for i, p in enumerate(section["positions"]):
         if not isinstance(p, dict):
@@ -973,6 +981,45 @@ def _validate_fund_positions(section: Any) -> tuple[list[str], list[dict]]:
     return errors, positions
 
 
+def _validate_stock_positions(section: Any) -> tuple[list[str], dict[str, Any] | None]:
+    """stock_positions 深度校验:复用保存路由的 Pydantic 模型(条数/金额/元素类型)。"""
+    if not isinstance(section, dict):
+        return ["stock_positions 需为对象(含 positions 数组)"], None
+    try:
+        model = config_route.SavePositionsRequest.model_validate({
+            "positions": section.get("positions", []),
+            "available_cash": section.get("available_cash", 800000.0),
+        })
+    except ValidationError as e:
+        return [f"stock_positions: {'.'.join(str(x) for x in err['loc'])}: {err['msg']}"
+                for err in e.errors()[:5]], None
+    return [], {"positions": model.positions, "available_cash": model.available_cash}
+
+
+def _validate_watchlist(section: Any) -> tuple[list[str], dict[str, list[str]] | None]:
+    """watchlist 深度校验:6 位代码为键、规则为字符串数组,限制条数与规则数。"""
+    if not isinstance(section, dict):
+        return ["watchlist 需为对象"], None
+    if len(section) > LEDGER_MAX_ITEMS:
+        return [f"watchlist 条数超限(最多 {LEDGER_MAX_ITEMS} 条)"], None
+    errors: list[str] = []
+    cleaned: dict[str, list[str]] = {}
+    for code, rules in section.items():
+        if not isinstance(code, str) or not re.fullmatch(r"\d{6}", code):
+            errors.append(f"watchlist 代码非法: {code!r}")
+            continue
+        if not isinstance(rules, list) or not all(isinstance(r, str) for r in rules):
+            errors.append(f"watchlist[{code}] 规则需为字符串数组")
+            continue
+        if len(rules) > WATCHLIST_MAX_RULES:
+            errors.append(f"watchlist[{code}] 规则数超限(最多 {WATCHLIST_MAX_RULES})")
+            continue
+        cleaned[code] = rules
+    if errors:
+        return errors[:10], None
+    return [], cleaned
+
+
 def _validate_ledger_payload(payload: Any) -> tuple[list[str], dict[str, Any]]:
     """schema 校验:版本、分区类型、凭据字段拒绝非空。返回 (errors, normalized)。"""
     errors: list[str] = []
@@ -993,17 +1040,17 @@ def _validate_ledger_payload(payload: Any) -> tuple[list[str], dict[str, Any]]:
     # stock_positions(可选)
     stock = sections.get("stock_positions")
     if stock is not None:
-        if isinstance(stock, dict) and isinstance(stock.get("positions", []), list):
-            normalized["stock_positions"] = stock
-        else:
-            errors.append("stock_positions 需为对象(含 positions 数组)")
+        s_errs, s_clean = _validate_stock_positions(stock)
+        errors += s_errs
+        if s_clean is not None:
+            normalized["stock_positions"] = s_clean
     # watchlist(可选)
     watchlist = sections.get("watchlist")
     if watchlist is not None:
-        if isinstance(watchlist, dict):
-            normalized["watchlist"] = watchlist
-        else:
-            errors.append("watchlist 需为对象")
+        w_errs, w_clean = _validate_watchlist(watchlist)
+        errors += w_errs
+        if w_clean is not None:
+            normalized["watchlist"] = w_clean
 
     # portfolio_config(可选,webhook/groups 白名单校验,凭据字段拒绝非空)
     pc = sections.get("portfolio_config")
@@ -1127,6 +1174,16 @@ async def import_ledger(req: LedgerImportRequest):
     执行前自动备份现有文件到 data/backup/import_backup_<ts>/。
     校验失败整包拒绝(不部分写入)。
     """
+    try:
+        payload_bytes = len(json.dumps(req.payload, ensure_ascii=False).encode("utf-8"))
+    except (TypeError, ValueError, RecursionError):
+        return {"success": False, "errors": ["payload 无法序列化(结构非法/嵌套过深)"],
+                "applied": None, "message": "校验失败,整包拒绝(未做任何写入)"}
+    if payload_bytes > LEDGER_MAX_BYTES:
+        return {"success": False,
+                "errors": [f"payload 过大({payload_bytes} 字节,上限 {LEDGER_MAX_BYTES} 字节)"],
+                "applied": None, "message": "校验失败,整包拒绝(未做任何写入)"}
+
     errors, normalized = _validate_ledger_payload(req.payload)
     if errors:
         return {"success": False, "errors": errors, "applied": None,
