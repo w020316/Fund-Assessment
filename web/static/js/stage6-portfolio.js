@@ -190,7 +190,7 @@
               '<input type="checkbox" id="st6PushEnabled" ' + (cfg.enabled ? 'checked' : '') + ' style="width:18px;height:18px;"> 启用推送' +
             '</label>' +
             '<label style="display:flex;align-items:center;gap:6px;font-size:13px;">阈值 ±' +
-              '<input class="input" type="number" id="st6PushThreshold" value="' + esc(cfg.thresholds && cfg.thresholds.est_pct_abs != null ? cfg.thresholds.est_pct_abs : 2.0) + '" step="0.5" style="width:80px;">%' +
+              '<input class="input" type="number" id="st6PushThreshold" min="0.1" max="100" step="0.5" value="' + esc(cfg.thresholds && cfg.thresholds.est_pct_abs != null ? cfg.thresholds.est_pct_abs : 2.0) + '" style="width:80px;">%' +
             '</label>' +
             '<span style="font-size:12px;color:var(--text-muted,#8b92a8);">渠道: ' + esc(cfg.channel) +
               (cfg.sendkey_configured ? ' · 凭据已配置' : ' · <span style="color:#f59e0b;">凭据未配置(env PUSH_SERVERCHAN_SENDKEY)</span>') + '</span>' +
@@ -206,14 +206,26 @@
     return pushSettingsState.promise;
   }
 
+  /** 阈值校验:有限数字且 0 < v <= 100,非法返回 null(后端同规则返回 422) */
+  function parseThreshold(raw) {
+    const v = Number(String(raw == null ? '' : raw).trim());
+    if (!isFinite(v) || v <= 0 || v > 100) return null;
+    return v;
+  }
+
   function savePushConfig() {
     const enabled = !!(document.getElementById('st6PushEnabled') || {}).checked;
     const thRaw = (document.getElementById('st6PushThreshold') || {}).value;
+    const threshold = parseThreshold(thRaw);
+    if (threshold == null) {
+      if (typeof showToast === 'function') showToast('阈值需为大于 0 且不超过 100 的数字', 'error');
+      return;
+    }
     callApi('/api/portfolio/webhook/config', {
       method: 'PUT',
       body: JSON.stringify({
         enabled: enabled,
-        thresholds: { est_pct_abs: Number(thRaw) || 2.0 },
+        thresholds: { est_pct_abs: threshold },
       }),
     }).then(function (data) {
       if (data && data.success) { if (typeof showToast === 'function') showToast('推送配置已保存', 'success'); }
