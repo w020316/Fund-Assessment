@@ -96,6 +96,39 @@
   font-size: 11px; color: var(--text-muted, #8b92a8); margin-top: 6px;
 }
 
+/* ===== STAGE7: rebalance ===== 再平衡建议单(目标权重 + 偏离阈值) */
+
+.st6-rb-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.st6-rb-label { font-size: 12px; color: var(--text-muted, #8b92a8); }
+.st6-rb-input {
+  width: 84px; min-height: 44px; padding: 6px 10px; border-radius: 6px;
+  border: 1px solid var(--border, rgba(255,255,255,0.12));
+  background: rgba(255,255,255,0.03); color: var(--text-primary, #e8ecf5);
+  font-size: 13px; font-variant-numeric: tabular-nums;
+}
+.st6-rb-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 8px 16px; margin-top: 8px;
+}
+.st6-rb-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; }
+.st6-rb-name {
+  font-size: 12px; color: var(--text-secondary, #c3c9d9);
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.st6-rb-suggests { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.st6-rb-suggest {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 10px; border-radius: 8px; font-size: 12px;
+  background: var(--bg-card, rgba(255,255,255,0.04));
+  border: 1px solid var(--border, rgba(255,255,255,0.08));
+}
+.st6-rb-action { font-weight: 700; min-width: 32px; }
+.st6-rb-suggest-name { font-weight: 600; }
+@media (max-width: 768px) {
+  .st6-rb-grid { grid-template-columns: 1fr; }
+  .st6-rb-controls { width: 100%; }
+}
+
 /* ===== STAGE6: xray-report ===== 重叠矩阵与暴露表 */
 
 .st6-xray-warn {
@@ -276,6 +309,7 @@
   .tab,
   .hud-subtab,
   .st6-window-tab,
+  .st6-rb-input,
   .bottom-tab-item,
   .nav-item {
     min-height: 48px;

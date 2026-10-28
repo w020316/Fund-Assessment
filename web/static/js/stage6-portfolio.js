@@ -264,6 +264,7 @@
     }
     // 归因卡在风险页内,首次进入即加载(与风险窗口独立)
     if (!attrState.loaded) loadAttribution(attrState.window);
+    loadRebalanceTab();
   }
 
   function loadRisk(window) {
@@ -1038,6 +1039,167 @@
     body.innerHTML = html;
   }
 
+  // ===== STAGE7: rebalance ===== 再平衡建议单(目标权重 + 偏离阈值)
+
+  const RB_MAX_WEIGHT_TOTAL = 100;
+  const rbState = { loaded: false };
+
+  function loadRebalanceTab() {
+    const box = document.getElementById('st6RbTargets');
+    if (!box || rbState.loaded) return;
+    renderStatus(box, 'loading');
+    Promise.all([
+      callApi('/api/portfolio/rebalance/config'),
+      callApi('/api/fund/positions'),
+    ]).then(function (res) {
+      rbState.loaded = true;
+      renderRebalanceEditor(res[0] || {}, res[1] || {});
+    }).catch(function (e) {
+      renderStatus(box, 'error', '再平衡配置加载失败', String(e && e.message || e));
+    });
+  }
+
+  function renderRebalanceEditor(cfg, payload) {
+    const box = document.getElementById('st6RbTargets');
+    if (!box) return;
+    const threshold = document.getElementById('st6RbThreshold');
+    if (threshold && cfg.drift_threshold_pct != null) threshold.value = cfg.drift_threshold_pct;
+    const positions = Array.isArray(payload) ? payload : (payload.positions || []);
+    const targets = cfg.targets || {};
+    const codes = [];
+    positions.forEach(function (p) {
+      if (p.fund_code && codes.indexOf(p.fund_code) < 0) codes.push(p.fund_code);
+    });
+    Object.keys(targets).forEach(function (c) {
+      if (codes.indexOf(c) < 0) codes.push(c);
+    });
+    if (!codes.length) {
+      box.innerHTML = '<div class="st6-note">暂无持仓;先到「持仓」添加基金后再配置目标权重。</div>';
+      return;
+    }
+    box.innerHTML = '<div class="st6-rb-grid">' + codes.map(function (code) {
+      const p = positions.filter(function (x) { return x.fund_code === code; })[0] || {};
+      const val = targets[code] != null ? targets[code] : '';
+      return '<label class="st6-rb-row" data-code="' + esc(code) + '">' +
+        '<span class="st6-rb-name">' + esc(code) + ' ' + esc(p.fund_name || '') + '</span>' +
+        '<input type="number" class="st6-rb-input st6-rb-weight" min="0" max="100" step="0.1" ' +
+        'value="' + esc(val) + '" inputmode="decimal" aria-label="' + esc(code) + ' 目标权重(百分比)">' +
+        '</label>';
+    }).join('') + '</div>' +
+      '<div class="st6-note">权重合计需 ≤100%(其余视为现金);留空的持仓不参与本次再平衡。</div>';
+  }
+
+  function collectRebalanceTargets() {
+    const targets = {};
+    let total = 0;
+    const rows = document.querySelectorAll('#st6RbTargets .st6-rb-row');
+    for (let i = 0; i < rows.length; i++) {
+      const code = rows[i].getAttribute('data-code');
+      const input = rows[i].querySelector('.st6-rb-weight');
+      const raw = input ? String(input.value || '').trim() : '';
+      if (!raw) continue;
+      const w = Number(raw);
+      if (!isFinite(w) || w <= 0 || w > 100) {
+        return { error: code + ' 的目标权重需在 0~100 之间(留空表示不参与)' };
+      }
+      targets[code] = w;
+      total += w;
+    }
+    if (total > RB_MAX_WEIGHT_TOTAL + 0.001) {
+      return { error: '目标权重合计 ' + total.toFixed(1) + '% 超过 100%' };
+    }
+    return { targets: targets };
+  }
+
+  function saveRebalanceConfig() {
+    const picked = collectRebalanceTargets();
+    if (picked.error) { showToast(picked.error, 'error'); return; }
+    const thresholdEl = document.getElementById('st6RbThreshold');
+    const threshold = Number(thresholdEl ? thresholdEl.value : 5);
+    if (!isFinite(threshold) || threshold <= 0 || threshold > 100) {
+      showToast('偏离阈值需在 0~100 之间', 'error');
+      return;
+    }
+    callApi('/api/portfolio/rebalance/config', {
+      method: 'PUT',
+      body: JSON.stringify({ drift_threshold_pct: threshold, targets: picked.targets }),
+    }).then(function (data) {
+      if (!data || data.success === false) {
+        showToast((data && data.errors && data.errors[0]) || '再平衡目标保存失败', 'error');
+        return;
+      }
+      showToast('再平衡目标已保存', 'success');
+      loadRebalancePreview();
+    });
+  }
+
+  function loadRebalancePreview() {
+    const body = document.getElementById('st6RbBody');
+    if (!body) return;
+    renderStatus(body, 'loading');
+    callApi('/api/portfolio/rebalance/preview').then(function (data) {
+      if (!data) throw new Error('接口无响应');
+      renderRebalancePreview(data);
+    }).catch(function (e) {
+      renderStatus(body, 'error', '再平衡建议生成失败', String(e && e.message || e));
+    });
+  }
+
+  function renderRebalancePreview(data) {
+    const body = document.getElementById('st6RbBody');
+    if (!body) return;
+    const targets = data.targets || {};
+    if (!Object.keys(targets).length) {
+      renderStatus(body, 'empty', '未配置目标权重', '在上方为目标基金填写权重并保存');
+      return;
+    }
+    const positions = data.positions || [];
+    const suggestions = data.suggestions || [];
+    let html = '';
+    if (positions.length) {
+      html += '<div class="table-wrap"><table><thead><tr>' +
+        '<th>代码</th><th>名称</th><th>份额</th><th>净值</th><th>市值</th>' +
+        '<th>当前%</th><th>目标%</th><th>偏离pp</th></tr></thead><tbody>' +
+        positions.map(function (p) {
+          return '<tr>' +
+            '<td>' + esc(p.code) + '</td>' +
+            '<td>' + esc(p.name || '') + '</td>' +
+            '<td>' + fmtMoney(p.shares) + '</td>' +
+            '<td>' + (p.nav != null ? Number(p.nav).toFixed(4) : '—') + '</td>' +
+            '<td>' + fmtMoney(p.value) + '</td>' +
+            '<td>' + fmtPct(p.current_pct) + '</td>' +
+            '<td>' + fmtPct(p.target_pct) + '</td>' +
+            '<td class="' + pctCls(p.drift_pct) + '">' +
+            (p.drift_pct > 0 ? '+' : '') + fmtPct(p.drift_pct) + '</td>' +
+            '</tr>';
+        }).join('') + '</tbody></table></div>' +
+        '<div class="st6-note">参与口径市值 ' + fmtMoney(data.managed_value) +
+        ' 元 · 建议买入 ' + fmtMoney(data.total_buy) + ' 元 · 建议卖出 ' +
+        fmtMoney(data.total_sell) + ' 元</div>';
+    }
+    if (suggestions.length) {
+      html += '<div class="st6-rb-suggests">' + suggestions.map(function (s) {
+        const isBuy = s.action === 'buy';
+        return '<div class="st6-rb-suggest">' +
+          '<span class="st6-rb-action ' + (isBuy ? 'st6-up' : 'st6-down') + '">' +
+          (isBuy ? '买入' : '卖出') + '</span>' +
+          '<span class="st6-rb-suggest-name">' + esc(s.code) + ' ' + esc(s.name || '') + '</span>' +
+          '<span>' + (isBuy ? '买入 ' : '卖出 ') + fmtMoney(s.shares) + ' 份 · ' +
+          fmtMoney(s.amount) + ' 元</span>' +
+          '<span class="st6-note" style="margin:0;">' + esc(s.reason) + '</span>' +
+          '</div>';
+      }).join('') + '</div>';
+    } else {
+      html += '<div class="st6-note">当前偏离均在阈值 ' + fmtPct(data.threshold_pct) +
+        ' 以内,无需调仓。</div>';
+    }
+    if (data.degraded) {
+      html += '<div class="st6-note" style="color:#f59e0b;">部分基金缺少最新净值,已从参与口径剔除</div>';
+    }
+    html += '<div class="st6-note">' + esc(data.note || '') + '</div>';
+    body.innerHTML = html;
+  }
+
   // ===== STAGE6: expose ===== 全局暴露(inline onclick 绑定)
 
   window.St6Portfolio = {
@@ -1045,6 +1207,8 @@
     loadRisk: loadRisk,
     loadXray: loadXray,
     loadAttribution: loadAttribution,
+    saveRebalanceConfig: saveRebalanceConfig,
+    loadRebalancePreview: loadRebalancePreview,
     savePushConfig: savePushConfig,
     testPush: testPush,
     downloadExport: downloadExport,

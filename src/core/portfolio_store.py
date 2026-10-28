@@ -253,6 +253,101 @@ def group_for_fund(config: dict[str, Any], fund_code: str) -> str:
     return gid if gid in valid_ids else DEFAULT_GROUP_ID
 
 
+# ===== 再平衡配置(阶段七,借鉴 PyPortfolioOpt 权重→份额 / bt 阈值再平衡) =====
+
+REBALANCE_CONFIG_FILE = PORTFOLIO_DIR / "rebalance_config.json"
+MAX_REBALANCE_TARGETS = 50
+
+DEFAULT_REBALANCE_CONFIG: dict[str, Any] = {
+    "schema_version": 1,
+    "drift_threshold_pct": 5.0,  # 偏离超过该百分点才给建议
+    "targets": {},               # 基金代码 → 目标权重(%)
+}
+
+_rebalance_lock = threading.Lock()
+
+
+def _default_rebalance() -> dict[str, Any]:
+    return json.loads(json.dumps(DEFAULT_REBALANCE_CONFIG))
+
+
+def normalize_rebalance_config(data: Any) -> tuple[list[str], dict[str, Any]]:
+    """校验并归一化再平衡配置,返回 (errors, cleaned)。
+
+    铁律:
+    - 目标权重与偏离阈值复用 ``valid_threshold`` 口径:(0, 100] 的有限数值
+    - 基金代码仅接受 6 位数字;目标权重合计不得超过 100%(允许留现金)
+    - 校验失败返回错误列表 + 默认配置,由调用方整包拒绝
+    """
+    errors: list[str] = []
+    cleaned = _default_rebalance()
+    if not isinstance(data, dict):
+        return ["rebalance 配置需为 JSON 对象"], cleaned
+
+    threshold = valid_threshold(data.get("drift_threshold_pct", cleaned["drift_threshold_pct"]))
+    if threshold is None:
+        errors.append("drift_threshold_pct 必须在 (0, 100] 内")
+    else:
+        cleaned["drift_threshold_pct"] = round(threshold, 2)
+
+    raw_targets = data.get("targets")
+    if raw_targets is None:
+        raw_targets = {}
+    if not isinstance(raw_targets, dict):
+        return errors + ["targets 需为对象"], _default_rebalance()
+    if len(raw_targets) > MAX_REBALANCE_TARGETS:
+        return errors + [f"目标基金数量超限(最多 {MAX_REBALANCE_TARGETS} 只)"], _default_rebalance()
+
+    total = 0.0
+    for code, weight in raw_targets.items():
+        code_s = str(code).strip()
+        if not _FUND_CODE_RE.fullmatch(code_s):
+            errors.append(f"targets 基金代码非法: {code_s!r}")
+            continue
+        fw = valid_threshold(weight)
+        if fw is None:
+            errors.append(f"targets[{code_s}] 目标权重必须在 (0, 100] 内")
+            continue
+        cleaned["targets"][code_s] = round(fw, 2)
+        total += fw
+    if total > 100.0001:
+        errors.append(f"目标权重合计 {total:.2f}% 超过 100%")
+
+    if errors:
+        return errors, _default_rebalance()
+    return [], cleaned
+
+
+def load_rebalance_config(path: Path | None = None) -> dict[str, Any]:
+    """读取再平衡配置(缺失/损坏/非法 → 默认空目标,绝不抛异常)。"""
+    file = path or REBALANCE_CONFIG_FILE
+    data = safe_read_json(file, default=None)
+    if data is None:
+        return _default_rebalance()
+    errors, cleaned = normalize_rebalance_config(data)
+    if errors:
+        logger.warning(f"load_rebalance_config 配置非法,回退默认值: {errors[:3]}")
+        return _default_rebalance()
+    return cleaned
+
+
+def save_rebalance_config(config: dict[str, Any], path: Path | None = None) -> bool:
+    """保存再平衡配置(白名单字段落盘;非法配置拒绝写入)。"""
+    file = path or REBALANCE_CONFIG_FILE
+    errors, cleaned = normalize_rebalance_config(config)
+    if errors:
+        logger.warning(f"save_rebalance_config 校验失败: {errors[:3]}")
+        return False
+    try:
+        with _rebalance_lock:
+            _ensure_parent(file)
+            atomic_write_json(file, cleaned)
+        return True
+    except Exception as e:
+        logger.error(f"save_rebalance_config failed: {e}")
+        return False
+
+
 # ===== 文件级节流(幂等保障) =====
 
 

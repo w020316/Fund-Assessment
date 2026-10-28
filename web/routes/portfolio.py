@@ -32,6 +32,7 @@ from src.core import portfolio_store as pstore
 from src.analysis import portfolio_attribution as pattr
 from src.analysis import portfolio_risk as prisk
 from src.analysis import portfolio_xray as pxray
+from src.analysis import rebalance as reb
 from src.core import webhook_push as wpush
 from src.core.cache import DataCache
 from src.utils.auth import require_admin
@@ -593,6 +594,85 @@ async def put_groups(req: GroupsUpdateRequest):
         **_groups_response(cleaned),
         "message": "分组配置已保存",
     }
+
+
+# ==================================================================
+# STAGE7: 再平衡建议单(借鉴 PyPortfolioOpt 权重→份额 / bt 阈值再平衡)
+# ==================================================================
+
+
+class RebalanceConfigRequest(BaseModel):
+    """再平衡目标配置(白名单字段;目标合计 ≤100%,允许留现金)。"""
+
+    drift_threshold_pct: float = Field(5.0, description="偏离阈值(百分点),取值 (0,100]")
+    targets: dict[str, float] = Field(default_factory=dict, description="基金代码 → 目标权重(%)")
+
+
+def _rebalance_config_response(config: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "success": True,
+        "schema_version": config.get("schema_version", 1),
+        "drift_threshold_pct": config.get("drift_threshold_pct", 5.0),
+        "targets": config.get("targets", {}),
+        "generated_at": _now_iso(),
+    }
+
+
+@router.get("/rebalance/config", dependencies=[Depends(require_admin)])
+async def get_rebalance_config():
+    """读取再平衡配置;未配置 → 空目标 + 默认阈值 5%。"""
+    return _rebalance_config_response(pstore.load_rebalance_config())
+
+
+@router.put("/rebalance/config", dependencies=[Depends(require_admin)])
+async def put_rebalance_config(req: RebalanceConfigRequest):
+    """全量保存再平衡配置(校验失败整包拒绝,不部分写入)。"""
+    errors, cleaned = pstore.normalize_rebalance_config({
+        "schema_version": 1,
+        "drift_threshold_pct": req.drift_threshold_pct,
+        "targets": req.targets,
+    })
+    if errors:
+        return {"success": False, "errors": errors, "message": "再平衡配置校验失败,未保存"}
+    if not pstore.save_rebalance_config(cleaned):
+        return {"success": False, "errors": ["再平衡配置写入失败,请查看日志"],
+                "message": "保存失败"}
+    return {**_rebalance_config_response(cleaned), "message": "再平衡配置已保存"}
+
+
+@router.get("/rebalance/preview", dependencies=[Depends(require_admin)])
+async def get_rebalance_preview():
+    """按最新净值生成再平衡建议单(只建议,不自动交易)。
+
+    净值取腾讯基金实时接口的官方单位净值;缺净值的基金从参与口径剔除并标注
+    degraded,绝不拿成本价冒充市值。
+    """
+    config = pstore.load_rebalance_config()
+    targets = config.get("targets") or {}
+    positions = fund_route._load_positions()
+    codes = sorted({
+        _safe_str(p.get("fund_code"))
+        for p in positions if p.get("fund_code")
+    } | set(targets))
+
+    navs: dict[str, float] = {}
+    if codes:
+        try:
+            quotes = await asyncio.to_thread(ds2.get_fund_realtime_tencent, codes)
+        except Exception as e:
+            logger.warning(f"rebalance preview quotes failed: {e}")
+            quotes = []
+        for q in quotes or []:
+            code = _safe_str(q.get("code"))
+            nav = _safe_float(q.get("nav"))
+            if code and nav > 0:
+                navs[code] = nav
+
+    result = reb.build_preview(
+        positions, navs, targets, _safe_float(config.get("drift_threshold_pct", 5.0)) or 5.0,
+    )
+    result["targets"] = targets
+    return result
 
 
 # ==================================================================
