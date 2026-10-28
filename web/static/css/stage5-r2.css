@@ -17,6 +17,23 @@
   .fund-head-actions > .btn { flex: 0 0 auto; }
 }
 
+/* ===== STAGE5-R2: scope ===== 模拟股票账户与真实基金持仓的口径说明 */
+.notice-info {
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  background: rgba(6, 182, 212, 0.08);
+  border: 1px solid rgba(6, 182, 212, 0.25);
+  border-radius: var(--radius);
+}
+.notice-info a {
+  color: var(--accent-cyan);
+  text-decoration: none;
+  font-weight: 600;
+}
+.notice-info a:hover { text-decoration: underline; }
+
 /* ===== STAGE5-R2: ticker fade ===== 内容溢出时右侧渐隐，提示可横向滚动 */
 .index-bar {
   mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 20px), transparent 100%);

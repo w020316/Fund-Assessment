@@ -1426,6 +1426,11 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 
       <!-- ==================== 5. 持仓管理 ==================== -->
       <div class="page" id="page-position">
+        <!-- ===== STAGE5-R2: scope ===== 模拟股票账户与真实基金持仓口径 -->
+        <div class="notice-info mb-16" id="positionScopeNote">
+          当前「持仓管理」为模拟股票账户（初始资金 100 万元），不代表真实资产；真实基金持仓请到
+          <a href="#" onclick="switchPage('fund');return false;">「基金管理」</a> 查看。
+        </div>
         <!-- 账户概览 -->
         <div class="grid-4 mb-16" id="accountCards">
           <div class="card" style="text-align:center;">
