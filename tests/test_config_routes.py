@@ -98,6 +98,32 @@ class TestUpdateSettings:
         assert saved["app"]["name"] == "NewApp"
 
 
+class TestStripMasked:
+    """_strip_masked:只有"整体等于掩码"的值才丢弃(R2-23)"""
+
+    def test_drops_exact_mask_values(self):
+        from web.routes import config as config_route
+        assert config_route._strip_masked({"token": "****", "api_key": "********"}) == {}
+
+    def test_keeps_normal_values_containing_mask_chars(self):
+        """备注/URL 中正常出现 **** 不应被当成"未修改"静默删除。"""
+        from web.routes import config as config_route
+        data = {
+            "note": "口令提示:见 **** 文档",
+            "webhook": "https://x.test/hook?sig=****",
+            "name": "a****b",
+        }
+        assert config_route._strip_masked(data) == data
+
+    def test_nested_structure(self):
+        from web.routes import config as config_route
+        out = config_route._strip_masked({
+            "list": [{"token": "********", "keep": "****abc"}, {"other": 1}],
+            "empty": {},
+        })
+        assert out == {"list": [{"keep": "****abc"}, {"other": 1}], "empty": {}}
+
+
 class TestStrategies:
     """GET/PUT /api/config/strategies"""
 

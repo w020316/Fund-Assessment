@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -52,17 +53,22 @@ def _mask_sensitive(data: Any) -> Any:
     return data
 
 
+def _is_masked_value(val: str) -> bool:
+    """值是否整体为掩码(_mask_value 产物为 "****" 或 "********")。
+
+    不能用 "**** in val":正常备注/URL 也可能含这四个字符,
+    会被误判为"未修改"并静默丢弃。
+    """
+    return bool(re.fullmatch(r"\*{4,}", val))
+
+
 def _strip_masked(data: Any) -> Any:
     if isinstance(data, dict):
         result: dict[str, Any] = {}
         for k, v in data.items():
-            if isinstance(v, str) and MASK_PATTERN in v:
+            if isinstance(v, str) and _is_masked_value(v):
                 continue
-            stripped = _strip_masked(v)
-            if not (isinstance(v, dict) and not stripped):
-                result[k] = stripped
-            else:
-                result[k] = stripped
+            result[k] = _strip_masked(v)
         return result
     if isinstance(data, list):
         return [_strip_masked(item) for item in data]
