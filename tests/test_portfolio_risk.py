@@ -274,12 +274,11 @@ class TestRiskRoute:
         assert data["degraded"] is False
         assert len(data["funds"]) == 2
 
-    def test_risk_invalid_window(self, client):
+    def test_risk_invalid_window_422(self, client):
+        """非法窗口 → 422(REST 契约),不再 200 + error 字段。"""
         resp = client.get("/api/portfolio/risk", params={"window": "10y"})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "error" in data
-        assert data["portfolio"] is None
+        assert resp.status_code == 422
+        assert "非法窗口" in resp.json()["detail"]
 
     def test_risk_compute_exception_still_200(self, client, monkeypatch):
         monkeypatch.setattr(

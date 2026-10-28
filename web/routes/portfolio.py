@@ -354,7 +354,9 @@ async def get_portfolio_risk(
     try:
         period = prisk.resolve_period(window)
     except ValueError as e:
-        return {"error": str(e), "window": window, "portfolio": None, "funds": []}
+        raise HTTPException(
+            status_code=_status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e),
+        ) from e
 
     try:
         positions = fund_route._load_positions()
@@ -486,10 +488,11 @@ async def get_portfolio_attribution(window: str = Query("mtd", max_length=8)):
     """
     window_s = (window or "").strip().lower()
     if window_s not in pattr.WINDOWS:
-        return {
-            **_attribution_empty(window_s, f"非法窗口: {window_s!r},支持 {list(pattr.WINDOWS)}", degraded=True),
-            "error": f"非法窗口: {window_s!r}",
-        }
+        # REST 契约:参数非法是客户端错误,不再 200 + error 字段(前端 api() 会走错误态)
+        raise HTTPException(
+            status_code=_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"非法窗口: {window_s!r},支持 {list(pattr.WINDOWS)}",
+        )
     try:
         positions = fund_route._load_positions()
         period = _ATTRIBUTION_PERIOD[window_s]

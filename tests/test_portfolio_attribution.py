@@ -178,13 +178,11 @@ class TestAttributionRoute:
         monkeypatch.setenv("APP_ENV", "production")
         assert client.get("/api/portfolio/attribution").status_code == 401
 
-    def test_invalid_window_returns_error_not_500(self, client):
+    def test_invalid_window_returns_422(self, client):
+        """非法窗口 → 422(REST 契约),不再 200 + error 字段。"""
         resp = client.get("/api/portfolio/attribution", params={"window": "1w"})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["error"]
-        assert data["funds"] == []
-        assert data["degraded"] is True
+        assert resp.status_code == 422
+        assert "非法窗口" in resp.json()["detail"]
 
     def test_empty_positions(self, client):
         resp = client.get("/api/portfolio/attribution", params={"window": "mtd"})
