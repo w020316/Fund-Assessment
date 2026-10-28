@@ -130,7 +130,7 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_credentials=_cors_allow_credentials,
     allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["Content-Type", "Authorization", "X-Admin-Token", "X-Trace-Id"],
+    allow_headers=["Content-Type", "Authorization", "X-Trace-Id"],
     expose_headers=["X-Trace-Id"],
 )
 

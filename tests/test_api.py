@@ -101,6 +101,17 @@ class TestStaticFiles:
         assert resp.status_code == 200
         assert resp.content == b""
 
+    def test_cors_preflight_rejects_admin_token_header(self, client):
+        """R2-22:CORS 白名单不再放行未被鉴权读取的 X-Admin-Token。"""
+        resp = client.options("/api/health", headers={
+            "Origin": "https://example.com",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "x-admin-token",
+        })
+        assert resp.status_code == 400
+        allowed = (resp.headers.get("access-control-allow-headers") or "").lower()
+        assert "x-admin-token" not in allowed
+
     def test_index_html_accessible(self, client):
         """测试index.html可访问"""
         resp = client.get("/static/index.html")
