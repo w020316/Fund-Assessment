@@ -171,8 +171,14 @@
 
   // ===== STAGE6: webhook-config ===== 推送设置(盯盘页内卡片)
 
-  function loadPushSettings() {
-    callApi('/api/portfolio/webhook/config')
+  // 盯盘页与风险页都会触发加载:复用同一 Promise + loaded 标记,避免来回切页重复请求
+  const pushSettingsState = { loaded: false, promise: null };
+
+  function loadPushSettings(force) {
+    if (force) pushSettingsState.loaded = false;
+    if (pushSettingsState.loaded) return Promise.resolve();
+    if (pushSettingsState.promise) return pushSettingsState.promise;
+    pushSettingsState.promise = callApi('/api/portfolio/webhook/config')
       .then(function (data) {
         if (!data || !data.config) return;
         const cfg = data.config;
@@ -193,8 +199,11 @@
             '<button class="btn btn-sm btn-primary" id="st6PushSaveBtn" onclick="St6Portfolio.savePushConfig()">保存配置</button>' +
             '<button class="btn btn-sm" id="st6PushTestBtn" onclick="St6Portfolio.testPush()">发送测试推送</button>' +
           '</div>';
+        pushSettingsState.loaded = true;
       })
-      .catch(function () { /* 静默:设置卡片非关键路径 */ });
+      .catch(function () { /* 静默:设置卡片非关键路径 */ })
+      .finally(function () { pushSettingsState.promise = null; });
+    return pushSettingsState.promise;
   }
 
   function savePushConfig() {
