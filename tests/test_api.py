@@ -125,7 +125,7 @@ class TestStaticFiles:
         """阶段 5:S5-08 静态资源补 Cache-Control;HTML 短缓存,API 不被缓存。"""
         html = client.get("/static/index.html")
         assert "max-age=60" in (html.headers.get("cache-control") or "")
-        css = client.get("/static/css/stage5-r2.css")
+        css = client.get("/static/css/stage6.css")
         assert css.status_code == 200
         assert "max-age=300" in (css.headers.get("cache-control") or "")
         api = client.get("/api/health")
