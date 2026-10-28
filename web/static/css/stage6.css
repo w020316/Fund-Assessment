@@ -255,10 +255,14 @@
 }
 .notice-info a:hover { text-decoration: underline; }
 
-/* ===== STAGE5-R2: ticker fade ===== 内容溢出时右侧渐隐，提示可横向滚动 */
-.index-bar {
-  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 20px), transparent 100%);
-  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 20px), transparent 100%);
+/* ===== STAGE5-R2: ticker fade ===== 内容溢出时右侧渐隐，提示可横向滚动
+   mask 会强制合成层,桌面宽屏指数条不溢出却要为此多付约 60ms 的 LCP 渲染延迟
+   (A/B 实验: 514ms vs 454ms),故仅在会溢出的窄屏启用。 */
+@media (max-width: 1200px) {
+  .index-bar {
+    mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 20px), transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 20px), transparent 100%);
+  }
 }
 
 /* ===== STAGE5-R2: coarse pointer ===== 触摸设备交互目标 >=48px（设计系统 44px 的移动增强） */
