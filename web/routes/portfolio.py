@@ -16,6 +16,8 @@ import datetime as _dt
 import os
 import re
 import secrets
+import shutil
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -1064,6 +1066,32 @@ async def export_ledger():
     }
 
 
+def _restore_import_files(written: list[Any], backup_dir: Any, existed_before: dict[str, bool]) -> bool:
+    """把已写入文件恢复为导入前状态;导入前不存在的文件删除。
+
+    Returns:
+        True=全部恢复成功;False=存在无法恢复的文件(调用方须提示手工回滚)。
+    """
+    ok = True
+    backup_path = Path(backup_dir) if backup_dir else None
+    for path in written:
+        target = Path(path)
+        source = backup_path / target.name if backup_path else None
+        try:
+            if source is not None and source.exists():
+                shutil.copy2(source, target)
+            elif not existed_before.get(str(target), False) and target.exists():
+                target.unlink()
+            elif existed_before.get(str(target), False):
+                # 导入前存在但备份里没有(备份失败)→ 无法安全恢复,保留现状并报错
+                ok = False
+                logger.error(f"_restore_import_files: 备份缺失,无法恢复 {target}")
+        except Exception as e:
+            ok = False
+            logger.error(f"_restore_import_files {target} failed: {e}")
+    return ok
+
+
 @router.post("/import", dependencies=[Depends(require_admin)])
 async def import_ledger(req: LedgerImportRequest):
     """账本全量导入恢复(破坏性操作,阶段5 五段式确认范式)。
@@ -1096,7 +1124,7 @@ async def import_ledger(req: LedgerImportRequest):
             "message": "破坏性操作:请先 dry_run=true 预览 diff 并逐项确认,再带 confirm=true 执行",
         }
 
-    # 执行前备份现有文件(安全网)
+    # 执行前备份现有文件(安全网);备份失败则整单取消,绝不无备份执行
     backup_files = [
         fund_route._FUND_POSITIONS_FILE,
         config_route._USER_POSITIONS_FILE,
@@ -1104,28 +1132,46 @@ async def import_ledger(req: LedgerImportRequest):
         pstore.WEBHOOK_CONFIG_FILE,
         pstore.GROUPS_FILE,
     ]
-    backup_dir = pstore.backup_files(backup_files, backup_name="import_backup")
+    existed_before = {str(Path(f)): Path(f).exists() for f in backup_files}
+    try:
+        backup_dir = pstore.backup_files(backup_files, backup_name="import_backup")
+    except Exception as e:
+        logger.error(f"import_ledger backup failed: {e}")
+        return {
+            "success": False,
+            "errors": ["导入前备份失败,已取消导入(未做任何写入)"],
+            "applied": {},
+            "backup_dir": "",
+        }
 
     applied: dict[str, Any] = {}
+    written: list[Any] = []
     try:
         if "fund_positions" in normalized:
-            ok = fund_route._save_positions(normalized["fund_positions"]["positions"])
-            applied["fund_positions"] = ok
-            if not ok:
-                return {"success": False, "errors": ["fund_positions 写入失败,请查看日志(已自动备份,可回滚)"],
-                        "applied": applied, "backup_dir": str(backup_dir or "")}
+            if not fund_route._save_positions(normalized["fund_positions"]["positions"]):
+                raise RuntimeError("fund_positions 写入失败")
+            written.append(fund_route._FUND_POSITIONS_FILE)
+            applied["fund_positions"] = True
         if "stock_positions" in normalized:
             atomic_write_json(config_route._USER_POSITIONS_FILE, normalized["stock_positions"])
+            written.append(config_route._USER_POSITIONS_FILE)
             applied["stock_positions"] = True
         if "watchlist" in normalized:
             atomic_write_json(monitor_route._WATCHLIST_FILE, normalized["watchlist"])
+            written.append(monitor_route._WATCHLIST_FILE)
             applied["watchlist"] = True
         if "portfolio_config" in normalized:
             incoming_pc = normalized["portfolio_config"]
             if "webhook" in incoming_pc:
-                applied["portfolio_config"] = pstore.save_webhook_config(incoming_pc["webhook"])
+                if not pstore.save_webhook_config(incoming_pc["webhook"]):
+                    raise RuntimeError("webhook 配置写入失败")
+                written.append(pstore.WEBHOOK_CONFIG_FILE)
+                applied["portfolio_config"] = True
             if "groups" in incoming_pc:
-                applied["groups"] = pstore.save_groups(incoming_pc["groups"])
+                if not pstore.save_groups(incoming_pc["groups"]):
+                    raise RuntimeError("groups 写入失败")
+                written.append(pstore.GROUPS_FILE)
+                applied["groups"] = True
         counts = {k: (len(v.get("positions", [])) if isinstance(v, dict) and "positions" in v else "-")
                   for k, v in normalized.items()}
         return {
@@ -1136,10 +1182,15 @@ async def import_ledger(req: LedgerImportRequest):
             "message": f"导入完成: {counts}",
         }
     except Exception as e:
-        logger.error(f"import_ledger failed: {e}")
+        rolled_back = _restore_import_files(written, backup_dir, existed_before)
+        logger.error(f"import_ledger failed, rolled_back={rolled_back}: {e}")
         return {
             "success": False,
-            "errors": [f"导入执行异常: {e}(已自动备份,可用备份目录回滚)"],
-            "applied": applied,
+            "rolled_back": rolled_back,
+            "errors": [
+                "导入执行失败,已回滚到导入前状态" if rolled_back
+                else "导入执行失败且回滚不完整,请用备份目录手工恢复"
+            ],
+            "applied": {} if rolled_back else applied,
             "backup_dir": str(backup_dir or ""),
         }

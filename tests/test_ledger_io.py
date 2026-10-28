@@ -225,6 +225,51 @@ class TestLedgerImport:
         raw = json.loads((tmp_path / "webhook_config.json").read_text(encoding="utf-8"))
         assert "sendkey" not in raw  # 白名单落盘,凭据字段不可能出现
 
+    def test_import_backup_failure_cancels_without_writes(self, client, tmp_path, monkeypatch):
+        """备份失败 → 整单取消,绝不无备份执行(原实现直接 500)。"""
+        _write_fund_positions(tmp_path, [{"fund_code": "000001", "fund_name": "旧持仓",
+                                          "shares": 1.0, "cost_nav": 1.0}])
+        monkeypatch.setattr(pstore, "backup_files",
+                            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("disk full")))
+        resp = client.post("/api/portfolio/import",
+                           json={"payload": _payload(_VALID_POSITIONS), "dry_run": False, "confirm": True})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert "备份失败" in data["errors"][0]
+        # 未做任何写入:旧内容原样保留
+        cur = json.loads((tmp_path / "fund_positions.json").read_text(encoding="utf-8"))
+        assert [p["fund_code"] for p in cur["positions"]] == ["000001"]
+
+    def test_import_midway_failure_rolls_back(self, client, tmp_path, monkeypatch):
+        """中途写入失败 → 已写文件全部回滚到导入前内容(不再半套数据)。"""
+        _write_fund_positions(tmp_path, [{"fund_code": "000001", "fund_name": "旧持仓",
+                                          "shares": 1.0, "cost_nav": 1.0}])
+        (tmp_path / "watchlist.json").write_text(json.dumps({"600519": ["price_surge"]}),
+                                                 encoding="utf-8")
+        payload = _payload(_VALID_POSITIONS, watchlist={"300308": ["price_surge"]})
+
+        from src.utils import file_io
+        real_write = file_io.atomic_write_json
+
+        def _boom(path, data, **kwargs):
+            if str(path).endswith("watchlist.json"):
+                raise OSError("disk full")
+            return real_write(path, data, **kwargs)
+
+        monkeypatch.setattr("web.routes.portfolio.atomic_write_json", _boom)
+        resp = client.post("/api/portfolio/import",
+                           json={"payload": payload, "dry_run": False, "confirm": True})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert data["rolled_back"] is True
+        # 持仓已回滚为旧内容,watchlist 未被破坏
+        cur = json.loads((tmp_path / "fund_positions.json").read_text(encoding="utf-8"))
+        assert [p["fund_code"] for p in cur["positions"]] == ["000001"]
+        wl = json.loads((tmp_path / "watchlist.json").read_text(encoding="utf-8"))
+        assert wl == {"600519": ["price_surge"]}
+
 
 # ============ 分组配置随账本往返(批次 B) ============
 
