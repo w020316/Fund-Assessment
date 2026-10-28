@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import math
 import re
 import shutil
 import threading
@@ -48,6 +49,23 @@ DEFAULT_WEBHOOK_CONFIG: dict[str, Any] = {
 }
 
 _VALID_CHANNELS = {"serverchan", "generic"}
+
+#: 阈值上限(%):超过即视为录入错误
+MAX_THRESHOLD: float = 100.0
+
+
+def valid_threshold(value: Any) -> float | None:
+    """阈值合法性:有限数值且 0 < v <= 100,非法返回 None。
+
+    inf/NaN 一旦落盘,GET /webhook/config 的 JSONResponse(allow_nan=False)会
+    持续 500,且扫描阈值恒为 inf 导致预警永不触发。
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    fv = float(value)
+    if not math.isfinite(fv) or not 0 < fv <= MAX_THRESHOLD:
+        return None
+    return fv
 
 # ===== 持仓分组配置(阶段六批次 B,功能 #8) =====
 
@@ -90,8 +108,10 @@ def load_webhook_config(path: Path | None = None) -> dict[str, Any]:
     thresholds = data.get("thresholds")
     if isinstance(thresholds, dict):
         for k, v in thresholds.items():
-            if k in merged["thresholds"] and isinstance(v, (int, float)) and v >= 0:
-                merged["thresholds"][k] = float(v)
+            if k in merged["thresholds"]:
+                fv = valid_threshold(v)
+                if fv is not None:
+                    merged["thresholds"][k] = fv
     return merged
 
 
@@ -106,8 +126,8 @@ def save_webhook_config(config: dict[str, Any], path: Path | None = None) -> boo
     }
     src_thresholds = config.get("thresholds") or {}
     for k, default_v in DEFAULT_WEBHOOK_CONFIG["thresholds"].items():
-        v = src_thresholds.get(k, default_v)
-        cleaned["thresholds"][k] = float(v) if isinstance(v, (int, float)) and v >= 0 else default_v
+        fv = valid_threshold(src_thresholds.get(k, default_v))
+        cleaned["thresholds"][k] = fv if fv is not None else default_v
     try:
         with _config_lock:
             _ensure_parent(file)

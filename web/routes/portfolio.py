@@ -724,7 +724,15 @@ async def put_webhook_config(req: WebhookConfigRequest):
     if req.enabled is not None:
         config["enabled"] = req.enabled
     if req.thresholds is not None:
-        config["thresholds"].update({k: v for k, v in req.thresholds.items() if k in config["thresholds"]})
+        invalid = [k for k, v in req.thresholds.items()
+                   if k in config["thresholds"] and pstore.valid_threshold(v) is None]
+        if invalid:
+            raise HTTPException(
+                status_code=_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"阈值非法(需有限数值且 0 < x <= 100): {', '.join(invalid)}",
+            )
+        config["thresholds"].update({k: pstore.valid_threshold(v) for k, v in req.thresholds.items()
+                                     if k in config["thresholds"]})
     ok = pstore.save_webhook_config(config)
     return {
         "success": ok,
@@ -998,9 +1006,9 @@ def _validate_ledger_payload(payload: Any) -> tuple[list[str], dict[str, Any]]:
                     cleaned["enabled"] = bool(webhook.get("enabled", False))
                     th = webhook.get("thresholds") or {}
                     for k in cleaned["thresholds"]:
-                        v = th.get(k)
-                        if isinstance(v, (int, float)) and v >= 0:
-                            cleaned["thresholds"][k] = float(v)
+                        fv = pstore.valid_threshold(th.get(k))
+                        if fv is not None:
+                            cleaned["thresholds"][k] = fv
                     normalized_pc["webhook"] = cleaned
             groups_cfg = pc.get("groups")
             if groups_cfg is not None:

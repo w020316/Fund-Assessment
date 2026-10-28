@@ -147,6 +147,28 @@ class TestPortfolioStore:
         assert cfg["enabled"] is True
         assert cfg["thresholds"]["est_pct_abs"] == 1.5
 
+    def test_threshold_rejects_non_finite_on_save_and_load(self, tmp_path):
+        """inf/NaN/0/超界阈值:写入回退默认值,读取回退默认值,绝不落 Infinity。"""
+        f = tmp_path / "webhook_config.json"
+        for bad in (float("inf"), float("-inf"), float("nan"), 0, -1.0, 100.5):
+            assert pstore.save_webhook_config(
+                {"thresholds": {"est_pct_abs": bad}}, path=f) is True
+            raw = f.read_text(encoding="utf-8")
+            assert "Infinity" not in raw and "NaN" not in raw
+            assert json.loads(raw)["thresholds"]["est_pct_abs"] == 2.0
+
+        # 历史脏文件(已被写入 Infinity)→ 读取时回退默认值,不再把 inf 带进响应
+        f.write_text('{"thresholds": {"est_pct_abs": Infinity}}', encoding="utf-8")
+        assert pstore.load_webhook_config(f)["thresholds"]["est_pct_abs"] == 2.0
+
+        # 合法边界值 0.1 / 100 保留
+        assert pstore.save_webhook_config(
+            {"thresholds": {"est_pct_abs": 0.1}}, path=f) is True
+        assert pstore.load_webhook_config(f)["thresholds"]["est_pct_abs"] == 0.1
+        assert pstore.save_webhook_config(
+            {"thresholds": {"est_pct_abs": 100}}, path=f) is True
+        assert pstore.load_webhook_config(f)["thresholds"]["est_pct_abs"] == 100.0
+
     def test_throttle_window(self, tmp_path, monkeypatch):
         """2h 节流:窗口内 is_throttled=True,窗口外 False;mark 后生效。"""
         f = tmp_path / "throttle.json"
@@ -254,6 +276,23 @@ class TestWebhookConfigRoute:
         resp = client.put("/api/portfolio/webhook/config", json={"channel": "wecom"})
         assert resp.status_code == 200
         assert resp.json()["success"] is False
+
+    def test_put_config_non_finite_threshold_422(self, client, tmp_path):
+        """inf/NaN/0/负数阈值 → 422,不静默回退,更不落盘 Infinity。"""
+        for bad in (float("inf"), float("nan"), 0, -3.0):
+            resp = client.put("/api/portfolio/webhook/config",
+                              json={"thresholds": {"est_pct_abs": bad}})
+            assert resp.status_code == 422
+            assert "est_pct_abs" in resp.json()["detail"]
+        assert not (tmp_path / "webhook_config.json").exists()
+
+    def test_get_config_with_dirty_infinity_file_still_200(self, client, tmp_path):
+        """历史脏文件含 Infinity → GET 仍 200(回退默认值),不再持续 500。"""
+        (tmp_path / "webhook_config.json").write_text(
+            '{"enabled": true, "thresholds": {"est_pct_abs": Infinity}}', encoding="utf-8")
+        resp = client.get("/api/portfolio/webhook/config")
+        assert resp.status_code == 200
+        assert resp.json()["config"]["thresholds"]["est_pct_abs"] == 2.0
 
 
 class TestWebhookTestRoute:
