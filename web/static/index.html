@@ -163,6 +163,21 @@ body {
    "操作"列与按钮直接点不到。给 grid item 补 min-width:0 后轨道回到 351px，
    表格由 .table-wrap 内部横向滚动承载（其本身即 overflow-x:auto）。 */
 .grid-2 > *, .grid-3 > *, .grid-4 > * { min-width:0; }
+/* (2026-10-28) 基金页双栏挤压修复:8 列持仓表(含 4 个操作按钮)在双栏下被压成逐字竖排,
+   实测 1440 视口名称列仅 58px、"现净值"整列竖排、操作列滚出可视区;1920 双栏表宽 800
+   也仅够勉强换行。策略:≤1680 单列(表格独占整行),≥1681 改 2:1 非对称分栏保证表格优先;
+   表格自身给 min-width 兜住 769~999 窄栏,横向滚动仍由 .table-wrap 的 overflow-x 承载。 */
+#fundPositionTableWrap table { min-width:860px; }
+#fundPositionTableWrap th { white-space:nowrap; }
+/* 徽章为 inline-flex,默认可收缩会把"截至 2026-10-27"从连字符处折成两行(1024 实测);
+   本表允许换行后,说明文字整体落到下一行,日期保持完整。 */
+#fundPositionTableWrap .freshness-badge { flex-wrap:wrap; }
+@media (max-width:1680px) {
+  .fund-grid { grid-template-columns:1fr; }
+}
+@media (min-width:1681px) {
+  .fund-grid { grid-template-columns:minmax(0,2fr) minmax(360px,1fr); }
+}
 .grid-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
 /* (2026-10-26) CLS 修复：首屏容器在异步回填前高度为 0（或远小于终态），数据到达后撑开，
    导致下方内容整体下移。实测桌面 CLS 0.03–0.37（中位数 0.23，远超 0.1 阈值）。
@@ -1647,7 +1662,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
           <div id="dcaResult" style="margin-top:12px;display:none;"></div>
         </div>
 
-        <div class="grid-2 mb-16">
+        <div class="grid-2 fund-grid mb-16">
           <!-- 基金持仓列表 -->
           <div class="card">
             <div class="card-title">基金持仓 <span style="font-size:11px;color:var(--text-muted);font-weight:500;margin-left:6px;">点击"分析"/"深度"查看P1新功能</span></div>
