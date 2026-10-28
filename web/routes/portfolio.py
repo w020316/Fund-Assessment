@@ -676,14 +676,14 @@ def _require_scan_key(
     """scan 端点专用鉴权: X-Api-Key 头 == env PORTFOLIO_SCAN_KEY。
 
     与 require_admin 同范式:
-    - env 未配置 → 500 fail-closed(生产裸奔拒绝)
+    - env 未配置 → 503 fail-closed(生产裸奔拒绝)
     - 头缺失/不匹配 → 401,secrets.compare_digest 防时序攻击
     """
     expected = os.getenv("PORTFOLIO_SCAN_KEY", "").strip()
     if not expected:
         logger.error("PORTFOLIO_SCAN_KEY 未配置, scan 端点拒绝服务(fail-closed)")
         raise HTTPException(
-            status_code=_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="服务端鉴权未配置, 请设置 PORTFOLIO_SCAN_KEY",
         )
     if not x_api_key or not x_api_key.strip():

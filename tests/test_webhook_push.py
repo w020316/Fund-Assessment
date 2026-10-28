@@ -277,11 +277,11 @@ class TestWebhookScan:
         resp = client.post("/api/portfolio/webhook/scan", headers={"X-Api-Key": "wrong"})
         assert resp.status_code == 401
 
-    def test_scan_key_unconfigured_500(self, client, monkeypatch):
-        """env 未配置 → 500 fail-closed(不裸奔)。"""
+    def test_scan_key_unconfigured_503(self, client, monkeypatch):
+        """env 未配置 → 503 fail-closed(不裸奔;配置缺失属服务不可用)。"""
         monkeypatch.delenv("PORTFOLIO_SCAN_KEY", raising=False)
         resp = client.post("/api/portfolio/webhook/scan", headers={"X-Api-Key": "x"})
-        assert resp.status_code == 500
+        assert resp.status_code == 503
 
     def test_scan_correct_key_passes_auth(self, client, tmp_path, monkeypatch):
         """正确 key 通过鉴权(推送未启用短路,证明鉴权层已放行)。"""

@@ -2,7 +2,7 @@
 
 验证 src/utils/auth.py 的 require_admin 依赖:
 - 未配置 ADMIN_TOKEN 时放行(开发模式)
-- 生产环境(APP_ENV != "dev")未配置 ADMIN_TOKEN → fail-closed 抛 500
+- 生产环境(APP_ENV != "dev")未配置 ADMIN_TOKEN → fail-closed 抛 503
 - 已配置时,缺少 Authorization / 令牌不匹配 / 空令牌 均返回 401
 - Bearer 与裸 token 两种格式均支持
 - secrets.compare_digest 防时序攻击(等长令牌)
@@ -42,16 +42,18 @@ class TestRequireAdmin:
             assert resp.status_code == 200
             assert resp.json() == {"ok": True}
 
-    def test_production_no_token_returns_500_fail_closed(self):
-        """生产环境(APP_ENV != dev)未配置 ADMIN_TOKEN → fail-closed 抛 500
+    def test_production_no_token_returns_503_fail_closed(self):
+        """生产环境(APP_ENV != dev)未配置 ADMIN_TOKEN → fail-closed 抛 503
 
         P1 安全修复(2026-07-29):避免生产裸奔,未配置即拒绝服务。
+        B-09 契约修正(2026-10-28):配置缺失属于“服务暂不可用”而非“服务器内部错误”,
+        改为 503,避免监控把配置问题误判为代码缺陷。
         """
         with patch.dict(os.environ, {"APP_ENV": "production"}, clear=False):
             os.environ.pop("ADMIN_TOKEN", None)
             client = TestClient(_build_app())
             resp = client.get("/protected")
-            assert resp.status_code == 500
+            assert resp.status_code == 503
             assert "ADMIN_TOKEN" in resp.json()["detail"]
 
     def test_production_with_valid_token_passes(self):

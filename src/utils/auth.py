@@ -4,7 +4,7 @@
 - 通过环境变量 ADMIN_TOKEN 配置管理员令牌
 - 客户端在请求头携带 Authorization: Bearer <token>
 - 若 ADMIN_TOKEN 未配置:
-    * 生产环境(app_env=production): 拒绝服务 500, 避免裸奔
+    * 生产环境(app_env=production): 拒绝服务 503, 避免裸奔
     * 开发环境(app_env=dev): 放行但记录警告(开发便利)
 - 若已配置但请求未携带/不匹配, 返回 401
 
@@ -61,7 +61,7 @@ def require_admin(authorization: str | None = Header(default=None)) -> None:
         async def update_settings(...): ...
 
     安全策略:
-    - 生产环境(APP_ENV != "dev")未配置 ADMIN_TOKEN → 抛 500(fail-closed)
+    - 生产环境(APP_ENV != "dev")未配置 ADMIN_TOKEN → 抛 503(fail-closed,配置缺失属服务不可用)
     - 开发环境(APP_ENV == "dev")未配置 ADMIN_TOKEN → 放行但 warning
     - 已配置但请求未携带/不匹配 → 抛 401
     """
@@ -74,7 +74,7 @@ def require_admin(authorization: str | None = Header(default=None)) -> None:
                 "请在 Render Dashboard 设置 ADMIN_TOKEN=<随机长字符串>"
             )
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="服务端鉴权未配置, 联系管理员设置 ADMIN_TOKEN",
             )
         # 开发环境放行, 但记录警告
