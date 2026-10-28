@@ -129,6 +129,28 @@ class TestLLMRouter:
         with pytest.raises(RuntimeError, match="所有LLM Provider均不可用"):
             router.chat([{"role": "user", "content": "test"}])
 
+    def test_chat_error_masks_api_key(self):
+        """异常信息回显 API Key → 抛出的 RuntimeError 文案必须脱敏。"""
+        with patch.dict("os.environ", {}, clear=True):
+            router = LLMRouter()
+        key = "sk-super-secret-1234567890"
+        provider = LLMProvider(
+            name="leaky",
+            provider_type=ProviderType.OPENAI,
+            base_url="https://mock.test.com/v1",
+            api_key=key,
+            model="gpt-4o",
+            max_retries=0,
+            retry_delay=0.0,
+        )
+        router.add_provider(provider)
+
+        with patch.object(router, "_call_provider", side_effect=RuntimeError(f"401 key={key} rejected")):
+            with pytest.raises(RuntimeError) as excinfo:
+                router.chat([{"role": "user", "content": "test"}])
+        assert key not in str(excinfo.value)
+        assert "***" in str(excinfo.value)
+
     def test_chat_with_mock_success(self):
         """测试成功调用（mock）"""
         # 创建空Router（不加载环境变量中的Provider）

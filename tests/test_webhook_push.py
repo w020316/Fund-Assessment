@@ -80,6 +80,27 @@ class TestServerChanChannel:
         assert r.success is False
         assert "dns fail" in r.error
 
+    def test_send_exception_masks_sendkey(self, monkeypatch):
+        """异常文本带含 Key 的 URL → 回传 error 必须脱敏(日志/GC 均安全)。"""
+        monkeypatch.setenv("PUSH_SERVERCHAN_SENDKEY", "SCT123456789")
+        leaked = "HTTPSConnectionPool url=https://sctapi.ftqq.com/SCT123456789.send dns fail"
+        with patch("src.core.webhook_push.httpx.post", side_effect=RuntimeError(leaked)):
+            r = wpush.ServerChanChannel().send("t", "c")
+        assert r.success is False
+        assert "SCT123456789" not in r.error
+        assert "****" in r.error
+        assert "dns fail" in r.error
+
+    def test_generic_exception_masks_url(self, monkeypatch):
+        """通用渠道异常回显 URL → URL 中的 token 必须脱敏。"""
+        monkeypatch.setenv("WEBHOOK_GENERIC_URL", "https://hook.example/push?token=TOPSECRET")
+        leaked = "ConnectError https://hook.example/push?token=TOPSECRET timeout"
+        with patch("src.core.webhook_push.httpx.post", side_effect=RuntimeError(leaked)):
+            r = wpush.GenericWebhookChannel().send("t", "c")
+        assert r.success is False
+        assert "TOPSECRET" not in r.error
+        assert "****" in r.error
+
     def test_mask_secret(self):
         assert wpush.mask_secret("SCT123456789") == "SCT1****"
         assert wpush.mask_secret("") == "****"

@@ -50,6 +50,16 @@ def mask_secret(secret: str | None) -> str:
     return s[:4] + "****"
 
 
+def _mask_text(text: str | None, *secrets: str) -> str:
+    """异常文本脱敏:httpx 异常会带完整请求 URL(Server 酱 URL 含 SendKey),
+    落日志/回传前必须替换掉凭据原文。"""
+    out = text or ""
+    for secret in secrets:
+        if secret:
+            out = out.replace(secret, "****")
+    return out[:200]
+
+
 class BaseWebhookChannel(abc.ABC):
     """推送渠道适配器接口(钉钉/飞书/企微按此扩展)。"""
 
@@ -97,8 +107,9 @@ class ServerChanChannel(BaseWebhookChannel):
                 error="" if ok else f"上游返回 {resp.status_code}",
             )
         except Exception as e:
-            logger.warning(f"webhook_push[{self.name}] failed: {e}")
-            return PushResult(success=False, channel=self.name, error=str(e), message="推送失败")
+            safe_error = _mask_text(str(e), key)
+            logger.warning(f"webhook_push[{self.name}] failed: {safe_error}")
+            return PushResult(success=False, channel=self.name, error=safe_error, message="推送失败")
 
 
 class GenericWebhookChannel(BaseWebhookChannel):
@@ -130,8 +141,9 @@ class GenericWebhookChannel(BaseWebhookChannel):
                 error="" if ok else f"上游返回 {resp.status_code}",
             )
         except Exception as e:
-            logger.warning(f"webhook_push[{self.name}] failed: {e}")
-            return PushResult(success=False, channel=self.name, error=str(e), message="推送失败")
+            safe_error = _mask_text(str(e), url)
+            logger.warning(f"webhook_push[{self.name}] failed: {safe_error}")
+            return PushResult(success=False, channel=self.name, error=safe_error, message="推送失败")
 
 
 _CHANNELS: dict[str, type[BaseWebhookChannel]] = {

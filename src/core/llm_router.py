@@ -569,6 +569,7 @@ class LLMRouter:
             return cached
 
         last_error = None
+        last_error_provider: LLMProvider | None = None
         for provider in self._providers:
             if not provider.is_available:
                 continue
@@ -595,6 +596,8 @@ class LLMRouter:
                     return response
                 except Exception as e:
                     last_error = e
+                    last_error_provider = provider
+                    safe_error = self._sanitize_error(e, provider)
                     # 429 是上游限流而非 Provider 故障:官方建议平台过载时拉开重试间隔,
                     # 1s/2s 原地重试救不回来(线上实测白等 37.5s 才降级),直接切下一个。
                     # 超时同理:该 Provider 已耗满超时预算(线上实测首个 Provider 白等 30s),
@@ -607,21 +610,25 @@ class LLMRouter:
                         switch_reason = None
                     if switch_reason:
                         provider.record_failure()
-                        logger.warning(f"LLM Provider [{provider.name}] {switch_reason},跳过重试切换下一个: {e}")
+                        logger.warning(f"LLM Provider [{provider.name}] {switch_reason},跳过重试切换下一个: {safe_error}")
                         break
                     if attempt < max_attempts - 1:
                         delay = provider.retry_delay * (2 ** attempt)
-                        logger.warning(f"LLM Provider [{provider.name}] 第{attempt+1}次失败: {e},{delay:.1f}s后重试")
+                        logger.warning(f"LLM Provider [{provider.name}] 第{attempt+1}次失败: {safe_error},{delay:.1f}s后重试")
                         time.sleep(delay)
                     else:
                         provider.record_failure()
-                        logger.warning(f"LLM Provider [{provider.name}] 全部{max_attempts}次重试失败: {e}")
+                        logger.warning(f"LLM Provider [{provider.name}] 全部{max_attempts}次重试失败: {safe_error}")
 
         # 修复(2026-07-31): 所有 Provider 不可用时返回明确错误。
         # 当所有 Provider 被熔断或未配置时,循环不执行,last_error 仍为 None,
         # 原"最后错误: None"信息含糊。区分"有 Provider 调用失败"和"无可用 Provider"两种情况。
         if last_error is not None:
-            raise RuntimeError(f"所有LLM Provider均不可用，最后错误: {last_error}")
+            safe_last = (
+                self._sanitize_error(last_error, last_error_provider)
+                if last_error_provider is not None else "unknown"
+            )
+            raise RuntimeError(f"所有LLM Provider均不可用，最后错误: {safe_last}")
         raise RuntimeError("所有LLM Provider均不可用: 无可用Provider(全部被熔断或未配置)")
 
     def _call_provider(
