@@ -186,10 +186,10 @@
         if (!box) return;
         box.innerHTML =
           '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;">' +
-            '<label style="display:flex;align-items:center;gap:6px;font-size:13px;">' +
+            '<label style="display:flex;align-items:center;gap:6px;font-size:13px;white-space:nowrap;flex-shrink:0;">' +
               '<input type="checkbox" id="st6PushEnabled" ' + (cfg.enabled ? 'checked' : '') + ' style="width:18px;height:18px;"> 启用推送' +
             '</label>' +
-            '<label style="display:flex;align-items:center;gap:6px;font-size:13px;">阈值 ±' +
+            '<label style="display:flex;align-items:center;gap:6px;font-size:13px;white-space:nowrap;flex-shrink:0;">阈值 ±' +
               '<input class="input" type="number" id="st6PushThreshold" min="0.1" max="100" step="0.5" value="' + esc(cfg.thresholds && cfg.thresholds.est_pct_abs != null ? cfg.thresholds.est_pct_abs : 2.0) + '" style="width:80px;">%' +
             '</label>' +
             '<span style="font-size:12px;color:var(--text-muted,#8b92a8);">渠道: ' + esc(cfg.channel) +
