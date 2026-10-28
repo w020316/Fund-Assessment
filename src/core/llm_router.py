@@ -78,8 +78,9 @@ class LLMProvider:
     def current_api_key(self) -> str:
         """获取当前轮换的API Key(支持多Key负载均衡)"""
         if self.api_keys:
-            key = self.api_keys[self._key_index % len(self.api_keys)]
-            self._key_index += 1
+            with self._key_lock:
+                key = self.api_keys[self._key_index % len(self.api_keys)]
+                self._key_index += 1
             return key
         return self.api_key
 

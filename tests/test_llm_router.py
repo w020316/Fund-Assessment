@@ -1,4 +1,7 @@
 """LLM路由器测试"""
+import threading
+from collections import Counter
+
 import pytest
 import requests
 from unittest.mock import patch, MagicMock
@@ -240,6 +243,40 @@ class TestMultiKeyRotation:
         assert provider.current_api_key == "key3"
         # 第四次应回到 key1
         assert provider.current_api_key == "key1"
+
+    def test_current_api_key_thread_safe(self):
+        """并发轮换不丢更新:总调用次数守恒且各 Key 命中次数均等"""
+        provider = LLMProvider(
+            name="test_concurrent",
+            provider_type=ProviderType.OPENAI,
+            base_url="https://test.com/v1",
+            api_key="single-key",
+            api_keys=["key1", "key2", "key3", "key4"],
+        )
+        n_threads, per_thread = 8, 200
+        results = []
+        results_lock = threading.Lock()
+        start = threading.Barrier(n_threads)
+
+        def worker():
+            start.wait()
+            local = [provider.current_api_key for _ in range(per_thread)]
+            with results_lock:
+                results.extend(local)
+
+        threads = [threading.Thread(target=worker) for _ in range(n_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        total = n_threads * per_thread
+        assert len(results) == total
+        # 无锁时 _key_index += 1 会丢失更新,索引总量小于调用次数
+        assert provider._key_index == total
+        counts = Counter(results)
+        assert set(counts) == {"key1", "key2", "key3", "key4"}
+        assert all(c == total // 4 for c in counts.values())
 
     def test_fallback_to_single_key(self):
         """无 api_keys 时应回退到 api_key"""
