@@ -47,6 +47,8 @@
    * @returns {string} 无任何信息时返回 ''(调用方模板可直接拼接)
    */
   function html(opts) {
+    // 全站只用 html() 拼模板,若样式只在 render() 注入则 .freshness-badge 永不生效
+    injectStyle();
     const o = opts || {};
     const hasAsOf = !!(o.asOf && String(o.asOf).trim());
     const estimated = !!o.estimated;
