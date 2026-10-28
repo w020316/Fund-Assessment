@@ -170,12 +170,19 @@ body {
      桌面 1440：indexCards 159→139、sectorHeatmap 220→507、热股表容器 199→360
      移动 390 ：indexCards 159→388、sectorHeatmap →734
    策略：能定高的定高（min=max），内容多于预期时容器内滚动，保证任何一次回填都不改变外部布局。 */
-#indexCards { min-height:160px; }
+/* (2026-10-28) 生产移动端 CLS 0.023 的位移源是 #indexCards 异步回填（先 +48px 再 +40px）：
+   旧的 160/392 两组预留按早期卡片高度估算，已比当前终态少 80~90px；终态高度随列数变化，
+   按断点各自预留实测：3 列(>1024) 169px、2 列(769–1024) 354px、1 列(≤768) 480px
+   （375/414/768 实测一致，360 视口 468px），向上取整到 172/360/484。 */
+#indexCards { min-height:172px; }
 #indexCards > .card { contain:layout; }
 #sectorHeatmap { min-height:510px; max-height:510px; overflow-y:auto; }
 #hotStockWrap { min-height:360px; }
+@media (max-width:1024px) {
+  #indexCards { min-height:360px; }
+}
 @media (max-width:768px) {
-  #indexCards { min-height:392px; }
+  #indexCards { min-height:484px; }
   /* 移动端热力图在首屏视口外，预留过大只会留白，故取较小定高 + 内部滚动 */
   #sectorHeatmap { min-height:420px; max-height:420px; }
 }
