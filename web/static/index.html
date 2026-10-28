@@ -2110,7 +2110,11 @@ async function api(url, options={}) {
     return data;
   } catch(e) {
     const isAbort = e.name === 'AbortError';
-    const msg = isAbort ? `请求超时(${timeoutMs/1000}s)` : (e.message || '网络异常');
+    // 浏览器抛出的网络层错误是英文原文(Failed to fetch/Load failed)，对用户统一中文口径
+    const raw = e.message || '';
+    const msg = isAbort ? `请求超时(${timeoutMs/1000}s)`
+      : (/failed to fetch|load failed|networkerror/i.test(raw) ? '网络连接失败'
+        : (raw || '网络异常'));
     console.error('API Error:', url, e);
     // 静默端点(轮询/自动刷新)不打扰用户,仅记录
     const isPolling = url.includes('_realtime') || url.includes('/api/health');
