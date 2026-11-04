@@ -4,8 +4,6 @@
 - GET  /api/agent/skills/categories 分类统计
 - POST /api/agent/dispatch          一句话 → 技能调度方案(只生成方案,不自动执行写操作)
 """
-from __future__ import annotations
-
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Query, Request

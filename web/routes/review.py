@@ -5,8 +5,6 @@
 - GET  /api/review/first_board    首板分析
 - POST /api/review/three_question 出手三问闸门(只读校验,不涉及资金)
 """
-from __future__ import annotations
-
 import asyncio
 import re
 from datetime import datetime
