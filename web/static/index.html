@@ -965,6 +965,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <div class="hud-group-header">
           <div class="hud-subtabs" role="group" aria-label="行情二级导航">
             <span class="hud-subtab active" data-page="market" role="button" tabindex="0" onclick="switchPage('market')">行情总览</span>
+            <span class="hud-subtab" data-page="review" role="button" tabindex="0" onclick="switchPage('review')">短线复盘</span>
             <span class="hud-subtab" data-page="global" role="button" tabindex="0" onclick="switchPage('global')">国际市场</span>
             <span class="hud-subtab" data-page="data" role="button" tabindex="0" onclick="switchPage('data')">深度数据</span>
           </div>
@@ -1088,6 +1089,8 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
           <div class="hud-subtabs" role="group" aria-label="策略二级导航">
             <span class="hud-subtab active" data-page="strategy" role="button" tabindex="0" onclick="switchPage('strategy')">策略中心</span>
             <span class="hud-subtab" data-page="ai" role="button" tabindex="0" onclick="switchPage('ai')">智能分析</span>
+            <span class="hud-subtab" data-page="gate" role="button" tabindex="0" onclick="switchPage('gate')">出手三问</span>
+            <span class="hud-subtab" data-page="dispatch" role="button" tabindex="0" onclick="switchPage('dispatch')">一句话调度</span>
           </div>
         </div>
       </div>
@@ -1145,6 +1148,141 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
           <div class="card-title">全球资讯</div>
           <div class="news-ticker">
             <div class="news-ticker-inner" id="newsTicker"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== 1.1 短线复盘 ==================== -->
+      <div class="page" id="page-review">
+        <div class="flex-between mb-16" style="flex-wrap:wrap;gap:8px;">
+          <div>
+            <div style="font-size:15px;font-weight:600;">短线复盘看板</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">盘面数据由涨停池/行情接口换算,次日判断为规则引擎输出,不构成投资建议</div>
+          </div>
+          <button class="btn btn-sm btn-primary" onclick="ReviewDesk.loadAll(true)">刷新复盘</button>
+        </div>
+
+        <div class="grid-4 mb-16">
+          <div class="card">
+            <div class="card-title">情绪温度</div>
+            <div style="display:flex;align-items:baseline;gap:8px;">
+              <div id="reviewTempScore" style="font-size:32px;font-weight:700;color:var(--text-muted);">—</div>
+              <span class="signal" id="reviewTempLevel" style="background:rgba(148,163,184,0.15);color:var(--color-flat);">待加载</span>
+            </div>
+            <div id="reviewTempBars" style="margin-top:10px;"></div>
+          </div>
+          <div class="card">
+            <div class="card-title">涨停 / 跌停</div>
+            <div id="reviewLimitCount" style="font-size:28px;font-weight:700;color:var(--text-muted);">—</div>
+            <div id="reviewLimitSub" style="font-size:12px;color:var(--text-muted);margin-top:6px;">—</div>
+          </div>
+          <div class="card">
+            <div class="card-title">炸板率 / 最高板</div>
+            <div id="reviewBrokenRate" style="font-size:28px;font-weight:700;color:var(--text-muted);">—</div>
+            <div id="reviewBrokenSub" style="font-size:12px;color:var(--text-muted);margin-top:6px;">—</div>
+          </div>
+          <div class="card">
+            <div class="card-title">市场广度</div>
+            <div id="reviewBreadth" style="font-size:28px;font-weight:700;color:var(--text-muted);">—</div>
+            <div id="reviewBreadthSub" style="font-size:12px;color:var(--text-muted);margin-top:6px;">—</div>
+          </div>
+        </div>
+
+        <div class="grid-2 mb-16">
+          <div class="card">
+            <div class="card-title">今日 vs 昨日</div>
+            <div id="reviewCompare"><div style="color:var(--text-muted);font-size:13px;">加载中…</div></div>
+          </div>
+          <div class="card">
+            <div class="card-title">连板梯队</div>
+            <div id="reviewLadder"><div style="color:var(--text-muted);font-size:13px;">加载中…</div></div>
+          </div>
+        </div>
+
+        <div class="card mb-16">
+          <div class="card-title">近 5 日情绪周期</div>
+          <div id="reviewCycle"><div style="color:var(--text-muted);font-size:13px;">加载中…</div></div>
+        </div>
+
+        <div class="grid-2 mb-16">
+          <div class="card">
+            <div class="card-title">今晚判断(盘后→次日)</div>
+            <div id="reviewTonight"><div style="color:var(--text-muted);font-size:13px;">加载中…</div></div>
+          </div>
+          <div class="card">
+            <div class="card-title">复盘后判断(周期位置)</div>
+            <div id="reviewAfter"><div style="color:var(--text-muted);font-size:13px;">加载中…</div></div>
+          </div>
+        </div>
+
+        <div class="card mb-16">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span>首板分析</span>
+            <span id="reviewFirstMeta" style="font-size:12px;color:var(--text-muted);">—</span>
+          </div>
+          <div class="table-wrap" tabindex="0" style="max-height:360px;overflow-y:auto;">
+            <table>
+              <thead><tr><th>代码</th><th>名称</th><th>行业</th><th>封板时间</th><th>封板资金</th><th>炸板</th><th>封板质量</th><th>跟踪级别</th></tr></thead>
+              <tbody id="reviewFirstBody"><tr><td colspan="8" style="text-align:center;color:var(--text-muted);">加载中…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span>交易日志 / 纪律归因</span>
+            <span id="journalStats" style="font-size:12px;color:var(--text-muted);">—</span>
+          </div>
+          <div class="grid-2 mb-16">
+            <div>
+              <div class="signal-row"><span class="signal-label">纪律评分</span><span id="journalScore" style="font-size:20px;font-weight:700;color:var(--text-muted);">—</span><span id="journalGrade" class="signal" style="background:rgba(148,163,184,0.15);color:var(--color-flat);">样本不足</span></div>
+              <div class="signal-row"><span class="signal-label">出手合规率</span><span id="journalCompliance" style="flex:1;font-size:13px;">—</span></div>
+              <div class="signal-row"><span class="signal-label">三问覆盖率</span><span id="journalCoverage" style="flex:1;font-size:13px;">—</span></div>
+              <div class="signal-row"><span class="signal-label">放弃次数</span><span id="journalAbandon" style="flex:1;font-size:13px;">—</span></div>
+              <div id="journalIssues" style="margin-top:8px;font-size:12px;color:var(--color-warning);line-height:1.8;"></div>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">日志写入/读取需要 ADMIN_TOKEN;开发模式自动放行。只有刚完成的三问会随本次记录自动带入。</div>
+            </div>
+            <div>
+              <div class="form-group">
+                <label class="form-label" for="journalAction">动作</label>
+                <select class="select" id="journalAction">
+                  <option value="buy">买入</option>
+                  <option value="sell">卖出</option>
+                  <option value="abandon">放弃</option>
+                  <option value="watch">观察</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="journalCode">股票代码</label>
+                <input class="input" id="journalCode" maxlength="6" placeholder="6 位代码">
+              </div>
+              <div class="form-group" style="display:flex;gap:8px;">
+                <div style="flex:1;"><label class="form-label" for="journalPrice">价格</label><input class="input" id="journalPrice" type="number" step="0.01" placeholder="可选"></div>
+                <div style="flex:1;"><label class="form-label" for="journalQty">数量</label><input class="input" id="journalQty" type="number" step="1" placeholder="可选"></div>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="journalEmotion">当时情绪</label>
+                <select class="select" id="journalEmotion">
+                  <option value="">不记录</option>
+                  <option value="冷静">冷静</option>
+                  <option value="犹豫">犹豫</option>
+                  <option value="冲动">冲动</option>
+                  <option value="恐惧">恐惧</option>
+                  <option value="贪婪">贪婪</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="journalNote">备注</label>
+                <input class="input" id="journalNote" maxlength="300" placeholder="为什么出手/放弃">
+              </div>
+              <button class="btn btn-primary" style="width:100%;" onclick="ReviewDesk.addJournal(this)">记录日志</button>
+            </div>
+          </div>
+          <div class="table-wrap" tabindex="0" style="max-height:300px;overflow-y:auto;">
+            <table>
+              <thead><tr><th>时间</th><th>动作</th><th>代码</th><th>价格</th><th>三问</th><th>情绪</th><th>备注</th></tr></thead>
+              <tbody id="journalBody"><tr><td colspan="7" style="text-align:center;color:var(--text-muted);">加载中…</td></tr></tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -1289,6 +1427,106 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
               <thead><tr><th>时间</th><th>股票</th><th>决策</th><th>置信度</th><th>评分</th></tr></thead>
               <tbody id="aiHistoryBody"></tbody>
             </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== 2.1 出手三问 ==================== -->
+      <div class="page" id="page-gate">
+        <div class="card mb-16">
+          <div class="card-title">三问全过才出手,一问不过直接放弃</div>
+          <div style="font-size:13px;color:var(--text-secondary);line-height:1.9;">
+            ① <b>什么身份</b>:是不是热点板块的龙头票,能不能带动板块<br>
+            ② <b>什么断板</b>:断板当天收盘价是否高于前一日收盘价<br>
+            ③ <b>什么竞价</b>:次日集合竞价是否高开<br>
+            <span style="color:var(--color-warning);">任一问数据缺失,按“不通过”处理(fail-closed),不用不确定的数据下单。</span>
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">输入</div>
+            <div class="form-group">
+              <label class="form-label" for="gateCode">股票代码</label>
+              <input class="input" id="gateCode" placeholder="6 位股票代码" maxlength="6" value="600519">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="gateMode">校验方式</label>
+              <select class="select" id="gateMode" onchange="ReviewDesk.toggleGateMode()">
+                <option value="auto">自动取数(断板/竞价/涨停池)</option>
+                <option value="manual">手动填写证据</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="gateSector">板块(可选,自动模式可留空)</label>
+              <input class="input" id="gateSector" placeholder="如 半导体 / 白酒">
+            </div>
+            <div id="gateManualFields" style="display:none;">
+              <div class="form-group">
+                <label class="form-label" for="gatePrevClose">前一日收盘价</label>
+                <input class="input" id="gatePrevClose" type="number" step="0.01" placeholder="如 10.00">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="gateBreakClose">断板日收盘价</label>
+                <input class="input" id="gateBreakClose" type="number" step="0.01" placeholder="如 10.50">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="gateAuction">竞价价格</label>
+                <input class="input" id="gateAuction" type="number" step="0.01" placeholder="如 11.00">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="gateSectorChange">板块涨幅(%)</label>
+                <input class="input" id="gateSectorChange" type="number" step="0.01" placeholder="如 4.2">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="gateSectorCount">板块涨停家数</label>
+                <input class="input" id="gateSectorCount" type="number" min="0" step="1" placeholder="如 6">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="gateLeader">是否板块龙头</label>
+                <select class="select" id="gateLeader">
+                  <option value="">未填写(按不通过)</option>
+                  <option value="true">是</option>
+                  <option value="false">否</option>
+                </select>
+              </div>
+            </div>
+            <button class="btn btn-primary" style="width:100%;" onclick="ReviewDesk.runGate(this)">校验三问</button>
+          </div>
+          <div class="card">
+            <div class="card-title">校验结论</div>
+            <div id="gateResult">
+              <div style="color:var(--text-muted);font-size:13px;padding:12px 0;">填写证据后点击「校验三问」。自动模式会读取最近两个已完成交易日的 K 线与今日开盘价。</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== 2.2 一句话调度 ==================== -->
+      <div class="page" id="page-dispatch">
+        <div class="card mb-16">
+          <div class="card-title">一句话调度 AI 投研团队</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <input class="input" id="dispatchQuery" style="flex:1;min-width:240px;" placeholder="例如:帮我复盘今天大盘 / 600519 值不值得买 / 我的基金要不要加仓" onkeydown="if(event.key==='Enter')ReviewDesk.runDispatch(this)">
+            <button class="btn btn-primary" onclick="ReviewDesk.runDispatch(this)">生成调度方案</button>
+          </div>
+          <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;" id="dispatchExamples"></div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:8px;">只生成执行方案,不自动下单;涉及交易技能必须人工确认。</div>
+        </div>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">调度方案</div>
+            <div id="dispatchResult">
+              <div style="color:var(--text-muted);font-size:13px;padding:12px 0;">输入一句话,系统会匹配技能库并按顺序给出执行步骤。</div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+              <span>金融技能库</span>
+              <span id="dispatchSkillStats" style="font-size:12px;color:var(--text-muted);">—</span>
+            </div>
+            <div id="dispatchSkills" style="max-height:520px;overflow-y:auto;">
+              <div style="color:var(--text-muted);font-size:13px;padding:12px 0;">加载中…</div>
+            </div>
           </div>
         </div>
       </div>
@@ -2070,6 +2308,7 @@ const ALERT_ICON_MAP = {
 // 超时映射:特定慢接口允许更长等待(智能分析/检索类)
 const API_TIMEOUT_MS = (url) => {
   if (url.startsWith('/api/agent/') || url.includes('/fund_analyze')) return 90000; // 多智能体 90s
+  if (url.startsWith('/api/review/')) return 30000; // 复盘需并行拉取涨停/炸板/跌停池,冷启动较慢
   if (url.startsWith('/api/news/search')) return 30000; // 智能检索 30s
   if (url.startsWith('/api/market/outlook') || url.startsWith('/api/scripts/ai-generate')) return 30000;
   if (url.startsWith('/api/holdings/upload')) return 60000; // 图片OCR识别需调用AI视觉模型,后端30s超时,前端给60s余量
@@ -2223,6 +2462,7 @@ function switchPage(name) {
      主理人拍板:trade 并入「持仓」聚合容器(hud-holdings)。 */
   const STAGE5_PAGE_MAP = {
     market:   { parent: 'hud-market' },
+    review:   { parent: 'hud-market' },
     global:   { parent: 'hud-market' },
     data:     { parent: 'hud-market' },
     position: { parent: 'hud-holdings' },
@@ -2230,6 +2470,8 @@ function switchPage(name) {
     trade:    { parent: 'hud-holdings' },
     ai:       { parent: 'hud-strategy' },
     strategy: { parent: 'hud-strategy' },
+    gate:     { parent: 'hud-strategy' },
+    dispatch: { parent: 'hud-strategy' },
     monitor:  { parent: 'hud-monitor' },
     config:   { parent: 'hud-settings' },
   };
@@ -2270,6 +2512,9 @@ function switchPage(name) {
   if (bottomTab) bottomTab.classList.add('active');
   // 切换时加载数据
   if (name === 'market') loadMarketData();
+  if (name === 'review') ReviewDesk.loadAll();
+  if (name === 'gate') ReviewDesk.initGate();
+  if (name === 'dispatch') ReviewDesk.initDispatch();
   if (name === 'position') loadPositionData();
   if (name === 'fund') loadFundData();
   if (name === 'global') loadGlobalData();
@@ -2297,6 +2542,480 @@ function switchPage(name) {
     if (subtab) subtab.classList.add('active');
   }
 }
+
+/* ========== 短线复盘 / 出手三问 / 一句话调度 ========== */
+const ReviewDesk = {
+  _skills: null,
+  _lastGate: null,
+  _loading: false,
+
+  async loadAll(force = false) {
+    if (this._loading) return;
+    this._loading = true;
+    try {
+      await Promise.all([this.loadBoard(force), this.loadCycle(force), this.loadFirst(force), this.loadJournal()]);
+    } catch (e) {
+      console.error('ReviewDesk.loadAll', e);
+    } finally {
+      this._loading = false;
+    }
+  },
+
+  async loadBoard(force = false) {
+    const resp = await api('/api/review/board' + (force ? '?refresh=1' : ''));
+    const d = resp && resp.data;
+    if (!d) {
+      ['reviewTempBars', 'reviewCompare', 'reviewLadder', 'reviewTonight', 'reviewAfter'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:8px 0;">复盘数据暂不可用,请稍后刷新</div>';
+      });
+      return;
+    }
+    const limit = d.limit || {};
+    const market = d.market || {};
+    const temp = d.temperature || {};
+    const level = temp.level || '未知';
+    const score = Number(temp.score || 0);
+    const tempColor = score >= 60 ? 'var(--color-up)' : score >= 40 ? 'var(--color-warning)' : 'var(--color-down)';
+
+    const scoreEl = document.getElementById('reviewTempScore');
+    if (scoreEl) { scoreEl.textContent = d.available ? score.toFixed(1) : '—'; scoreEl.style.color = tempColor; }
+    const levelEl = document.getElementById('reviewTempLevel');
+    if (levelEl) {
+      levelEl.textContent = d.available ? level : '无数据';
+      levelEl.style.background = this._tint(tempColor);
+      levelEl.style.color = tempColor;
+    }
+    const bars = document.getElementById('reviewTempBars');
+    if (bars) {
+      const breakdown = temp.breakdown || {};
+      const keys = Object.keys(breakdown);
+      bars.innerHTML = keys.length ? keys.map(k => {
+        const v = Math.max(0, Math.min(100, Number(breakdown[k]) || 0));
+        return `<div class="signal-row">
+          <span class="signal-label">${escapeHtml(k)}</span>
+          <span class="signal-bar"><span class="signal-bar-fill" style="width:${v}%;background:var(--accent);"></span></span>
+          <span class="signal-score">${v.toFixed(0)}</span>
+        </div>`;
+      }).join('') : '<div style="color:var(--text-muted);font-size:12px;">暂无分项数据</div>';
+    }
+
+    const limitCountEl = document.getElementById('reviewLimitCount');
+    if (limitCountEl) {
+      limitCountEl.textContent = `${limit.limit_up_count ?? 0} / ${limit.limit_down_count ?? 0}`;
+      limitCountEl.style.color = 'var(--color-up)';
+    }
+    const limitSub = document.getElementById('reviewLimitSub');
+    if (limitSub) limitSub.textContent = `涨停 ${limit.limit_up_count ?? 0} 家,跌停 ${limit.limit_down_count ?? 0} 家`;
+
+    const brokenEl = document.getElementById('reviewBrokenRate');
+    if (brokenEl) {
+      brokenEl.textContent = `${(limit.broken_rate_pct ?? 0).toFixed(1)}%`;
+      brokenEl.style.color = (limit.broken_rate_pct || 0) >= 30 ? 'var(--color-down)' : 'var(--color-warning)';
+    }
+    const brokenSub = document.getElementById('reviewBrokenSub');
+    if (brokenSub) brokenSub.textContent = `炸板 ${limit.broken_count ?? 0} 家,最高 ${limit.max_streak ?? 0} 板`;
+
+    const breadthEl = document.getElementById('reviewBreadth');
+    if (breadthEl) {
+      breadthEl.textContent = `${((market.rise_ratio || 0) * 100).toFixed(0)}%`;
+      breadthEl.style.color = (market.rise_ratio || 0) >= 0.5 ? 'var(--color-up)' : 'var(--color-down)';
+    }
+    const breadthSub = document.getElementById('reviewBreadthSub');
+    if (breadthSub) breadthSub.textContent = `涨 ${market.rise_count ?? 0} / 跌 ${market.fall_count ?? 0} / 平 ${market.flat_count ?? 0}`;
+
+    const compare = document.getElementById('reviewCompare');
+    if (compare) {
+      const y = d.yesterday || {};
+      const delta = Number(y.limit_up_delta || 0);
+      const deltaColor = delta > 0 ? 'var(--color-up)' : delta < 0 ? 'var(--color-down)' : 'var(--color-flat)';
+      compare.innerHTML = `
+        <div class="signal-row"><span class="signal-label">涨停家数</span><span style="flex:1;font-size:12px;">今日 ${limit.limit_up_count ?? 0} · 昨日 ${y.limit_up_count ?? 0}</span><span class="signal-score" style="color:${deltaColor};">${delta > 0 ? '+' : ''}${delta}</span></div>
+        <div class="signal-row"><span class="signal-label">炸板率</span><span style="flex:1;font-size:12px;">今日 ${(limit.broken_rate_pct ?? 0).toFixed(1)}% · 昨日 ${(y.broken_rate_pct ?? 0).toFixed(1)}%</span><span class="signal-score">—</span></div>
+        <div class="signal-row"><span class="signal-label">最高连板</span><span style="flex:1;font-size:12px;">今日 ${limit.max_streak ?? 0} 板 · 昨日 ${y.max_streak ?? 0} 板</span><span class="signal-score">—</span></div>
+        <div class="signal-row"><span class="signal-label">情绪温度</span><span style="flex:1;font-size:12px;">今日 ${score.toFixed(1)} · 昨日 ${y.temperature == null ? '—' : Number(y.temperature).toFixed(1)}</span><span class="signal-score">—</span></div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">数据质量:${escapeHtml(d.data_quality || '')} · 更新于 ${escapeHtml(d.updated_at || '')}</div>`;
+    }
+
+    const ladder = document.getElementById('reviewLadder');
+    if (ladder) {
+      const items = limit.ladder || {};
+      const keys = ['首板', '2板', '3板', '4板+'];
+      const max = Math.max(1, ...keys.map(k => Number(items[k] || 0)));
+      ladder.innerHTML = keys.map(k => {
+        const v = Number(items[k] || 0);
+        return `<div class="signal-row"><span class="signal-label">${k}</span>
+          <span class="signal-bar"><span class="signal-bar-fill" style="width:${(v / max) * 100}%;background:var(--color-up);opacity:0.7;"></span></span>
+          <span class="signal-score">${v}</span></div>`;
+      }).join('');
+    }
+
+    const tonight = document.getElementById('reviewTonight');
+    if (tonight) {
+      const t = d.tonight || {};
+      tonight.innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <span class="signal" style="background:rgba(245,158,11,0.15);color:var(--color-warning);">${escapeHtml(t.stance || '—')}</span>
+          <span style="font-size:13px;color:var(--text-secondary);">${escapeHtml(t.summary || '')}</span>
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">关注方向</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">${(t.focus || []).map(x => `<span class="signal" style="background:rgba(6,182,212,0.12);color:var(--accent-cyan);">${escapeHtml(x)}</span>`).join('')}</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">风险提示</div>
+        <ul style="margin:0;padding-left:18px;font-size:12px;color:var(--color-warning);line-height:1.8;">${(t.risk || []).map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>`;
+    }
+
+    const after = document.getElementById('reviewAfter');
+    if (after) {
+      const r = d.review || {};
+      after.innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <span class="signal" style="background:rgba(59,130,246,0.15);color:var(--accent-blue);">${escapeHtml(r.phase || '—')}</span>
+          <span style="font-size:13px;color:var(--text-secondary);">${escapeHtml(r.summary || '')}</span>
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">次日验证点</div>
+        <ul style="margin:0;padding-left:18px;font-size:12px;color:var(--text-secondary);line-height:1.8;">${(r.verify || []).map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>`;
+    }
+  },
+
+  async loadCycle(force = false) {
+    const resp = await api('/api/review/sentiment?days=5' + (force ? '&refresh=1' : ''));
+    const d = resp && resp.data;
+    const el = document.getElementById('reviewCycle');
+    if (!el) return;
+    if (!d || !(d.series || []).length) {
+      el.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:8px 0;">情绪周期数据暂不可用</div>';
+      return;
+    }
+    const series = d.series;
+    const maxCount = Math.max(1, ...series.map(x => Number(x.limit_up_count || 0)));
+    el.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+        <span class="signal" style="background:rgba(245,158,11,0.15);color:var(--color-warning);">${escapeHtml(d.trend || '—')}</span>
+        <span style="font-size:12px;color:var(--text-muted);">温度变化 ${Number(d.temperature_delta || 0) >= 0 ? '+' : ''}${Number(d.temperature_delta || 0).toFixed(1)}</span>
+      </div>
+      ${series.map(x => `
+        <div class="signal-row">
+          <span class="signal-label" style="min-width:82px;">${escapeHtml(x.date)}</span>
+          <span class="signal-bar" style="max-width:260px;"><span class="signal-bar-fill" style="width:${(Number(x.limit_up_count || 0) / maxCount) * 100}%;background:var(--color-up);opacity:0.7;"></span></span>
+          <span style="font-size:12px;min-width:110px;">涨停 ${x.limit_up_count ?? 0} · 最高 ${x.max_streak ?? 0} 板</span>
+          <span class="signal-score">${Number(x.temperature || 0).toFixed(0)}</span>
+        </div>`).join('')}`;
+  },
+
+  async loadFirst(force = false) {
+    const resp = await api('/api/review/first_board?top=20' + (force ? '&refresh=1' : ''));
+    const d = resp && resp.data;
+    const body = document.getElementById('reviewFirstBody');
+    const meta = document.getElementById('reviewFirstMeta');
+    if (!body) return;
+    if (!d) {
+      body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);">首板数据暂不可用</td></tr>';
+      return;
+    }
+    if (meta) meta.textContent = `${d.date || ''} · ${d.count ?? 0} 只首板`;
+    if (!(d.items || []).length) {
+      body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);">当日暂无首板数据(可能非交易日)</td></tr>';
+      return;
+    }
+    body.innerHTML = d.items.map(item => {
+      const levelColor = item.watch_level === '强' ? 'var(--color-up)' : item.watch_level === '中' ? 'var(--color-warning)' : 'var(--color-flat)';
+      return `<tr>
+        <td>${escapeHtml(item.code)}</td>
+        <td>${escapeHtml(item.name)}</td>
+        <td>${escapeHtml(item.industry || '—')}</td>
+        <td>${escapeHtml(item.first_seal_time || '—')}</td>
+        <td>${fmtMoney(item.seal_amount)}</td>
+        <td>${item.break_count ?? 0}</td>
+        <td>${Number(item.seal_quality || 0).toFixed(1)}</td>
+        <td><span class="signal" style="background:${this._tint(levelColor)};color:${levelColor};">${escapeHtml(item.watch_level)}</span></td>
+      </tr>`;
+    }).join('');
+  },
+
+  async loadJournal() {
+    const resp = await api('/api/review/journal?limit=100');
+    const body = document.getElementById('journalBody');
+    const statsEl = document.getElementById('journalStats');
+    const d = resp && resp.data;
+    if (!body) return;
+    if (!d) {
+      body.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);">日志暂不可用(需配置 ADMIN_TOKEN)</td></tr>';
+      return;
+    }
+    const s = d.stats || {};
+    const score = s.score;
+    const scoreColor = score == null ? 'var(--text-muted)' : score >= 90 ? 'var(--color-up)' : score >= 75 ? 'var(--color-warning)' : 'var(--color-down)';
+    const gradeColor = s.grade === '优秀' ? 'var(--color-up)' : s.grade === '良好' ? 'var(--color-warning)' : s.grade === '样本不足' ? 'var(--color-flat)' : 'var(--color-down)';
+    const scoreEl = document.getElementById('journalScore');
+    if (scoreEl) { scoreEl.textContent = score == null ? '—' : score.toFixed(1); scoreEl.style.color = scoreColor; }
+    const gradeEl = document.getElementById('journalGrade');
+    if (gradeEl) { gradeEl.textContent = s.grade || '样本不足'; gradeEl.style.background = this._tint(gradeColor); gradeEl.style.color = gradeColor; }
+    const compEl = document.getElementById('journalCompliance');
+    if (compEl) compEl.textContent = s.compliance_rate == null ? '暂无买入记录' : `${(s.compliance_rate * 100).toFixed(0)}% (${s.buy_count - s.buys_with_gate_fail - s.buys_without_gate}/${s.buy_count})`;
+    const covEl = document.getElementById('journalCoverage');
+    if (covEl) covEl.textContent = s.check_coverage == null ? '暂无交易记录' : `${(s.check_coverage * 100).toFixed(0)}% (${s.gate_checked}/${s.buy_count + s.sell_count})`;
+    const abEl = document.getElementById('journalAbandon');
+    if (abEl) abEl.textContent = `${s.abandon_count ?? 0} 次`;
+    const issuesEl = document.getElementById('journalIssues');
+    if (issuesEl) {
+      issuesEl.innerHTML = (s.issues || []).length
+        ? (s.issues || []).map(x => `<div>· ${escapeHtml(x)}</div>`).join('')
+        : '<div style="color:var(--text-muted);">暂无纪律问题</div>';
+    }
+    if (statsEl) statsEl.textContent = `${s.total ?? 0} 条记录`;
+
+    if (!(d.entries || []).length) {
+      body.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);">还没有记录,先用上面的表单记一笔</td></tr>';
+      return;
+    }
+    const actionLabel = { buy: '买入', sell: '卖出', abandon: '放弃', watch: '观察' };
+    body.innerHTML = d.entries.slice(0, 50).map(item => {
+      let gateText = '未校验';
+      let gateColor = 'var(--color-flat)';
+      if (item.gate && item.gate.passed === true) { gateText = '通过'; gateColor = 'var(--color-up)'; }
+      else if (item.gate && item.gate.passed === false) { gateText = '不通过'; gateColor = 'var(--color-down)'; }
+      const actionColor = item.action === 'buy' ? 'var(--color-up)' : item.action === 'sell' ? 'var(--color-down)' : 'var(--color-flat)';
+      return `<tr>
+        <td>${escapeHtml(String(item.created_at || '').slice(5, 16))}</td>
+        <td><span class="signal" style="background:${this._tint(actionColor)};color:${actionColor};">${escapeHtml(actionLabel[item.action] || item.action)}</span></td>
+        <td>${escapeHtml(item.stock_code)} ${escapeHtml(item.stock_name || '')}</td>
+        <td>${item.price == null ? '—' : fmtNum(item.price)}</td>
+        <td><span class="signal" style="background:${this._tint(gateColor)};color:${gateColor};">${gateText}</span></td>
+        <td>${escapeHtml(item.emotion || '—')}</td>
+        <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(item.note || '')}">${escapeHtml(item.note || '—')}</td>
+      </tr>`;
+    }).join('');
+  },
+
+  async _postJournal(payload, btn) {
+    const run = () => api('/api/review/journal', { method: 'POST', body: JSON.stringify(payload) });
+    const resp = btn ? await withLoading(btn, run) : await run();
+    if (resp && resp.data) {
+      showToast('已记录到交易日志', 'success');
+      await this.loadJournal();
+      return true;
+    }
+    return false;
+  },
+
+  async addJournal(btn) {
+    const action = document.getElementById('journalAction')?.value || 'watch';
+    const code = (document.getElementById('journalCode')?.value || '').trim();
+    if (!/^\d{6}$/.test(code)) {
+      showToast('请输入 6 位股票代码', 'error');
+      return;
+    }
+    const payload = {
+      action,
+      stock_code: code,
+      price: this._numOrNull('journalPrice'),
+      quantity: this._numOrNull('journalQty'),
+      emotion: document.getElementById('journalEmotion')?.value || '',
+      note: (document.getElementById('journalNote')?.value || '').trim(),
+    };
+    const gate = this._lastGate;
+    if (gate && gate.stock_code === code) {
+      payload.stock_name = gate.stock_name || '';
+      payload.gate_passed = gate.passed;
+      payload.gate_mode = gate.mode || '';
+      payload.gate_missing = gate.missing || [];
+      payload.gate_failed = gate.failed || [];
+    }
+    const ok = await this._postJournal(payload, btn);
+    if (ok) {
+      const noteEl = document.getElementById('journalNote');
+      if (noteEl) noteEl.value = '';
+    }
+  },
+
+  async journalFromGate(btn) {
+    const gate = this._lastGate;
+    if (!gate) {
+      showToast('请先完成一次三问校验', 'error');
+      return;
+    }
+    await this._postJournal({
+      action: 'watch',
+      stock_code: gate.stock_code,
+      stock_name: gate.stock_name || '',
+      gate_passed: gate.passed,
+      gate_mode: gate.mode || '',
+      gate_missing: gate.missing || [],
+      gate_failed: gate.failed || [],
+      note: '三问校验记录'
+    }, btn);
+  },
+
+  toggleGateMode() {
+    const mode = document.getElementById('gateMode')?.value || 'auto';
+    const fields = document.getElementById('gateManualFields');
+    if (fields) fields.style.display = mode === 'manual' ? 'block' : 'none';
+  },
+
+  initGate() {
+    this.toggleGateMode();
+  },
+
+  _numOrNull(id) {
+    const raw = document.getElementById(id)?.value;
+    if (raw === undefined || raw === null || String(raw).trim() === '') return null;
+    const num = Number(raw);
+    return Number.isFinite(num) ? num : null;
+  },
+
+  /* CSS 变量不支持 var(--x)22 这种加透明度写法,统一映射为 rgba */
+  _tint(colorVar) {
+    const c = colorVar || '';
+    if (c.includes('color-up')) return 'rgba(239,68,68,0.13)';
+    if (c.includes('color-down')) return 'rgba(34,197,94,0.13)';
+    if (c.includes('color-warning')) return 'rgba(245,158,11,0.13)';
+    if (c.includes('accent-cyan')) return 'rgba(6,182,212,0.13)';
+    if (c.includes('accent-blue')) return 'rgba(59,130,246,0.13)';
+    return 'rgba(148,163,184,0.13)';
+  },
+
+  async runGate(btn) {
+    const code = (document.getElementById('gateCode')?.value || '').trim();
+    if (!/^\d{6}$/.test(code)) {
+      showToast('请输入 6 位股票代码', 'error');
+      return;
+    }
+    const mode = document.getElementById('gateMode')?.value || 'auto';
+    const payload = { stock_code: code, mode, sector: (document.getElementById('gateSector')?.value || '').trim() };
+    if (mode === 'manual') {
+      const leaderRaw = document.getElementById('gateLeader')?.value || '';
+      payload.prev_close = this._numOrNull('gatePrevClose');
+      payload.break_close = this._numOrNull('gateBreakClose');
+      payload.auction_price = this._numOrNull('gateAuction');
+      payload.sector_change_pct = this._numOrNull('gateSectorChange');
+      payload.sector_limit_up_count = this._numOrNull('gateSectorCount');
+      payload.is_sector_leader = leaderRaw === '' ? null : leaderRaw === 'true';
+    }
+    const el = document.getElementById('gateResult');
+    if (el) el.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:12px 0;">校验中…</div>';
+    const resp = await withLoading(btn, () => api('/api/review/three_question', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }));
+    const d = resp && resp.data;
+    if (!d) {
+      if (el) el.innerHTML = '<div style="color:var(--color-warning);font-size:13px;padding:12px 0;">校验失败,请稍后重试</div>';
+      return;
+    }
+    this._lastGate = d;
+    const color = d.passed ? 'var(--color-up)' : 'var(--color-down)';
+    if (el) {
+      el.innerHTML = `
+        <div style="padding:12px;border-radius:8px;background:${this._tint(color)};border:1px solid ${color};margin-bottom:12px;">
+          <div style="font-size:16px;font-weight:700;color:${color};">${d.passed ? '三问全过 · 可出手' : '放弃 · 不符合模式'}</div>
+          <div style="font-size:12px;color:var(--text-secondary);margin-top:6px;">${escapeHtml(d.verdict || '')}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">${escapeHtml(d.stock_name || '')} ${escapeHtml(d.stock_code || '')} · ${escapeHtml(d.mode === 'auto' ? '自动取数' : '手动证据')} · ${escapeHtml(d.checked_at || '')}</div>
+        </div>
+        ${(d.questions || []).map(q => {
+          const qc = q.passed ? 'var(--color-up)' : 'var(--color-down)';
+          return `<div style="padding:10px 12px;margin-bottom:8px;border-left:3px solid ${qc};background:rgba(148,163,184,0.06);border-radius:4px;">
+            <div class="flex-between"><span style="font-weight:600;font-size:13px;">${escapeHtml(q.title)}</span>
+              <span class="signal" style="background:${this._tint(qc)};color:${qc};">${q.passed ? '通过' : '不通过'}</span></div>
+            <div style="font-size:12px;color:var(--text-secondary);margin-top:6px;">${escapeHtml(q.detail || '')}</div>
+          </div>`;
+        }).join('')}
+        <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">${escapeHtml(d.risk_note || '')}</div>
+        <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <button class="btn btn-sm btn-outline" onclick="ReviewDesk.journalFromGate(this)">记录本次校验</button>
+          <span style="font-size:11px;color:var(--text-muted);">记录后可在「短线复盘」页的交易日志中查看纪律归因</span>
+        </div>`;
+    }
+  },
+
+  initDispatch() {
+    this.renderExamples();
+    if (!this._skills) this.loadSkills();
+  },
+
+  renderExamples() {
+    const el = document.getElementById('dispatchExamples');
+    if (!el) return;
+    const examples = ['帮我复盘今天大盘', '600519 值不值得买', '我的基金要不要加仓', '这个策略回测是不是过拟合', '今天有哪些首板可以跟踪'];
+    el.innerHTML = examples.map(q => `<button class="btn btn-sm btn-outline" data-q="${escapeHtml(q)}" onclick="ReviewDesk.useExample(this)">${escapeHtml(q)}</button>`).join('');
+  },
+
+  useExample(btn) {
+    const q = btn?.dataset?.q || '';
+    const input = document.getElementById('dispatchQuery');
+    if (input) input.value = q;
+    this.runDispatch(null);
+  },
+
+  async loadSkills() {
+    const resp = await api('/api/agent/skills');
+    const d = resp && resp.data;
+    const el = document.getElementById('dispatchSkills');
+    const statsEl = document.getElementById('dispatchSkillStats');
+    if (!d) {
+      if (el) el.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">技能库暂不可用</div>';
+      return;
+    }
+    this._skills = d.skills || [];
+    const byId = {};
+    this._skills.forEach(s => { byId[s.id] = s; });
+    if (statsEl) statsEl.textContent = `${d.stats.total} 项 · ${d.stats.categories} 类`;
+    if (!el) return;
+    el.innerHTML = (d.categories || []).map(cat => {
+      const chips = (cat.skills || []).map(id => {
+        const s = byId[id];
+        if (!s) return '';
+        const color = s.read_only ? 'var(--accent-cyan)' : 'var(--color-warning)';
+        return `<span class="signal" title="${escapeHtml(s.description)}" style="background:${this._tint(color)};color:${color};">${escapeHtml(s.name)}</span>`;
+      }).join('');
+      return `<div style="margin-bottom:12px;">
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">${escapeHtml(cat.category)} (${cat.count})</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">${chips}</div>
+      </div>`;
+    }).join('');
+  },
+
+  async runDispatch(btn) {
+    const input = document.getElementById('dispatchQuery');
+    const query = (input?.value || '').trim();
+    if (!query) {
+      showToast('请输入一句话指令', 'error');
+      return;
+    }
+    const el = document.getElementById('dispatchResult');
+    if (el) el.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:12px 0;">匹配技能中…</div>';
+    const run = () => api('/api/agent/dispatch', { method: 'POST', body: JSON.stringify({ query }) });
+    // 回车触发时 this 是输入框,不能当按钮做 loading 态(会清空输入内容)
+    const trigger = (btn && btn.tagName === 'BUTTON') ? btn : null;
+    const resp = trigger ? await withLoading(trigger, run) : await run();
+    const d = resp && resp.data;
+    if (!d) {
+      if (el) el.innerHTML = '<div style="color:var(--color-warning);font-size:13px;padding:12px 0;">调度失败,请稍后重试</div>';
+      return;
+    }
+    const intent = d.intent || {};
+    const confColor = intent.confidence === 'high' ? 'var(--color-up)' : intent.confidence === 'medium' ? 'var(--color-warning)' : 'var(--color-flat)';
+    if (el) {
+      el.innerHTML = `
+        <div style="padding:12px;border-radius:8px;background:rgba(59,130,246,0.08);border:1px solid var(--accent-blue);margin-bottom:12px;">
+          <div style="font-size:13px;font-weight:600;">识别意图:${escapeHtml(intent.name || '—')}</div>
+          <div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">分类 ${escapeHtml(intent.category || '—')} · 置信度 <span style="color:${confColor};">${escapeHtml(intent.confidence || '—')}</span>${d.stock_code ? ' · 代码 ' + escapeHtml(d.stock_code) : ''}</div>
+        </div>
+        ${(d.plan || []).map(step => {
+          const rc = step.read_only ? 'var(--accent-cyan)' : 'var(--color-warning)';
+          const params = Object.keys(step.params_hint || {}).length
+            ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">参数建议:${escapeHtml(JSON.stringify(step.params_hint))}</div>` : '';
+          return `<div style="padding:10px 12px;margin-bottom:8px;border-left:3px solid ${rc};background:rgba(148,163,184,0.06);border-radius:4px;">
+            <div class="flex-between"><span style="font-weight:600;font-size:13px;">${step.step}. ${escapeHtml(step.skill)}</span>
+              <span class="signal" style="background:${this._tint(rc)};color:${rc};">${step.read_only ? '只读' : '写操作'}</span></div>
+            <div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">${escapeHtml(step.description || '')}</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">${escapeHtml(step.method)} ${escapeHtml(step.api)}</div>
+            ${params}
+          </div>`;
+        }).join('')}
+        ${(d.notes || []).length ? `<ul style="margin:8px 0 0;padding-left:18px;font-size:12px;color:var(--color-warning);line-height:1.8;">${d.notes.map(n => `<li>${escapeHtml(n)}</li>`).join('')}</ul>` : ''}`;
+    }
+  }
+};
 
 /* ========== 系统时间 ========== */
 function updateTime() {

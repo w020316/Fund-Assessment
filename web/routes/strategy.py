@@ -4,12 +4,14 @@ from typing import Any
 
 import asyncio
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.core import data_source_v2 as ds2
+from src.core.validation import validate_returns
 from src.utils.auth import require_admin
+from web.rate_limiter import limiter
 
 router = APIRouter()
 
@@ -93,6 +95,14 @@ class StrategyInfo(BaseModel):
     display_name: str
     description: str
     enabled: bool
+
+
+class ValidateRequest(BaseModel):
+    returns: list[float] = Field(..., min_length=1, max_length=5000)
+    train_size: int = Field(60, ge=5, le=1000)
+    test_size: int = Field(20, ge=5, le=500)
+    step: int | None = Field(None, ge=1, le=500)
+    runs: int = Field(1000, ge=100, le=5000)
 
 
 def _fallback_analysis(stock_code: str, strategy_type: str, error_msg: str = "") -> dict[str, Any]:
@@ -381,6 +391,24 @@ async def backtest(req: BacktestRequest):
         logger.exception(f"backtest {req.strategy} failed")
         from fastapi import HTTPException
         raise HTTPException(status_code=503, detail="回测执行失败，请稍后重试")
+
+
+@router.post("/validate")
+@limiter.limit("20/minute")
+async def validate_backtest(request: Request, req: ValidateRequest) -> dict[str, Any]:
+    """回测结果验证:滚动样本外 + 蒙特卡洛
+
+    输入为逐期收益率序列(如日收益,小数形式),不会触发任何交易或写操作。
+    """
+    result = await asyncio.to_thread(
+        validate_returns,
+        req.returns,
+        train_size=req.train_size,
+        test_size=req.test_size,
+        step=req.step,
+        runs=req.runs,
+    )
+    return {"data": result}
 
 
 @router.get("/list", response_model=list[StrategyInfo])

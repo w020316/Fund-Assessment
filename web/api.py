@@ -206,7 +206,9 @@ from web.routes import market as market_route
 from web.routes import monitor as monitor_route
 from web.routes import news as news_route
 from web.routes import portfolio as portfolio_route
+from web.routes import review as review_route
 from web.routes import scripts as scripts_route
+from web.routes import skills as skills_route
 from web.routes import strategy as strategy_route
 from web.routes import trade as trade_route
 from src.utils.auth import require_admin
@@ -225,6 +227,10 @@ app.include_router(news_route.router, prefix="/api/news", tags=["消息面"])
 app.include_router(holdings_route.router, prefix="/api/holdings", tags=["重仓股板块"])
 # 阶段七:数据源健康度(借鉴 zvt recorder 状态;只读,无需鉴权)
 app.include_router(data_health_route.router, prefix="/api/data", tags=["数据源健康"])
+# 短线复盘 + 出手三问(只读,复用行情数据源)
+app.include_router(review_route.router, prefix="/api/review", tags=["短线复盘"])
+# 金融技能库 + 一句话调度(只生成方案,不自动执行写操作)
+app.include_router(skills_route.router, prefix="/api/agent", tags=["技能调度"])
 # 阶段六批次A:组合盯盘/风险/X-Ray/Webhook/账本导入导出(全部挂 require_admin,scan 例外见路由内说明)
 app.include_router(portfolio_route.router, prefix="/api/portfolio", tags=["组合阶段六"])
 

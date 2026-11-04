@@ -11,6 +11,11 @@
 - **基金建议规则引擎**:基于大盘/板块/盈亏三信号生成个性化建议(take_profit/add/dca/hold/watch)
 - **话术库**:24 个预置模板 + 变量填充 + 智能匹配,股市+基金双覆盖
 - **A 股特有约束建模**:T+1 交易制度、涨跌停限制(10%/20%/5%)、最小交易单位 100 股
+- **短线复盘看板**:涨跌家数、涨停/跌停/炸板、连板梯队、近 5 日情绪周期、首板封板质量、次日规则判断
+- **交易日志 / 纪律归因**:记录买入/卖出/放弃/观察与三问结果,统计出手合规率、三问覆盖率、过度交易与重复犯错
+- **出手三问闸门**:身份/断板/竞价三问全过才给出“可出手”结论,任一问数据缺失按不通过处理(fail-closed)
+- **金融技能库 + 一句话调度**:40 项真实技能 / 9 大分类,自然语言 → 技能匹配 → 可执行调度方案(不自动下单)
+- **回测验证**:Walk-Forward 滚动样本外统计 + 蒙特卡洛重采样,补充单一收益曲线看不到的稳健性信息
 - **数据质量校验**:多维度数据质量检查(完整性/时效性/合理性/一致性),质量评分 0-100
 - **完整风控体系**:四级风险等级 + 系统回撤限制 + 单日亏损限制 + 紧急停止机制
 - **鉴权安全**:静态 Token + 时序攻击防护,6 个写/交易端点保护
@@ -20,13 +25,13 @@
 
 ```
 ┌──────────────────────────────────────────────────┐
-│         Web 前端 (index.html SPA,10 页面)         │
-│  行情/智能分析/策略/交易/持仓/基金/国际/数据/监控/配置 │
+│         Web 前端 (index.html SPA,13 页面)         │
+│  行情/复盘/智能分析/策略/三问/调度/交易/持仓/基金/国际/数据/监控/配置 │
 ├──────────────────────────────────────────────────┤
-│          FastAPI REST API (10 大路由模块)          │
+│          FastAPI REST API (12 大路由模块)          │
 │  dashboard / strategy / trade / monitor          │
-│  config / market / agent / fund                  │
-│  global / scripts                                │
+│  config / market / agent / fund / skills         │
+│  global / scripts / review                       │
 ├──────────────────────────────────────────────────┤
 │              核心业务层                            │
 │  ┌──────────┐ ┌──────────┐ ┌───────────────┐    │
@@ -64,7 +69,7 @@
 | 鉴权 | 静态 Token + secrets.compare_digest |
 | 数据库 | SQLite (风控状态持久化) |
 | 部署 | Render (主要), Fly.io, Railway, Vercel |
-| 测试 | pytest + TestClient + mock, 71 文件 1790 用例 |
+| 测试 | pytest + TestClient + mock, 77 文件 1905 用例 |
 
 ## 快速开始
 
@@ -111,7 +116,7 @@ python -m uvicorn web.api:app --host 0.0.0.0 --port 8000
 ### 4. 运行测试
 
 ```bash
-# 全量测试(71 文件, 1790 用例)
+# 全量测试(77 文件, 1905 用例)
 python -m pytest tests/ -v
 
 # 单个子项目测试
@@ -128,6 +133,28 @@ python -m pytest tests/test_global_market.py -v
 - 个股实时行情、K 线图、资金流向
 - 板块排名、龙虎榜、北向资金
 - 数据质量评分与来源标识
+
+### 短线复盘(行情 → 短线复盘)
+- 盘面数据:涨跌家数、涨停/跌停/炸板家数与炸板率、两市成交额
+- 涨停结构:首板/2板/3板/4板+ 梯队、最高连板、板块涨停分布
+- 情绪温度:涨停强度/连板高度/封板质量/市场广度/指数表现五因子加权(0-100)
+- 近 5 日情绪周期:涨停家数与最高连板变化,判断升温/降温/震荡
+- 首板分析:按封板时间、封单金额、炸板次数计算封板质量,给出强/中/弱跟踪级别
+- 今晚判断 / 复盘后判断:规则引擎输出,同数据同结论,不调用 LLM
+- 交易日志 / 纪律归因:JSONL 追加写,记录动作、价格、情绪、备注与三问结果;统计出手合规率、三问覆盖率、每日买入次数与重复标的
+
+### 出手三问(策略 → 出手三问)
+- 第一问·身份:是否热点板块龙头(板块涨停家数 + 板块内连板/封单排名)
+- 第二问·断板:断板日收盘价是否高于前一日收盘价
+- 第三问·竞价:次日集合竞价是否高开
+- 三问全过才返回“可出手”;任一问不通过或数据缺失直接“放弃”
+- 支持自动取数(日 K + 实时行情 + 涨停池)与手动填写证据两种模式
+
+### 一句话调度(策略 → 一句话调度)
+- 40 项金融技能、9 大分类(市场复盘/行情数据/个股研究/策略选股/回测验证/基金组合/持仓交易/风险监控/资讯话术)
+- 自然语言 → 关键词与场景加权 → 输出 1-3 个技能的执行顺序、API、参数建议
+- 只生成方案不自动执行;写操作(下单)必须人工确认
+- 技能目录只登记真实存在的 API,不登记未实现能力
 
 ### 智能分析(快捷键 2)
 - 7 位专业分析师多维度分析
@@ -207,6 +234,15 @@ python -m pytest tests/test_global_market.py -v
 | `POST /api/scripts/generate` | 生成话术 |
 | `POST /api/scripts/match/fund` | 基金话术匹配 |
 | `POST /api/scripts/match/stock` | 股票话术匹配 |
+| `GET /api/review/board` | 短线复盘看板 |
+| `GET /api/review/sentiment` | 近 N 日情绪周期 |
+| `GET /api/review/first_board` | 首板分析 |
+| `POST /api/review/three_question` | 出手三问校验 |
+| `GET /api/review/journal` | 交易日志 + 纪律归因 |
+| `POST /api/review/journal` | 追加交易日志 |
+| `GET /api/agent/skills` | 金融技能库目录 |
+| `POST /api/agent/dispatch` | 一句话调度方案 |
+| `POST /api/strategy/validate` | 回测验证(滚动样本外 + 蒙特卡洛) |
 
 完整 API 文档访问 `/docs`(Swagger UI)。
 
@@ -226,8 +262,12 @@ Fund-Assessment/
 │   └── 2026-07-06-S6-test-coverage.md          # S6 测试补全
 ├── scripts/             # 14 个实用脚本(日报/回测/监控等)
 ├── src/
-│   ├── agents/          # 多智能体系统(7 Agent + 辩论 + 决策)
+│   ├── agents/          # 多智能体系统(7 Agent + 辩论 + 决策 + 技能调度)
+│   │   ├── skill_registry.py   # 金融技能库(40 项/9 类)
+│   │   └── dispatcher.py       # 一句话意图路由
 │   ├── analysis/        # 分析模块
+│   │   ├── market_review.py    # 短线复盘(盘面/情绪周期/首板/次日判断)
+│   │   ├── trade_journal.py    # 交易日志与纪律归因
 │   │   ├── fund_advisor.py     # 基金建议规则引擎
 │   │   ├── script_library.py   # 话术库(24 模板)
 │   │   ├── capital_flow.py     # 资金流分析
@@ -244,16 +284,18 @@ Fund-Assessment/
 │   │   ├── risk_manager.py      # 四级风控管理
 │   │   ├── executor.py          # 交易执行器
 │   │   ├── scheduler.py         # APScheduler 调度
+│   │   ├── validation.py        # 回测验证(Walk-Forward + 蒙特卡洛)
 │   │   └── backtest.py          # 回测引擎
 │   ├── monitor/         # 监控模块(告警/日内资金流)
-│   ├── strategies/      # 6 个交易策略
+│   ├── strategies/      # 6 个交易策略 + 三问闸门
+│   │   └── three_question_gate.py  # 身份/断板/竞价校验
 │   └── utils/           # 工具模块
 │       ├── auth.py              # 鉴权(静态 Token)
 │       ├── convert.py           # 类型转换(safe_float/safe_str)
 │       ├── config.py            # 配置加载
 │       ├── logger.py            # 日志
 │       └── notify.py            # 通知
-├── tests/               # 测试(71 文件, 1790 用例)
+├── tests/               # 测试(77 文件, 1905 用例)
 │   ├── conftest.py              # 测试配置 + fixtures
 │   ├── test_api.py              # API 端点测试
 │   ├── test_auth.py             # 鉴权测试
@@ -279,9 +321,11 @@ Fund-Assessment/
 │   │   ├── agent.py             # AI Agent
 │   │   ├── fund.py              # 基金
 │   │   ├── global_market.py     # 国际市场
+│   │   ├── review.py            # 短线复盘 / 出手三问
+│   │   ├── skills.py            # 技能库 / 一句话调度
 │   │   └── scripts.py           # 话术库
 │   └── static/
-│       └── index.html   # 前端 SPA(10 页面)
+│       └── index.html   # 前端 SPA(13 页面)
 ├── launch.py            # 启动入口(推荐)
 ├── .env.example         # 环境变量模板
 ├── requirements.txt     # Python 依赖
@@ -301,9 +345,10 @@ Fund-Assessment/
 | S4 话术库 | 1 | 26 | 模板列表/填充/生成/基金匹配/股票匹配/分类 |
 | S5 前端去 AI 化 | 0 | 0 | 纯前端改造(无单测) |
 | S6 测试补全 | 3 | 55 | DataCache/话术路由/国际路由 |
-| **合计(当前全量)** | **71** | **1790** | 全部通过(2026-10-28) |
+| S7 复盘/三问/日志/技能调度 | 6 | 54 | 复盘看板/情绪周期/首板/三问闸门/交易日志/技能库/回测验证/新增路由 |
+| **合计(当前全量)** | **77** | **1905** | 全部通过(2026-11-04) |
 
-说明:S1~S6 行为各阶段交付时的原始用例数,合计为当前仓库全量规模(含阶段六与第二轮质量评估新增用例)。
+说明:S1~S7 行为各阶段交付时的原始用例数,合计为当前仓库全量规模(含阶段六、第二轮质量评估与本轮复盘/调度新增用例)。
 
 ### 运行测试
 
@@ -327,7 +372,7 @@ python -m pytest tests/ --cov=src --cov=web --cov-report=html
 
 ## 质量保障
 
-- **1790 个单元测试**:覆盖核心模块、数据源、路由、引擎
+- **1905 个单元测试**:覆盖核心模块、数据源、路由、引擎
 - **数据真实性**:移除所有造假 fallback,返回空数据 + 日志说明
 - **async 友好**:所有同步网络调用用 `asyncio.to_thread` 包装,不阻塞事件循环
 - **鉴权安全**:6 个写/交易端点静态 Token 保护,`secrets.compare_digest` 防时序攻击
