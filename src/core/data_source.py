@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import sqlite3
@@ -554,7 +555,9 @@ class CacheSource(DataSourceBase):
                         d["timestamp"] = datetime.fromisoformat(d["timestamp"])
                     return QuoteResult(**d)
                 case "history_kline":
-                    df = pd.read_json(d["data"], orient="records")
+                    # pandas 3.x 起 read_json 不再接受 JSON 字面量字符串(会当成文件路径),
+                    # 必须用 StringIO 包装, 否则缓存读回恒为 None。
+                    df = pd.read_json(io.StringIO(d["data"]), orient="records")
                     return KlineResult(
                         symbol=d["symbol"],
                         data=df,
