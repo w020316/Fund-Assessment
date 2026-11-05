@@ -70,8 +70,10 @@ if (-not $env:ADMIN_TOKEN) {
 }
 
 if ($IsProd) {
-    Write-Host "[PROD] 生产模式: 4 workers, 无热重载" -ForegroundColor Green
-    & $pythonCmd -m uvicorn web.api:app --host 0.0.0.0 --port 8000 --workers 4
+    # R-15: 模拟持仓/风控/限流计数/缓存均驻留进程内, 多 worker 会让状态各持一份
+    # (持仓消失、限流翻倍、风控错乱), 因此生产固定单进程。
+    Write-Host "[PROD] 生产模式: 单进程(进程内状态一致性要求), 无热重载" -ForegroundColor Green
+    & $pythonCmd launch.py --host 0.0.0.0 --port 8000
 } else {
     Write-Host "[DEV] 开发模式: 热重载已启用" -ForegroundColor Green
     $job = Start-Job -ScriptBlock {
