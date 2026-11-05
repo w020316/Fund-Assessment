@@ -1884,6 +1884,8 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
             <div style="font-size:22px;font-weight:700;" id="fundCount">—</div>
           </div>
         </div>
+        <!-- 阶段四:净值数据质量提示(仅在缺失时显示,不改变既有配色) -->
+        <div id="fundDataQualityNote" style="display:none;margin:-6px 0 12px;padding:8px 12px;border:1px dashed var(--border);border-radius:8px;font-size:12px;color:var(--text-muted);"></div>
 
         <!-- 大盘温度计(P1-3) -->
         <div class="card mb-16" id="marketThermometerCard" style="display:none;">
@@ -4310,10 +4312,15 @@ let _fundSearchTimer = null;
 function _fundCardHtml(p) {
   const safeName = escapeHtml(p.fund_name || '—');
   const safeCode = escapeHtml(p.fund_code || '');
-  const mv = p.market_value || 0;
-  const chg = p.change_pct || 0;
-  const todayPnl = (p.current_nav > 0 && chg !== 0) ? mv - mv / (1 + chg / 100) : 0;
-  const pnlColor = changeColor(todayPnl);
+  // 阶段四 P0:净值/盈亏缺失时显示"数据缺失",不以 0 值伪装
+  const navMissing = p.current_nav == null;
+  const mvMissing = p.market_value == null;
+  const chgMissing = p.change_pct == null;
+  const mv = mvMissing ? 0 : p.market_value;
+  const chg = chgMissing ? 0 : p.change_pct;
+  const todayMissing = navMissing || mvMissing || chgMissing;
+  const todayPnl = (todayMissing || chg === 0) ? null : mv - mv / (1 + chg / 100);
+  const pnlColor = todayMissing ? 'var(--text-muted)' : changeColor(todayPnl);
   const low = p.confidence === 'low';
   const fresh = Freshness.html({
     asOf: p.nav_date || '',
@@ -4331,7 +4338,7 @@ function _fundCardHtml(p) {
         <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${safeCode}${lowBadge}</div>
       </div>
       <div style="text-align:right;flex-shrink:0;">
-        <div style="font-size:16px;font-weight:700;color:${pnlColor};padding:2px 8px;border-radius:6px;background:rgba(255,255,255,0.04);">${(todayPnl > 0 ? '+' : '') + todayPnl.toFixed(2)}</div>
+        <div style="font-size:16px;font-weight:700;color:${pnlColor};padding:2px 8px;border-radius:6px;background:rgba(255,255,255,0.04);">${todayPnl == null ? '<span style="font-size:13px;font-weight:500;">数据缺失</span>' : ((todayPnl > 0 ? '+' : '') + todayPnl.toFixed(2))}</div>
         <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">当日收益</div>
       </div>
     </div>
@@ -4339,8 +4346,8 @@ function _fundCardHtml(p) {
     <div class="fund-card-grid">
       <div class="fc-item"><span class="fc-label">份额</span><span class="fc-value">${fmtNum(p.shares)}</span></div>
       <div class="fc-item"><span class="fc-label">成本净值</span><span class="fc-value">${(p.cost_nav || 0).toFixed(4)}</span></div>
-      <div class="fc-item"><span class="fc-label">现价</span><span class="fc-value">${(p.current_nav || 0).toFixed(4)}</span></div>
-      <div class="fc-item"><span class="fc-label">市值</span><span class="fc-value">${fmtMoney(mv)}</span></div>
+      <div class="fc-item"><span class="fc-label">现价</span><span class="fc-value">${navMissing ? '<span style="color:var(--text-muted);">数据缺失</span>' : p.current_nav.toFixed(4)}</span></div>
+      <div class="fc-item"><span class="fc-label">市值</span><span class="fc-value">${mvMissing ? '<span style="color:var(--text-muted);">数据缺失</span>' : fmtMoney(mv)}</span></div>
     </div>
   </div>`;
 }
@@ -4351,14 +4358,33 @@ async function loadFundData() {
   const positions = data.positions || [];
   const summary = data.summary || {};
 
-  document.getElementById('fundTotalValue').textContent = fmtMoney(summary.total_market_value || 0);
-  document.getElementById('fundTotalCost').textContent = fmtMoney(summary.total_cost || 0);
+  // 阶段四 P0:后端缺失时返回 null,前端必须显示"数据缺失"(不再显示 0.0000/+0.00)
+  const totalMvMissing = summary.total_market_value == null;
+  const totalPnlMissing = summary.total_pnl == null;
+  const totalMvEl = document.getElementById('fundTotalValue');
+  totalMvEl.textContent = totalMvMissing ? '数据缺失' : fmtMoney(summary.total_market_value);
+  totalMvEl.style.color = totalMvMissing ? 'var(--text-muted)' : '';
+  document.getElementById('fundTotalCost').textContent = fmtMoney(summary.total_cost == null ? 0 : summary.total_cost);
   const pnlEl = document.getElementById('fundTotalPnl');
-  const pnl = summary.total_pnl || 0;
+  const pnl = summary.total_pnl;
   // 负值必须带 "-":原写法只补 "+" 再取绝对值,浮亏会显示成正数(仅靠绿色隐含方向)
-  pnlEl.textContent = (pnl > 0 ? '+' : pnl < 0 ? '-' : '') + fmtMoney(Math.abs(pnl));
-  pnlEl.style.color = changeColor(pnl);
+  pnlEl.textContent = totalPnlMissing
+    ? '数据缺失'
+    : ((pnl > 0 ? '+' : pnl < 0 ? '-' : '') + fmtMoney(Math.abs(pnl)));
+  pnlEl.style.color = totalPnlMissing ? 'var(--text-muted)' : changeColor(pnl);
   document.getElementById('fundCount').textContent = summary.count || 0;
+
+  const noteEl = document.getElementById('fundDataQualityNote');
+  if (noteEl) {
+    const missing = summary.missing_nav_count || 0;
+    if (missing > 0) {
+      noteEl.style.display = 'block';
+      noteEl.textContent = '有 ' + missing + ' 只基金实时净值缺失,相关数值显示为"数据缺失",未计入总计。';
+    } else {
+      noteEl.style.display = 'none';
+      noteEl.textContent = '';
+    }
+  }
 
   const body = document.getElementById('fundPositionBody');
   // ===== STAGE5: fund-cards ===== 移动端卡片列表同源渲染(P1-1);桌面由 CSS 只显示表格
@@ -4383,7 +4409,7 @@ async function loadFundData() {
       <td>${safeName}</td>
       <td>${p.shares}</td>
       <td>${(p.cost_nav || 0).toFixed(4)}</td>
-      <td>${(p.current_nav || 0).toFixed(4)}
+      <td>${p.current_nav == null ? '<span title="实时净值暂无数据" style="color:var(--text-muted);">数据缺失</span>' : p.current_nav.toFixed(4)}
         <!-- ===== STAGE5: freshness ===== K6:净值"截至日期/滞后"标识 + 置信度(P0-2) -->
         <div>${Freshness.html({
           asOf: p.nav_date || '',
@@ -4391,9 +4417,11 @@ async function loadFundData() {
           note: p.confidence === 'low' ? (p.confidence_reason || '') : ''
         })}${p.confidence === 'low' ? ` <button class="btn btn-sm" style="padding:2px 8px;color:var(--color-warning);" title="进入补录向导复核该基金" data-code="${escapeHtml(p.fund_code)}" onclick="onFundWizardReviewClick(this)">复核</button>` : ''}</div>
       </td>
-      <td style="color:${changeColorStr};">${(p.change_pct || 0).toFixed(2)}%</td>
+      <td style="color:${p.change_pct == null ? 'var(--text-muted)' : changeColorStr};">${p.change_pct == null ? '数据缺失' : p.change_pct.toFixed(2) + '%'}</td>
       <!-- (2026-07-31) P2-9 修复: pnl_amount 为 0 时不应显示 "+", 改为 > 0 才加正号 -->
-      <td style="color:${pnlColor};">${(p.pnl_amount > 0 ? '+' : '') + (p.pnl_amount || 0).toFixed(2)}<br><span style="font-size:11px;">(${(p.pnl_pct >= 0 ? '+' : '') + (p.pnl_pct || 0).toFixed(2)}%)</span></td>
+      <td style="color:${p.pnl_amount == null ? 'var(--text-muted)' : pnlColor};">${p.pnl_amount == null || p.pnl_pct == null
+        ? '数据缺失'
+        : ((p.pnl_amount > 0 ? '+' : '') + p.pnl_amount.toFixed(2) + '<br><span style="font-size:11px;">(' + (p.pnl_pct >= 0 ? '+' : '') + p.pnl_pct.toFixed(2) + '%)</span>')}</td>
       <td style="white-space:nowrap;">
         <button class="btn btn-sm" style="color:var(--accent-cyan);padding:3px 8px;" title="P1-2 重仓股板块分析" data-code="${escapeHtml(p.fund_code)}" data-name="${safeNameAttr}" onclick="onViewHoldingsClick(this)">分析</button>
         <button class="btn btn-sm" style="color:var(--accent);padding:3px 8px;" title="P1-5 多智能体深度分析" data-code="${escapeHtml(p.fund_code)}" data-name="${safeNameAttr}" data-cost="${p.cost_nav || 0}" data-shares="${p.shares || 0}" onclick="onMultiAgentAnalyzeClick(this)">深度</button>

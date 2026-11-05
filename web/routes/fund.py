@@ -208,16 +208,29 @@ async def get_positions():
     for p in positions:
         code = p.get("fund_code", "")
         quote = quote_map.get(code, {})
-        current_nav = _safe_float(quote.get("nav", 0))
+        # 阶段四 P0 修复:净值缺失时返回 null(不填 0),并标记 data_quality=degraded。
+        # 原实现 _safe_float(quote.get("nav", 0)) 把"无行情"伪造成 0.0000,
+        # 前端继而渲染 0.0000/0.00%/+0.00,用户无法区分"真的跌到 0"与"没有数据"。
+        raw_nav = quote.get("nav") if isinstance(quote, dict) else None
+        current_nav = round(_safe_float(raw_nav), 4) if _safe_float(raw_nav) > 0 else None
         cost_nav = _safe_float(p.get("cost_nav", 0))
         shares = _safe_float(p.get("shares", 0))
-        pnl_pct = ((current_nav - cost_nav) / cost_nav * 100) if cost_nav > 0 and current_nav > 0 else 0.0
-        pnl_amount = (current_nav - cost_nav) * shares if current_nav > 0 and cost_nav > 0 else 0.0
-        market_value = current_nav * shares if current_nav > 0 else 0.0
+        if current_nav is not None and cost_nav > 0:
+            pnl_pct = (current_nav - cost_nav) / cost_nav * 100
+            pnl_amount = (current_nav - cost_nav) * shares
+            market_value = current_nav * shares
+        else:
+            # 净值或成本缺失 → 盈亏/市值不可计算,返回 null(而非 0)
+            pnl_pct = None
+            pnl_amount = None
+            market_value = None
         # 阶段5 T01:净值日期取 update_time 前 10 位,置信度 fail-closed
         update_time = _safe_str(quote.get("update_time", ""))
         nav_date = update_time[:10] if _parse_nav_date(update_time) else ""
         confidence, confidence_reason = _nav_confidence(update_time, today)
+        raw_change = quote.get("change_pct") if isinstance(quote, dict) else None
+        change_pct = round(_safe_float(raw_change), 2) if raw_change is not None else None
+        missing = current_nav is None
         enriched.append({
             "fund_code": code,
             "fund_name": p.get("fund_name") or _safe_str(quote.get("name", "")),
@@ -226,39 +239,66 @@ async def get_positions():
             "current_nav": current_nav,
             "buy_date": p.get("buy_date", ""),
             "note": p.get("note", ""),
-            "change_pct": _safe_float(quote.get("change_pct", 0)),
-            "pnl_pct": round(pnl_pct, 2),
-            "pnl_amount": round(pnl_amount, 2),
-            "market_value": round(market_value, 2),
+            "change_pct": change_pct,
+            "pnl_pct": round(pnl_pct, 2) if pnl_pct is not None else None,
+            "pnl_amount": round(pnl_amount, 2) if pnl_amount is not None else None,
+            "market_value": round(market_value, 2) if market_value is not None else None,
             "update_time": update_time,
             # 阶段5 新增三字段(向后兼容,只加不删)
             "nav_date": nav_date,
             "confidence": confidence,
             "confidence_reason": confidence_reason,
+            # 阶段四新增:该条净值数据质量,供前端区分"缺失"与真实 0
+            "data_quality": "degraded" if missing else "ok",
+            "data_quality_reason": "实时净值缺失" if missing else "",
         })
 
-    total_market_value = sum(e["market_value"] for e in enriched)
+    # 汇总只统计有净值的条目;缺失条目不参与求和,避免把"缺数据"算成 0 拉低总市值。
+    valued = [e for e in enriched if e["current_nav"] is not None]
+    missing_count = len(enriched) - len(valued)
     total_cost = sum(e["cost_nav"] * e["shares"] for e in enriched)
-    total_pnl = total_market_value - total_cost
-    total_pnl_pct = (total_pnl / total_cost * 100) if total_cost > 0 else 0.0
-    # 修复(2026-07-29): 原代码在 change_pct==0 时误返总盈亏(pnl_amount)
-    # 正确逻辑:当日盈亏 = 当前市值 - 昨日市值 = 当前市值 * change_pct / (100 + change_pct)
-    today_pnl = 0.0
-    for e in enriched:
-        if e["current_nav"] <= 0 or e["change_pct"] == 0:
-            continue
-        # 当日盈亏 = 市值 - 市值/(1+涨幅)
-        today_pnl += e["market_value"] - e["market_value"] / (1 + e["change_pct"] / 100)
+    if not enriched:
+        # 空仓:保留历史零值语义(前端显示 0)
+        total_market_value = 0.0
+        total_pnl = 0.0
+        total_pnl_pct = 0.0
+        today_pnl = 0.0
+        data_quality = "ok"
+    elif missing_count > 0:
+        # 任一持仓缺净值 → 总市值/总盈亏不可完整计算,返回 null 并标记 degraded
+        total_market_value = None
+        total_pnl = None
+        total_pnl_pct = None
+        today_pnl = None
+        data_quality = "degraded"
+    else:
+        total_market_value = sum(e["market_value"] for e in valued)
+        total_pnl = total_market_value - total_cost
+        total_pnl_pct = (total_pnl / total_cost * 100) if total_cost > 0 else 0.0
+        # 修复(2026-07-29): 原代码在 change_pct==0 时误返总盈亏(pnl_amount)
+        # 正确逻辑:当日盈亏 = 当前市值 - 昨日市值 = 当前市值 * change_pct / (100 + change_pct)
+        today_pnl = 0.0
+        for e in valued:
+            if e["change_pct"] in (None, 0):
+                continue
+            today_pnl += e["market_value"] - e["market_value"] / (1 + e["change_pct"] / 100)
+        data_quality = "ok"
+
+    def _r2(v):
+        return round(v, 2) if v is not None else None
 
     return {
         "positions": enriched,
         "summary": {
-            "total_market_value": round(total_market_value, 2),
-            "total_cost": round(total_cost, 2),
-            "total_pnl": round(total_pnl, 2),
-            "total_pnl_pct": round(total_pnl_pct, 2),
-            "today_pnl": round(today_pnl, 2),
+            "total_market_value": _r2(total_market_value),
+            "total_cost": _r2(total_cost),
+            "total_pnl": _r2(total_pnl),
+            "total_pnl_pct": _r2(total_pnl_pct),
+            "today_pnl": _r2(today_pnl),
             "count": len(enriched),
+            # 阶段四新增:整体数据质量与缺失条数(向后兼容,只加不删)
+            "data_quality": data_quality,
+            "missing_nav_count": missing_count,
         },
     }
 
