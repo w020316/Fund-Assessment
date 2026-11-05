@@ -1604,6 +1604,19 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
           </div>
         </div>
 
+        <!-- ===== 策略验证入口(R-03): 回测/样本外验证此前无 UI, 仅 API 可用 ===== -->
+        <div class="card mt-16" id="strategyLabCard">
+          <div class="card-title">策略验证(分析 / 回测 / 样本外验证)</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+            <input class="input" id="strategyLabCode" placeholder="股票代码" style="max-width:140px;" value="600519">
+            <button class="btn btn-sm btn-primary" onclick="runStrategyAnalyze()">策略分析</button>
+            <button class="btn btn-sm btn-outline" onclick="runStrategyBacktest()">回测</button>
+            <input class="input" id="strategyLabRuns" type="number" min="100" max="5000" step="100" value="1000" style="max-width:110px;" title="蒙特卡洛次数">
+            <button class="btn btn-sm btn-outline" onclick="runStrategyValidate()">样本外验证</button>
+          </div>
+          <div id="strategyLabResult" style="font-size:12px;color:var(--text-secondary);">选择操作后在此查看结果。样本外验证使用该股票近 120 日真实 K 线收盘价计算收益率序列;回测为假设性回测(因子取当前快照,存在未来函数偏差),结果仅供参考。</div>
+        </div>
+
         <!-- ===== STAGE5: signal-progress ===== 五信号评估分步进度(P1-3/K8)。
              三步均对应真实网络请求(数据获取/五信号计算/结论汇总),无假延时;
              单步失败展示已得结论并标注缺失。 -->
@@ -3907,6 +3920,95 @@ async function loadStrategyList() {
       <td><button class="btn btn-sm btn-outline" data-name="${escapeHtml(s.name)}" onclick="onStrategyManageClick(this)">管理</button></td>
     </tr>`;
   }).join('');
+}
+
+/* ===== 策略验证入口(R-03): 分析 / 回测 / 样本外验证 ===== */
+function _strategyLabCode() {
+  return (document.getElementById('strategyLabCode').value.trim() || '600519');
+}
+
+function _renderStrategyLab(title, rows) {
+  const box = document.getElementById('strategyLabResult');
+  const body = rows.map(([k, v]) =>
+    `<div style="display:flex;justify-content:space-between;gap:12px;padding:3px 0;border-bottom:1px solid var(--border);">
+      <span style="color:var(--text-muted);">${escapeHtml(k)}</span>
+      <span style="font-weight:600;">${escapeHtml(String(v))}</span>
+    </div>`).join('');
+  box.innerHTML = `<div style="font-weight:600;margin-bottom:6px;">${escapeHtml(title)}</div>${body}`;
+}
+
+function _strategyLabError(title, err) {
+  const box = document.getElementById('strategyLabResult');
+  const hint = (String(err.message || err).includes('401') || String(err.message || err).includes('503'))
+    ? '<div style="margin-top:4px;color:var(--text-muted);">该接口需要管理员令牌: 请先在控制台 localStorage.setItem(\'admin_token\', \'<你的 ADMIN_TOKEN>\') 后重试。</div>'
+    : '';
+  box.innerHTML = `<div style="color:var(--color-up);font-weight:600;">${escapeHtml(title)}</div>${hint}`;
+}
+
+async function runStrategyAnalyze() {
+  const code = _strategyLabCode();
+  try {
+    const data = await api('/api/strategy/analyze', {
+      method: 'POST',
+      body: JSON.stringify({ stock_code: code, strategy_type: 'comprehensive' })
+    });
+    const r = (data && data.result) || {};
+    _renderStrategyLab(`策略分析 ${code}`, [
+      ['类型', String((data && data.strategy_type) || '')],
+      ['综合评分', fmtNum(r.composite_score ?? r.score)],
+      ['信号', String(r.signal || r.recommendation || '—')],
+      ['说明', String(r.summary || r.reason || '—').slice(0, 120)]
+    ]);
+  } catch (e) {
+    _strategyLabError(`策略分析失败(HTTP/网络异常)`, e);
+  }
+}
+
+async function runStrategyBacktest() {
+  const code = _strategyLabCode();
+  try {
+    const data = await api('/api/strategy/backtest', {
+      method: 'POST',
+      body: JSON.stringify({ strategy: 'bspro_quant', stock_code: code })
+    });
+    _renderStrategyLab(`回测结果 ${code}`, [
+      ['累计收益', fmtNum(data.total_return)],
+      ['年化收益', fmtNum(data.annualized_return)],
+      ['最大回撤', fmtNum(data.max_drawdown)],
+      ['夏普比率', fmtNum(data.sharpe_ratio)],
+      ['胜率', fmtNum(data.win_rate)],
+      ['交易次数', fmtNum(data.trades)]
+    ]);
+  } catch (e) {
+    _strategyLabError(`回测失败(执行异常或行情不可用)`, e);
+  }
+}
+
+async function runStrategyValidate() {
+  const code = _strategyLabCode();
+  const runsEl = document.getElementById('strategyLabRuns');
+  const runs = Math.max(100, Math.min(5000, parseInt(runsEl.value, 10) || 1000));
+  try {
+    // 用真实K线收盘价构造收益率序列, 数据不足则直接提示, 不生成合成序列
+    const kline = await api(`/api/market/stock_kline?code=${encodeURIComponent(code)}&count=120`);
+    const items = (kline && kline.data) || [];
+    const closes = items.map(k => Number(k.close)).filter(v => Number.isFinite(v) && v > 0);
+    if (closes.length < 85) {
+      _renderStrategyLab(`样本外验证 ${code}`, [['状态', `K线数据不足(${closes.length}/120), 无法验证`]]);
+      return;
+    }
+    const returns = [];
+    for (let i = 1; i < closes.length; i++) returns.push((closes[i] - closes[i - 1]) / closes[i - 1]);
+    const data = await api('/api/strategy/validate', {
+      method: 'POST',
+      body: JSON.stringify({ returns, runs })
+    });
+    _renderStrategyLab(`样本外验证 ${code}(${returns.length} 期收益, ${runs} 次蒙特卡洛)`, [
+      ['结果', JSON.stringify(data && data.data ? data.data : data).slice(0, 200)]
+    ]);
+  } catch (e) {
+    _strategyLabError(`样本外验证失败(数据不可用或鉴权失败)`, e);
+  }
 }
 
 /* ========== 4. 交易执行 ========== */

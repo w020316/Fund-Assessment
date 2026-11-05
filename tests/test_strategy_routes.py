@@ -355,3 +355,20 @@ class TestAuth:
         )
         assert resp.status_code == 200
         assert "data" in resp.json()
+
+    def test_backtest_times_out_with_503(self, client, monkeypatch):
+        """回测挂起超过上限时返回 503 超时提示, 不得无限等待(2026-11-05 R-03)"""
+        import time
+
+        import web.routes.strategy as strategy_mod
+
+        class _SlowQuant:
+            def backtest_strategy(self, factor_combo, period):
+                time.sleep(1.0)
+                return {}
+
+        monkeypatch.setattr(strategy_mod, "BSProQuant", _SlowQuant)
+        monkeypatch.setattr(strategy_mod, "BACKTEST_TIMEOUT_SECONDS", 0.05)
+        resp = client.post("/api/strategy/backtest", json={"strategy": "bspro_quant", "stock_code": "600519"})
+        assert resp.status_code == 503
+        assert "超时" in resp.json()["detail"]

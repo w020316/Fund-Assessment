@@ -13,6 +13,10 @@ from web.rate_limiter import limiter
 
 router = APIRouter()
 
+# R-03(2026-11-05): 回测逐票拉取历史行情, 无上限时会长时间挂起(实测 >150s),
+# 超过该上限直接返回 503, 避免前端入口"点了没反应"。
+BACKTEST_TIMEOUT_SECONDS = 45
+
 _HAS_STRATEGIES = False
 try:
     from src.strategies.a_stock_analyst import AStockAnalyst
@@ -375,7 +379,12 @@ async def backtest(req: BacktestRequest):
         # (1) 同步方法包裹到线程池
         # (2) 原代码异常时静默返回全零,用户无法区分"回测结果恰好全零"与"回测彻底失败",
         #     可能据此做出错误投资决策。改为抛 HTTPException 503 明确告知失败。
-        result = await asyncio.to_thread(quant.backtest_strategy, factor_combo=factor_combo, period=60)
+        # R-03(2026-11-05): 该回测逐票拉取历史行情, 外部数据源抖动时可无限挂起
+        # (实测本机 >150s 无响应), 前端入口因此不可用 → 增加 45s 上限并明确报超时。
+        result = await asyncio.wait_for(
+            asyncio.to_thread(quant.backtest_strategy, factor_combo=factor_combo, period=60),
+            timeout=BACKTEST_TIMEOUT_SECONDS,
+        )
         return BacktestResponse(
             strategy=req.strategy, stock_code=req.stock_code,
             total_return=result["total_return"],
@@ -384,6 +393,13 @@ async def backtest(req: BacktestRequest):
             sharpe_ratio=result["sharpe_ratio"],
             win_rate=result["win_rate"],
             trades=result["trades"],
+        )
+    except asyncio.TimeoutError:
+        logger.warning(f"backtest {req.strategy} 超时({BACKTEST_TIMEOUT_SECONDS}s)")
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=503,
+            detail=f"回测超时({BACKTEST_TIMEOUT_SECONDS}s), 行情数据源暂不可用, 请稍后重试",
         )
     except Exception as e:
         logger.exception(f"backtest {req.strategy} failed")

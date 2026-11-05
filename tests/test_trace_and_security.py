@@ -251,3 +251,34 @@ class TestFrontendHtmlEscaping:
         html = self._html()
         assert not re.search(r'onclick="[^"]*\$\{', html), "onclick 内不得插入模板变量"
 
+
+class TestStrategyLabUiEntry:
+    """回测/验证最小前端入口回归（2026-11-05 R-03）
+
+    缺陷：/api/strategy/analyze|backtest|validate 三个后端能力无任何前端入口,
+    README 却宣称"回测验证",用户无法在 UI 上使用。
+    本类做静态回归：入口卡片与三处调用必须存在,且结果渲染走 escapeHtml。
+    """
+
+    @staticmethod
+    def _html() -> str:
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parents[1] / "web" / "static" / "index.html"
+        return path.read_text(encoding="utf-8")
+
+    def test_strategy_lab_card_exists_in_strategy_page(self):
+        html = self._html()
+        assert 'id="strategyLabCard"' in html
+        # 必须位于策略页容器内, 不新增导航层级
+        start = html.index('id="page-strategy"')
+        end = html.index('id="page-trade"')
+        assert 'id="strategyLabCard"' in html[start:end]
+
+    @pytest.mark.parametrize(
+        "endpoint",
+        ["/api/strategy/analyze", "/api/strategy/backtest", "/api/strategy/validate"],
+    )
+    def test_three_endpoints_called_from_ui(self, endpoint):
+        assert endpoint in self._html()
+

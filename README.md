@@ -15,7 +15,7 @@
 - **交易日志 / 纪律归因**:记录买入/卖出/放弃/观察与三问结果,统计出手合规率、三问覆盖率、过度交易与重复犯错
 - **出手三问闸门**:身份/断板/竞价三问全过才给出“可出手”结论,任一问数据缺失按不通过处理(fail-closed)
 - **金融技能库 + 一句话调度**:40 项真实技能 / 9 大分类,自然语言 → 技能匹配 → 可执行调度方案(不自动下单)
-- **回测验证**:Walk-Forward 滚动样本外统计 + 蒙特卡洛重采样,补充单一收益曲线看不到的稳健性信息
+- **回测验证**:Walk-Forward 滚动样本外统计 + 蒙特卡洛重采样,补充单一收益曲线看不到的稳健性信息(策略中心「策略验证」卡片可发起分析/回测/样本外验证)
 - **数据质量校验**:多维度数据质量检查(完整性/时效性/合理性/一致性),质量评分 0-100
 - **完整风控体系**:四级风险等级 + 系统回撤限制 + 单日亏损限制 + 紧急停止机制
 - **鉴权安全**:静态 Token + 时序攻击防护,36 个写操作(POST/PUT/DELETE)与敏感读取端点统一保护
@@ -244,7 +244,11 @@ python -m pytest tests/test_global_market.py -v
 | `POST /api/review/journal` | 追加交易日志 |
 | `GET /api/agent/skills` | 金融技能库目录 |
 | `POST /api/agent/dispatch` | 一句话调度方案 |
-| `POST /api/strategy/validate` | 回测验证(滚动样本外 + 蒙特卡洛) |
+| `POST /api/strategy/analyze` | 策略分析(综合/量化/因子) — UI: 策略中心「策略验证」卡片 |
+| `POST /api/strategy/backtest` | 策略回测 — UI: 策略中心「策略验证」卡片 |
+| `POST /api/strategy/validate` | 回测验证(滚动样本外 + 蒙特卡洛) — UI: 策略中心「策略验证」卡片(需 ADMIN_TOKEN) |
+
+> 其余后端能力(如 `/api/monitor/*`、`/api/market/heatmap`、`/api/agent/multi_analyze` 等)目前**仅 API 可用,无前端入口**,已在 `docs/quality-review-2026-11-05.md` 的 backlog 中登记。
 
 完整 API 文档访问 `/docs`(Swagger UI)。
 
