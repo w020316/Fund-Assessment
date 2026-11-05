@@ -248,9 +248,13 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 }
 .btn-primary { background:var(--accent); color:#0d1117; }
 .btn-primary:hover { background:#d97706; }
-.btn-success { background:var(--color-down); color:#fff; }
+/* (2026-11-05) 阶段三 P1-01：hud 主题把 --color-up/--color-down 重映射为浅色板
+   (#F87171/#34D399)，白色文字实测仅 2.76:1 与 1.92:1（AA 要求 4.5:1）。底色按约束保留，
+   文字改为深色 #0b1220：在 #F87171 上实测 6.77:1、在 #34D399 上 9.74:1；
+   hover 态两者整元素 opacity .9 后仍为 5.09:1 与 6.94:1。 */
+.btn-success { background:var(--color-down); color:#0b1220; }
 .btn-success:hover { opacity:0.9; }
-.btn-danger { background:var(--color-up); color:#fff; }
+.btn-danger { background:var(--color-up); color:#0b1220; }
 .btn-danger:hover { opacity:0.9; }
 .btn-outline {
   background:transparent; color:var(--text-secondary);
