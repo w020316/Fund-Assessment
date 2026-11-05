@@ -1616,6 +1616,12 @@ def get_fund_realtime_tencent(codes: list[str]) -> list[dict]:
             estimated_nav = _safe_float(parts[2])
             nav = _safe_float(parts[5])
             acc_nav = _safe_float(parts[6])
+            if nav <= 0:
+                # 2026-11-05 R-06: 字段缺失/全零时不再返回 nav=0.00 的"假行情"。
+                # 0 净值与"真实净值缺失"无法区分, 下游会把盈亏静默算成 0,
+                # 因此该条直接丢弃, 由调用方按"无行情"分支处理。
+                logger.warning(f"fund_realtime: {raw_code} 无有效净值, 丢弃该条")
+                continue
             # Tencent 基金接口 parts[7] 是涨跌幅百分比(如 1.566 表示 1.566%),
             # 不是绝对涨跌额。原代码误将其当作绝对值再除以 (nav-change) 反推百分比,
             # 导致出现 135% 这种荒谬结果。

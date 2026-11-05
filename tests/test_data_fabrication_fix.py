@@ -168,6 +168,19 @@ class TestFundChangePctDivideByZero:
         # 25 > 20, 走降级分支: change=25, prev_nav=10-25=-15, change_pct=0
         assert fund["change_pct"] == 0.0
 
+    def test_fund_realtime_drops_zero_nav_entry(self):
+        """net=0/缺失的条目必须丢弃, 不得以 nav=0.00 假行情返回(2026-11-05 R-06)"""
+        parts = ["110022", "易方达消费", "0.0000", "0.0000", "",
+                 "0.0000", "0.0000", "0.0000", "2026-07-03"]
+        segment = "~".join(parts) + "~;"
+        mock_text = f'v_jj110022="{segment}'
+        with patch.object(ds2.requests, "get") as mock_get:
+            mock_resp = mock_get.return_value
+            mock_resp.text = mock_text
+            mock_resp.encoding = "gbk"
+            result = ds2.get_fund_realtime_tencent(["110022"])
+        assert result == []
+
 
 class TestParallelFetch:
     """_parallel_fetch 并行抓取测试"""

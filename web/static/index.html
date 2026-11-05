@@ -2262,6 +2262,16 @@ function onFundWizardReviewClick(btn) {
   FundWizard.open(btn.getAttribute('data-code') || '');
 }
 
+// 数据源脚注(2026-11-05 R-06): 质量分 < 70 时展示"数据降级"标识, 不把默认分当真实质量
+function renderMetaFooter(meta) {
+  if (!meta || !meta.timestamp) return '';
+  const cachedTag = meta.cached ? ' · 缓存' : '';
+  const degradedTag = meta.degraded
+    ? ' · <span style="color:var(--color-warning);font-weight:600;">数据降级</span>'
+    : '';
+  return `数据源: ${escapeHtml(meta.data_source || '')}${cachedTag}${degradedTag} · ${escapeHtml(String(meta.timestamp))}`;
+}
+
 // 以下为持仓/基金操作按钮的事件委托入口(2026-11-05 R-05):
 // 参数一律从 data-* 读取, 不再拼进 onclick 的 JS 字面量。
 function onViewHoldingsClick(btn) {
@@ -4142,7 +4152,7 @@ async function loadSectorRotation() {
 
   // 数据源信息
   if (data._meta && data._meta.timestamp) {
-    html += `<div style="margin-top:8px;font-size:11px;color:var(--text-muted);text-align:right;">数据源: ${data._meta.data_source || ''} · ${data._meta.timestamp}</div>`;
+    html += `<div style="margin-top:8px;font-size:11px;color:var(--text-muted);text-align:right;">${renderMetaFooter(data._meta)}</div>`;
   }
 
   body.innerHTML = html;
@@ -4538,7 +4548,7 @@ async function newsAiSearch() {
         html += '<div style="padding:12px;text-align:center;color:var(--text-muted);font-size:12px;">未检索到相关消息</div>';
       }
       if (data._meta && data._meta.timestamp) {
-        html += `<div style="margin-top:6px;font-size:11px;color:var(--text-muted);text-align:right;">数据源: ${data._meta.data_source || ''} · ${data._meta.timestamp}</div>`;
+        html += `<div style="margin-top:6px;font-size:11px;color:var(--text-muted);text-align:right;">${renderMetaFooter(data._meta)}</div>`;
       }
       body.innerHTML = html;
       showToast('检索完成', 'success');
@@ -5478,8 +5488,7 @@ async function loadGlobalOverview() {
 
   // 数据源信息
   if (data._meta && data._meta.timestamp) {
-    const cachedTag = data._meta.cached ? ' · 缓存' : '';
-    html += `<div style="margin-top:8px;font-size:11px;color:var(--text-muted);text-align:right;">数据源: ${data._meta.data_source || ''}${cachedTag} · ${data._meta.timestamp}</div>`;
+    html += `<div style="margin-top:8px;font-size:11px;color:var(--text-muted);text-align:right;">${renderMetaFooter(data._meta)}</div>`;
   }
 
   body.innerHTML = html;

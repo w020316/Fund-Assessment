@@ -28,6 +28,30 @@ def client():
     return TestClient(app)
 
 
+class TestBuildMetaDegraded:
+    """_build_meta 降级标识(2026-11-05 R-06)
+
+    缺陷: quality_score 在未显式给出时默认 80/100, 空数据的 0.0 与正常数据
+    都没有降级标记, 前端无法区分"真实行情"与"降级/空数据"。
+    """
+
+    def test_empty_data_marks_degraded(self):
+        from web.routes.market import _build_meta
+
+        meta = _build_meta("none", quality_score=0.0)
+        assert meta["quality_score"] == 0.0
+        assert meta["degraded"] is True
+
+    def test_normal_and_cached_not_degraded(self):
+        from web.routes.market import _build_meta
+
+        assert _build_meta("tencent")["degraded"] is False
+        assert _build_meta("tencent", cached=True)["degraded"] is False
+        # 既有默认语义保持不变, 不改变已有断言依赖的 80/100
+        assert _build_meta("tencent")["quality_score"] == 80.0
+        assert _build_meta("tencent", cached=True)["quality_score"] == 100.0
+
+
 @pytest.fixture(autouse=True)
 def clear_market_cache():
     """每个测试前清空 market 路由的文件缓存,避免 mock 被跳过"""

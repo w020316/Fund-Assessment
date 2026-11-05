@@ -39,12 +39,16 @@ def _build_meta(
     stale: bool = False,
 ) -> dict:
     """构建响应元数据"""
+    resolved_quality = quality_score if quality_score is not None else (100.0 if cached else 80.0)
     meta = ResponseMeta(
         data_source=data_source,
-        quality_score=quality_score if quality_score is not None else (100.0 if cached else 80.0),
+        quality_score=resolved_quality,
         cached=cached,
         timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     ).model_dump()
+    # 2026-11-05 R-06: 显式的降级信号。质量分 < 70(最常见于空数据/降级路径的 0.0)
+    # 时标记 degraded, 前端据此展示"数据降级", 避免把默认 80/100 当成真实质量。
+    meta["degraded"] = resolved_quality < 70
     # 2026-10-26：stale=True 表示"这份数据已过 TTL，正在后台刷新"，
     # 前端可据此显示"数据稍有延迟"，也便于线上排查命中路径。
     if stale:
