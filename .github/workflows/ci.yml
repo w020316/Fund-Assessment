@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install "pytest>=8" pytest-cov
+
+      - name: Syntax check (compileall)
+        run: python -m compileall -q src web launch.py
+
+      # 阻断门禁只保留"一定是真缺陷"的规则: 语法错误 / 未定义名 / 无效比较。
+      # 全量 ruff(F401 re-export、E402 脚本内延迟导入等)噪声较大, 见
+      # docs/quality-review-2026-11-05.md 第四节, 收敛前仅报告不阻断。
+      - name: Ruff (critical rules, blocking)
+        run: python -m ruff check --select E9,F63,F7,F82 src web tests
+
+      - name: Ruff (full ruleset, report only)
+        run: python -m ruff check src web tests || true
+
+      - name: Pytest with coverage gate
+        run: |
+          python -m pytest tests/ -q \
+            --cov=src --cov=web --cov-report=term-missing \
+            --cov-fail-under=75
