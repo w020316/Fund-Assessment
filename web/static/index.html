@@ -389,6 +389,28 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 .toast-success { background:#065f46; color:#6ee7b7; border:1px solid #059669; }
 .toast-error { background:#7f1d1d; color:#fca5a5; border:1px solid #dc2626; }
 .toast-info { background:#1e3a5f; color:#93c5fd; border:1px solid #2563eb; }
+/* 阶段四:持久错误卡(不自动消失,带明确原因与重试) */
+.api-error-panel {
+  position:fixed; top:60px; right:20px; z-index:10000; display:none;
+  align-items:flex-start; gap:10px; max-width:380px; padding:12px 14px;
+  border-radius:10px; background:#7f1d1d; color:#fca5a5; border:1px solid #dc2626;
+  box-shadow:0 8px 24px rgba(0,0,0,0.35); font-size:13px;
+}
+.api-error-panel.show { display:flex; }
+.api-error-panel .aep-body { flex:1; min-width:0; }
+.api-error-panel .aep-title { font-weight:700; margin-bottom:2px; color:#fecaca; }
+.api-error-panel .aep-msg { line-height:1.5; word-break:break-word; }
+.api-error-panel .aep-retry {
+  background:#dc2626; color:#fff; border:0; border-radius:6px;
+  padding:5px 10px; cursor:pointer; font-size:12px; flex-shrink:0;
+}
+.api-error-panel .aep-close {
+  background:transparent; border:0; color:#fca5a5; font-size:16px;
+  line-height:1; cursor:pointer; flex-shrink:0;
+}
+@media (max-width:640px) {
+  .api-error-panel { left:12px; right:12px; top:56px; max-width:none; }
+}
 @keyframes toast-in { from { opacity:0; transform:translateX(40px); } to { opacity:1; transform:translateX(0); } }
 
 /* Loading（静态占位，无扫光动画） */
@@ -2280,6 +2302,15 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 
 <!-- Toast容器 -->
 <div class="toast-container" id="toastContainer"></div>
+<!-- 阶段四:持久错误卡(替代 3 秒即消失的 toast) -->
+<div class="api-error-panel" id="apiErrorPanel" role="alert" aria-live="assertive">
+  <div class="aep-body">
+    <div class="aep-title" id="apiErrorTitle">请求失败</div>
+    <div class="aep-msg" id="apiErrorMsg"></div>
+  </div>
+  <button class="aep-retry" id="apiErrorRetry" type="button">重试</button>
+  <button class="aep-close" id="apiErrorClose" type="button" aria-label="关闭错误提示" onclick="hideApiError()">×</button>
+</div>
 
 <!-- ===== STAGE5: wizard ===== 持仓补录向导挂载点(wizard.js 按需填充) -->
 <div id="fundWizardRoot"></div>
@@ -2306,6 +2337,79 @@ function showToast(msg, type='info') {
   c.appendChild(t);
   setTimeout(() => { t.style.opacity='0'; t.style.transition='opacity 0.3s'; setTimeout(()=>t.remove(),300); }, CONFIG.TOAST_DURATION);
 }
+
+/* ===== 阶段四:持久错误卡 =====
+ * 网络/接口错误不再用 3 秒 toast(用户来不及读也来不及重试),
+ * 改为固定在右上角的错误卡:明确原因 + 重试按钮 + 手动关闭。
+ * 文案不暴露内部接口路径(/api/...),只给用户可理解的原因。 */
+let _lastApiError = null;
+
+function _sanitizeUserMsg(msg) {
+  return String(msg || '')
+    .replace(/\/api\/[\w\-./{}$]*/g, '该接口')
+    .replace(/https?:\/\/[^\s]+/g, '该服务');
+}
+
+function _friendlyApiError(status, err) {
+  const detail = _sanitizeUserMsg(err && err.detail);
+  // 只展示可读中文原因;后端英文/技术性 detail(如 "Not Found")不外露给用户
+  const readable = /[\u4e00-\u9fff]/.test(detail) ? detail : '';
+  const isTimeout = err && err.name === 'AbortError';
+  if (isTimeout) {
+    return { title: '请求超时', message: '服务响应时间过长,已停止等待。可以点"重试"重新发起。' };
+  }
+  if (!status) {
+    return { title: '网络连接失败', message: '无法连接服务器,请检查网络后重试。' };
+  }
+  if (status === 401) {
+    return { title: '需要管理权限', message: '此操作需要管理员令牌,请到"设置"页配置后重试。' };
+  }
+  if (status === 403) {
+    return { title: '暂无操作权限', message: '当前身份无权执行此操作。' };
+  }
+  if (status === 404) {
+    return { title: '数据暂不可用', message: readable || '请求的数据不存在或尚未就绪,请确认后重试。' };
+  }
+  if (status === 409) {
+    return { title: '数据已被修改', message: readable || '请刷新页面后重试。' };
+  }
+  if (status === 429) {
+    return { title: '请求过于频繁', message: '已触发频率限制,请稍候片刻再试。' };
+  }
+  if (status >= 500) {
+    return {
+      title: (err && err.code === 'LLM_ALL_PROVIDERS_FAILED') ? 'AI 分析暂不可用' : '服务暂时不可用',
+      message: readable || '后端服务暂时不可用,请稍后重试。'
+    };
+  }
+  return { title: '操作失败', message: readable || '请稍后重试。' };
+}
+
+function showApiError(title, message, retryFn, url) {
+  const panel = document.getElementById('apiErrorPanel');
+  if (!panel) return;
+  document.getElementById('apiErrorTitle').textContent = title;
+  document.getElementById('apiErrorMsg').textContent = message;
+  const retryBtn = document.getElementById('apiErrorRetry');
+  if (retryFn) {
+    retryBtn.style.display = '';
+    retryBtn.onclick = () => {
+      hideApiError();
+      try { retryFn(); } catch (e) { console.error('retry failed', e); }
+    };
+  } else {
+    retryBtn.style.display = 'none';
+  }
+  panel.classList.add('show');
+  _lastApiError = { title, message, url: url || '' };
+}
+
+function hideApiError() {
+  const panel = document.getElementById('apiErrorPanel');
+  if (panel) panel.classList.remove('show');
+  _lastApiError = null;
+}
+
 
 // 策略"管理"按钮: 事件委托入口, 避免把策略名拼进 onclick 造成 XSS
 function onStrategyManageClick(btn) {
@@ -2481,28 +2585,60 @@ async function api(url, options={}) {
       signal: controller.signal,
       ...opts
     });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    if (!resp.ok) {
+      // 读取后端结构化错误(detail 可能是字符串或 {code,message}),供错误卡展示可读原因
+      let detail = '', code = '';
+      try {
+        const body = await resp.json();
+        const d = body && body.detail;
+        if (typeof d === 'string') detail = d;
+        else if (d && typeof d === 'object') {
+          detail = d.message || d.reason || '';
+          code = d.code || d.error_code || '';
+        }
+      } catch (_) { /* 非 JSON 错误体,忽略 */ }
+      const err = new Error(detail || ('HTTP ' + resp.status));
+      err.status = resp.status;
+      err.detail = detail;
+      err.code = code;
+      throw err;
+    }
     const data = await resp.json();
     // FastAPI返回list时可能包装为{value:[...], Count:N}，需要解包
     if (data && !Array.isArray(data) && data.value && Array.isArray(data.value)) {
+      hideApiErrorIfSame(url);
       return data.value;
     }
+    hideApiErrorIfSame(url);
     return data;
   } catch(e) {
     const isAbort = e.name === 'AbortError';
-    // 浏览器抛出的网络层错误是英文原文(Failed to fetch/Load failed)，对用户统一中文口径
-    const raw = e.message || '';
-    const msg = isAbort ? `请求超时(${timeoutMs/1000}s)`
-      : (/failed to fetch|load failed|networkerror/i.test(raw) ? '网络连接失败'
-        : (raw || '网络异常'));
     console.error('API Error:', url, e);
     // 静默端点(轮询/自动刷新)不打扰用户,仅记录
     const isPolling = url.includes('_realtime') || url.includes('/api/health');
-    if (!isPolling) showToast(`${msg}: ${url.split('?')[0]}`, 'error');
+    if (isPolling) {
+      hideApiErrorIfSame(url);
+      return null;
+    }
+    // 阶段四:3 秒 toast → 持久错误卡;文案不含内部路径;GET 失败可直接重试
+    const friendly = _friendlyApiError(isAbort ? 0 : (e.status || 0), e);
+    const canRetry = !(options.body instanceof FormData);
+    showApiError(friendly.title, friendly.message, canRetry ? () => {
+      api(url, options).then(d => {
+        if (d) {
+          showToast('请求已恢复,正在刷新页面', 'success');
+          setTimeout(() => location.reload(), 600);
+        }
+      });
+    } : null, url);
     return null;
   } finally {
     clearTimeout(timer);
   }
+}
+
+function hideApiErrorIfSame(url) {
+  if (_lastApiError && _lastApiError.url === url) hideApiError();
 }
 
 // 按钮loading态管理(防止重复提交)
