@@ -28,8 +28,8 @@ _STRATEGIES = {
 def _format_result(name: str, result: BacktestResult) -> str:
     lines = [
         f"### {name}\n",
-        f"| 指标 | 值 |",
-        f"|------|-----|",
+        "| 指标 | 值 |",
+        "|------|-----|",
         f"| 总收益率 | {result.total_return:.2%} |",
         f"| 年化收益率 | {result.annual_return:.2%} |",
         f"| 最大回撤 | {result.max_drawdown:.2%} |",
@@ -54,12 +54,12 @@ def _generate_report(
     report_path = log_dir / f"backtest_report_{date.today().strftime('%Y%m%d')}.md"
 
     with open(report_path, "w", encoding="utf-8") as f:
-        f.write(f"# 回测验证报告\n\n")
+        f.write("# 回测验证报告\n\n")
         f.write(f"- **股票**: {stock_code}\n")
         f.write(f"- **回测区间**: {start_date} ~ {end_date}\n")
         f.write(f"- **生成时间**: {date.today().isoformat()}\n")
-        f.write(f"- **初始资金**: 1,000,000.00\n\n")
-        f.write(f"---\n\n")
+        f.write("- **初始资金**: 1,000,000.00\n\n")
+        f.write("---\n\n")
 
         for strategy_key, result in results.items():
             name = _STRATEGIES.get(strategy_key, (strategy_key,))[0]

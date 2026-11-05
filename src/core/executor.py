@@ -249,7 +249,7 @@ class SimulatedBroker(BrokerAPI):
             if pos is None or pos["available_quantity"] < quantity:
                 order.status = OrderStatus.REJECTED
                 order.updated_at = datetime.now()
-                logger.warning(f"SimulatedBroker: 卖出被拒绝，持仓不足")
+                logger.warning("SimulatedBroker: 卖出被拒绝，持仓不足")
                 return order
 
             filled_price = price

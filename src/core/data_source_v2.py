@@ -248,7 +248,7 @@ def _kline_sina_fallback(symbol: str, period: str = "daily", count: int = 30) ->
     sina_code = _prefix_code(symbol)
     scale_map = {"daily": "240", "weekly": "1200", "monthly": "5200"}
     scale = scale_map.get(period, "240")
-    url = f"https://quotes.sina.cn/cn/api/jsonp_v2.php/var=/CN_MarketDataService.getKLineData"
+    url = "https://quotes.sina.cn/cn/api/jsonp_v2.php/var=/CN_MarketDataService.getKLineData"
     params = {
         "symbol": sina_code,
         "scale": scale,

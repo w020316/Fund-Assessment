@@ -54,7 +54,7 @@ def _save_report(
     report_path = log_dir / f"backtest_{stock_code}_{date.today().strftime('%Y%m%d')}.txt"
 
     with open(report_path, "w", encoding="utf-8") as f:
-        f.write(f"回测报告\n")
+        f.write("回测报告\n")
         f.write(f"股票: {stock_code}\n")
         f.write(f"区间: {start_date} ~ {end_date}\n")
         f.write(f"生成时间: {date.today().isoformat()}\n\n")

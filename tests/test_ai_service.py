@@ -844,7 +844,7 @@ class TestAnalyzePortfolio:
     def test_llm_returns_json_with_text_wrapper(self, mock_analysis_response):
         """LLM 返回带文本包裹的 JSON → 应能提取"""
         positions = [{"symbol": "600519", "name": "茅台", "quantity": 100, "cost_price": 1500, "current_price": 1688}]
-        wrapped = f"分析结果:\n{{\"score\": 80}}\n谢谢"
+        wrapped = "分析结果:\n{\"score\": 80}\n谢谢"
         with patch.object(ai_service, "get_realtime_quote_tencent", return_value=[]):
             with patch.object(ai_service, "quick_analysis", return_value={
                 "action": "BUY", "confidence": 0.8, "risk_assessment": {"risk_level": "MEDIUM"},
@@ -908,7 +908,7 @@ class TestGetMarketOutlook:
 
     def test_outlook_with_text_wrapper(self):
         """LLM 返回带文本包裹的 JSON → 应能提取"""
-        wrapped = f"结果如下:\n{{\"outlook\": \"NEUTRAL\"}}\n结束"
+        wrapped = "结果如下:\n{\"outlook\": \"NEUTRAL\"}\n结束"
         with self._patch_parallel_fetch({
             "indices": [{"name": "上证"}],
         }):

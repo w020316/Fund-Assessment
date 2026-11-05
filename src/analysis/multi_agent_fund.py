@@ -136,7 +136,7 @@ def _build_fund_analysis_prompt(
         concentration = holdings_data.get("concentration", {})
         nav_impact = holdings_data.get("nav_impact", {})
         sector_rotation = holdings_data.get("sector_rotation", [])
-        holdings_summary = f"前十大重仓股:\n"
+        holdings_summary = "前十大重仓股:\n"
         holdings_summary += "\n".join(
             f"  {h.get('name', '')}({h.get('code', '')}) 权重{h.get('weight', 0)}% 变化{h.get('change', '')}"
             for h in holdings

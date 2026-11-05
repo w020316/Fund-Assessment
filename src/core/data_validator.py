@@ -183,7 +183,7 @@ class DataValidator:
                     result.add_issue(QualityIssue(
                         field_name=f"kline[{i}]",
                         level=QualityLevel.WARNING,
-                        message=f"开盘/收盘价超出最高价范围，可能数据异常",
+                        message="开盘/收盘价超出最高价范围，可能数据异常",
                     ))
 
         # 日期连续性检查（仅检查最近的数据）

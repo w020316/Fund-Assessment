@@ -143,7 +143,7 @@ def install_from_sdist(sdist_url, sdist_filename):
         pkg_dirs = [d for d in os.listdir(tmp_dir)
                     if os.path.isdir(os.path.join(tmp_dir, d)) and d != "__pycache__"]
         if not pkg_dirs:
-            print(f"    No extracted directory found", flush=True)
+            print("    No extracted directory found", flush=True)
             return False
 
         pkg_dir = os.path.join(tmp_dir, pkg_dirs[0])
@@ -153,14 +153,14 @@ def install_from_sdist(sdist_url, sdist_filename):
         pyproject = os.path.join(pkg_dir, "pyproject.toml")
 
         if os.path.exists(setup_py) or os.path.exists(setup_cfg) or os.path.exists(pyproject):
-            print(f"    Building from source...", flush=True)
+            print("    Building from source...", flush=True)
             result = subprocess.run(
                 [sys.executable, "setup.py", "install", "--prefix", PYLIBS_DIR],
                 cwd=pkg_dir,
                 capture_output=True, text=True, timeout=120
             )
             if result.returncode != 0:
-                print(f"    setup.py install failed, trying direct copy...", flush=True)
+                print("    setup.py install failed, trying direct copy...", flush=True)
                 for item in os.listdir(pkg_dir):
                     src = os.path.join(pkg_dir, item)
                     if os.path.isdir(src) and not item.startswith(('.', 'test', 'doc', 'example')):
@@ -212,7 +212,7 @@ def install_package(pkg_name, import_name):
                 print(f"    [OK] {pkg_name}", flush=True)
                 return True
             else:
-                print(f"    Wheel installed but import failed, trying sdist...", flush=True)
+                print("    Wheel installed but import failed, trying sdist...", flush=True)
 
     sdist_info = pick_sdist(urls)
     if sdist_info:
