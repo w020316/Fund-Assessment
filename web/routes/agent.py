@@ -7,7 +7,7 @@ from collections import deque
 from contextlib import contextmanager
 from typing import Any, Iterator
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
 from pydantic import BaseModel
 
@@ -111,6 +111,28 @@ class _AIResponseCache:
 
 _ai_cache = _AIResponseCache(maxsize=50)
 
+
+def _raise_if_degraded(result: Any, op: str) -> None:
+    """阶段四:LLM 全量失败时返回 503,不再 200 + 置信度 0%。
+
+    ai_service / multi_agent_fund 在 Provider 全部失败时返回带 degraded 标记的
+    兜底结构;这里统一转成结构化 503,前端据此展示失败态与重试入口。
+    一旦某个 Provider 恢复,degraded 不再出现,自动恢复 200,无需改代码。
+    """
+    if not isinstance(result, dict) or not result.get("degraded"):
+        return
+    code = result.get("error_code") or "LLM_ALL_PROVIDERS_FAILED"
+    reason = result.get("degraded_reason") or ""
+    if code == "DATA_UNAVAILABLE" or "无法获取" in reason:
+        code = "DATA_UNAVAILABLE"
+        message = "行情数据暂不可用,暂时无法完成分析,请稍后重试。"
+    else:
+        message = "AI 模型服务暂时不可用(所有 Provider 调用失败),请稍后重试。"
+    raise HTTPException(
+        status_code=503,
+        detail={"code": code, "message": message, "retryable": True, "operation": op},
+    )
+
 # TTL 配置(秒):分析类 180s,快速分析 60s,组合建议 300s,市场研判 600s
 _TTL_ANALYZE = 180
 _TTL_QUICK = 60
@@ -148,6 +170,7 @@ async def analyze(request: Request, req: AnalyzeRequest) -> dict[str, Any]:
         return cached
     with _ai_operation("analyze", code=req.stock_code):
         result = await asyncio.to_thread(analyze_stock, req.stock_code, "deep")
+    _raise_if_degraded(result, "analyze")
     _decision_history.append(result)
     _ai_cache.set(cache_key, result)
     return result
@@ -163,6 +186,7 @@ async def get_opinions(request: Request, code: str = Query(..., description="股
         return cached
     with _ai_operation("opinions", code=code):
         result = await asyncio.to_thread(ai_quick_analysis, code)
+    _raise_if_degraded(result, "opinions")
     payload = {"stock_code": code, "opinions": result.get("agent_opinions", [])}
     _ai_cache.set(cache_key, payload)
     return payload
@@ -178,6 +202,7 @@ async def get_debate(request: Request, code: str = Query(..., description="股�
         return cached
     with _ai_operation("debate", code=code):
         result = await asyncio.to_thread(analyze_stock, code, "quick")
+    _raise_if_degraded(result, "debate")
     payload = result.get("debate_result", {
         "topic": f"{code}多空辩论",
         "bull_arguments": [],
@@ -209,6 +234,7 @@ async def quick_analysis(request: Request, req: QuickAnalysisRequest) -> dict[st
         return cached
     with _ai_operation("quick", code=req.stock_code):
         result = await asyncio.to_thread(ai_quick_analysis, req.stock_code)
+    _raise_if_degraded(result, "quick_analysis")
     _ai_cache.set(cache_key, result)
     return result
 
@@ -223,6 +249,7 @@ async def multi_analyze(request: Request, req: MultiAnalyzeRequest) -> dict[str,
         return cached
     with _ai_operation("multi", code=req.stock_code, mode=req.mode):
         result = await asyncio.to_thread(ai_multi_analyze, req.stock_code, req.mode)
+    _raise_if_degraded(result, "multi_analyze")
     _decision_history.append(result)
     result["selected_agents"] = req.agents
     _ai_cache.set(cache_key, result)
@@ -239,6 +266,7 @@ async def portfolio_advice(request: Request, req: PortfolioRequest) -> dict[str,
         return cached
     with _ai_operation("portfolio", positions_count=len(req.positions)):
         result = await asyncio.to_thread(ai_analyze_portfolio, req.positions)
+    _raise_if_degraded(result, "portfolio_advice")
     _ai_cache.set(cache_key, result)
     return result
 
@@ -253,6 +281,7 @@ async def market_outlook(request: Request) -> dict[str, Any]:
         return cached
     with _ai_operation("outlook"):
         result = await asyncio.to_thread(ai_get_market_outlook)
+    _raise_if_degraded(result, "market_outlook")
     _ai_cache.set(cache_key, result)
     return result
 
@@ -300,6 +329,7 @@ async def fund_multi_analyze(request: Request, req: FundMultiAnalyzeRequest) -> 
             shares=req.shares,
             mode=req.mode,
         )
+    _raise_if_degraded(result, "fund_analyze")
     _ai_cache.set(cache_key, result)
     return result
 

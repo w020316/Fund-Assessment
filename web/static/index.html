@@ -3570,8 +3570,9 @@ async function runAiAnalysis() {
       body: JSON.stringify({stock_code: code})
     });
 
-    if (!result) {
-      renderEmpty('agentCards', '分析失败', '请稍后重试或检查股票代码');
+    if (!result || result.degraded === true) {
+      // 阶段四:503/降级时展示失败态与重试入口,不弹"完成"toast(消除矛盾提示)
+      renderAnalysisFailure('agentCards', 'runAiAnalysis()');
       return;
     }
 
@@ -3601,8 +3602,8 @@ async function runQuickAnalysis() {
       body: JSON.stringify({stock_code: code})
     });
 
-    if (!result) {
-      renderEmpty('agentCards', '快速分析失败', '请稍后重试');
+    if (!result || result.degraded === true) {
+      renderAnalysisFailure('agentCards', 'runQuickAnalysis()');
       return;
     }
 
@@ -3611,6 +3612,21 @@ async function runQuickAnalysis() {
     renderFinalDecision(result);
     showToast('快速分析完成', 'success');
   });
+}
+
+/**
+ * 阶段四:AI 全量失败的可重试失败卡。
+ * 明确说明"未生成任何结论",不展示 0% 置信度的伪造结果。
+ */
+function renderAnalysisFailure(containerId, retryFnName) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = `<div class="card" style="text-align:center;padding:28px 20px;">
+    <div style="font-size:28px;opacity:0.4;margin-bottom:8px;">⚠</div>
+    <div style="font-size:15px;color:var(--color-warning);margin-bottom:6px;">AI 分析暂不可用</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">所有 AI 模型调用均失败,本次未生成任何结论(不会以 0% 置信度冒充结果)。请稍后重试。</div>
+    <button class="btn btn-primary" onclick="${retryFnName}">重试分析</button>
+  </div>`;
 }
 
 // 渲染Agent卡片
@@ -5371,12 +5387,12 @@ async function multiAgentAnalyze(fundCode, fundName, costNav, shares) {
     if (_fundAnalyzeTimeoutTimer) { clearTimeout(_fundAnalyzeTimeoutTimer); _fundAnalyzeTimeoutTimer = null; }
     if (_fundAnalyzeProgressTimer) { clearInterval(_fundAnalyzeProgressTimer); _fundAnalyzeProgressTimer = null; }
 
-    if (!data) {
+    if (!data || data.degraded === true) {
       const elapsed = ((Date.now() - startTs) / 1000).toFixed(0);
       bodyEl.innerHTML = `<div style="padding:32px 24px;text-align:center;">
         <div style="font-size:32px;margin-bottom:12px;opacity:0.5;">⚠</div>
         <div style="font-size:15px;color:var(--color-warning);margin-bottom:8px;">分析失败</div>
-        <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">可能原因:1.未配置管理Token 2.触发限流(3次/分钟) 3.LLM服务繁忙</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">所有 AI 模型调用均失败,未生成任何结论。可能原因:1.未配置管理Token 2.触发限流(3次/分钟) 3.LLM服务暂不可用。请稍后重试。</div>
         <button class="btn btn-primary" data-code="${escapeHtml(fundCode)}" data-name="${escapeHtml(fundName || '')}" data-cost="${costNav||0}" data-shares="${shares||0}" onclick="onMultiAgentAnalyzeClick(this)">重试分析</button>
       </div>`;
       return;

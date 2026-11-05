@@ -400,6 +400,10 @@ def _fallback_fund_result(fund_code: str, reason: str) -> dict[str, Any]:
         "analysis_mode": "multi_agent_fund",
         "analyst_count": 0,
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        # 阶段四:诚实失败标记(路由层返回 503,不再 200+置信度0%)
+        "degraded": True,
+        "error_code": "LLM_ALL_PROVIDERS_FAILED",
+        "degraded_reason": reason,
     }
 
 

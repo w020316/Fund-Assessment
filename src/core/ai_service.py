@@ -794,7 +794,13 @@ def _parse_analysis_response(response_text: str, stock_code: str) -> dict[str, A
 
 
 def _fallback_result(stock_code: str, reason: str) -> dict[str, Any]:
+    """分析不可用时的兜底结构。
+
+    阶段四修复:显式标记 degraded + error_code,让路由层可以返回 503,
+    不再把"全 Provider 失败"伪装成 200 + 置信度 0%。
+    """
     now = datetime.now().isoformat()
+    error_code = "DATA_UNAVAILABLE" if "无法获取" in reason else "LLM_ALL_PROVIDERS_FAILED"
     fallback_roles = ["fundamental", "technical", "sentiment", "news", "policy", "hot_money", "lockup"]
     fallback_opinions = []
     for role in fallback_roles:
@@ -814,6 +820,10 @@ def _fallback_result(stock_code: str, reason: str) -> dict[str, Any]:
         "position_size": 0.0,
         "confidence": 0.0,
         "reasoning": f"[降级] {reason}，默认持有观望",
+        # 阶段四:诚实失败标记(路由层据此返回 503,不返回 200+置信度0%)
+        "degraded": True,
+        "error_code": error_code,
+        "degraded_reason": reason,
         "agent_opinions": fallback_opinions,
         "debate_result": {
             "topic": f"{stock_code}多空辩论",
@@ -1204,6 +1214,7 @@ def analyze_portfolio(positions: list[dict]) -> dict[str, Any]:
         {"role": "user", "content": portfolio_prompt},
     ]
 
+    degraded = False
     try:
         response_text = _call_llm(messages, temperature=0.3)
         try:
@@ -1218,6 +1229,7 @@ def analyze_portfolio(positions: list[dict]) -> dict[str, Any]:
     except Exception as e:
         logger.error(f"portfolio AI analysis failed: {e}")
         portfolio_result = {}
+        degraded = True
 
     return {
         "positions": position_analyses,
@@ -1226,6 +1238,10 @@ def analyze_portfolio(positions: list[dict]) -> dict[str, Any]:
         "concentration_risk_level": concentration_risk,
         "portfolio_analysis": portfolio_result,
         "timestamp": datetime.now().isoformat(),
+        # 阶段四:诚实失败标记
+        "degraded": degraded,
+        "error_code": "LLM_ALL_PROVIDERS_FAILED" if degraded else "",
+        "degraded_reason": "组合 AI 分析失败,所有 Provider 均不可用" if degraded else "",
     }
 
 
@@ -1321,6 +1337,7 @@ def get_market_outlook() -> dict[str, Any]:
         {"role": "user", "content": outlook_prompt},
     ]
 
+    degraded = False
     try:
         response_text = _call_llm(messages, temperature=0.3, json_mode=True)
         try:
@@ -1345,9 +1362,14 @@ def get_market_outlook() -> dict[str, Any]:
         except Exception as e2:
             logger.error(f"market outlook AI analysis failed: {e2}")
             outlook_result = {}
+            degraded = True
 
     return {
         "market_data": market_data,
         "outlook_analysis": outlook_result,
         "timestamp": datetime.now().isoformat(),
+        # 阶段四:诚实失败标记
+        "degraded": degraded,
+        "error_code": "LLM_ALL_PROVIDERS_FAILED" if degraded else "",
+        "degraded_reason": "市场展望 AI 分析失败,所有 Provider 均不可用" if degraded else "",
     }
