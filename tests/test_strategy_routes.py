@@ -328,3 +328,30 @@ class TestAuth:
             for p in patches:
                 p.stop()
         assert resp.status_code == 200
+
+    def test_validate_requires_admin_token(self, client, monkeypatch):
+        """validate 与 analyze/backtest 同口径: 生产缺 token 返回 503, 错 token 401(2026-11-05 R-13)"""
+        monkeypatch.setenv("APP_ENV", "production")
+        monkeypatch.delenv("ADMIN_TOKEN", raising=False)
+        resp = client.post("/api/strategy/validate", json={"returns": [0.01] * 120})
+        assert resp.status_code == 503
+
+        monkeypatch.setenv("ADMIN_TOKEN", "correct-secret-token")
+        resp = client.post(
+            "/api/strategy/validate",
+            json={"returns": [0.01] * 120},
+            headers={"Authorization": "Bearer wrong-token"},
+        )
+        assert resp.status_code == 401
+
+    def test_validate_passes_with_correct_token(self, client, monkeypatch):
+        """携带正确 token 时 validate 正常返回"""
+        monkeypatch.setenv("APP_ENV", "production")
+        monkeypatch.setenv("ADMIN_TOKEN", "correct-secret-token")
+        resp = client.post(
+            "/api/strategy/validate",
+            json={"returns": [0.005] * 120, "runs": 100},
+            headers={"Authorization": "Bearer correct-secret-token"},
+        )
+        assert resp.status_code == 200
+        assert "data" in resp.json()

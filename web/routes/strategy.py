@@ -391,12 +391,16 @@ async def backtest(req: BacktestRequest):
         raise HTTPException(status_code=503, detail="回测执行失败，请稍后重试")
 
 
-@router.post("/validate")
+@router.post("/validate", dependencies=[Depends(require_admin)])
 @limiter.limit("20/minute")
 async def validate_backtest(request: Request, req: ValidateRequest) -> dict[str, Any]:
     """回测结果验证:滚动样本外 + 蒙特卡洛
 
     输入为逐期收益率序列(如日收益,小数形式),不会触发任何交易或写操作。
+
+    2026-11-05 R-13: 与 /analyze、/backtest 对齐挂 require_admin。
+    该端点是纯计算密集 POST(自带 runs/step 可放大计算量), 仅靠 20/min 限流
+    不足以防止被当作免费算力; 鉴权只在配置了 ADMIN_TOKEN 时生效, 本地 dev 仍放行。
     """
     result = await asyncio.to_thread(
         validate_returns,
