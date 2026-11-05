@@ -287,6 +287,35 @@ class TestBacktest:
         assert "回测执行失败" in resp.json()["detail"]
 
 
+class TestBacktestGuard:
+    """阶段五 R1:回测单飞守卫(并发时快速拒绝,而不是排队打满实例)"""
+
+    def test_second_concurrent_backtest_rejected(self):
+        from fastapi import HTTPException
+        from web.routes import strategy as mod
+
+        first = mod._single_backtest_guard()
+        next(first)
+        try:
+            second = mod._single_backtest_guard()
+            with pytest.raises(HTTPException) as exc:
+                next(second)
+            assert exc.value.status_code == 503
+            assert "回测仍在进行" in exc.value.detail
+        finally:
+            first.close()
+
+    def test_guard_released_after_first_finishes(self):
+        from web.routes import strategy as mod
+
+        first = mod._single_backtest_guard()
+        next(first)
+        first.close()  # 依赖退出时释放
+        second = mod._single_backtest_guard()
+        next(second)
+        second.close()
+
+
 class TestAuth:
     """鉴权场景(analyze 与 backtest 端点依赖 require_admin)"""
 

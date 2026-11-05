@@ -1,6 +1,7 @@
 from typing import Any
 
 import asyncio
+import threading
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
@@ -18,6 +19,21 @@ router = APIRouter()
 # 重复拉全市场快照;修复后实测 12~15s 可完成。上限从 45s 收紧到 30s:
 # 正常路径有充足余量,异常路径也更早给出可读失败(不靠"拉长时间"掩盖问题)。
 BACKTEST_TIMEOUT_SECONDS = 30
+
+# 阶段五 R1:回测同时只允许一个任务。
+# 单次回测已用 4 个因子线程 + 20s 预算;并发再来几次会同时打满上游与 512MB 实例,
+# 表现为"所有请求都超时"。这里用非阻塞锁快速拒绝,而不是排队(排队只会更糟)。
+_BACKTEST_GUARD = threading.Lock()
+
+
+def _single_backtest_guard():
+    if not _BACKTEST_GUARD.acquire(blocking=False):
+        raise HTTPException(status_code=503, detail="上一次回测仍在进行,请稍后再试")
+    try:
+        yield
+    finally:
+        _BACKTEST_GUARD.release()
+
 
 _HAS_STRATEGIES = False
 try:
@@ -366,7 +382,8 @@ async def scan_cb():
         return []
 
 
-@router.post("/backtest", response_model=BacktestResponse, dependencies=[Depends(require_admin)])
+@router.post("/backtest", response_model=BacktestResponse,
+             dependencies=[Depends(require_admin), Depends(_single_backtest_guard)])
 async def backtest(req: BacktestRequest):
     if not _HAS_STRATEGIES:
         return BacktestResponse(
