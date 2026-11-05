@@ -40,23 +40,28 @@ def client_ip_key(request: Request) -> str:
     也变成"全站 3 次/分钟"。
 
     取值顺序：
-    1) 若 client.host 已是公网地址（uvicorn 按信任链解析过 XFF），直接用；
-    2) 否则从 XFF **右侧**向左找第一个公网地址 —— 右侧由最近的代理写入，
-       最可信；从左侧取会被客户端自带的伪造头部绕过限流；
-    3) 都没有则回落到对端地址（至少保证"同源同桶"，不会完全失效）。
+    1) 若请求带 X-Forwarded-For，从**右侧**向左找第一个公网地址 —— 右侧由最近的
+       代理写入，最可信；客户端在左侧自带的伪造跳不会改变键；
+    2) 无 XFF 时才回落到 client.host（直连/本地开发场景）；
+    3) 都没有则 "unknown"（至少保证同源同桶）。
+
+    阶段五 O2(2026-11-05 线上实测)：uvicorn 配了 FORWARDED_ALLOW_IPS=* 后会把
+    client.host 改写成 XFF 的**最左**一跳。线上连续 12 次写请求全部 401(未触发 429)，
+    而固定 XFF 时能稳定 10 次后 429 —— 说明"信任 client.host"等于信任最左跳，
+    键会随代理写入顺序漂移且可被客户端伪造。改为**始终优先解析 XFF 右端**。
     """
+    xff = request.headers.get("x-forwarded-for") or ""
+    hops = [h.strip() for h in xff.split(",") if h.strip()]
+    for hop in reversed(hops):
+        if not _is_untrusted_peer(hop):
+            return hop
+
     peer = ""
     if request.client and request.client.host:
         peer = request.client.host
 
     if peer and not _is_untrusted_peer(peer):
         return peer
-
-    xff = request.headers.get("x-forwarded-for") or ""
-    hops = [h.strip() for h in xff.split(",") if h.strip()]
-    for hop in reversed(hops):
-        if not _is_untrusted_peer(hop):
-            return hop
 
     return peer or "unknown"
 

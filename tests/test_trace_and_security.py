@@ -155,6 +155,11 @@ class TestRateLimitKey:
         # 攻击者自带 "2.2.2.2"，真实 proxy 追加了真实 IP "8.8.4.4"
         assert client_ip_key(self._req("10.0.0.5", "2.2.2.2, 8.8.4.4")) == "8.8.4.4"
 
+    def test_xff_preferred_even_when_peer_public(self):
+        """阶段五 O2:代理已把 peer 改写成最左跳时,仍以 XFF 右端为准"""
+        from web.rate_limiter import client_ip_key
+        assert client_ip_key(self._req("34.1.2.3", "2.2.2.2, 8.8.4.4")) == "8.8.4.4"
+
     def test_all_private_hops_fall_back_to_peer(self):
         from web.rate_limiter import client_ip_key
         assert client_ip_key(self._req("10.0.0.5", "10.0.0.1, 192.168.1.1")) == "10.0.0.5"
