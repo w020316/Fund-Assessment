@@ -4563,8 +4563,11 @@ async function loadFundData() {
   const cardsEl = document.getElementById('fundPositionCards');
   if (cardsEl) cardsEl.innerHTML = positions.map(_fundCardHtml).join('');
   if (!positions.length) {
-    body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px;">暂无基金持仓,请在右侧添加</td></tr>';
-    if (cardsEl) cardsEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);">暂无基金持仓,请在右侧添加</div>';
+    // 阶段四 R-08:空态文案去掉方位词。移动端「添加基金」表单在持仓卡下方,
+    // 写"右侧"会让用户找错位置;桌面端表单在右侧、移动端在下方,用表单名指代即可。
+    const emptyFundText = '暂无基金持仓,请使用「添加基金」表单补录';
+    body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px;">' + emptyFundText + '</td></tr>';
+    if (cardsEl) cardsEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);">' + emptyFundText + '</div>';
     // ===== STAGE6: groups ===== 空仓也渲染分组条(可先建组,便于后续归组)
     if (window.St6Groups) window.St6Groups.applyGroups([]);
     return;
