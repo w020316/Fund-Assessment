@@ -48,4 +48,4 @@ jobs:
         run: |
           python -m pytest tests/ -q \
             --cov=src --cov=web --cov-report=term-missing \
-            --cov-fail-under=75
+            --cov-fail-under=78
