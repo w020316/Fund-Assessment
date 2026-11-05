@@ -54,6 +54,21 @@ if (Test-Path $envFile) {
     Write-Host "[OK] 已加载 .env 配置" -ForegroundColor Green
 }
 
+# R-01: 本地开发显式注入 APP_ENV=dev, 让 require_admin 走 dev 放行分支。
+# 仅本地回环使用; --prod 分支不注入, 生产保持 fail-closed(fail-closed 逻辑本身未改动)。
+if (-not $IsProd -and -not $env:APP_ENV) {
+    $env:APP_ENV = "dev"
+    Write-Host "[DEV] 已注入 APP_ENV=dev (仅限本地回环开发)" -ForegroundColor Yellow
+}
+
+if (-not $env:ADMIN_TOKEN) {
+    Write-Host "========================================" -ForegroundColor Red
+    Write-Host " [警告] ADMIN_TOKEN 为空, 写端点(交易/持仓/配置)无鉴权保护!" -ForegroundColor Red
+    Write-Host " 仅限本地回环开发; 生产环境必须设置 ADMIN_TOKEN=<随机长字符串>" -ForegroundColor Red
+    Write-Host " 生成: python -c `"import secrets; print(secrets.token_urlsafe(32))`"" -ForegroundColor Red
+    Write-Host "========================================" -ForegroundColor Red
+}
+
 if ($IsProd) {
     Write-Host "[PROD] 生产模式: 4 workers, 无热重载" -ForegroundColor Green
     & $pythonCmd -m uvicorn web.api:app --host 0.0.0.0 --port 8000 --workers 4

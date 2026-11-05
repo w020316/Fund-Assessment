@@ -97,7 +97,7 @@ cp .env.example .env
 - `TAVILY_API_KEY` — 新闻搜索增强
 - `TINYFISH_API_KEY` — 备用 LLM
 - `TUSHARE_TOKEN` — Tushare 数据源
-- `ADMIN_TOKEN` — 写/交易端点鉴权(不配置则开发模式放行)
+- `ADMIN_TOKEN` — 写/交易端点鉴权。**生产环境必须设置**（缺省时写端点返回 503）；本地开发由启动脚本注入 `APP_ENV=dev` 放行，**仅限本地回环使用**，不可用于任何对外可访问的部署。
 
 ### 3. 启动服务
 
