@@ -1,5 +1,5 @@
 @echo off
-echo Starting OpenClaw Quantitative Trading System...
+echo Starting QuantFlow Pro ...
 if "%APP_ENV%"=="" set "APP_ENV=dev"
 if "%ADMIN_TOKEN%"=="" (
   echo ========================================
@@ -7,4 +7,5 @@ if "%ADMIN_TOKEN%"=="" (
   echo  Local loopback dev only; production MUST set ADMIN_TOKEN.
   echo ========================================
 )
-D:\dev-tools\Python312\python.exe -m uvicorn web.api:app --host 0.0.0.0 --port 8000 --reload
+rem 统一走 launch.py: 由其负责 sys.path / PYTHONPATH 注入, 避免依赖调用方环境
+D:\dev-tools\Python312\python.exe "%~dp0launch.py" --host 0.0.0.0 --port 8000 --reload

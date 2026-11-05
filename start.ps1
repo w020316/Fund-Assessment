@@ -75,11 +75,11 @@ if ($IsProd) {
 } else {
     Write-Host "[DEV] 开发模式: 热重载已启用" -ForegroundColor Green
     $job = Start-Job -ScriptBlock {
-        param($py, $root, $pylibs)
+        param($py, $root)
         Set-Location $root
-        $env:PYTHONPATH = "$pylibs;$root;$env:PYTHONPATH"
-        & $py -m uvicorn web.api:app --host 0.0.0.0 --port 8000 --reload
-    } -ArgumentList $pythonCmd, $Workspace, $PylibsDir
+        # 统一走 launch.py: 由其负责 sys.path/PYTHONPATH 注入, 避免子进程继承失效
+        & $py launch.py --host 0.0.0.0 --port 8000 --reload
+    } -ArgumentList $pythonCmd, $Workspace
 
     Start-Sleep -Seconds 3
 
