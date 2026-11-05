@@ -287,6 +287,27 @@
   font-weight: 600;
 }
 .notice-info a:hover { text-decoration: underline; }
+/* (2026-11-05) 阶段三 P2-01：口径说明里的「基金管理」跳转链接实测 72×16，
+   垂直命中区不足 48px。视觉尺寸与横向位置不动，仅加垂直 padding 并用等量负
+   margin 抵消占位（行盒高度仍为 16px），命中区变为 72×48。 */
+.notice-info a {
+  display: inline-block;
+  padding: 16px 0;
+  margin: -16px 0;
+}
+/* (2026-11-05) 阶段三 P2-01：盯盘推送开关(18×18)与阈值输入(89×44)外层 label 上
+   叠加透明伪元素扩大命中区到 ≥48px。伪元素不参与布局：push 开关的命中框以
+   复选框中心（label 左内边界 +9px）为中心，阈值输入用 label 全宽。
+   垂直延伸量均小于 flex row-gap(14px)，不会覆盖相邻可点元素。 */
+.st6-push-toggle, .st6-threshold-toggle { position: relative; }
+.st6-push-toggle::after {
+  content: ''; position: absolute; left: 9px; top: 50%;
+  width: 48px; height: 48px; transform: translate(-50%, -50%);
+}
+.st6-threshold-toggle::after {
+  content: ''; position: absolute; left: 0; top: 50%;
+  width: 100%; min-width: 48px; height: 48px; transform: translateY(-50%);
+}
 
 /* ===== STAGE5-R2: ticker fade ===== 内容溢出时右侧渐隐，提示可横向滚动
    mask 会强制合成层,桌面宽屏指数条不溢出却要为此多付约 60ms 的 LCP 渲染延迟

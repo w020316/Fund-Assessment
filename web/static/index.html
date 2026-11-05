@@ -113,6 +113,16 @@ body {
   0%,100% { opacity:1; }
   50% { opacity:0.4; }
 }
+/* (2026-11-05) 阶段三 P2-01：连接状态点是 8×8 的可聚焦按钮(role=button tabindex=0)，
+   远低于 48px 触摸目标。视觉尺寸按约束不变，用透明 ::after 把命中区扩到 56×56
+   （移动端顶栏仅 46px 高，48 的框以圆点为中心会被视口上沿裁掉约 2px，取 56 保证
+   采样区内实测 ≥48×48；伪元素不改变布局占位、不产生滚动）。
+   topbar-right 内圆点右侧无其他可点元素，向下溢出顶栏的 5~9px 落在内容区右侧留白。 */
+#connStatus { position:relative; }
+#connStatus::after {
+  content:''; position:absolute; left:50%; top:50%;
+  width:56px; height:56px; transform:translate(-50%,-50%);
+}
 
 /* ========== 侧边导航 ========== */
 .nav-item {
