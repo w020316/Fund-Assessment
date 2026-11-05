@@ -201,6 +201,11 @@ async def add_static_cache_headers(request: Request, call_next):
             response.headers.setdefault("Cache-Control", "public, max-age=300")
     return response
 
+# 阶段四:写端点 10 次/分钟(在 trace 之内、业务之外)。
+# 阶段五 O1:必须注册在 log_requests **之前**(即更内层),否则限流直接返回的 429
+# 会绕过 log_requests → 访问日志与 metrics 里看不到被限流的请求(实测 429 无记录)。
+app.middleware("http")(write_rate_limit_middleware)
+
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     start = time.monotonic()
@@ -217,9 +222,6 @@ async def log_requests(request: Request, call_next):
         logger.info(f"[{trace_id}] {request.method} {path} - {response.status_code} ({duration_ms:.0f}ms)")
     return response
 
-
-# 阶段四:写端点 10 次/分钟(在 trace 之内、业务之外,429 也会被 trace 记录)
-app.middleware("http")(write_rate_limit_middleware)
 
 # ===== 请求追踪 trace ID(借鉴 open-telemetry/opentelemetry-python 2.0K Star)=====
 # P2 修复(2026-10-26)：trace 中间件必须**最后注册**（即最外层）。

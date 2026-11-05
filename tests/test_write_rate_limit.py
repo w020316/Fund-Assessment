@@ -116,6 +116,17 @@ class TestWriteLimitKey:
         assert rl.write_limit_key(_req(peer="8.8.8.8")).startswith("write:8.8.8.8")
 
 
+class TestRateLimitObservability:
+    def test_429_is_recorded_in_metrics(self, isolated_positions):
+        """阶段五 O1:限流 429 必须进入 metrics(此前被 log_requests 挡在外层)"""
+        from web.middleware.metrics import metrics as global_metrics
+        for _ in range(12):
+            _post()
+        snap = global_metrics.snapshot()
+        assert snap["status_distribution"].get("429", 0) >= 2, snap["status_distribution"]
+        assert snap["request_count"] >= 12
+
+
 class TestAgentPathExemptFromWriteQuota:
     def test_agent_posts_do_not_consume_write_quota(self, isolated_positions):
         # 用缺失必填字段的请求快速 422(不触发 LLM 计算),连续 12 次
