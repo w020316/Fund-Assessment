@@ -672,7 +672,9 @@ class DataSourceManager:
                     elif isinstance(result, list) and result and hasattr(result[0], "latency_ms"):
                         latency = result[0].latency_ms
                     self._log_source(method_name, symbol, source_name, latency, True)
-                    self._cache.store(method_name, symbol, result)
+                    # 缓存键必须与 CacheSource._retrieve 的 query_type 一致(去掉 get_ 前缀),
+                    # 否则降级兜底时永远读不到刚写入的缓存。
+                    self._cache.store(method_name.removeprefix("get_"), symbol, result)
                     return result
             except Exception as e:
                 source_name = type(source).__name__
