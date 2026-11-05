@@ -94,6 +94,7 @@
       '  <div><strong style="font-size:13px;">' + esc(a.fund_name || a.fund_code) + '</strong>' +
       '  <span style="font-size:12px;color:var(--text-muted,#8b92a8);margin-left:6px;">评分 ' + Number(score).toFixed(1) + '</span></div>' +
       '  <span style="color:' + actColor + ';font-weight:600;font-size:12px;padding:2px 8px;border:1px solid ' + actColor + ';border-radius:3px;">' + esc(String(act)) + '</span>' +
+      (a.data_quality === 'unavailable' ? '  <span class="sigp-missing" style="font-size:11px;">净值缺失</span>' : '') +
       '</div>' +
       (navInfo ? '<div style="margin:4px 0;">' + Freshness.html(navInfo) + '</div>' : '') +
       rows +

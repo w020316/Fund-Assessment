@@ -285,6 +285,7 @@ class TestAnalyzeFundFiveSignals:
         assert result["current_nav"] == 1.25
         assert result["cost_nav"] == 1.0
         assert result["pnl_pct"] == 25.0  # 25% 浮盈
+        assert result["data_quality"] == "ok"
         assert "five_signals" in result
         assert "advice" in result
         # 浮盈25%触发止盈
@@ -308,6 +309,11 @@ class TestAnalyzeFundFiveSignals:
         assert result["current_nav"] == 0
         assert result["five_signals"]["final_score"] == 50
         assert result["advice"]["signal"] in ("hold", "neutral")
+        # 2026-11-05 R-02 回归: 净值缺失必须显式标注, 不得把盈亏静默算成 0.00
+        assert result["data_quality"] == "unavailable"
+        assert result["pnl_pct"] is None
+        assert result["pnl_amount"] is None
+        assert result["advice"]["action"] == "数据不足"
 
 
 class TestGenerateFundAdviceV2:

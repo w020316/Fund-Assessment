@@ -4636,6 +4636,7 @@ async function loadFundAdviceV2() {
           <span style="font-size:12px;color:var(--text-muted);margin-left:8px;">评分 ${fundScore.toFixed(1)}</span>
         </div>
         <span style="color:${actColor};font-weight:600;font-size:12px;padding:2px 8px;border:1px solid ${actColor};border-radius:3px;">${act}</span>
+        ${a.data_quality === 'unavailable' ? '<span style="margin-left:6px;font-size:11px;color:var(--color-warning);border:1px dashed var(--color-warning);padding:1px 6px;border-radius:10px;">净值缺失</span>' : ''}
       </div>
       ${signalRows}
     </div>`;

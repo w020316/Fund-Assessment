@@ -552,15 +552,23 @@ async def analyze_fund_five_signals(
 
     five_signals = _merge_five_signals(technical, fundamental, news, holdings, market)
 
-    # 盈亏
-    pnl_pct = ((current_nav - cost_nav) / cost_nav * 100) if cost_nav > 0 and current_nav > 0 else 0.0
-    pnl_amount = (current_nav - cost_nav) * shares if current_nav > 0 and cost_nav > 0 else 0.0
+    # 盈亏(数据缺失时置 None, 不得静默算成 0.00 —— 0 与"真实不赚不亏"必须可区分)
+    nav_available = current_nav > 0
+    if cost_nav > 0 and nav_available:
+        pnl_pct: float | None = (current_nav - cost_nav) / cost_nav * 100
+        pnl_amount: float | None = (current_nav - cost_nav) * shares
+    else:
+        pnl_pct = None
+        pnl_amount = None
 
     # 基于五信号+盈亏的综合建议
     final_action = five_signals["action"]
     final_signal = five_signals["signal"]
+    if not nav_available:
+        # 净值缺失: 明确标注数据不足, 不再给出可执行的买卖动作
+        final_action = "数据不足"
     # 止盈线判断
-    if cost_nav > 0 and current_nav > 0:
+    if cost_nav > 0 and nav_available and pnl_pct is not None:
         if pnl_pct >= 20:
             final_signal = "take_profit"
             final_action = "止盈"
@@ -573,8 +581,9 @@ async def analyze_fund_five_signals(
         "current_nav": current_nav,
         "cost_nav": cost_nav,
         "shares": shares,
-        "pnl_pct": round(pnl_pct, 2),
-        "pnl_amount": round(pnl_amount, 2),
+        "pnl_pct": round(pnl_pct, 2) if pnl_pct is not None else None,
+        "pnl_amount": round(pnl_amount, 2) if pnl_amount is not None else None,
+        "data_quality": "ok" if nav_available else "unavailable",
         "five_signals": five_signals,
         "advice": {
             "signal": final_signal,
@@ -640,6 +649,7 @@ async def generate_fund_advice_v2(positions: list[dict]) -> dict[str, Any]:
     add_count = sum(1 for a in actions if "加仓" in a or "定投" in a)
     hold_count = sum(1 for a in actions if "持有" in a)
     watch_count = sum(1 for a in actions if "关注" in a)
+    unavailable_count = sum(1 for a in actions if "数据不足" in a)
     summary_parts = []
     if take_profit_count:
         summary_parts.append(f"{take_profit_count} 只建议止盈")
@@ -649,6 +659,8 @@ async def generate_fund_advice_v2(positions: list[dict]) -> dict[str, Any]:
         summary_parts.append(f"{hold_count} 只建议持有")
     if watch_count:
         summary_parts.append(f"{watch_count} 只建议关注")
+    if unavailable_count:
+        summary_parts.append(f"{unavailable_count} 只数据不足(未取到净值)")
     summary = " | ".join(summary_parts) if summary_parts else "无明确建议"
 
     return {
