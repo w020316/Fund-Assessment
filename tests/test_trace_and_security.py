@@ -204,3 +204,50 @@ class TestTraceIdInAccessLog:
 
         hits = [m for m in msgs if "GET /api/health" in m]
         assert hits and "abcd1234ef567890" in hits[-1]
+
+
+class TestFrontendHtmlEscaping:
+    """前端 innerHTML 注入点回归（2026-11-05 R-05）
+
+    缺陷：市场展望的 LLM 摘要/指数名/板块名、策略名、国际指数名、组合权重名称
+    直接拼进 innerHTML 模板，策略名还被拼进 onclick 的 JS 字符串参数 ——
+    数据源或用户可控文本含 `<img onerror>` / 引号时可执行脚本。
+
+    本类做静态回归：这些渲染点必须经 escapeHtml，onclick 不得插值。
+    """
+
+    @staticmethod
+    def _html() -> str:
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parents[1] / "web" / "static" / "index.html"
+        return path.read_text(encoding="utf-8")
+
+    def test_escape_html_escapes_all_dangerous_chars(self):
+        html = self._html()
+        assert "function escapeHtml(" in html
+        for ch in ("&amp;", "&lt;", "&gt;", "&quot;", "&#39;"):
+            assert ch in html
+
+    @pytest.mark.parametrize(
+        "snippet",
+        [
+            "escapeHtml(oa.summary)",
+            "escapeHtml(idx.name)",
+            "escapeHtml(idx.comment || '')",
+            "escapeHtml(oa.sector_rotation.hot_sectors.join('、'))",
+            "escapeHtml(oa.sector_rotation.cold_sectors.join('、'))",
+            "escapeHtml(s.name)",
+            "escapeHtml(s.type)",
+            "escapeHtml(idx.currency || '')",
+            "escapeHtml(w.symbol)",
+            "escapeHtml(w.name)",
+        ],
+    )
+    def test_render_sites_are_escaped(self, snippet):
+        assert snippet in self._html(), f"缺失转义: {snippet}"
+
+    def test_no_interpolation_inside_onclick(self):
+        html = self._html()
+        assert not re.search(r'onclick="[^"]*\$\{', html), "onclick 内不得插入模板变量"
+

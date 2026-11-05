@@ -2252,6 +2252,45 @@ function showToast(msg, type='info') {
   setTimeout(() => { t.style.opacity='0'; t.style.transition='opacity 0.3s'; setTimeout(()=>t.remove(),300); }, CONFIG.TOAST_DURATION);
 }
 
+// 策略"管理"按钮: 事件委托入口, 避免把策略名拼进 onclick 造成 XSS
+function onStrategyManageClick(btn) {
+  showToast('策略操作: ' + (btn.getAttribute('data-name') || ''), 'info');
+}
+
+// 基金"复核"按钮: 事件委托入口, 避免基金代码被拼进 onclick 的 JS 字符串
+function onFundWizardReviewClick(btn) {
+  FundWizard.open(btn.getAttribute('data-code') || '');
+}
+
+// 以下为持仓/基金操作按钮的事件委托入口(2026-11-05 R-05):
+// 参数一律从 data-* 读取, 不再拼进 onclick 的 JS 字面量。
+function onViewHoldingsClick(btn) {
+  viewHoldings(btn.getAttribute('data-code') || '', btn.getAttribute('data-name') || '');
+}
+function onMultiAgentAnalyzeClick(btn) {
+  multiAgentAnalyze(
+    btn.getAttribute('data-code') || '',
+    btn.getAttribute('data-name') || '',
+    Number(btn.getAttribute('data-cost')) || 0,
+    Number(btn.getAttribute('data-shares')) || 0
+  );
+}
+function onToggleFundChartClick(btn) {
+  toggleFundChart(btn.getAttribute('data-code') || '');
+}
+function onDeleteFundPositionClick(btn) {
+  deleteFundPosition(btn.getAttribute('data-code') || '');
+}
+function onSelectFundClick(el) {
+  selectFund(el.getAttribute('data-code') || '', el.getAttribute('data-name') || '');
+}
+function onDeleteStockPositionClick(btn) {
+  deleteStockPosition(btn.getAttribute('data-code') || '');
+}
+function onRemoveWatchlistClick(btn) {
+  removeWatchlist(btn.getAttribute('data-code') || '');
+}
+
 // HTML 转义(2026-07-30):防止用户输入的 name 等字段经 innerHTML 注入,造成 XSS
 // 用于所有用户可控文本(股票/基金名称、备注)插入 DOM 前的转义
 function escapeHtml(s) {
@@ -3516,14 +3555,14 @@ async function loadMarketOutlook() {
     <div style="font-size:20px;font-weight:700;color:${outlookColor};">${outlookText}</div>
     <div style="color:var(--text-secondary);">置信度: <span style="color:var(--accent);font-weight:600;">${(oa.confidence * 100).toFixed(0)}%</span></div>
   </div>`;
-  if (oa.summary) html += `<div style="color:var(--text-secondary);margin-bottom:12px;line-height:1.7;">${oa.summary}</div>`;
+  if (oa.summary) html += `<div style="color:var(--text-secondary);margin-bottom:12px;line-height:1.7;">${escapeHtml(oa.summary)}</div>`;
   if (Array.isArray(oa.index_analysis) && oa.index_analysis.length) {
     html += '<div style="margin-bottom:12px;"><div style="color:var(--text-muted);font-size:12px;margin-bottom:6px;">指数点评</div>';
     oa.index_analysis.forEach(idx => {
       const trendColor = idx.trend === 'UP' ? 'var(--color-down)' : (idx.trend === 'DOWN' ? 'var(--color-up)' : 'var(--color-flat)');
       html += `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);">
-        <span>${idx.name} <span style="color:${trendColor};">${idx.change_pct >= 0 ? '+' : ''}${idx.change_pct}%</span></span>
-        <span style="color:var(--text-muted);font-size:12px;">${idx.comment || ''}</span>
+        <span>${escapeHtml(idx.name)} <span style="color:${trendColor};">${idx.change_pct >= 0 ? '+' : ''}${idx.change_pct}%</span></span>
+        <span style="color:var(--text-muted);font-size:12px;">${escapeHtml(idx.comment || '')}</span>
       </div>`;
     });
     html += '</div>';
@@ -3531,10 +3570,10 @@ async function loadMarketOutlook() {
   if (oa.sector_rotation) {
     html += '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;">';
     if (Array.isArray(oa.sector_rotation.hot_sectors) && oa.sector_rotation.hot_sectors.length) {
-      html += `<div><span style="color:var(--color-down);">▲ 热门:</span> ${oa.sector_rotation.hot_sectors.join('、')}</div>`;
+      html += `<div><span style="color:var(--color-down);">▲ 热门:</span> ${escapeHtml(oa.sector_rotation.hot_sectors.join('、'))}</div>`;
     }
     if (Array.isArray(oa.sector_rotation.cold_sectors) && oa.sector_rotation.cold_sectors.length) {
-      html += `<div><span style="color:var(--color-up);">▼ 冷门:</span> ${oa.sector_rotation.cold_sectors.join('、')}</div>`;
+      html += `<div><span style="color:var(--color-up);">▼ 冷门:</span> ${escapeHtml(oa.sector_rotation.cold_sectors.join('、'))}</div>`;
     }
     html += '</div>';
   }
@@ -3850,12 +3889,12 @@ async function loadStrategyList() {
     const statusColor = s.status === '运行中' ? 'var(--color-down)' : 'var(--color-warning)';
     const retColor = changeColor(s.return_rate);
     return `<tr>
-      <td style="font-weight:500;">${s.name}</td>
-      <td>${s.type}</td>
+      <td style="font-weight:500;">${escapeHtml(s.name)}</td>
+      <td>${escapeHtml(s.type)}</td>
       <td><span style="color:${statusColor};">●</span> ${s.status}</td>
       <td style="color:${retColor}">${changeSign(s.return_rate)}${fmtNum(s.return_rate)}%</td>
       <td style="color:var(--color-up);">${fmtNum(s.max_drawdown)}%</td>
-      <td><button class="btn btn-sm btn-outline" onclick="showToast('策略操作: ${s.name}','info')">管理</button></td>
+      <td><button class="btn btn-sm btn-outline" data-name="${escapeHtml(s.name)}" onclick="onStrategyManageClick(this)">管理</button></td>
     </tr>`;
   }).join('');
 }
@@ -4131,7 +4170,7 @@ function _fundCardHtml(p) {
   });
   const lowBadge = low
     ? ` <span style="color:var(--color-warning);border:1px dashed var(--color-warning);padding:1px 6px;border-radius:10px;font-size:11px;">⚠ 置信度低</span>`
-      + ` <button class="btn btn-sm" style="padding:2px 8px;color:var(--color-warning);" title="进入补录向导复核该基金" onclick="FundWizard.open('${safeCode}')">复核</button>`
+      + ` <button class="btn btn-sm" style="padding:2px 8px;color:var(--color-warning);" title="进入补录向导复核该基金" data-code="${safeCode}" onclick="onFundWizardReviewClick(this)">复核</button>`
     : '';
   return `<div class="fund-card" data-fund-code="${safeCode}">
     <div class="fund-card-top">
@@ -4198,16 +4237,16 @@ async function loadFundData() {
           asOf: p.nav_date || '',
           estimated: p.confidence === 'low' && !p.nav_date,
           note: p.confidence === 'low' ? (p.confidence_reason || '') : ''
-        })}${p.confidence === 'low' ? ` <button class="btn btn-sm" style="padding:2px 8px;color:var(--color-warning);" title="进入补录向导复核该基金" onclick="FundWizard.open('${escapeHtml(p.fund_code)}')">复核</button>` : ''}</div>
+        })}${p.confidence === 'low' ? ` <button class="btn btn-sm" style="padding:2px 8px;color:var(--color-warning);" title="进入补录向导复核该基金" data-code="${escapeHtml(p.fund_code)}" onclick="onFundWizardReviewClick(this)">复核</button>` : ''}</div>
       </td>
       <td style="color:${changeColorStr};">${(p.change_pct || 0).toFixed(2)}%</td>
       <!-- (2026-07-31) P2-9 修复: pnl_amount 为 0 时不应显示 "+", 改为 > 0 才加正号 -->
       <td style="color:${pnlColor};">${(p.pnl_amount > 0 ? '+' : '') + (p.pnl_amount || 0).toFixed(2)}<br><span style="font-size:11px;">(${(p.pnl_pct >= 0 ? '+' : '') + (p.pnl_pct || 0).toFixed(2)}%)</span></td>
       <td style="white-space:nowrap;">
-        <button class="btn btn-sm" style="color:var(--accent-cyan);padding:3px 8px;" title="P1-2 重仓股板块分析" onclick="viewHoldings('${escapeHtml(p.fund_code)}','${safeNameAttr}')">分析</button>
-        <button class="btn btn-sm" style="color:var(--accent);padding:3px 8px;" title="P1-5 多智能体深度分析" onclick="multiAgentAnalyze('${escapeHtml(p.fund_code)}','${safeNameAttr}',${p.cost_nav || 0},${p.shares || 0})">深度</button>
-        <button class="btn btn-sm" style="color:var(--text-muted);padding:3px 8px;" title="净值走势图" onclick="toggleFundChart('${escapeHtml(p.fund_code)}')">走势</button>
-        <button class="btn btn-sm" style="color:var(--color-up);padding:3px 8px;" onclick="deleteFundPosition('${escapeHtml(p.fund_code)}')">删</button>
+        <button class="btn btn-sm" style="color:var(--accent-cyan);padding:3px 8px;" title="P1-2 重仓股板块分析" data-code="${escapeHtml(p.fund_code)}" data-name="${safeNameAttr}" onclick="onViewHoldingsClick(this)">分析</button>
+        <button class="btn btn-sm" style="color:var(--accent);padding:3px 8px;" title="P1-5 多智能体深度分析" data-code="${escapeHtml(p.fund_code)}" data-name="${safeNameAttr}" data-cost="${p.cost_nav || 0}" data-shares="${p.shares || 0}" onclick="onMultiAgentAnalyzeClick(this)">深度</button>
+        <button class="btn btn-sm" style="color:var(--text-muted);padding:3px 8px;" title="净值走势图" data-code="${escapeHtml(p.fund_code)}" onclick="onToggleFundChartClick(this)">走势</button>
+        <button class="btn btn-sm" style="color:var(--color-up);padding:3px 8px;" data-code="${escapeHtml(p.fund_code)}" onclick="onDeleteFundPositionClick(this)">删</button>
       </td>
     </tr>
     <tr id="chart-row-${p.fund_code}" data-chart-for="${escapeHtml(p.fund_code)}" style="display:none;">
@@ -5008,7 +5047,7 @@ async function multiAgentAnalyze(fundCode, fundName, costNav, shares) {
         <div style="font-size:32px;margin-bottom:12px;opacity:0.5;">⚠</div>
         <div style="font-size:15px;color:var(--color-warning);margin-bottom:8px;">网络异常</div>
         <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">请检查网络连接后重试。若未配置管理Token,请在"设置"页填写。</div>
-        <button class="btn btn-primary" onclick="multiAgentAnalyze('${fundCode}','${(fundName||'').replace(/'/g,'')}',${costNav||0},${shares||0})">重试分析</button>
+        <button class="btn btn-primary" data-code="${escapeHtml(fundCode)}" data-name="${escapeHtml(fundName || '')}" data-cost="${costNav||0}" data-shares="${shares||0}" onclick="onMultiAgentAnalyzeClick(this)">重试分析</button>
       </div>`;
       return;
     }
@@ -5021,7 +5060,7 @@ async function multiAgentAnalyze(fundCode, fundName, costNav, shares) {
         <div style="font-size:32px;margin-bottom:12px;opacity:0.5;">⚠</div>
         <div style="font-size:15px;color:var(--color-warning);margin-bottom:8px;">分析失败</div>
         <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">可能原因:1.未配置管理Token 2.触发限流(3次/分钟) 3.LLM服务繁忙</div>
-        <button class="btn btn-primary" onclick="multiAgentAnalyze('${fundCode}','${(fundName||'').replace(/'/g,'')}',${costNav||0},${shares||0})">重试分析</button>
+        <button class="btn btn-primary" data-code="${escapeHtml(fundCode)}" data-name="${escapeHtml(fundName || '')}" data-cost="${costNav||0}" data-shares="${shares||0}" onclick="onMultiAgentAnalyzeClick(this)">重试分析</button>
       </div>`;
       return;
     }
@@ -5275,15 +5314,12 @@ async function fundSearch(q) {
     return;
   }
   el.innerHTML = data.data.slice(0, 8).map(item => {
-    // XSS 修复(2026-07-31):原代码 item.name 未 escapeHtml 直接插入 innerHTML,
-    // 且 onclick 字符串只替换单引号未处理反斜杠/双引号。改为 escapeHtml 显示,
-    // onclick 用 JSON.stringify 安全嵌入字符串字面量。
+    // XSS 修复(2026-07-31):原代码 item.name 未 escapeHtml 直接插入 innerHTML。
+    // 2026-11-05 R-05: onclick 改为 data-* + 事件委托, 不再把名称拼进 JS 字面量。
     const safeCode = escapeHtml(item.code);
     const safeName = escapeHtml(item.name);
     const safeType = escapeHtml(item.type || '');
-    const jsCode = JSON.stringify(String(item.code));
-    const jsName = JSON.stringify(String(item.name));
-    return `<div style="padding:4px 8px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background=''" onclick="selectFund(${jsCode},${jsName})">
+    return `<div style="padding:4px 8px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background=''" data-code="${safeCode}" data-name="${safeName}" onclick="onSelectFundClick(this)">
       <strong>${safeCode}</strong> ${safeName} <span style="color:var(--text-muted);font-size:11px;">${safeType}</span>
     </div>`;
   }).join('');
@@ -5461,10 +5497,10 @@ async function loadGlobalIndices() {
     const sign = changeSign(idx.change_pct);
     const flag = idx.market === 'US' ? 'US' : idx.market === 'HK' ? 'HK' : '';
     return `<div class="card" style="text-align:center;">
-      <div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">${flag} ${idx.name}</div>
+      <div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">${flag} ${escapeHtml(idx.name)}</div>
       <div style="font-size:20px;font-weight:700;color:${color};">${fmtNum(idx.price)}</div>
       <div style="font-size:12px;color:${color};margin-top:4px;">${sign}${fmtNum(idx.change)} (${sign}${fmtNum(idx.change_pct)}%)</div>
-      <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">${idx.currency || ''}</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">${escapeHtml(idx.currency || '')}</div>
     </div>`;
   }).join('');
 }
@@ -5648,8 +5684,8 @@ async function loadPortfolioRisk() {
     const weightsHtml = (d.weights || []).map(w => {
       const wColor = w.weight > 40 ? '#ef4444' : (w.weight > 25 ? 'var(--accent-blue)' : 'var(--text-secondary)');
       return `<tr>
-        <td style="color:var(--accent-cyan);">${w.symbol}</td>
-        <td>${w.name}</td>
+        <td style="color:var(--accent-cyan);">${escapeHtml(w.symbol)}</td>
+        <td>${escapeHtml(w.name)}</td>
         <td style="color:${wColor};font-weight:600;">${fmtNum(w.weight)}%</td>
         <td><div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden;"><div style="height:100%;width:${Math.min(w.weight, 100)}%;background:${wColor};"></div></div></td>
       </tr>`;
@@ -5924,7 +5960,7 @@ async function loadPositions() {
       <td style="color:${color}">${fmtNum(price)}</td>
       <td style="color:${color}">${changeSign(profit)}${fmtMoney(profit)}</td>
       <td style="color:${color}">${changeSign(profitPct)}${fmtNum(profitPct)}%</td>
-      <td><button class="btn btn-sm" style="padding:2px 8px;font-size:11px;color:#ef4444;" onclick="deleteStockPosition('${code}')">删除</button></td>
+      <td><button class="btn btn-sm" style="padding:2px 8px;font-size:11px;color:#ef4444;" data-code="${escapeHtml(code)}" onclick="onDeleteStockPositionClick(this)">删除</button></td>
     </tr>`;
   }).join('');
 
@@ -6241,11 +6277,11 @@ async function loadWatchlist() {
   body.innerHTML = list.map(w => {
     const color = changeColor(w.change_pct);
     return `<tr>
-      <td style="color:var(--accent-cyan);">${w.code}</td>
-      <td>${w.name}</td>
+      <td style="color:var(--accent-cyan);">${escapeHtml(w.code)}</td>
+      <td>${escapeHtml(w.name)}</td>
       <td style="color:${color}">${fmtNum(w.price)}</td>
       <td style="color:${color}">${changeSign(w.change_pct)}${fmtNum(w.change_pct)}%</td>
-      <td><button class="btn btn-sm btn-outline" onclick="removeWatchlist('${w.code}')">删除</button></td>
+      <td><button class="btn btn-sm btn-outline" data-code="${escapeHtml(w.code)}" onclick="onRemoveWatchlistClick(this)">删除</button></td>
     </tr>`;
   }).join('');
 }
