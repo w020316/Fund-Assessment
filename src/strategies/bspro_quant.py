@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import TimeoutError as FuturesTimeout
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -12,6 +14,8 @@ from loguru import logger
 # 阶段四 R-06:akshare 内部 requests 调用默认无超时,上游抖动时会单次挂起数十秒。
 # 统一给支持 timeout 参数的接口传显式上限,失败快速返回而不是无限等待。
 AK_TIMEOUT_SECONDS = 8.0
+# 因子并发计算的整体预算:到点即用已完成部分,避免个别慢请求拖垮整次回测。
+FACTOR_BUDGET_SECONDS = 20.0
 
 
 class FactorCategory(str, Enum):
@@ -59,6 +63,9 @@ FACTOR_LIBRARY: list[FactorDef] = [
 class BSProQuant:
     def __init__(self) -> None:
         self._kline_cache: dict[str, pd.DataFrame] = {}
+        # 阶段四 R-06:回测路径可跳过"全市场快照"这类分钟级调用(pcf 成本高、收益小),
+        # 其它调用方(单票因子查询)行为保持不变。
+        self.skip_heavy_spot = False
 
     def _get_kline(self, stock_code: str, days: int = 250) -> pd.DataFrame:
         if stock_code in self._kline_cache:
@@ -89,8 +96,33 @@ class BSProQuant:
             logger.warning(f"获取估值指标 failed: {e}")
         # 阶段四 R-06:原实现在这里对每只股票调用一次 ak.stock_zh_a_spot_em(),
         # 该接口内部按页拉取全市场快照(实测 59 页、约 70s),30 只股票会放大到
-        # 不可用级别(回测恒超时)。pcf 仅为价值因子之一且当前上游已不可用,
-        # 直接不再采集,避免用一个全市场快照换取单只股票的市销率。
+        # 不可用级别(回测恒超时)。回测路径(skip_heavy_spot=True)跳过该调用,
+        # 单票因子查询保持原行为。
+        if not self.skip_heavy_spot:
+            try:
+                df_cash = ak.stock_cash_flow_sheet_by_report_em(symbol=stock_code)
+                if df_cash is not None and not df_cash.empty:
+                    latest = df_cash.iloc[0]
+                    net_cash = float(latest.get("经营活动产生的现金流量净额", 0))
+                    try:
+                        df_spot = ak.stock_zh_a_spot_em()
+                        if df_spot is not None and not df_spot.empty:
+                            row = df_spot[df_spot["代码"] == stock_code]
+                            if not row.empty:
+                                market_cap = float(row.iloc[0].get("总市值", 0))
+                                if net_cash != 0 and market_cap > 0:
+                                    result["pcf"] = market_cap / abs(net_cash)
+                    except Exception as e:
+                        logger.warning(f"获取市值数据 failed: {e}")
+            except Exception as e:
+                logger.warning(f"获取现金流数据 failed: {e}")
+        try:
+            df_val = ak.stock_a_indicator_lg(symbol=stock_code)
+            if df_val is not None and not df_val.empty:
+                latest = df_val.iloc[-1]
+                result["pe_ttm"] = float(latest.get("pe_ttm", result.get("pe", 0)))
+        except Exception as e:
+            logger.warning(f"获取TTM估值指标 failed: {e}")
         return result
 
     def _compute_growth_factors(self, stock_code: str) -> dict[str, float]:
@@ -166,12 +198,18 @@ class BSProQuant:
         result["sharpe"] = round(float(mean_return / std_return) if std_return > 0 else 0.0, 4)
         return result
 
-    def compute_factors(self, stock_code: str) -> dict:
-        value = self._compute_value_factors(stock_code)
-        growth = self._compute_growth_factors(stock_code)
-        quality = self._compute_quality_factors(stock_code)
-        momentum = self._compute_momentum_factors(stock_code)
-        volatility = self._compute_volatility_factors(stock_code)
+    def compute_factors(self, stock_code: str, categories: set[str] | None = None) -> dict:
+        """计算因子。
+
+        categories=None 时计算全部五类(原有行为);回测只传组合用到的类别,
+        避免为"不参与打分"的因子支付网络与计算成本(阶段四 R-06)。
+        """
+        need = categories or {c.value for c in FactorCategory}
+        value = self._compute_value_factors(stock_code) if FactorCategory.VALUE.value in need else {}
+        growth = self._compute_growth_factors(stock_code) if FactorCategory.GROWTH.value in need else {}
+        quality = self._compute_quality_factors(stock_code) if FactorCategory.QUALITY.value in need else {}
+        momentum = self._compute_momentum_factors(stock_code) if FactorCategory.MOMENTUM.value in need else {}
+        volatility = self._compute_volatility_factors(stock_code) if FactorCategory.VOLATILITY.value in need else {}
         all_factors = {**value, **growth, **quality, **momentum, **volatility}
         categorized: dict[str, dict[str, float]] = {
             FactorCategory.VALUE.value: value,
@@ -233,7 +271,7 @@ class BSProQuant:
         try:
             from src.core.data_source_v2 import get_stock_ranking_em
             ranking = get_stock_ranking_em(sort_field="f3", sort_order=0, count=30)
-            stock_pool = [str(s.get("code", "")).zfill(6) for s in (ranking or []) if s.get("code")][:30]
+            stock_pool = [str(s.get("code", "")).zfill(6) for s in (ranking or []) if s.get("code")][:15]
         except Exception as e:
             logger.warning(f"回测候选池获取失败: {e}")
             stock_pool = []
@@ -243,17 +281,47 @@ class BSProQuant:
             result["error_message"] = "候选股票池获取失败:行情数据源暂不可用"
             return result
 
-        # 30 只股票逐只算因子实测约 45~55s,这里用 4 个线程并发,整体约 12~15s,
-        # 保证在端点 30s 上限内返回;单只失败只影响该只(分数记 0)。
+        # 候选池 15 只、4 线程并发:实测 12~18s,30s 上限留有余量
+        # (上游抖动时会更快触发超时并返回可读 503,而不是无限挂起)。
+        self.skip_heavy_spot = True
+        # 只计算组合里真正用到的因子类别(省掉不参与打分的一类财务接口)
+        need_categories: set[str] = set()
+        for factor_name in factor_combo:
+            factor_def = next((f for f in FACTOR_LIBRARY if f.name == factor_name), None)
+            if factor_def:
+                need_categories.add(factor_def.category.value)
+
         def _factor_of(code: str) -> tuple[str, dict]:
             try:
-                return code, self.compute_factors(code).get("factors", {})
+                return code, self.compute_factors(code, need_categories).get("factors", {})
             except Exception as e:
                 logger.warning(f"计算 {code} 因子失败: {e}")
                 return code, {}
 
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            factor_map = dict(pool.map(_factor_of, stock_pool))
+        pool = ThreadPoolExecutor(max_workers=4)
+        futures = {pool.submit(_factor_of, c): c for c in stock_pool}
+        factor_map: dict[str, dict] = {}
+        deadline = time.monotonic() + FACTOR_BUDGET_SECONDS
+        try:
+            for fut in as_completed(futures, timeout=max(0.0, deadline - time.monotonic())):
+                code, factors = fut.result()
+                factor_map[code] = factors
+        except FuturesTimeout:
+            logger.warning(
+                f"回测因子计算超过 {FACTOR_BUDGET_SECONDS}s 预算,"
+                f"已得 {len(factor_map)}/{len(stock_pool)} 只,使用已完成部分"
+            )
+        finally:
+            # 不等待未完成的线程(cancel 只能取消未开始任务),保证接口按预算返回
+            pool.shutdown(wait=False, cancel_futures=True)
+
+        if len(factor_map) < 3:
+            result["error"] = "DATA_SOURCE_UNAVAILABLE"
+            result["error_message"] = "因子计算超时:行情数据源响应过慢"
+            return result
+        if len(factor_map) < len(stock_pool):
+            result["partial"] = True
+            result["warning"] += "(部分股票因子未在预算内完成)"
 
         scores: dict[str, float] = {}
         for code in stock_pool:
@@ -267,7 +335,9 @@ class BSProQuant:
                 score += val * weight
             scores[code] = score
         sorted_stocks = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-        top_stocks = [s[0] for s in sorted_stocks[:5]]
+        # 只用已完成因子的股票(预算内未完成的股票分数是默认 0,不能当"低分"入选,
+        # 也会额外触发一轮 K 线请求)
+        top_stocks = [s[0] for s in sorted_stocks if s[0] in factor_map][:5]
 
         # 收集每只股票最近 period 天的日线数据(对齐日期)
         stock_closes: dict[str, pd.Series] = {}
