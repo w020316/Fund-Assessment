@@ -2,7 +2,7 @@ from typing import Any
 
 import asyncio
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -13,9 +13,11 @@ from web.rate_limiter import limiter
 
 router = APIRouter()
 
-# R-03(2026-11-05): 回测逐票拉取历史行情, 无上限时会长时间挂起(实测 >150s),
-# 超过该上限直接返回 503, 避免前端入口"点了没反应"。
-BACKTEST_TIMEOUT_SECONDS = 45
+# R-03(2026-11-05): 回测逐票拉取历史行情, 无上限时会长时间挂起(实测 >150s)。
+# R-06(2026-11-05): 根因是候选池用 ak.stock_zh_a_spot_em()(59 页/约 70s)且逐票
+# 重复拉全市场快照;修复后实测 12~15s 可完成。上限从 45s 收紧到 30s:
+# 正常路径有充足余量,异常路径也更早给出可读失败(不靠"拉长时间"掩盖问题)。
+BACKTEST_TIMEOUT_SECONDS = 30
 
 _HAS_STRATEGIES = False
 try:
@@ -385,6 +387,9 @@ async def backtest(req: BacktestRequest):
             asyncio.to_thread(quant.backtest_strategy, factor_combo=factor_combo, period=60),
             timeout=BACKTEST_TIMEOUT_SECONDS,
         )
+        # R-06:候选池取不到时上游明确失败,不返回全零冒充"回测完成"
+        if result.get("error") == "DATA_SOURCE_UNAVAILABLE":
+            raise HTTPException(status_code=503, detail=result.get("error_message") or "行情数据源暂不可用")
         return BacktestResponse(
             strategy=req.strategy, stock_code=req.stock_code,
             total_return=result["total_return"],
@@ -396,14 +401,16 @@ async def backtest(req: BacktestRequest):
         )
     except asyncio.TimeoutError:
         logger.warning(f"backtest {req.strategy} 超时({BACKTEST_TIMEOUT_SECONDS}s)")
-        from fastapi import HTTPException
         raise HTTPException(
             status_code=503,
             detail=f"回测超时({BACKTEST_TIMEOUT_SECONDS}s), 行情数据源暂不可用, 请稍后重试",
         )
+    except HTTPException:
+        # R-06:内部抛出的是有明确语义的 503(如候选池不可用),不要被下面的
+        # 通用兜底改写成"回测执行失败",否则真实原因丢失。
+        raise
     except Exception as e:
         logger.exception(f"backtest {req.strategy} failed")
-        from fastapi import HTTPException
         raise HTTPException(status_code=503, detail="回测执行失败，请稍后重试")
 
 

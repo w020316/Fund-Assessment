@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -7,6 +8,10 @@ import numpy as np
 import pandas as pd
 import akshare as ak
 from loguru import logger
+
+# 阶段四 R-06:akshare 内部 requests 调用默认无超时,上游抖动时会单次挂起数十秒。
+# 统一给支持 timeout 参数的接口传显式上限,失败快速返回而不是无限等待。
+AK_TIMEOUT_SECONDS = 8.0
 
 
 class FactorCategory(str, Enum):
@@ -59,7 +64,10 @@ class BSProQuant:
         if stock_code in self._kline_cache:
             return self._kline_cache[stock_code]
         try:
-            df = ak.stock_zh_a_hist(symbol=stock_code, period="daily", adjust="qfq")
+            df = ak.stock_zh_a_hist(
+                symbol=stock_code, period="daily", adjust="qfq",
+                timeout=AK_TIMEOUT_SECONDS,
+            )
             if df is not None and not df.empty:
                 df = df.tail(days).reset_index(drop=True)
                 self._kline_cache[stock_code] = df
@@ -79,30 +87,10 @@ class BSProQuant:
                 result["ps"] = float(latest.get("ps", 0))
         except Exception as e:
             logger.warning(f"获取估值指标 failed: {e}")
-        try:
-            df_cash = ak.stock_cash_flow_sheet_by_report_em(symbol=stock_code)
-            if df_cash is not None and not df_cash.empty:
-                latest = df_cash.iloc[0]
-                net_cash = float(latest.get("经营活动产生的现金流量净额", 0))
-                try:
-                    df_spot = ak.stock_zh_a_spot_em()
-                    if df_spot is not None and not df_spot.empty:
-                        row = df_spot[df_spot["代码"] == stock_code]
-                        if not row.empty:
-                            market_cap = float(row.iloc[0].get("总市值", 0))
-                            if net_cash != 0 and market_cap > 0:
-                                result["pcf"] = market_cap / abs(net_cash)
-                except Exception as e:
-                    logger.warning(f"获取市值数据 failed: {e}")
-        except Exception as e:
-            logger.warning(f"获取现金流数据 failed: {e}")
-        try:
-            df_val = ak.stock_a_indicator_lg(symbol=stock_code)
-            if df_val is not None and not df_val.empty:
-                latest = df_val.iloc[-1]
-                result["pe_ttm"] = float(latest.get("pe_ttm", result.get("pe", 0)))
-        except Exception as e:
-            logger.warning(f"获取TTM估值指标 failed: {e}")
+        # 阶段四 R-06:原实现在这里对每只股票调用一次 ak.stock_zh_a_spot_em(),
+        # 该接口内部按页拉取全市场快照(实测 59 页、约 70s),30 只股票会放大到
+        # 不可用级别(回测恒超时)。pcf 仅为价值因子之一且当前上游已不可用,
+        # 直接不再采集,避免用一个全市场快照换取单只股票的市销率。
         return result
 
     def _compute_growth_factors(self, stock_code: str) -> dict[str, float]:
@@ -239,20 +227,40 @@ class BSProQuant:
             "trades": 0,
             "warning": "假设性回测:因子为当前快照,存在未来函数偏差,结果仅供参考",
         }
+        # 阶段四 R-06:候选池不再用 ak.stock_zh_a_spot_em()。
+        # 实测该接口分 59 页拉全市场快照、约 70s(超过端点 45s 上限,回测恒失败);
+        # 改用 data_source_v2 的东财榜单(1 次请求,实测 1.2s,失败时自动回退新浪)。
         try:
-            df = ak.stock_zh_a_spot_em()
-            if df is None or df.empty:
-                return result
-            candidates = df.head(100)
-            stock_pool = candidates["代码"].tolist()[:30]
-        except Exception:
+            from src.core.data_source_v2 import get_stock_ranking_em
+            ranking = get_stock_ranking_em(sort_field="f3", sort_order=0, count=30)
+            stock_pool = [str(s.get("code", "")).zfill(6) for s in (ranking or []) if s.get("code")][:30]
+        except Exception as e:
+            logger.warning(f"回测候选池获取失败: {e}")
+            stock_pool = []
+        if not stock_pool:
+            # 明确失败,由路由层转成可读的 503,不再静默返回全零
+            result["error"] = "DATA_SOURCE_UNAVAILABLE"
+            result["error_message"] = "候选股票池获取失败:行情数据源暂不可用"
             return result
+
+        # 30 只股票逐只算因子实测约 45~55s,这里用 4 个线程并发,整体约 12~15s,
+        # 保证在端点 30s 上限内返回;单只失败只影响该只(分数记 0)。
+        def _factor_of(code: str) -> tuple[str, dict]:
+            try:
+                return code, self.compute_factors(code).get("factors", {})
+            except Exception as e:
+                logger.warning(f"计算 {code} 因子失败: {e}")
+                return code, {}
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            factor_map = dict(pool.map(_factor_of, stock_pool))
+
         scores: dict[str, float] = {}
         for code in stock_pool:
-            factors = self.compute_factors(code)
+            factors = factor_map.get(code, {})
             score = 0.0
             for factor_name, weight in factor_combo.items():
-                val = factors["factors"].get(factor_name, 0.0)
+                val = factors.get(factor_name, 0.0)
                 factor_def = next((f for f in FACTOR_LIBRARY if f.name == factor_name), None)
                 if factor_def and not factor_def.higher_is_better:
                     val = -val
