@@ -1081,7 +1081,7 @@
       const p = positions.filter(function (x) { return x.fund_code === code; })[0] || {};
       const val = targets[code] != null ? targets[code] : '';
       return '<label class="st6-rb-row" data-code="' + esc(code) + '">' +
-        '<span class="st6-rb-name">' + esc(code) + ' ' + esc(p.fund_name || '') + '</span>' +
+        '<span class="st6-rb-name" title="' + esc(code) + ' ' + esc(p.fund_name || '') + '">' + esc(code) + ' ' + esc(p.fund_name || '') + '</span>' +
         '<input type="number" class="st6-rb-input st6-rb-weight" min="0" max="100" step="0.1" ' +
         'value="' + esc(val) + '" inputmode="decimal" aria-label="' + esc(code) + ' 目标权重(百分比)">' +
         '</label>';
