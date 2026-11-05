@@ -3572,7 +3572,7 @@ async function runAiAnalysis() {
 
     if (!result || result.degraded === true) {
       // 阶段四:503/降级时展示失败态与重试入口,不弹"完成"toast(消除矛盾提示)
-      renderAnalysisFailure('agentCards', 'runAiAnalysis()');
+      renderAnalysisFailure('agentCards', runAiAnalysis);
       return;
     }
 
@@ -3603,7 +3603,7 @@ async function runQuickAnalysis() {
     });
 
     if (!result || result.degraded === true) {
-      renderAnalysisFailure('agentCards', 'runQuickAnalysis()');
+      renderAnalysisFailure('agentCards', runQuickAnalysis);
       return;
     }
 
@@ -3618,15 +3618,20 @@ async function runQuickAnalysis() {
  * 阶段四:AI 全量失败的可重试失败卡。
  * 明确说明"未生成任何结论",不展示 0% 置信度的伪造结果。
  */
-function renderAnalysisFailure(containerId, retryFnName) {
+function renderAnalysisFailure(containerId, retryFn) {
   const el = document.getElementById(containerId);
   if (!el) return;
   el.innerHTML = `<div class="card" style="text-align:center;padding:28px 20px;">
     <div style="font-size:28px;opacity:0.4;margin-bottom:8px;">⚠</div>
     <div style="font-size:15px;color:var(--color-warning);margin-bottom:6px;">AI 分析暂不可用</div>
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">所有 AI 模型调用均失败,本次未生成任何结论(不会以 0% 置信度冒充结果)。请稍后重试。</div>
-    <button class="btn btn-primary" onclick="${retryFnName}">重试分析</button>
+    <button class="btn btn-primary" data-role="retry-analysis">重试分析</button>
   </div>`;
+  // 失败卡重试按钮用事件绑定,不在 onclick 里插模板变量(避免内联处理器注入)
+  const btn = el.querySelector('[data-role="retry-analysis"]');
+  if (btn && typeof retryFn === 'function') {
+    btn.addEventListener('click', retryFn);
+  }
 }
 
 // 渲染Agent卡片
