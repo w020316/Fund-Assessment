@@ -340,6 +340,7 @@ class TestFreeProviderLoading:
             "OPENROUTER_API_KEY", "OPENROUTER_API_KEYS", "OPENROUTER_MODEL", "OPENROUTER_BASE_URL",
             "DEEPSEEK_API_KEY", "DEEPSEEK_API_KEYS", "DEEPSEEK_MODEL", "DEEPSEEK_BASE_URL",
             "CF_ACCOUNT_ID", "CF_API_TOKEN", "CF_MODEL",
+            "LY77625_API_KEY", "LY77625_BASE_URL", "LY77625_MODEL", "LY77625_TIMEOUT",
         ]
         for k in llm_envs:
             os.environ.pop(k, None)
@@ -366,6 +367,53 @@ class TestFreeProviderLoading:
             assert sf[0].model == "Qwen/Qwen2-7B-Instruct"
             assert sf[0].rpm == 1000
             assert sf[0].priority == 95
+
+    def test_ly77625_loading_defaults(self):
+        """ly.77625.xyz 加载测试:默认 base_url/model/超时/优先级"""
+        self._clear_llm_env()
+        with patch.dict("os.environ", {"LY77625_API_KEY": "ly-test-key"}, clear=False):
+            router = LLMRouter()
+            ly = [p for p in router._providers if p.name == "ly77625"]
+            assert len(ly) == 1
+            assert ly[0].base_url == "https://ly.77625.xyz/v1"
+            assert ly[0].model == "gemini-3.8-flash"
+            assert ly[0].priority == 95  # 最后一档兜底
+            assert ly[0].free_tier is True
+            assert ly[0].timeout == 30
+            assert ly[0].provider_type == ProviderType.OPENAI
+
+    def test_ly77625_not_loaded_without_key(self):
+        """未配置 Key 时不加载,其它 Provider 不受影响"""
+        self._clear_llm_env()
+        router = LLMRouter()
+        assert not [p for p in router._providers if p.name == "ly77625"]
+
+    def test_ly77625_env_overrides(self):
+        """base_url/model/超时可通过环境变量覆盖"""
+        self._clear_llm_env()
+        env = {
+            "LY77625_API_KEY": "ly-test-key",
+            "LY77625_BASE_URL": "https://ly.example.test/v1",
+            "LY77625_MODEL": "gemini-3.8-flash",
+            "LY77625_TIMEOUT": "12",
+        }
+        with patch.dict("os.environ", env, clear=False):
+            router = LLMRouter()
+            ly = [p for p in router._providers if p.name == "ly77625"][0]
+            assert ly.base_url == "https://ly.example.test/v1"
+            assert ly.timeout == 12
+
+    def test_ly77625_health_check_reports_available(self):
+        """/api/health/llm 依赖的 health_check 能反映新 Provider"""
+        self._clear_llm_env()
+        with patch.dict("os.environ", {"LY77625_API_KEY": "ly-test-key"}, clear=False):
+            router = LLMRouter()
+            info = router.health_check().get("ly77625")
+            assert info is not None
+            assert info["available"] is True
+            assert info["model"] == "gemini-3.8-flash"
+            assert info["free_tier"] is True
+            assert info["priority"] == 95
 
     def test_dashscope_loading(self):
         """阿里云百炼加载测试"""
@@ -466,6 +514,55 @@ class TestFreeProviderLoading:
             assert router._providers[2].priority == 65
             assert router._providers[-1].name == "siliconflow"
             assert router._providers[-1].priority == 95
+
+
+class TestLy77625Provider:
+    """ly.77625.xyz Provider 的调用行为(全部 mock 网络,不依赖外网)"""
+
+    def test_chat_routes_to_openai_compatible_endpoint(self):
+        with patch.dict("os.environ",
+                        {"LY77625_API_KEY": "ly-test-key",
+                         "LY77625_BASE_URL": "https://ly.77625.xyz/v1"},
+                        clear=True):
+            router = LLMRouter()
+        assert [p.name for p in router._providers] == ["ly77625"]
+
+        captured = {}
+
+        def mock_post(url, **kwargs):
+            captured["url"] = url
+            captured["headers"] = kwargs.get("headers") or {}
+            captured["json"] = kwargs.get("json") or {}
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.json.return_value = {
+                "choices": [{"message": {"content": "ok-from-ly"}}],
+                "usage": {"total_tokens": 12},
+            }
+            return resp
+
+        with patch("requests.post", side_effect=mock_post):
+            result = router.chat([{"role": "user", "content": "ping"}])
+
+        assert result.content == "ok-from-ly"
+        assert captured["url"] == "https://ly.77625.xyz/v1/chat/completions"
+        assert captured["headers"].get("Authorization", "").startswith("Bearer ")
+        assert captured["json"]["model"] == "gemini-3.8-flash"
+
+    def test_failure_is_reported_not_faked(self):
+        """上游失败时 chat 抛错(由上层转 503),不返回伪造成功"""
+        with patch.dict("os.environ",
+                        {"LY77625_API_KEY": "ly-test-key"}, clear=True):
+            router = LLMRouter()
+
+        def mock_post(url, **kwargs):
+            resp = MagicMock()
+            resp.raise_for_status.side_effect = requests.exceptions.HTTPError("502")
+            return resp
+
+        with patch("requests.post", side_effect=mock_post):
+            with pytest.raises(RuntimeError):
+                router.chat([{"role": "user", "content": "ping"}])
 
 
 class TestChatWithRateLimit:

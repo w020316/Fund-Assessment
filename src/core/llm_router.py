@@ -495,6 +495,22 @@ class LLMRouter:
                 priority=65,
             ))
 
+        # ly.77625.xyz(第三方免费模型站,OpenAI 兼容;可用性不保证)
+        # 实测:GET /v1/models 200、gemini-3.8-flash 对话可用(~15s);
+        # x-deepseek-v4.1-flash 返回 502。仅作最后一档兜底,不改变既有优先级。
+        ly_key = os.getenv("LY77625_API_KEY", "")
+        if ly_key:
+            self.add_provider(LLMProvider(
+                name="ly77625",
+                provider_type=ProviderType.OPENAI,
+                base_url=os.getenv("LY77625_BASE_URL", "https://ly.77625.xyz/v1"),
+                api_key=ly_key,
+                model=os.getenv("LY77625_MODEL", "gemini-3.8-flash"),
+                priority=95,
+                timeout=int(os.getenv("LY77625_TIMEOUT", "30")),
+                free_tier=True,
+            ))
+
         # 按优先级排序
         self._providers.sort(key=lambda p: p.priority)
         if self._providers:

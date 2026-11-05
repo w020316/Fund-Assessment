@@ -98,6 +98,7 @@ cp .env.example .env
 **可选项**:
 - `TAVILY_API_KEY` — 新闻搜索增强
 - `TINYFISH_API_KEY` — 备用 LLM
+- `LY77625_API_KEY` — 第三方免费模型站 ly.77625.xyz(OpenAI 兼容,可用性不保证,仅作最后一档兜底)
 - `TUSHARE_TOKEN` — Tushare 数据源
 - `ADMIN_TOKEN` — 写/交易端点鉴权。**生产环境必须设置**（缺省时写端点返回 503）；本地开发由启动脚本注入 `APP_ENV=dev` 放行，**仅限本地回环使用**，不可用于任何对外可访问的部署。
 
