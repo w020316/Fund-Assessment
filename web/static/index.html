@@ -349,6 +349,17 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
   width:100%;
 }
 .input:focus, .select:focus { border-color:var(--accent-blue); }
+/* (2026-11-05) 阶段三 P2-04：原本 .input 的 outline:none + .input:focus 只换边框色，
+   键盘用户在 config 页看不到焦点；position 页行内链接又沿用 UA 默认
+   outline(1px #101010)，在 #0d1117 底上几乎不可见。统一改为 focus-visible 高对比
+   焦点环（#22d3ee 对 #0d1117 约 10:1，远超 3:1）。放在 .input:focus 之后以保证
+   同特异度下后者生效。 */
+.input:focus-visible, .select:focus-visible, textarea:focus-visible,
+a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
+[tabindex]:focus-visible,
+.btn:focus-visible, .tab:focus-visible, .hud-subtab:focus-visible, .bottom-tab-item:focus-visible {
+  outline: 2px solid #22d3ee; outline-offset: 2px;
+}
 .select { cursor:pointer; }
 .form-group { margin-bottom:14px; }
 .form-label { display:block; font-size:12px; color:var(--text-secondary); margin-bottom:6px; font-weight:500; }
