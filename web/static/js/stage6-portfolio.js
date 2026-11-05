@@ -255,6 +255,26 @@
 
   // ===== STAGE6: risk-panel ===== 风险页(指标 + X-Ray + 账本)
 
+  // 阶段四 R-07:指标区骨架占位。
+  // 原实现 #st6RiskSummary/#st6AttrSummary 初始为空,异步数据到达后才插入
+  // 8/4 张卡片,整块高度从 0 变为 90px,把下方卡片整体下移(实测风险页 CLS 0.4508)。
+  // 进入页面即填充与最终数量一致的骨架卡,数据到达只替换内容,高度不变。
+  function seedMetricSkeletons() {
+    [['st6RiskSummary', 8], ['st6AttrSummary', 4]].forEach(function (cfg) {
+      const el = document.getElementById(cfg[0]);
+      if (!el || el.children.length) return;
+      let html = '';
+      for (let i = 0; i < cfg[1]; i++) {
+        html += '<div class="st6-metric-card st6-metric-skeleton" aria-hidden="true">' +
+          '<div class="st6-metric-label">加载中</div>' +
+          '<div class="st6-metric-value">—</div>' +
+          '<div class="st6-metric-hint">&nbsp;</div></div>';
+      }
+      el.innerHTML = html;
+    });
+  }
+  seedMetricSkeletons();
+
   const riskState = { window: '3m', loaded: false };
 
   function loadRiskTab() {

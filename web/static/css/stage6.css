@@ -91,6 +91,15 @@
 .st6-metric-label { font-size: 11px; color: var(--text-muted, #8b92a8); }
 .st6-metric-value { font-size: 18px; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
 .st6-metric-hint { font-size: 11px; color: var(--text-muted, #8b92a8); margin-top: 2px; }
+.st6-metric-skeleton { opacity: 0.55; }
+
+/* 阶段四 R-07:预留指标区/表格区高度,消除"空占位 → 异步填充"造成的 CLS。
+   阶段四实测风险页 CLS 0.4508,来源即 #st6RiskSummary(0 → 8 张卡 90px)、
+   #st6RiskBody(116 → 147)、#st6AttrSummary(0 → 4 张卡 90px)、#st6AttrBody(116 → 217)。
+   min-height 取"加载完成后实测高度",加载态与完成态同高,下方卡片不再位移。 */
+#st6RiskSummary, #st6AttrSummary { min-height: 90px; }
+#st6RiskBody { min-height: 148px; }
+#st6AttrBody { min-height: 217px; }
 .st6-risk-deep { color: var(--hud-up, #F87171); }   /* 深回撤等警示值 */
 .st6-note {
   font-size: 11px; color: var(--text-muted, #8b92a8); margin-top: 6px;

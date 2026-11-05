@@ -4089,6 +4089,21 @@ async function runScan(type) {
 }
 
 // 策略列表
+// 阶段四 R-07:加载前预留 6 行高度(当前 /api/strategy/list 固定 6 条)。
+// 原实现 tbody 为空,数据到达后插入 6 行,把下方"策略验证"卡整体下移约 390px
+// (阶段四实测策略页 CLS 0.1975);骨架行高度与真实行(含 44px 按钮)对齐。
+(function seedStrategyListSkeleton() {
+  const body = document.getElementById('strategyListBody');
+  if (!body || body.children.length) return;
+  let html = '';
+  for (let i = 0; i < 6; i++) {
+    html += '<tr class="st6-row-skeleton" aria-hidden="true">' +
+      '<td colspan="6" style="height:64px;color:var(--text-muted);font-size:12px;">' +
+      (i === 0 ? '策略加载中…' : '') + '</td></tr>';
+  }
+  body.innerHTML = html;
+})();
+
 async function loadStrategyList() {
   const data = await api('/api/strategy/list');
   const body = document.getElementById('strategyListBody');
