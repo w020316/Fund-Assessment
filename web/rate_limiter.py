@@ -66,11 +66,40 @@ def client_ip_key(request: Request) -> str:
     return peer or "unknown"
 
 
-# 全局限流器:按真实客户端 IP 限流,保护 Render Free 实例(512MB RAM)
-# - LLM 高成本端点(/api/agent/*):3次/分钟(在路由上单独装饰)
-# - 写操作端点(POST/PUT/DELETE):10次/分钟(由 web/middleware/write_limit.py 统一拦截)
-# - 读操作端点(GET):60次/分钟(default_limits 兜底)
-limiter = Limiter(key_func=client_ip_key, default_limits=["60/minute"])
+def _admin_token() -> str:
+    """读取服务端 ADMIN_TOKEN(env 优先,与 src.utils.auth 一致)。"""
+    try:
+        from src.utils.auth import _get_admin_token
+        return _get_admin_token()
+    except Exception:
+        return os.environ.get("ADMIN_TOKEN", "").strip()
+
+
+def rate_limit_key(request: Request) -> str:
+    """限流键:认证用户按用户,匿名按全局。
+
+    阶段五 O2(2026-11-05 线上实测):
+    Render Free 的边缘代理下,同一客户端连续 12 次写请求的 `client.host` 与
+    XFF 右端都在漂移 —— 按 IP 分桶时**从不出现 429**(限流形同虚设);
+    而手工固定 XFF 时能稳定 10 次后 429。说明该链路拿不到稳定的客户端 IP,
+    继续按 IP 分桶既拦不住刷量,又能被伪造头绕开。
+
+    因此:
+    - 与服务端 ADMIN_TOKEN 完全一致的请求 → 独立用户桶(多用户互不影响);
+    - 其余匿名请求 → 单一全局桶(宁可全局收紧,也不做"看似有、实际无效"的限流)。
+    单管理员场景下,匿名请求本就被鉴权拦截,全局桶不会影响正常使用。
+    """
+    auth = request.headers.get("authorization", "")
+    token = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+    expected = _admin_token()
+    if expected and token and hmac.compare_digest(token, expected):
+        return "u" + hashlib.sha256(token.encode("utf-8")).hexdigest()[:10]
+    return "anon"
+
+
+# 全局限流器:阶段五 O2 起改用"认证用户 / 匿名全局"两种键。
+# 原因见 rate_limit_key 注释:Render 边缘链路下按 IP 分桶实测完全失效。
+limiter = Limiter(key_func=rate_limit_key, default_limits=["60/minute"])
 
 
 # ===== 阶段四:写端点限流(10 次/分钟)=====
@@ -92,27 +121,9 @@ WRITE_LIMIT_EXEMPT_PREFIXES = ("/api/agent/",)
 
 
 def write_limit_key(request: Request) -> str:
-    """写端点限流键:IP 为主,已认证管理员再附加身份后缀。
+    """写端点限流键:与 rate_limit_key 同一策略(认证用户独立桶,匿名全局桶)。
 
-    - 匿名请求:直接按 client_ip_key(右侧可信 XFF 或对端地址)限流,
-      客户端伪造 X-Forwarded-For 左侧内容不会产生新桶。
-    - 已认证请求:仅当 X-Admin-Token 与服务端 ADMIN_TOKEN 完全一致时才附加
-      用户维度后缀;伪造/错误 token 仍落回 IP 桶,无法靠换头绕过。
+    阶段五 O2 起不再按 IP 分桶:线上实测 Render 边缘代理会让同一客户端的
+    client.host / XFF 每请求漂移,按 IP 分桶时 429 从不触发(详见 rate_limit_key)。
     """
-    base = client_ip_key(request)
-    auth = request.headers.get("authorization", "")
-    token = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
-    expected = _admin_token()
-    if expected and token and hmac.compare_digest(token, expected):
-        digest = hashlib.sha256(token.encode("utf-8")).hexdigest()[:10]
-        base = f"{base}:u{digest}"
-    return f"write:{base}"
-
-
-def _admin_token() -> str:
-    """读取服务端 ADMIN_TOKEN(env 优先,与 src.utils.auth 一致)。"""
-    try:
-        from src.utils.auth import _get_admin_token
-        return _get_admin_token()
-    except Exception:
-        return os.environ.get("ADMIN_TOKEN", "").strip()
+    return "write:" + rate_limit_key(request)

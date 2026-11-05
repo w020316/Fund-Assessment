@@ -107,13 +107,13 @@ class TestWriteLimitKey:
         anon = rl.write_limit_key(_req(peer="8.8.8.8"))
         forged = rl.write_limit_key(_req(peer="8.8.8.8", authorization="Bearer nope"))
         real = rl.write_limit_key(_req(peer="8.8.8.8", authorization="Bearer real-secret"))
-        assert anon == forged, "伪造令牌不得改变限流键"
-        assert real != anon and real.startswith("write:8.8.8.8:u")
+        assert anon == forged == "write:anon", "模拟头/换 IP 都不能换桶"
+        assert real.startswith("write:u")
 
-    def test_no_token_configured_all_share_ip_key(self, monkeypatch):
+    def test_no_token_configured_all_share_anon_key(self, monkeypatch):
         from web import rate_limiter as rl
         monkeypatch.delenv("ADMIN_TOKEN", raising=False)
-        assert rl.write_limit_key(_req(peer="8.8.8.8")).startswith("write:8.8.8.8")
+        assert rl.write_limit_key(_req(peer="8.8.8.8")) == "write:anon"
 
 
 class TestRateLimitObservability:
