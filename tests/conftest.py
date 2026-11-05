@@ -71,6 +71,13 @@ def _clear_global_caches():
         _ai_cache.clear()
     except Exception:
         pass
+    # 阶段四:限流计数也属于全局状态,逐个测试清零(写端点 10/min、LLM 3/min),
+    # 避免不同测试累计触发 429 造成随机失败。
+    try:
+        from web.rate_limiter import limiter
+        limiter._storage.reset()
+    except Exception:
+        pass
     yield
     # 测试后也清理(防止副作用泄露到下一个测试)
     try:

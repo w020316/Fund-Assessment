@@ -8,13 +8,12 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 # 借鉴 encode/starlette(10.5K Star)内置 GZip 中间件,响应压缩 70%+,零新依赖
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.requests import Request
 from loguru import logger
 
 # 借鉴 la-deps/slowapi(1.0K Star)FastAPI 限流中间件
-from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 # limiter 实例从独立模块导入,避免路由模块 import web.api 触发循环 import
@@ -24,6 +23,7 @@ from web.rate_limiter import limiter
 from web.middleware.metrics import metrics
 # 借鉴 open-telemetry/opentelemetry-python(2.0K Star)请求追踪 trace ID
 from web.middleware.trace import trace_middleware
+from web.middleware.write_limit import write_rate_limit_middleware
 
 _parent_dir = str(Path(__file__).resolve().parent.parent)
 if _parent_dir not in sys.path:
@@ -97,7 +97,40 @@ app = FastAPI(
 # - 写操作端点(POST/PUT/DELETE):10次/分钟
 # - 读操作端点(GET):60次/分钟
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    """429 结构化响应(阶段四第 5 项)。
+
+    slowapi 默认处理器只返回 `{"error": "Rate limit exceeded: 3 per 1 minute"}`,
+    前端错误卡拿不到可读中文原因。这里保持 `error` 字段向后兼容,同时补
+    `detail`(code/message/retryable/limit),与其它错误响应同一套结构。
+    """
+    limit_text = str(getattr(exc, "detail", "") or "")
+    is_llm = request.url.path.startswith("/api/agent/")
+    if is_llm:
+        code, message = "LLM_RATE_LIMITED", "AI 分析请求过于频繁,请稍后重试。"
+    else:
+        code, message = "RATE_LIMITED", "请求过于频繁,请稍后重试。"
+    response = JSONResponse(
+        status_code=429,
+        content={
+            "error": f"Rate limit exceeded: {limit_text}".strip(),
+            "detail": {
+                "code": code,
+                "message": message,
+                "retryable": True,
+                "limit": limit_text,
+            },
+        },
+    )
+    retry_after = getattr(exc, "retry_after", None)
+    if retry_after:
+        response.headers["Retry-After"] = str(retry_after)
+    return response
+
+
+app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
 # P1 修复(2026-07-30):必须注册 SlowAPIMiddleware,@limiter.limit 装饰器才会被中间件拦截执行
 app.add_middleware(SlowAPIMiddleware)
 
@@ -184,6 +217,9 @@ async def log_requests(request: Request, call_next):
         logger.info(f"[{trace_id}] {request.method} {path} - {response.status_code} ({duration_ms:.0f}ms)")
     return response
 
+
+# 阶段四:写端点 10 次/分钟(在 trace 之内、业务之外,429 也会被 trace 记录)
+app.middleware("http")(write_rate_limit_middleware)
 
 # ===== 请求追踪 trace ID(借鉴 open-telemetry/opentelemetry-python 2.0K Star)=====
 # P2 修复(2026-10-26)：trace 中间件必须**最后注册**（即最外层）。

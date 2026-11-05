@@ -9,8 +9,12 @@
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import ipaddress
+import os
 
+from limits import parse
 from slowapi import Limiter
 from starlette.requests import Request
 
@@ -59,6 +63,51 @@ def client_ip_key(request: Request) -> str:
 
 # 全局限流器:按真实客户端 IP 限流,保护 Render Free 实例(512MB RAM)
 # - LLM 高成本端点(/api/agent/*):3次/分钟(在路由上单独装饰)
-# - 写操作端点(POST/PUT/DELETE):10次/分钟(在路由上单独装饰)
+# - 写操作端点(POST/PUT/DELETE):10次/分钟(由 web/middleware/write_limit.py 统一拦截)
 # - 读操作端点(GET):60次/分钟(default_limits 兜底)
 limiter = Limiter(key_func=client_ip_key, default_limits=["60/minute"])
+
+
+# ===== 阶段四:写端点限流(10 次/分钟)=====
+# 原实现只在注释里声明"写操作 10/min"，没有任何装饰器/中间件真正生效，
+# 实测连续 12 次写请求全部 200。这里用同一个 slowapi 存储统一计数。
+WRITE_LIMIT = parse("10/minute")
+WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+# 只读语义的 POST(校验/问答/检索)不计入写配额,避免误伤正常编辑流程
+WRITE_LIMIT_EXEMPT_PATHS = frozenset({
+    "/api/fund/positions/validate",
+    "/api/review/three_question",
+    "/api/news/search",
+    "/api/skills/dispatch",
+})
+# /api/agent/* 各端点自身已挂 @limiter.limit("3/minute")(LLM 高成本),
+# 若再叠加写配额会出现"LLM 调用吃掉改持仓的 10 次额度"的串味,
+# 这里按前缀豁免,让两类限流各自独立计数。
+WRITE_LIMIT_EXEMPT_PREFIXES = ("/api/agent/",)
+
+
+def write_limit_key(request: Request) -> str:
+    """写端点限流键:IP 为主,已认证管理员再附加身份后缀。
+
+    - 匿名请求:直接按 client_ip_key(右侧可信 XFF 或对端地址)限流,
+      客户端伪造 X-Forwarded-For 左侧内容不会产生新桶。
+    - 已认证请求:仅当 X-Admin-Token 与服务端 ADMIN_TOKEN 完全一致时才附加
+      用户维度后缀;伪造/错误 token 仍落回 IP 桶,无法靠换头绕过。
+    """
+    base = client_ip_key(request)
+    auth = request.headers.get("authorization", "")
+    token = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+    expected = _admin_token()
+    if expected and token and hmac.compare_digest(token, expected):
+        digest = hashlib.sha256(token.encode("utf-8")).hexdigest()[:10]
+        base = f"{base}:u{digest}"
+    return f"write:{base}"
+
+
+def _admin_token() -> str:
+    """读取服务端 ADMIN_TOKEN(env 优先,与 src.utils.auth 一致)。"""
+    try:
+        from src.utils.auth import _get_admin_token
+        return _get_admin_token()
+    except Exception:
+        return os.environ.get("ADMIN_TOKEN", "").strip()
