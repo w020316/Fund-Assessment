@@ -4,6 +4,9 @@
  * 4 步状态机:① 持仓列表 → ② 逐只核对表单 → ③ diff 预览 → ④ 确认提交/回执
  *
  * 设计要点(架构文档 1.4 / PRD P0-1~P0-3):
+ * - 写库边界(阶段四 P0 修复):步骤 ② 只修改内存草稿,**不调用任何写接口**;
+ *   只有步骤 ④ 点击"确认提交"才 POST /api/fund/positions 全量写入。
+ *   关闭弹窗/返回列表/取消一律不落库,避免"改了但没确认"却已覆盖真实持仓。
  * - K7 前端 100% 拦截:份额≤0、成本≤0、代码非 6 位数字、非法日期
  * - 防覆盖保存语义:全量覆盖仅允许在 diff 预览 + 逐项勾选删除后提交
  * - 提交失败不丢已录入内容:所有草稿保存在内存 state,失败停留在预览步可重试
@@ -24,6 +27,7 @@
     lastDiff: null,     // 最近一次 validate 返回(失败重试时复用)
     lastWarnings: [],
     submitting: false,  // 防重复提交
+    dirty: false,       // 草稿是否已偏离服务端(仅内存,未落库)
   };
 
   const STEPS = ['持仓列表', '逐只核对', 'diff 预览', '确认提交'];
@@ -193,6 +197,7 @@
     state.editingCode = null;
     state.lastDiff = null;
     state.submitting = false;
+    state.dirty = false;
     renderStep1Loading();
     const data = await api('/api/fund/positions');
     if (!data || !data.positions) {
@@ -255,6 +260,7 @@
     }).join('');
     const delCount = state.draft.filter(function (r) { return r._deleted; }).length;
     renderBody(
+      (state.dirty ? '<div class="fw-del-banner" style="border-color:#f59e0b;background:rgba(245,158,11,0.10);color:#f59e0b;">草稿已修改,尚未写入持仓。完成"diff 预览 → 确认提交"后才会保存。</div>' : '') +
       (delCount ? '<div class="fw-del-banner">已标记删除 ' + delCount + ' 条(预览步将逐项确认)</div>' : '') +
       '<div style="overflow-x:auto;"><table class="fw-table">' +
       '<thead><tr><th>代码</th><th>名称</th><th>份额</th><th class="fw-hide-sm">成本净值</th><th>净值/置信度</th><th>操作</th></tr></thead>' +
@@ -269,7 +275,10 @@
 
   function markDelete(code) {
     const rec = findDraft(code);
-    if (rec) rec._deleted = !rec._deleted;
+    if (rec) {
+      rec._deleted = !rec._deleted;
+      state.dirty = true;
+    }
     renderStep1();
   }
 
@@ -281,7 +290,9 @@
     state.step = 2;
     renderBody(
       '<div class="fw-change" style="margin-bottom:4px;">' +
-      (rec ? '正在核对 ' + esc(code) + '(预填现有值)' : '新增基金持仓') + '</div>' +
+      (rec ? '正在核对 ' + esc(code) + '(预填现有值)' : '新增基金持仓') +
+      '</div>' +
+      '<div class="fw-change" style="margin-bottom:10px;">此步只修改本地草稿,不写入持仓;需在最后点"确认提交"才会保存。</div>' +
       '<label class="fw-label" for="fwCode">基金代码(6 位数字)</label>' +
       '<input class="fw-input" id="fwCode" inputmode="numeric" maxlength="6" placeholder="如 110022" value="' + esc(rec ? rec.fund_code : '') + '" oninput="FundWizard.onFieldInput()">' +
       '<div class="fw-err" id="fwErrCode"></div>' +
@@ -306,7 +317,7 @@
       '<input class="fw-input" id="fwNote" maxlength="200" placeholder="可选" value="' + esc(rec ? rec.note : '') + '">' +
       '<div class="fw-footer">' +
       '  <button class="fw-btn" onclick="FundWizard.renderStep1()">返回列表</button>' +
-      '  <button class="fw-btn fw-btn-primary" id="fwSaveBtn" onclick="FundWizard.saveFormRecord()">保存并下一步</button>' +
+      '  <button class="fw-btn fw-btn-primary" id="fwSaveBtn" onclick="FundWizard.saveFormRecord()">保存到草稿</button>' +
       '</div>'
     );
   }
@@ -340,30 +351,25 @@
     if (btn) btn.disabled = Object.keys(errors).length > 0;
   }
 
-  async function saveFormRecord() {
+  function saveFormRecord() {
     const rec = collectForm();
     const errors = validateRecord(rec);
     if (Object.keys(errors).length) { showFormErrors(errors); return; }  // K7 双保险
-    const btn = document.getElementById('fwSaveBtn');
-    if (btn) { btn.disabled = true; btn.textContent = '保存中...'; }
-    const resp = await api('/api/fund/positions/add', {
-      method: 'POST',
-      body: JSON.stringify(toPayload(rec)),
-    });
-    if (btn) { btn.disabled = false; btn.textContent = '保存并下一步'; }
-    if (!resp || resp.success !== true) {
-      showToast('单条保存失败,已录入内容保留,请重试', 'error');
-      return;
-    }
-    // 更新本地草稿(upsert,保序)
+    // 阶段四 P0 修复:此处只更新内存草稿,绝不调用写接口。
+    // 原实现直接 POST /api/fund/positions/add,导致"第②步保存"即覆盖真实持仓,
+    // 用户未点"确认提交"就关窗也会落库。写库唯一入口收敛到步骤④ doSubmit。
+    const payload = toPayload(rec);
     const existing = findDraft(rec.fund_code);
     if (existing) {
-      Object.assign(existing, toPayload(rec));
+      Object.assign(existing, payload, { _deleted: false });
     } else {
-      const entry = Object.assign({}, toPayload(rec), { nav_date: '', confidence: 'high', confidence_reason: '', _deleted: false, _isNew: true });
-      state.draft.push(entry);
+      state.draft.push(Object.assign({}, payload, {
+        nav_date: '', confidence: 'high', confidence_reason: '',
+        _deleted: false, _isNew: true,
+      }));
     }
-    showToast((resp.changes ? '已更新 ' : '已新增 ') + rec.fund_code, 'success');
+    state.dirty = true;
+    showToast((existing ? '已更新本地草稿' : '已加入本地草稿') + '(尚未写入持仓)', 'success');
     renderStep1();
   }
 
@@ -449,7 +455,8 @@
     // 确认文案写明影响范围(P0-3)
     html += '<div style="margin-top:14px;padding:10px 12px;border:1px solid var(--border,#2a3142);border-radius:8px;font-size:13px;">' +
       '本次提交影响范围:新增 <b>' + added.length + '</b> 条、更新 <b>' + updated.length + '</b> 条、删除 <b>' + deleted.length + '</b> 条(全量覆盖保存)' +
-      '</div>';
+      '</div>' +
+      '<div class="fw-change" style="margin-top:6px;">以上仅为预览,当前未写入任何数据;点"下一步:确认提交"并再次确认后才会保存。</div>';
 
     html += '<div class="fw-footer">' +
       '<button class="fw-btn" onclick="FundWizard.renderStep1()">返回列表</button>' +
@@ -517,6 +524,7 @@
       renderStep3();
       return;
     }
+    state.dirty = false;
     // 成功:回执(影响范围摘要),之后关闭
     const s = resp.summary || { added: 0, updated: 0, deleted: 0, deleted_codes: [] };
     renderBody(
