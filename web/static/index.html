@@ -1406,12 +1406,12 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <div class="card mb-16">
           <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> 话术库</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
-            <select id="scriptCategorySelect" class="select" style="width:120px;" onchange="loadScriptLibrary()">
+            <select id="scriptCategorySelect" class="select" style="width:120px;" onchange="loadScriptLibrary()" aria-label="话术库分类筛选">
               <option value="">全部分类</option>
               <option value="stock">股市</option>
               <option value="fund">基金</option>
             </select>
-            <select id="scriptSceneSelect" class="select" style="width:120px;" onchange="loadScriptLibrary()">
+            <select id="scriptSceneSelect" class="select" style="width:120px;" onchange="loadScriptLibrary()" aria-label="话术库场景筛选">
               <option value="">全部场景</option>
               <option value="buy">买入</option>
               <option value="sell">卖出</option>
@@ -2090,7 +2090,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
         <div class="card mb-16">
           <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg> 国际个股查询</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
-            <select id="globalMarketSelect" class="select" style="width:120px;">
+            <select id="globalMarketSelect" class="select" style="width:120px;" aria-label="国际个股所属市场">
               <option value="us">美股</option>
               <option value="hk">港股</option>
             </select>
