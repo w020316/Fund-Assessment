@@ -480,7 +480,16 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
   .sidebar { display:none; }
   .grid-4, .grid-3, .grid-2 { grid-template-columns:1fr; }
   .index-bar { display:none; }
-  .content { padding:12px; padding-bottom:70px; }
+  /* (2026-11-05) 阶段三补丁:移动端固定底栏实测 54px(≤768 断点 58px),原留白 70px 未计入
+     刘海屏底部安全区 —— iPhone 类设备 safe-area-inset-bottom≈34px 时底栏实际高 88px,
+     内容最后一段会被永久压住 18px。这里把留白与 scroll-padding 同步叠加 env(),
+     保证滚到底后末行控件仍在底栏之上;scroll-padding-bottom 让键盘聚焦 /
+     scrollIntoView 把控件滚出底栏覆盖区(WCAG 2.4.11)。不改底栏高度、不改布局骨架。 */
+  .content {
+    padding:12px;
+    padding-bottom:calc(70px + env(safe-area-inset-bottom, 0px));
+    scroll-padding-bottom:calc(70px + env(safe-area-inset-bottom, 0px));
+  }
   .bottom-tab-bar { display:flex !important; }
   .data-quality-badge { display:none; }
   .data-freshness { display:none; }
