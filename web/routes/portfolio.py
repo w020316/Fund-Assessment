@@ -862,8 +862,15 @@ async def test_webhook():
     }
 
 
-def _build_scan_alerts(watchboard: dict, threshold: float) -> tuple[list[dict], list[dict]]:
+def _build_scan_alerts(
+    watchboard: dict, threshold: float, force: bool = False
+) -> tuple[list[dict], list[dict]]:
     """阈值判断:估算涨跌绝对值 ≥ est_pct_abs 的基金触发预警。
+
+    Args:
+        watchboard: 自选看板数据
+        threshold: 触发阈值(百分比绝对值)
+        force: 为 True 时跳过节流判断(人工调试强制推送)
 
     Returns:
         (triggered, skipped): triggered 为待推送项;skipped 为
@@ -877,7 +884,7 @@ def _build_scan_alerts(watchboard: dict, threshold: float) -> tuple[list[dict], 
         if est_pct is None:
             skipped.append({"fund_code": code, "reason": "no_data"})
             continue
-        if pstore.is_throttled(f"est_{code}"):
+        if not force and pstore.is_throttled(f"est_{code}"):
             # 幂等:2h 窗口内该基金已推送过,跳过(文件级节流,重启不丢)
             skipped.append({"fund_code": code, "reason": "throttled"})
             continue
@@ -910,7 +917,7 @@ async def webhook_scan(req: ScanRequest | None = None):
     # scan 始终取实时数据(不走 60s watchboard 缓存,保证触发判断新鲜)
     watchboard = await _compute_watchboard()
     threshold = float(config["thresholds"].get("est_pct_abs", 2.0))
-    triggered, skipped = _build_scan_alerts(watchboard, threshold)
+    triggered, skipped = _build_scan_alerts(watchboard, threshold, force=bool(body.force))
 
     if not triggered:
         return {

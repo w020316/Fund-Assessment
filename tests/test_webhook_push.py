@@ -546,3 +546,38 @@ class TestWebhookScan:
         assert data["pushed"] is False
         assert data["skipped"][0]["reason"] == "below_threshold"
         assert fake.call_count == 0
+
+    def test_scan_force_bypasses_throttle(self, client, tmp_path, monkeypatch):
+        """force=true → 跳过节流强制推送(2026-11-05 R-07 回归)。
+
+        缺陷: ScanRequest.force 被赋值后从未使用, 前端/运维传 force 仍被 2h 节流拦截。
+        """
+        monkeypatch.setenv("PORTFOLIO_SCAN_KEY", "scan-secret")
+        (tmp_path / "positions.json").write_text(_POSITIONS, encoding="utf-8")
+        _enable_push(monkeypatch, tmp_path)
+
+        class _Resp:
+            status_code = 200
+
+        calls = {"n": 0}
+
+        def _fake_post(url, data=None, timeout=None):
+            calls["n"] += 1
+            return _Resp()
+
+        with patch("src.core.data_source_v2.get_fund_realtime_tencent", return_value=_QUOTES), \
+             patch("src.core.webhook_push.httpx.post", side_effect=_fake_post):
+            r1 = client.post("/api/portfolio/webhook/scan",
+                             headers={"X-Api-Key": "scan-secret"}, json={})
+            # 第二次未 force: 命中节流
+            r2 = client.post("/api/portfolio/webhook/scan",
+                             headers={"X-Api-Key": "scan-secret"}, json={})
+            # 第三次 force: 跳过节流
+            r3 = client.post("/api/portfolio/webhook/scan",
+                             headers={"X-Api-Key": "scan-secret"}, json={"force": True})
+        assert r1.json()["pushed"] is True
+        assert r2.json()["pushed"] is False
+        assert r3.json()["pushed"] is True
+        assert r3.json()["triggered"][0]["fund_code"] == "110022"
+        assert calls["n"] == 2
+
