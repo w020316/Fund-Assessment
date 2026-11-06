@@ -17,7 +17,7 @@ from loguru import logger
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 # limiter 实例从独立模块导入,避免路由模块 import web.api 触发循环 import
-from web.rate_limiter import limiter
+from web.rate_limiter import limiter, anonymous_read_guard_middleware
 
 # 借鉴 prometheus/client_python(4.2K Star)指标设计的轻量级监控
 from web.middleware.metrics import metrics
@@ -201,6 +201,9 @@ async def add_static_cache_headers(request: Request, call_next):
             response.headers.setdefault("Cache-Control", "public, max-age=300")
     return response
 
+# 阶段二 R-06:匿名读请求指纹分桶(60/min)+ 全站匿名安全阀(300/min)。
+# 注册在 log_requests 之内,429 仍会进入访问日志与 metrics。
+app.middleware("http")(anonymous_read_guard_middleware)
 # 阶段四:写端点 10 次/分钟(在 trace 之内、业务之外)。
 # 阶段五 O1:必须注册在 log_requests **之前**(即更内层),否则限流直接返回的 429
 # 会绕过 log_requests → 访问日志与 metrics 里看不到被限流的请求(实测 429 无记录)。

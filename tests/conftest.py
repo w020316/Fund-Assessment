@@ -78,6 +78,12 @@ def _clear_global_caches():
         limiter._storage.reset()
     except Exception:
         pass
+    # 阶段二 R-06:匿名读请求指纹/全站安全阀也是进程内全局状态,逐个测试清零
+    try:
+        from web.rate_limiter import _anon_read_guard
+        _anon_read_guard.reset()
+    except Exception:
+        pass
     yield
     # 测试后也清理(防止副作用泄露到下一个测试)
     try:
