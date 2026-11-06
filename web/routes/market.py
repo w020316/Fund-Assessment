@@ -774,8 +774,19 @@ async def stock_search(q: str = Query(..., min_length=1, max_length=50, descript
                 price=_safe_float(raw_price) if raw_price not in (None, "") else None,
                 change_pct=_safe_float(raw_change) if raw_change not in (None, "") else None,
             ))
-        cache.set(cache_key, result, ttl=600)
+        # 只缓存非空结果：空结果可能是上游临时抖动，缓存 10 分钟会让
+        # "恢复后仍显示没有结果"，与数据真实性要求冲突。
+        if result:
+            cache.set(cache_key, result, ttl=600)
         return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
+    except ds2.DataSourceUnavailable as e:
+        # 阶段四 U1/W1：数据源全部不可达时不能伪装成"未找到匹配的股票"，
+        # 必须让前端能区分"故障"与"确实没有结果"。
+        logger.warning(f"stock_search unavailable: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "SEARCH_SOURCE_UNAVAILABLE", "message": "行情数据源暂不可用，请稍后重试"},
+        )
     except Exception:
         return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
 

@@ -644,6 +644,16 @@ def get_northbound_flow() -> dict:
         return {}
 
 
+class DataSourceUnavailable(RuntimeError):
+    """上游数据源全部不可达时抛出。
+
+    与"请求成功但没有匹配结果"必须区分：
+    - 抛本异常 = 数据源故障，调用方应返回 503 并提示"暂不可用"；
+    - 返回空列表 = 数据源正常响应但确实无匹配。
+    阶段四问题 U1/W1：两者若都渲染成"未找到"，用户会把故障误判为"系统没有这只标的"。
+    """
+
+
 def search_stock(keyword: str) -> list[dict]:
     if not keyword or not keyword.strip():
         return []
@@ -659,7 +669,10 @@ def search_stock(keyword: str) -> list[dict]:
         text = resp.text
         m = re.search(r'"([^"]*)"', text)
         if not m or not m.group(1).strip():
-            return _search_stock_tencent(keyword)
+            fallback = _search_stock_tencent(keyword)
+            if fallback is None:
+                raise DataSourceUnavailable("sina/tencent search unreachable")
+            return fallback
         entries = m.group(1).split(";")
         result: list[dict] = []
         for entry in entries:
@@ -682,7 +695,10 @@ def search_stock(keyword: str) -> list[dict]:
             if len(result) >= 20:
                 break
         if not result:
-            return _search_stock_tencent(keyword)
+            fallback = _search_stock_tencent(keyword)
+            if fallback is None:
+                raise DataSourceUnavailable("sina/tencent search unreachable")
+            return fallback
         codes = [r["code"] for r in result]
         quotes = get_realtime_quote_tencent(codes)
         quote_map = {q["code"]: q for q in quotes}
@@ -696,9 +712,24 @@ def search_stock(keyword: str) -> list[dict]:
                 "change_pct": _safe_float(q.get("change_pct")),
             })
         return final
+    except DataSourceUnavailable:
+        raise
     except Exception as e:
         logger.warning(f"search_stock failed: {e}")
-    return _search_stock_tencent(keyword)
+        fallback = _search_stock_tencent(keyword)
+        if fallback is None:
+            raise DataSourceUnavailable("sina/tencent search unreachable") from e
+        return fallback
+
+
+def _unescape_unicode(text: str) -> str:
+    """还原上游返回的字面 \\uXXXX 转义（腾讯 smartbox 的股票名是这种格式）。
+
+    只处理 4 位十六进制转义，其余字符原样保留；不改变正常中文文本。
+    """
+    if "\\u" not in text:
+        return text
+    return re.sub(r"\\u([0-9a-fA-F]{4})", lambda m: chr(int(m.group(1), 16)), text)
 
 
 def _search_stock_tencent(keyword: str) -> list[dict]:
@@ -715,16 +746,33 @@ def _search_stock_tencent(keyword: str) -> list[dict]:
             return []
         entries = m.group(1).split(";")
         result: list[dict] = []
+        quote_keys: list[str] = []
         for entry in entries:
             if not entry.strip():
                 continue
-            parts = entry.split("^")
-            if len(parts) < 3:
-                continue
-            code = _safe_str(parts[0])
-            name = _safe_str(parts[1])
+            # 阶段四修复(2026-11-07):腾讯 smartbox 实际返回 `sh~510300~沪深300ETF~...`
+            # （分隔符是 "~"，市场前缀与代码分开放在前两段）。原实现只按 "^" 切分，
+            # 导致 len(parts)<3 全部被丢弃 —— 数据源明明有结果却返回空列表，
+            # 前端因此显示"未找到匹配的股票"。保留 "^" 分支兼容既有测试与旧格式。
+            market = ""
+            if "~" in entry:
+                pieces = entry.split("~")
+                if len(pieces) < 3:
+                    continue
+                market = _safe_str(pieces[0])
+                code = _safe_str(pieces[1])
+                # 腾讯把中文名以字面 \uXXXX 转义返回，需还原成真实字符
+                name = _unescape_unicode(_safe_str(pieces[2]))
+            else:
+                parts = entry.split("^")
+                if len(parts) < 3:
+                    continue
+                code = _safe_str(parts[0])
+                name = _safe_str(parts[1])
             if not code or not name:
                 continue
+            # 行情接口对 ETF 需要市场前缀（sh510300），裸 6 位会查不到
+            quote_keys.append((market + code) if market else code)
             result.append({
                 "code": code,
                 "name": name,
@@ -735,11 +783,14 @@ def _search_stock_tencent(keyword: str) -> list[dict]:
             if len(result) >= 20:
                 break
         if result:
-            codes = [r["code"] for r in result]
-            quotes = get_realtime_quote_tencent(codes)
+            quotes = get_realtime_quote_tencent(quote_keys)
             quote_map = {q["code"]: q for q in quotes}
-            for r in result:
-                q = quote_map.get(r["code"], {})
+            for r, key in zip(result, quote_keys):
+                # 键可能是 "sh510300" 或裸 "510300"，两种都尝试
+                q = (quote_map.get(key)
+                     or quote_map.get(key[-6:])
+                     or quote_map.get(r["code"])
+                     or {})
                 raw_price = q.get("price")
                 raw_change = q.get("change_pct")
                 r["price"] = round(_safe_float(raw_price), 3) if raw_price not in (None, "") else None
@@ -747,7 +798,8 @@ def _search_stock_tencent(keyword: str) -> list[dict]:
         return result
     except Exception as e:
         logger.warning(f"_search_stock_tencent failed: {e}")
-    return []
+    # 网络/解析失败返回 None（区别于"正常响应但无匹配"的空列表）
+    return None
 
 
 def get_stock_detail(code: str) -> dict:

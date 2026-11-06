@@ -405,6 +405,18 @@ class TestSignalsAndUtilities:
         monkeypatch.setattr(market.ds2, "search_stock", _raise)
         assert client.get("/api/market/search", params={"q": "茅台"}).json()["data"] == []
 
+    def test_search_source_unavailable_returns_503(self, client, monkeypatch):
+        """阶段四 U1/W1：数据源全部不可达时必须 503，不能伪装成"未找到"。"""
+        market.cache.clear()
+
+        def _unavailable(q):
+            raise market.ds2.DataSourceUnavailable("all sources down")
+
+        monkeypatch.setattr(market.ds2, "search_stock", _unavailable)
+        resp = client.get("/api/market/search", params={"q": "510300"})
+        assert resp.status_code == 503
+        assert resp.json()["detail"]["code"] == "SEARCH_SOURCE_UNAVAILABLE"
+
     def test_status_shape(self, client):
         payload = client.get("/api/market/status").json()
         assert payload["data"]["session"] in {"morning", "afternoon", "lunch_break", "closed", "weekend"}

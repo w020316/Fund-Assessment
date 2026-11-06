@@ -3647,12 +3647,23 @@ async function searchStocks() {
   try {
     resp = await api('/api/market/search?q=' + encodeURIComponent(q));
   } catch (e) {
-    body.innerHTML = '<div style="color:var(--color-warning);font-size:12px;padding:6px 0;">搜索失败，请稍后重试</div>';
+    // 阶段四 U1/W1：数据源不可用时必须显示"故障"而不是"未找到匹配"，
+    // 否则用户会把上游故障误判成"系统没有这只标的"。
+    const msg = (e && e.message) ? e.message : '搜索失败，请稍后重试';
+    const code = (e && e.code) ? e.code : 'SEARCH_FAILED';
+    body.innerHTML = `<div class="hud-status hud-status-error" style="padding:14px 0;">
+      <div class="hud-status-icon">⚠</div>
+      <div class="hud-status-msg">${escapeHtml(msg)}</div>
+      <div class="hud-status-hint">错误码 ${escapeHtml(code)} · 这不代表"没有该标的"</div>
+      <div style="margin-top:10px;"><button type="button" class="btn btn-sm btn-outline" id="searchRetryBtn">重试</button></div>
+    </div>`;
+    const retry = document.getElementById('searchRetryBtn');
+    if (retry) retry.addEventListener('click', searchStocks);
     return;
   }
   const items = (resp && resp.data) || [];
   if (!items.length) {
-    body.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:6px 0;">未找到匹配的股票</div>';
+    body.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:6px 0;">没有匹配的标的（数据源已正常响应），可尝试输入 6 位代码</div>';
     return;
   }
   body.innerHTML = items.map(it => {
