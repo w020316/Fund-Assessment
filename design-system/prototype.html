@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>QuantFlow Pro · Aurora Terminal 原型 v1.0</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2322E3FF'/%3E%3Ctext x='16' y='21' font-family='sans-serif' font-size='12' font-weight='700' fill='%2304070E' text-anchor='middle'%3EQF%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<style>
+/* ============================================================
+   原型专属样式（只做页面编排，不新增视觉语言）
+   全部尺寸/色彩取自 token；若某条规则需要裸值，说明该处尚未组件化。
+   ============================================================ */
+html,body{height:100%;margin:0;background:#02040A}
+body{font-family:var(--qf-font-body)}
+
+/* ---------- 预览控制条（开发工具，不属于产品 UI） ---------- */
+.proto{min-height:100vh;display:flex;flex-direction:column;background:
+  radial-gradient(120% 80% at 50% 0%,#070C15,#02040A 72%)}
+.proto-bar{
+  position:sticky;top:0;z-index:200;display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  padding:10px 16px;background:rgba(7,12,21,.92);backdrop-filter:blur(14px);
+  border-bottom:1px solid #1C2A3D;
+  font:500 12px/1 var(--qf-font-body);color:#A7BAD2;
+}
+.proto-bar b{font-family:var(--qf-font-display);letter-spacing:.1em;color:#22E3FF;font-size:12px}
+.proto-bar .sep{width:1px;height:20px;background:#1C2A3D}
+.proto-bar .lbl{color:#8B9DB4;font-size:11px;letter-spacing:.06em}
+.proto-bar button{
+  height:30px;padding:0 12px;border-radius:999px;border:1px solid #1C2A3D;background:rgba(255,255,255,.03);
+  color:#A7BAD2;font:500 12px/1 var(--qf-font-body);cursor:pointer;transition:all .2s cubic-bezier(.2,.8,.2,1);
+}
+.proto-bar button:hover{color:#EAF3FF;background:rgba(255,255,255,.07)}
+.proto-bar button[aria-pressed="true"]{background:rgba(34,227,255,.14);color:#22E3FF;border-color:rgba(34,227,255,.34)}
+.proto-bar .note{margin-left:auto;color:#5C6E85;font-size:11px}
+
+.proto-stage{flex:1;padding:24px;display:flex;justify-content:center;overflow:auto}
+.proto-frame{
+  width:100%;max-width:100%;height:calc(100vh - 105px);min-height:560px;
+  border-radius:14px;overflow:hidden;background:#04070E;
+  box-shadow:0 24px 64px rgba(0,0,0,.7),0 0 0 1px #1C2A3D;
+  transition:width .32s cubic-bezier(.2,.8,.2,1),border-radius .32s;
+}
+.proto-frame[data-mode="mobile"]{width:390px;border-radius:22px;box-shadow:0 24px 64px rgba(0,0,0,.7),0 0 0 8px #0B111C,0 0 0 9px #1C2A3D}
+.proto-frame[data-mode="tablet"]{width:1024px;border-radius:18px}
+.proto-frame[data-mode="desktop"]{width:1440px}
+.proto-frame .qf-app{height:100%}
+
+/* ---------- 产品页编排 ---------- */
+.top-index{display:flex;align-items:center;gap:4px;flex:1;justify-content:center;min-width:0}
+.top-index__item{
+  display:flex;align-items:baseline;gap:6px;padding:4px 10px;border-radius:6px;
+  background:rgba(255,255,255,.03);font:500 12px/1 var(--qf-font-body);white-space:nowrap;
+}
+.top-index__name{color:var(--qf-text-muted)}
+.top-index__val{font:600 13px/1 var(--qf-font-display);font-variant-numeric:tabular-nums}
+.top-search{position:relative;flex:0 1 280px;min-width:120px}
+.top-search .qf-field{background:rgba(7,12,21,.9)}
+.top-status{display:flex;align-items:center;gap:6px;font:500 11px/1 var(--qf-font-body);color:var(--qf-text-muted);white-space:nowrap}
+
+.page-head{display:flex;align-items:flex-end;gap:var(--qf-space-2);flex-wrap:wrap;margin-bottom:var(--qf-space-3)}
+.page-head__title{font:var(--qf-t-h2)}
+.page-head__meta{font:400 12px/1 var(--qf-font-body);color:var(--qf-text-muted);padding-bottom:3px}
+.page-head .qf-spacer{flex:1}
+
+.hero-line{display:flex;align-items:baseline;gap:var(--qf-space-1);flex-wrap:wrap;margin-top:var(--qf-space-1)}
+.hero-price{font:700 34px/1 var(--qf-font-display);font-variant-numeric:tabular-nums slashed-zero;letter-spacing:-.01em}
+
+.flow-row{display:grid;grid-template-columns:112px 1fr 88px;gap:var(--qf-space-2);align-items:center;padding:9px 0}
+.flow-name{font:500 12px/1 var(--qf-font-body);color:var(--qf-text-muted)}
+.flow-track{height:8px;border-radius:999px;background:rgba(255,255,255,.06);overflow:hidden}
+.flow-fill{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,rgba(248,113,113,.5),rgba(248,113,113,.95));transition:width .32s cubic-bezier(.2,.8,.2,1)}
+.flow-fill.down{background:linear-gradient(90deg,rgba(52,211,153,.5),rgba(52,211,153,.95))}
+.flow-val{font:600 12px/1 var(--qf-font-body);font-variant-numeric:tabular-nums;text-align:right}
+
+.temp-track{position:relative;height:10px;border-radius:999px;background:linear-gradient(90deg,#34D399,#5AC8FA 40%,#F5A524 70%,#F87171);opacity:.9}
+.temp-pin{position:absolute;top:-5px;width:4px;height:20px;border-radius:2px;background:#EAF3FF;box-shadow:0 0 12px rgba(234,243,255,.7);transform:translateX(-50%)}
+
+.analysis-grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:var(--qf-space-3)}
+.verdict{display:flex;align-items:center;gap:var(--qf-space-2);padding:var(--qf-space-2);border-radius:10px;background:rgba(34,227,255,.06);border:1px solid rgba(34,227,255,.22)}
+.verdict__word{font:700 28px/1 var(--qf-font-body);color:var(--qf-neon-cyan)}
+.verdict__meta{font:400 12px/18px var(--qf-font-body);color:var(--qf-text-secondary)}
+.point{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid rgba(28,42,61,.6);font:400 13px/21px var(--qf-font-body);color:var(--qf-text-secondary)}
+.point:last-child{border-bottom:0}
+.point .tag{flex:0 0 auto;width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font:700 11px/1 var(--qf-font-display)}
+.point .tag.b{background:rgba(248,113,113,.14);color:var(--qf-sem-up)}
+.point .tag.s{background:rgba(52,211,153,.14);color:var(--qf-sem-down)}
+.missing{display:flex;gap:8px;align-items:flex-start;padding:10px 12px;border-radius:8px;background:rgba(245,165,36,.08);border:1px solid rgba(245,165,36,.26);font:400 12px/18px var(--qf-font-body);color:var(--qf-text-secondary)}
+.search-pop{
+  position:absolute;left:0;right:0;top:calc(100% + 6px);z-index:60;
+  background:var(--qf-bg-elev);border:1px solid var(--qf-line-2);border-radius:var(--qf-radius-sm);
+  box-shadow:var(--qf-shadow-2);overflow:hidden;
+}
+.search-pop[hidden]{display:none}
+.search-pop__item{
+  display:flex;align-items:center;gap:10px;height:44px;padding:0 12px;cursor:pointer;
+  font:400 13px/1 var(--qf-font-body);color:var(--qf-text-secondary);
+  transition:background .2s cubic-bezier(.2,.8,.2,1),color .2s;
+}
+.search-pop__item:hover,.search-pop__item.is-active{background:rgba(34,227,255,.08);color:var(--qf-text-primary)}
+.search-pop__code{font:500 12px/1 var(--qf-font-mono);color:var(--qf-text-muted)}
+.scan-item{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid rgba(28,42,61,.6)}
+.scan-item:last-child{border-bottom:0}
+.scan-item__name{font:600 13px/1.4 var(--qf-font-body)}
+.scan-item__meta{font:400 11px/16px var(--qf-font-body);color:var(--qf-text-muted);margin-top:2px}
+
+/* ---------- 页面编排的断点适配（容器查询，与组件库同一断点） ---------- */
+@container qfapp (max-width: 767px){
+  .top-index{display:none}
+  .top-search{flex:1 1 auto;min-width:0}
+  .top-status{display:none}
+  .page-head__title{font:600 22px/30px var(--qf-font-body)}
+  .page-head{gap:var(--qf-space-1);align-items:flex-start;row-gap:var(--qf-space-1)}
+  .page-head>div:first-child{flex:1 1 100%}
+  .page-head .qf-spacer{display:none}
+  .analysis-grid{grid-template-columns:1fr}
+  .hero-price{font-size:28px}
+  .flow-row{grid-template-columns:80px 1fr 72px;gap:var(--qf-space-1)}
+  .proto-bar{font-size:11px}
+}
+@container qfapp (min-width: 768px) and (max-width: 1200px){
+  .top-index{gap:2px}
+  .top-index__item:nth-child(3){display:none}
+  .analysis-grid{grid-template-columns:1fr}
+  .page-head__title{font:var(--qf-t-h2)}
+}
+</style>
+</head>
+<body>
+
+<!-- ============ 预览控制条（开发工具） ============ -->
+<div class="proto">
+  <div class="proto-bar">
+    <b>AURORA TERMINAL</b>
+    <span class="sep"></span>
+    <span class="lbl">画布</span>
+    <button data-mode="auto" aria-pressed="true">自适应</button>
+    <button data-mode="desktop" aria-pressed="false">桌面 1440</button>
+    <button data-mode="tablet" aria-pressed="false">平板 1024</button>
+    <button data-mode="mobile" aria-pressed="false">移动 390</button>
+    <span class="sep"></span>
+    <span class="lbl">动效</span>
+    <button id="motionBtn" aria-pressed="true">开启</button>
+    <span class="note">画布宽度即容器宽度，组件按 &lt;768 / 768–1200 / &gt;1200 实时重排</span>
+  </div>
+
+  <div class="proto-stage">
+    <div class="proto-frame" id="frame" data-mode="auto">
+
+      <!-- ============ 应用根（同时是容器查询容器） ============ -->
+      <div class="qf-ds qf-app" id="app">
+
+        <!-- 顶栏 -->
+        <header class="qf-topbar">
+          <div class="qf-brand">
+            <span class="qf-brand__mark">QF</span>
+            <span>
+              <span class="qf-brand__name">QUANTFLOW</span>
+              <span class="qf-brand__sub">AURORA TERMINAL</span>
+            </span>
+          </div>
+
+          <div class="top-index">
+            <div class="top-index__item"><span class="top-index__name">上证</span><span class="top-index__val">3,412.68</span><span class="qf-up" style="font-size:11px">+0.86%</span></div>
+            <div class="top-index__item"><span class="top-index__name">深证</span><span class="top-index__val">11,286.40</span><span class="qf-down" style="font-size:11px">-0.42%</span></div>
+            <div class="top-index__item"><span class="top-index__name">创业板</span><span class="top-index__val">2,318.55</span><span class="qf-up" style="font-size:11px">+1.24%</span></div>
+          </div>
+
+          <div class="top-search">
+            <div class="qf-field">
+              <span class="qf-field__lead">⌕</span>
+              <input class="qf-field__input" id="topSearch" placeholder="搜索代码 / 名称" aria-label="搜索标的">
+              <span class="qf-field__trail">/</span>
+            </div>
+            <div class="search-pop" id="searchPop" hidden></div>
+          </div>
+
+          <div class="top-status"><span class="qf-dot"></span>数据正常</div>
+          <button class="qf-icon-btn" id="refreshBtn" aria-label="刷新行情">⟳</button>
+        </header>
+
+        <div class="qf-shell">
+          <!-- 侧边导航（移动端隐藏） -->
+          <nav class="qf-nav" aria-label="主导航">
+            <div class="qf-nav__group">交易台</div>
+            <a class="qf-nav__item" data-nav="overview" aria-current="page"><span class="qf-nav__icon">◈</span>行情总览</a>
+            <a class="qf-nav__item" data-nav="holdings"><span class="qf-nav__icon">▤</span>持仓管理</a>
+            <div class="qf-nav__group">研究</div>
+            <a class="qf-nav__item" data-nav="analysis"><span class="qf-nav__icon">◐</span>智能分析</a>
+            <a class="qf-nav__item" data-nav="review"><span class="qf-nav__icon">◇</span>短线复盘</a>
+            <div class="qf-nav__group">系统</div>
+            <a class="qf-nav__item" data-nav="settings"><span class="qf-nav__icon">⚙</span>设置</a>
+          </nav>
+
+          <!-- 内容区 -->
+          <main class="qf-main" id="main">
+
+            <!-- ---------- P1 行情总览 ---------- -->
+            <section class="qf-page" id="page-overview">
+              <div class="page-head">
+                <div>
+                  <div class="page-head__title">行情总览</div>
+                  <div class="page-head__meta">2026-11-06 15:00 收盘 · 数据源：东方财富 / 新浪</div>
+                </div>
+                <div class="qf-spacer"></div>
+                <button class="qf-btn qf-btn--ghost qf-btn--sm">导出</button>
+                <button class="qf-btn qf-btn--primary qf-btn--sm" id="rebalanceBtn">再平衡建议</button>
+              </div>
+
+              <div class="qf-grid qf-grid--3">
+                <div class="qf-card">
+                  <div class="qf-metric__label">组合总市值</div>
+                  <div class="qf-metric__value">1,284,930</div>
+                  <div class="qf-metric__sub qf-up">▲ +26,882 · +2.13%</div>
+                </div>
+                <div class="qf-card">
+                  <div class="qf-metric__label">可用资金</div>
+                  <div class="qf-metric__value">86,420</div>
+                  <div class="qf-metric__sub" style="color:var(--qf-text-muted)">占比 6.72% · 无冻结</div>
+                </div>
+                <div class="qf-card">
+                  <div class="qf-metric__label">组合风险等级</div>
+                  <div class="qf-metric__value" style="color:var(--qf-sem-warn)">中高</div>
+                  <div class="qf-metric__sub" style="color:var(--qf-text-muted)">波动率 18.4% · 回撤 -6.2%</div>
+                </div>
+              </div>
+
+              <div class="qf-grid qf-grid--2" style="margin-top:var(--qf-space-3)">
+                <div class="qf-card">
+                  <div class="qf-card__head">
+                    <div class="qf-card__title">资金面</div>
+                    <div class="qf-spacer"></div>
+                    <span class="qf-badge qf-badge--info">15:00 收盘</span>
+                  </div>
+                  <div class="qf-card__body">
+                    <div class="flow-row"><span class="flow-name">主力净流入</span><div class="flow-track"><i class="flow-fill" style="width:78%"></i></div><span class="flow-val qf-up">+18.6 亿</span></div>
+                    <div class="flow-row"><span class="flow-name">超大单</span><div class="flow-track"><i class="flow-fill" style="width:52%"></i></div><span class="flow-val qf-up">+9.2 亿</span></div>
+                    <div class="flow-row"><span class="flow-name">大单</span><div class="flow-track"><i class="flow-fill" style="width:44%"></i></div><span class="flow-val qf-up">+9.4 亿</span></div>
+                    <div class="flow-row"><span class="flow-name">中单</span><div class="flow-track"><i class="flow-fill down" style="width:18%"></i></div><span class="flow-val qf-down">-3.1 亿</span></div>
+                    <div class="flow-row"><span class="flow-name">小单</span><div class="flow-track"><i class="flow-fill down" style="width:66%"></i></div><span class="flow-val qf-down">-15.5 亿</span></div>
+                  </div>
+                </div>
+
+                <div class="qf-glass" style="padding:var(--qf-space-3)">
+                  <div class="qf-card__head">
+                    <div class="qf-card__title">数据完整性</div>
+                    <div class="qf-spacer"></div>
+                    <span class="qf-badge qf-badge--warn">⚠ 2 项延迟</span>
+                  </div>
+                  <div class="qf-card__body qf-stack">
+                    <div class="missing"><span>⚠</span><span>北向资金：上游延迟 12s，已取最近一次快照（14:58）。缺失期间不参与 AI 推断。</span></div>
+                    <div class="qf-help">所有缺失字段显式标注，不以 0 值替代；影响结论时会在结果页给出提示。</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="qf-card qf-card--flush" style="margin-top:var(--qf-space-3)">
+                <div style="display:flex;align-items:center;gap:var(--qf-space-1);padding:var(--qf-space-2);flex-wrap:wrap">
+                  <div class="qf-card__title">持仓明细</div>
+                  <div class="qf-spacer"></div>
+                  <div class="qf-cluster">
+                    <button class="qf-btn qf-btn--sm qf-btn--ghost">批量调整</button>
+                    <button class="qf-btn qf-btn--sm qf-btn--primary" id="newHoldingBtn">+ 新建持仓</button>
+                  </div>
+                </div>
+                <div class="qf-table-wrap" style="border:0;border-top:1px solid var(--qf-line-1);border-radius:0">
+                  <table class="qf-table" id="holdTable">
+                    <thead>
+                      <tr>
+                        <th>标的</th><th>代码</th>
+                        <th class="qf-table__num" data-sort="num" aria-sort="none">市值</th>
+                        <th class="qf-table__num" data-sort="num">今日</th>
+                        <th class="qf-table__num" data-sort="num">盈亏</th>
+                        <th class="qf-table__num">占比</th>
+                        <th>状态</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr><td>沪深300ETF</td><td class="qf-table__code">510300</td><td class="qf-table__num">412,860</td><td class="qf-table__num qf-up">▲ +1.86%</td><td class="qf-table__num qf-up">+28,420</td><td class="qf-table__num">32.1%</td><td><span class="qf-badge qf-badge--up">▲ 盈利</span></td></tr>
+                      <tr><td>创业板ETF</td><td class="qf-table__code">159915</td><td class="qf-table__num">268,420</td><td class="qf-table__num qf-down">▼ -0.74%</td><td class="qf-table__num qf-down">-8,860</td><td class="qf-table__num">20.9%</td><td><span class="qf-badge qf-badge--down">▼ 回撤</span></td></tr>
+                      <tr><td>中证红利ETF</td><td class="qf-table__code">515180</td><td class="qf-table__num">196,330</td><td class="qf-table__num qf-up">▲ +3.21%</td><td class="qf-table__num qf-up">+12,140</td><td class="qf-table__num">15.3%</td><td><span class="qf-badge qf-badge--neon">持仓中</span></td></tr>
+                      <tr><td>纳指ETF</td><td class="qf-table__code">513100</td><td class="qf-table__num">148,900</td><td class="qf-table__num" style="color:var(--qf-text-muted)">—</td><td class="qf-table__num qf-up">+6,300</td><td class="qf-table__num">11.6%</td><td><span class="qf-badge qf-badge--warn">⚠ 延迟 12s</span></td></tr>
+                      <tr><td>黄金ETF</td><td class="qf-table__code">518880</td><td class="qf-table__num">96,220</td><td class="qf-table__num qf-up">▲ +0.42%</td><td class="qf-table__num qf-up">+3,180</td><td class="qf-table__num">7.5%</td><td><span class="qf-badge qf-badge--neon">持仓中</span></td></tr>
+                      <tr><td>现金</td><td class="qf-table__code">CASH</td><td class="qf-table__num">86,420</td><td class="qf-table__num" style="color:var(--qf-text-muted)">—</td><td class="qf-table__num" style="color:var(--qf-text-muted)">—</td><td class="qf-table__num">6.7%</td><td><span class="qf-badge qf-badge--plain">可用</span></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+
+            <!-- ---------- P2 持仓管理 ---------- -->
+            <section class="qf-page" id="page-holdings" hidden>
+              <div class="page-head">
+                <div>
+                  <div class="page-head__title">持仓管理</div>
+                  <div class="page-head__meta">6 个持仓 · 更新于 15:00</div>
+                </div>
+                <div class="qf-spacer"></div>
+                <button class="qf-btn qf-btn--neon qf-btn--sm" id="aiBtn">组合 AI 建议</button>
+              </div>
+
+              <div class="qf-card" id="aiPanel">
+                <div class="qf-card__head">
+                  <div class="qf-card__title">组合级 AI 建议</div>
+                  <div class="qf-spacer"></div>
+                  <span class="qf-badge qf-badge--neon">跨持仓</span>
+                </div>
+                <div class="qf-card__body" id="aiBody">
+                  <div class="qf-state">
+                    <div class="qf-state__icon">◇</div>
+                    <div class="qf-state__title">尚未生成建议</div>
+                    <div class="qf-state__hint">基于当前 6 个持仓计算集中度、行业暴露与再平衡缺口</div>
+                    <div class="qf-state__action"><button class="qf-btn qf-btn--neon qf-btn--sm" id="aiGen">生成建议</button></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="qf-grid qf-grid--2" style="margin-top:var(--qf-space-3)">
+                <div class="qf-card">
+                  <div class="qf-card__head"><div class="qf-card__title">集中度</div></div>
+                  <div class="qf-card__body qf-row" style="gap:var(--qf-space-3)">
+                    <div class="qf-ring" style="--qf-ring-value:32%"><span>32%</span></div>
+                    <div>
+                      <div style="font:600 13px/1.5 var(--qf-font-body)">最大单一持仓占比 32.1%</div>
+                      <div class="qf-help" style="margin-top:6px">超过 30% 阈值，建议单只不超过 25%</div>
+                      <div class="qf-progress" style="margin-top:10px"><i class="qf-progress__bar" style="width:78%"></i></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="qf-card">
+                  <div class="qf-card__head"><div class="qf-card__title">再平衡缺口</div></div>
+                  <div class="qf-card__body">
+                    <div class="flow-row"><span class="flow-name">宽基</span><div class="flow-track"><i class="flow-fill" style="width:52%"></i></div><span class="flow-val qf-up">+4.1%</span></div>
+                    <div class="flow-row"><span class="flow-name">成长</span><div class="flow-track"><i class="flow-fill" style="width:31%"></i></div><span class="flow-val qf-down">-2.6%</span></div>
+                    <div class="flow-row"><span class="flow-name">红利</span><div class="flow-track"><i class="flow-fill" style="width:22%"></i></div><span class="flow-val qf-up">+1.4%</span></div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- ---------- P3 智能分析 ---------- -->
+            <section class="qf-page" id="page-analysis" hidden>
+              <div class="page-head">
+                <div>
+                  <div class="page-head__title">智能分析</div>
+                  <div class="page-head__meta">沪深300ETF 510300 · 分析于 14:52</div>
+                </div>
+                <div class="qf-spacer"></div>
+                <span class="qf-badge qf-badge--neon">数据完整度 92%</span>
+              </div>
+
+              <div class="qf-card" style="margin-bottom:var(--qf-space-3)">
+                <div class="qf-row" style="flex-wrap:wrap;gap:var(--qf-space-2)">
+                  <div>
+                    <div class="qf-metric__label">沪深300ETF</div>
+                    <div class="hero-line">
+                      <span class="hero-price">4.128</span>
+                      <span class="qf-up" style="font:600 15px/1 var(--qf-font-body)">▲ +1.86%</span>
+                      <span class="qf-caption">+0.075</span>
+                    </div>
+                  </div>
+                  <div class="qf-spacer"></div>
+                  <div class="qf-tabs" role="tablist" aria-label="分析视图">
+                    <button class="qf-tab" role="tab" aria-selected="true" data-atab="verdict">结论</button>
+                    <button class="qf-tab" role="tab" aria-selected="false" data-atab="debate">多空</button>
+                    <button class="qf-tab" role="tab" aria-selected="false" data-atab="data">数据</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="analysis-grid" data-apane="verdict">
+                <div class="qf-card">
+                  <div class="qf-card__head"><div class="qf-card__title">AI 结论</div></div>
+                  <div class="qf-card__body">
+                    <div class="verdict">
+                      <div class="verdict__word">持有</div>
+                      <div class="verdict__meta">置信度 68% · 建议仓位维持 30%<br>基于 12 项指标，2 项数据延迟</div>
+                    </div>
+                    <div class="qf-stack" style="margin-top:var(--qf-space-2)">
+                      <div class="point"><span class="tag b">多</span><span>估值处于近三年 32% 分位，宽基配置价值仍在；主力资金连续 3 日净流入。</span></div>
+                      <div class="point"><span class="tag s">空</span><span>短期涨幅已接近 20 日均线上轨，存在回踩需求；成交额未同步放大。</span></div>
+                      <div class="point"><span class="tag b">多</span><span>跟踪误差 0.18%，费率 0.50%，成本处于同类前 25%。</span></div>
+                    </div>
+                    <div class="missing" style="margin-top:var(--qf-space-2)">
+                      <span>⚠</span><span>资金流数据延迟 12s，本结论未纳入最新一分钟净流入；北向资金缺失，未参与推断。</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="qf-card">
+                  <div class="qf-card__head"><div class="qf-card__title">关键指标</div></div>
+                  <div class="qf-card__body">
+                    <div class="qf-row" style="justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(28,42,61,.6)"><span class="qf-caption">PE (TTM)</span><span class="qf-num" style="font-weight:600">12.84</span></div>
+                    <div class="qf-row" style="justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(28,42,61,.6)"><span class="qf-caption">PB</span><span class="qf-num" style="font-weight:600">1.42</span></div>
+                    <div class="qf-row" style="justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(28,42,61,.6)"><span class="qf-caption">ROE</span><span class="qf-num" style="font-weight:600">11.6%</span></div>
+                    <div class="qf-row" style="justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(28,42,61,.6)"><span class="qf-caption">规模</span><span class="qf-num" style="font-weight:600">1,284 亿</span></div>
+                    <div class="qf-row" style="justify-content:space-between;padding:8px 0"><span class="qf-caption">跟踪误差</span><span class="qf-num" style="font-weight:600">0.18%</span></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="qf-card" data-apane="debate" hidden style="margin-top:var(--qf-space-3)">
+                <div class="qf-card__head"><div class="qf-card__title">多空辩论</div><div class="qf-spacer"></div><span class="qf-badge qf-badge--plain">2 轮</span></div>
+                <div class="qf-card__body qf-grid qf-grid--2">
+                  <div>
+                    <div class="qf-micro" style="color:var(--qf-sem-up)">BULL · 3</div>
+                    <div class="point"><span class="tag b">1</span><span>估值分位低，长期配置盘持续流入。</span></div>
+                    <div class="point"><span class="tag b">2</span><span>政策面稳增长预期未变，宽基受益顺序靠前。</span></div>
+                    <div class="point"><span class="tag b">3</span><span>费率与跟踪误差均优于同类中位数。</span></div>
+                  </div>
+                  <div>
+                    <div class="qf-micro" style="color:var(--qf-sem-down)">BEAR · 2</div>
+                    <div class="point"><span class="tag s">1</span><span>量能未确认，上涨缺乏增量资金。</span></div>
+                    <div class="point"><span class="tag s">2</span><span>短期偏离 20 日均线 +6.4%，回踩概率上升。</span></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="qf-card qf-card--flush" data-apane="data" hidden style="margin-top:var(--qf-space-3)">
+                <div class="qf-table-wrap" style="border:0">
+                  <table class="qf-table">
+                    <thead><tr><th>字段</th><th class="qf-table__num">数值</th><th>来源</th><th>时效</th></tr></thead>
+                    <tbody>
+                      <tr><td>最新价</td><td class="qf-table__num">4.128</td><td>东方财富</td><td><span class="qf-badge qf-badge--neon">实时</span></td></tr>
+                      <tr><td>资金流</td><td class="qf-table__num">—</td><td>东方财富</td><td><span class="qf-badge qf-badge--warn">⚠ 延迟 12s</span></td></tr>
+                      <tr><td>北向资金</td><td class="qf-table__num">—</td><td>缺失</td><td><span class="qf-badge qf-badge--plain">数据缺失</span></td></tr>
+                      <tr><td>PE (TTM)</td><td class="qf-table__num">12.84</td><td>财务接口</td><td><span class="qf-badge qf-badge--neon">日频</span></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+
+            <!-- ---------- P4 短线复盘 ---------- -->
+            <section class="qf-page" id="page-review" hidden>
+              <div class="page-head">
+                <div>
+                  <div class="page-head__title">短线复盘</div>
+                  <div class="page-head__meta">市场温度 62 · 中性偏暖</div>
+                </div>
+                <div class="qf-spacer"></div>
+                <button class="qf-btn qf-btn--ghost qf-btn--sm" id="simFailBtn">模拟数据源失败</button>
+              </div>
+
+              <div class="qf-card">
+                <div class="qf-card__head"><div class="qf-card__title">市场温度</div><div class="qf-spacer"></div><span class="qf-badge qf-badge--info">15:00</span></div>
+                <div class="qf-card__body">
+                  <div class="temp-track"><span class="temp-pin" style="left:62%"></span></div>
+                  <div class="qf-row" style="justify-content:space-between;margin-top:8px">
+                    <span class="qf-caption">冰点 0</span><span class="qf-caption">中性 50</span><span class="qf-caption">过热 100</span>
+                  </div>
+                  <div class="qf-grid qf-grid--3" style="margin-top:var(--qf-space-3)">
+                    <div><div class="qf-metric__label">涨跌家数</div><div style="font:600 20px/1.4 var(--qf-font-display)" class="qf-num"><span class="qf-up">3,120</span> / <span class="qf-down">1,786</span></div></div>
+                    <div><div class="qf-metric__label">成交额</div><div style="font:600 20px/1.4 var(--qf-font-display)" class="qf-num">1.82 万亿</div></div>
+                    <div><div class="qf-metric__label">两融余额</div><div style="font:600 20px/1.4 var(--qf-font-display)" class="qf-num">1.63 万亿</div></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="qf-card qf-card--flush" style="margin-top:var(--qf-space-3)">
+                <div style="padding:var(--qf-space-2)">
+                  <div class="qf-tabs" role="tablist" style="width:100%">
+                    <button class="qf-tab" role="tab" aria-selected="true" data-stab="high">创新高 3</button>
+                    <button class="qf-tab" role="tab" aria-selected="false" data-stab="limit">涨停梯队 5</button>
+                    <button class="qf-tab" role="tab" aria-selected="false" data-stab="cb">可转债 2</button>
+                  </div>
+                </div>
+                <div style="padding:0 var(--qf-space-2) var(--qf-space-2)" id="scanList">
+                  <div class="scan-item"><div><div class="scan-item__name">中证红利ETF</div><div class="scan-item__meta">515180 · 突破 60 日新高 · 量比 1.42</div></div><div class="qf-spacer"></div><span class="qf-badge qf-badge--up">▲ +3.21%</span></div>
+                  <div class="scan-item"><div><div class="scan-item__name">沪深300ETF</div><div class="scan-item__meta">510300 · 突破 20 日新高 · 量比 1.18</div></div><div class="qf-spacer"></div><span class="qf-badge qf-badge--up">▲ +1.86%</span></div>
+                  <div class="scan-item"><div><div class="scan-item__name">黄金ETF</div><div class="scan-item__meta">518880 · 突破 120 日新高 · 量比 0.96</div></div><div class="qf-spacer"></div><span class="qf-badge qf-badge--up">▲ +0.42%</span></div>
+                </div>
+              </div>
+            </section>
+
+            <!-- ---------- P5 设置 ---------- -->
+            <section class="qf-page" id="page-settings" hidden>
+              <div class="page-head">
+                <div>
+                  <div class="page-head__title">设置</div>
+                  <div class="page-head__meta">策略参数与执行偏好</div>
+                </div>
+              </div>
+
+              <div class="qf-card">
+                <div class="qf-card__head"><div class="qf-card__title">策略参数</div><div class="qf-spacer"></div><span class="qf-badge qf-badge--plain">仅影响信号生成</span></div>
+                <div class="qf-card__body qf-grid qf-grid--3">
+                  <div>
+                    <label class="qf-label" for="fThr">最小涨幅阈值</label>
+                    <div class="qf-field"><input class="qf-field__input" id="fThr" value="2.5" inputmode="decimal"><span class="qf-field__trail">%</span></div>
+                    <div class="qf-help">低于该值不触发信号</div>
+                  </div>
+                  <div>
+                    <label class="qf-label" for="fMax">持仓上限</label>
+                    <div class="qf-field"><input class="qf-field__input" id="fMax" value="20" inputmode="numeric"><span class="qf-field__trail">只</span></div>
+                    <div class="qf-help">超出后仅提示，不自动下单</div>
+                  </div>
+                  <div>
+                    <label class="qf-label" for="fCool">冷却时间</label>
+                    <div class="qf-field is-invalid"><input class="qf-field__input" id="fCool" value="-1"><span class="qf-field__trail">分钟</span></div>
+                    <div class="qf-help is-error">必须为正整数</div>
+                  </div>
+                </div>
+                <div class="qf-row qf-cluster" style="margin-top:var(--qf-space-3);gap:var(--qf-space-3)">
+                  <label class="qf-check"><input type="checkbox" checked><span class="qf-check__box"></span>开盘前自动扫描</label>
+                  <label class="qf-check"><input type="checkbox"><span class="qf-check__box"></span>仅提示不下单</label>
+                  <div class="qf-row" style="margin-left:auto"><span class="qf-help" style="margin:0">实时刷新</span><button class="qf-switch" role="switch" aria-checked="true" aria-label="实时刷新"></button></div>
+                </div>
+                <div class="qf-row" style="margin-top:var(--qf-space-3);justify-content:flex-end;gap:var(--qf-space-1)">
+                  <button class="qf-btn qf-btn--ghost">重置</button>
+                  <button class="qf-btn qf-btn--primary" id="saveBtn">保存设置</button>
+                </div>
+              </div>
+
+              <div class="qf-card" style="margin-top:var(--qf-space-3);border-color:rgba(255,90,95,.3)">
+                <div class="qf-card__head"><div class="qf-card__title" style="color:var(--qf-sem-critical)">危险操作</div></div>
+                <div class="qf-card__body">
+                  <div style="font:400 13px/22px var(--qf-font-body);color:var(--qf-text-secondary)">清空本地缓存与历史信号。该操作不可撤销，且不会删除已导出的报告。</div>
+                  <button class="qf-btn qf-btn--danger" style="margin-top:var(--qf-space-2)" id="dangerBtn">清空本地数据</button>
+                </div>
+              </div>
+            </section>
+
+          </main>
+        </div>
+
+        <!-- 移动端底部标签栏 -->
+        <nav class="qf-tabbar" aria-label="底部导航">
+          <button class="qf-tabbar__item" data-nav="overview" aria-current="page"><span class="qf-nav__icon">◈</span>行情</button>
+          <button class="qf-tabbar__item" data-nav="holdings"><span class="qf-nav__icon">▤</span>持仓</button>
+          <button class="qf-tabbar__item" data-nav="analysis"><span class="qf-nav__icon">◐</span>分析</button>
+          <button class="qf-tabbar__item" data-nav="review"><span class="qf-nav__icon">◇</span>复盘</button>
+          <button class="qf-tabbar__item" data-nav="settings"><span class="qf-nav__icon">⚙</span>设置</button>
+        </nav>
+
+        <!-- 浮层：Modal / Toast（置于应用根内，随容器定位） -->
+        <div class="qf-modal-mask" id="modalMask">
+          <div class="qf-modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+            <div class="qf-modal__title" id="modalTitle">新建持仓</div>
+            <div class="qf-modal__body">
+              <div class="qf-stack">
+                <div>
+                  <label class="qf-label" for="mCode">标的代码</label>
+                  <div class="qf-field"><input class="qf-field__input" id="mCode" placeholder="6 位代码，如 510300"></div>
+                </div>
+                <div>
+                  <label class="qf-label" for="mQty">数量</label>
+                  <div class="qf-field"><input class="qf-field__input" id="mQty" value="1000" inputmode="numeric"><span class="qf-field__trail">份</span></div>
+                </div>
+                <div class="qf-help">提交后仅写入本地组合，不触发任何下单动作。</div>
+              </div>
+            </div>
+            <div class="qf-modal__actions">
+              <button class="qf-btn qf-btn--ghost" data-close>取消</button>
+              <button class="qf-btn qf-btn--primary" id="modalOk">确认新建</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="qf-toast-stack" id="toasts"></div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   原型交互（仅模拟，不连接任何后端）
+   ============================================================ */
+
+/* ---------- 1. 预览画布 ---------- */
+const frame = document.getElementById('frame');
+document.querySelectorAll('[data-mode]').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    document.querySelectorAll('[data-mode]').forEach(b=>b.setAttribute('aria-pressed','false'));
+    btn.setAttribute('aria-pressed','true');
+    const mode = btn.dataset.mode;
+    frame.dataset.mode = mode;
+    frame.style.width = mode==='auto' ? '100%' : '';
+    if (mode==='mobile') frame.style.width='390px';
+    if (mode==='tablet') frame.style.width='1024px';
+    if (mode==='desktop') frame.style.width='1440px';
+  });
+});
+const motionBtn = document.getElementById('motionBtn');
+motionBtn.addEventListener('click',()=>{
+  const on = motionBtn.getAttribute('aria-pressed')==='true';
+  motionBtn.setAttribute('aria-pressed', on?'false':'true');
+  motionBtn.textContent = on?'关闭':'开启';
+  document.getElementById('app').classList.toggle('qf-no-motion', on);
+});
+
+/* ---------- 2. 页面切换 ---------- */
+const pages = {
+  overview: 'page-overview', holdings: 'page-holdings',
+  analysis: 'page-analysis', review: 'page-review', settings: 'page-settings'
+};
+function go(name){
+  if(!pages[name]) return;
+  Object.values(pages).forEach(id=>{
+    const el=document.getElementById(id);
+    if(el) el.hidden = (id!==pages[name]);
+  });
+  document.querySelectorAll('[data-nav]').forEach(el=>{
+    if(el.dataset.nav===name) el.setAttribute('aria-current','page');
+    else el.removeAttribute('aria-current');
+  });
+  document.getElementById('main').scrollTo({top:0,behavior:'instant'});
+}
+document.querySelectorAll('[data-nav]').forEach(el=>{
+  if(el.tagName==='A') el.setAttribute('tabindex','0');
+  el.addEventListener('click',()=>go(el.dataset.nav));
+});
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='A' && e.target.dataset.nav && (e.key==='Enter'||e.key===' ')){
+    e.preventDefault(); go(e.target.dataset.nav);
+  }
+});
+
+/* ---------- 3. Toast ---------- */
+const toastStack = document.getElementById('toasts');
+function toast(msg, tone){
+  const el=document.createElement('div');
+  el.className='qf-toast';
+  const dot = tone==='error' ? 'qf-dot qf-dot--up' : 'qf-dot';
+  el.innerHTML='<span class="'+dot+'"></span><span>'+msg+'</span>';
+  el.style.animation='qf-pop 320ms cubic-bezier(.16,1,.3,1)';
+  toastStack.appendChild(el);
+  setTimeout(()=>{
+    el.style.transition='opacity 200ms cubic-bezier(.4,0,1,1)';
+    el.style.opacity='0';
+    setTimeout(()=>el.remove(),200);
+  },4000);
+}
+
+/* ---------- 4. 按钮 loading ---------- */
+function withLoading(btn, fn, delay){
+  if(btn.dataset.busy) return;
+  btn.dataset.busy='1';
+  const w=btn.getBoundingClientRect().width;
+  const html=btn.innerHTML;
+  btn.style.width=w+'px';
+  btn.disabled=true;
+  btn.innerHTML='<span class="qf-btn__spinner"></span>处理中';
+  setTimeout(()=>{
+    btn.innerHTML=html; btn.disabled=false; btn.style.width='';
+    delete btn.dataset.busy;
+    fn && fn();
+  }, delay||1200);
+}
+document.getElementById('refreshBtn').addEventListener('click',function(){
+  const btn=this;
+  if(btn.dataset.busy) return;
+  btn.dataset.busy='1';
+  const glyph=btn.innerHTML;
+  btn.innerHTML='<span class="qf-btn__spinner" style="border-color:rgba(34,227,255,.22);border-top-color:var(--qf-neon-cyan)"></span>';
+  setTimeout(()=>{
+    btn.innerHTML=glyph; delete btn.dataset.busy;
+    toast('已刷新 1,284 条行情 · 15:00');
+  },900);
+});
+document.getElementById('saveBtn').addEventListener('click',function(){
+  withLoading(this,()=>toast('策略参数已保存'),800);
+});
+
+/* ---------- 5. Modal ---------- */
+const mask=document.getElementById('modalMask');
+function openModal(){ mask.classList.add('is-open'); }
+function closeModal(){ mask.classList.remove('is-open'); }
+document.getElementById('newHoldingBtn').addEventListener('click',openModal);
+document.getElementById('dangerBtn').addEventListener('click',openModal);
+document.getElementById('modalOk').addEventListener('click',()=>{
+  closeModal(); toast('已新建持仓 · 待同步');
+});
+document.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click',closeModal));
+mask.addEventListener('click',e=>{ if(e.target===mask) closeModal(); });
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeModal(); });
+
+/* ---------- 6. 表格排序 ---------- */
+function parseNum(t){ const m=String(t).replace(/[^\d.-]/g,''); return m===''?null:parseFloat(m); }
+document.querySelectorAll('.qf-table th[data-sort]').forEach(th=>{
+  th.addEventListener('click',()=>{
+    const table=th.closest('table'), body=table.tBodies[0];
+    const idx=[...th.parentNode.children].indexOf(th);
+    const cur=th.getAttribute('aria-sort');
+    const dir = cur==='descending' ? 'asc' : 'desc';
+    table.querySelectorAll('th[aria-sort]').forEach(x=>x.setAttribute('aria-sort','none'));
+    th.setAttribute('aria-sort', dir==='asc'?'ascending':'descending');
+    const rows=[...body.rows];
+    rows.sort((a,b)=>{
+      const va=parseNum(a.cells[idx].textContent), vb=parseNum(b.cells[idx].textContent);
+      if(va===null&&vb===null) return 0;
+      if(va===null) return 1; if(vb===null) return -1;
+      return dir==='asc' ? va-vb : vb-va;
+    });
+    rows.forEach(r=>body.appendChild(r));
+  });
+});
+
+/* ---------- 7. 搜索 ---------- */
+const DATA=[
+  {code:'510300',name:'沪深300ETF',val:'4.128',chg:'+1.86%',up:true},
+  {code:'159915',name:'创业板ETF',val:'2.286',chg:'-0.74%',up:false},
+  {code:'515180',name:'中证红利ETF',val:'1.482',chg:'+3.21%',up:true},
+  {code:'513100',name:'纳指ETF',val:'1.126',chg:'+0.42%',up:true},
+  {code:'518880',name:'黄金ETF',val:'7.842',chg:'+0.42%',up:true},
+  {code:'600519',name:'贵州茅台',val:'1680.00',chg:'-1.24%',up:false},
+  {code:'000300',name:'沪深300指数',val:'3,412.68',chg:'+0.86%',up:true}
+];
+const input=document.getElementById('topSearch');
+const pop=document.getElementById('searchPop');
+let timer=null;
+function renderPop(q){
+  const list=DATA.filter(d=>!q||d.code.includes(q)||d.name.includes(q)).slice(0,6);
+  if(!list.length){ pop.innerHTML='<div class="search-pop__item" style="cursor:default">未找到匹配标的</div>'; }
+  else{
+    pop.innerHTML=list.map(d=>
+      '<div class="search-pop__item" data-code="'+d.code+'">'+
+        '<span class="search-pop__code">'+d.code+'</span>'+
+        '<span style="flex:1;color:var(--qf-text-primary)">'+d.name+'</span>'+
+        '<span class="qf-num" style="font-weight:600">'+d.val+'</span>'+
+        '<span class="'+(d.up?'qf-up':'qf-down')+'" style="font-size:12px;min-width:52px;text-align:right">'+d.chg+'</span>'+
+      '</div>').join('');
+  }
+  pop.hidden=false;
+}
+input.addEventListener('input',()=>{
+  clearTimeout(timer);
+  timer=setTimeout(()=>renderPop(input.value.trim()),220);   // 防抖 220ms
+});
+input.addEventListener('focus',()=>renderPop(input.value.trim()));
+document.addEventListener('click',e=>{
+  if(!e.target.closest('.top-search')) pop.hidden=true;
+});
+pop.addEventListener('click',e=>{
+  const item=e.target.closest('[data-code]'); if(!item) return;
+  input.value=item.dataset.code; pop.hidden=true;
+  go('analysis'); toast('已载入 '+item.dataset.code+' 的分析');
+});
+
+/* ---------- 8. 分析页内页签 ---------- */
+const atabs=[...document.querySelectorAll('[data-atab]')];
+atabs.forEach(t=>t.addEventListener('click',()=>{
+  atabs.forEach(x=>x.setAttribute('aria-selected','false'));
+  t.setAttribute('aria-selected','true');
+  document.querySelectorAll('[data-apane]').forEach(p=>{ p.hidden = p.dataset.apane!==t.dataset.atab; });
+}));
+
+/* ---------- 9. 组合 AI 建议 ---------- */
+const aiBody=document.getElementById('aiBody');
+document.getElementById('aiGen').addEventListener('click',()=>{
+  aiBody.innerHTML =
+    '<div class="qf-stack" style="gap:12px">'+
+      '<div class="qf-skel qf-skel--title"></div>'+
+      '<div class="qf-skel qf-skel--line"></div>'+
+      '<div class="qf-skel qf-skel--line" style="width:82%"></div>'+
+      '<div class="qf-skel qf-skel--block"></div>'+
+    '</div>';
+  setTimeout(()=>{
+    aiBody.innerHTML =
+      '<div class="qf-grid qf-grid--2">'+
+        '<div>'+
+          '<div class="qf-micro" style="color:var(--qf-neon-cyan)">建议动作</div>'+
+          '<div style="font:600 18px/1.5 var(--qf-font-body);margin-top:6px">降低单一宽基集中度</div>'+
+          '<div class="qf-help" style="margin-top:8px">沪深300ETF 占比 32.1%，建议下调至 25% 以内，释放约 9.1 万元。</div>'+
+        '</div>'+
+        '<div>'+
+          '<div class="qf-micro" style="color:var(--qf-sem-warn)">风险提示</div>'+
+          '<div class="qf-help" style="margin-top:6px">再平衡会产生交易成本，按当前费率估算约 0.08%。结论未纳入北向资金（数据缺失）。</div>'+
+        '</div>'+
+      '</div>'+
+      '<div class="qf-row" style="margin-top:16px;gap:8px">'+
+        '<button class="qf-btn qf-btn--neon qf-btn--sm">查看调仓明细</button>'+
+        '<button class="qf-btn qf-btn--ghost qf-btn--sm">仅记录建议</button>'+
+      '</div>';
+  },1400);
+});
+
+/* ---------- 10. 扫描失败态 ---------- */
+let scanFailed=false;
+const scanList=document.getElementById('scanList');
+const scanHTML=scanList.innerHTML;
+document.getElementById('simFailBtn').addEventListener('click',function(){
+  scanFailed=!scanFailed;
+  this.textContent = scanFailed ? '恢复数据源' : '模拟数据源失败';
+  this.classList.toggle('qf-btn--danger', scanFailed);
+  this.classList.toggle('qf-btn--ghost', !scanFailed);
+  if(scanFailed){
+    scanList.innerHTML =
+      '<div class="qf-state qf-state--error">'+
+        '<div class="qf-state__icon">⚠</div>'+
+        '<div class="qf-state__title">扫描失败：上游数据源不可用</div>'+
+        '<div class="qf-state__hint">错误码 SCAN_DATA_UNAVAILABLE · 请稍后重试，不会以“暂无信号”替代失败</div>'+
+        '<div class="qf-state__action"><button class="qf-btn qf-btn--ghost qf-btn--sm" id="retryBtn">重试</button></div>'+
+      '</div>';
+    document.getElementById('retryBtn').addEventListener('click',()=>toast('正在重试…'));
+  }else{
+    scanList.innerHTML=scanHTML;
+  }
+});
+
+/* ---------- 11. 扫描页签 ---------- */
+const stabs=[...document.querySelectorAll('[data-stab]')];
+const STAB={
+  high:[['中证红利ETF','515180 · 突破 60 日新高 · 量比 1.42','+3.21%','up'],
+        ['沪深300ETF','510300 · 突破 20 日新高 · 量比 1.18','+1.86%','up'],
+        ['黄金ETF','518880 · 突破 120 日新高 · 量比 0.96','+0.42%','up']],
+  limit:[['中证红利ETF','515180 · 首板 · 封单 2.1 亿','+3.21%','up'],
+         ['沪深300ETF','510300 · 二板 · 封单 1.4 亿','+1.86%','up'],
+         ['创业板ETF','159915 · 回封 · 封单 0.8 亿','-0.74%','down'],
+         ['纳指ETF','513100 · 首板 · 封单 0.6 亿','+0.42%','up'],
+         ['黄金ETF','518880 · 三板 · 封单 0.4 亿','+0.42%','up']],
+  cb:[['红利转债','110001 · 溢价 8.2% · 剩余 2.4 年','+1.12%','up'],
+      ['宽基转债','110002 · 溢价 5.6% · 剩余 1.8 年','-0.32%','down']]
+};
+function renderScan(key){
+  scanList.innerHTML = STAB[key].map(([n,m,c,u])=>
+    '<div class="scan-item"><div><div class="scan-item__name">'+n+'</div>'+
+    '<div class="scan-item__meta">'+m+'</div></div><div class="qf-spacer"></div>'+
+    '<span class="qf-badge qf-badge--'+u+'">'+(u==='up'?'▲ ':'▼ ')+c+'</span></div>').join('');
+}
+stabs.forEach(t=>t.addEventListener('click',()=>{
+  stabs.forEach(x=>x.setAttribute('aria-selected','false'));
+  t.setAttribute('aria-selected','true');
+  renderScan(t.dataset.stab);
+}));
+
+/* ---------- 12. 开关 ---------- */
+document.querySelectorAll('.qf-switch').forEach(sw=>{
+  sw.addEventListener('click',()=>{
+    sw.setAttribute('aria-checked', sw.getAttribute('aria-checked')==='true' ? 'false':'true');
+  });
+});
+
+/* ---------- 13. 再平衡 ---------- */
+document.getElementById('rebalanceBtn').addEventListener('click',function(){
+  withLoading(this,()=>toast('再平衡建议已生成 · 3 条'),1000);
+});
+</script>
+</body>
+</html>

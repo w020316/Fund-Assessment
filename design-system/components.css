@@ -1,0 +1,522 @@
+/* ============================================================
+   Aurora Terminal · 组件库
+   QuantFlow Pro Design System v1.0  (2026-11-06)
+   ------------------------------------------------------------
+   依赖：tokens.css
+   命名：BEM 变体用 `--`，状态用 `.is-*`，修饰用 `[attr]`。
+   铁律：
+   1) 只允许引用 token，禁止出现裸色值 / 非 8 倍数尺寸；
+   2) 动效只过渡 transform / opacity / box-shadow / 背景色；
+   3) 所有可点元素的命中区 ≥44×44（视觉尺寸不足时用透明伪元素扩展，
+      且扩展区不得与相邻热区重叠）；
+   4) 断点规则写在 @container qfapp 内（见 tokens.css 的响应式契约）。
+   ============================================================ */
+
+/* ---------- 0. 容器 & 基础 ---------- */
+/* 统一 border-box：否则 width:200px 的侧栏会因 padding 被撑到 232px */
+.qf-ds,.qf-ds *,.qf-ds *::before,.qf-ds *::after{box-sizing:border-box}
+.qf-ds{
+  container-type:inline-size;
+  container-name:qfapp;
+  background:var(--qf-bg-void);
+  color:var(--qf-text-primary);
+  font:var(--qf-t-body);
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+}
+.qf-ds ::selection{background:rgba(34,227,255,.22)}
+.qf-ds :focus-visible{outline:none;box-shadow:var(--qf-focus-ring)}
+/* 输入类不用外环（由 .qf-field:focus-within 统一表达），避免双环叠加 */
+.qf-ds input:focus-visible,.qf-ds textarea:focus-visible{box-shadow:none;outline:none}
+
+/* ---------- 1. 布局原语（只提供间距与栅格，不承载视觉） ---------- */
+.qf-row{display:flex;align-items:center;gap:var(--qf-space-1)}
+.qf-row--2{gap:var(--qf-space-2)}
+.qf-cluster{display:flex;flex-wrap:wrap;align-items:center;gap:var(--qf-space-1)}
+.qf-stack{display:flex;flex-direction:column;gap:var(--qf-space-2)}
+.qf-stack--3{gap:var(--qf-space-3)}
+.qf-spacer{flex:1 1 auto}
+.qf-grid{display:grid;gap:var(--qf-space-3)}
+.qf-grid--2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.qf-grid--3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.qf-grid--4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.qf-grid>*{min-width:0}   /* 防 grid item 被内容撑破（表格/长文本场景） */
+
+/* 排版辅助 */
+.qf-h2{font:var(--qf-t-h2);letter-spacing:0}
+.qf-h3{font:var(--qf-t-h3)}
+.qf-caption{font:var(--qf-t-caption);color:var(--qf-text-muted);letter-spacing:.04em}
+.qf-micro{font:var(--qf-t-micro);letter-spacing:.08em;text-transform:uppercase;color:var(--qf-text-secondary)}
+.qf-num{font-variant-numeric:tabular-nums slashed-zero}
+.qf-ellipsis{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ---------- 2. 应用外壳 ---------- */
+/* 注意：.qf-ds 带 container-type:inline-size（= contain:layout），
+   会使其成为 fixed 后代的包含块。因此外壳必须锁定为视口尺寸，
+   滚动交给 .qf-main，这样 Modal / Toast 等 fixed 浮层仍等价于视口定位。 */
+.qf-app{display:flex;flex-direction:column;height:100vh;height:100dvh;overflow:hidden}
+.qf-topbar{
+  position:sticky;top:0;z-index:var(--qf-z-nav);
+  display:flex;align-items:center;gap:var(--qf-space-2);
+  height:64px;padding:0 var(--qf-space-4);
+  background:rgba(7,12,21,.82);
+  backdrop-filter:blur(16px) saturate(130%);
+  -webkit-backdrop-filter:blur(16px) saturate(130%);
+  border-bottom:1px solid var(--qf-line-1);
+}
+.qf-brand{display:flex;align-items:center;gap:var(--qf-space-1);flex:0 0 auto}
+.qf-brand__mark{
+  width:32px;height:32px;border-radius:9px;display:grid;place-items:center;
+  background:var(--qf-grad-cyan);color:var(--qf-ink);
+  font:700 13px/1 var(--qf-font-display);letter-spacing:.04em;
+  box-shadow:var(--qf-glow-cyan);
+}
+.qf-brand__name{font:700 15px/1 var(--qf-font-display);letter-spacing:.09em}
+.qf-brand__sub{display:block;margin-top:3px;font:500 10px/1.2 var(--qf-font-body);letter-spacing:.18em;color:var(--qf-text-muted)}
+
+.qf-shell{display:flex;flex:1;min-height:0}
+.qf-nav{
+  flex:0 0 200px;width:200px;
+  padding:var(--qf-space-2) var(--qf-space-2);
+  border-right:1px solid var(--qf-line-1);
+  background:rgba(12,19,31,.62);
+  overflow-y:auto;
+}
+.qf-nav__group{font:600 10px/1 var(--qf-font-body);letter-spacing:.16em;text-transform:uppercase;
+  color:var(--qf-text-muted);padding:var(--qf-space-1) var(--qf-space-1)}
+.qf-nav__group:not(:first-child){margin-top:var(--qf-space-2)}
+.qf-nav__item{
+  position:relative;
+  display:flex;align-items:center;gap:var(--qf-space-1);
+  height:40px;padding:0 var(--qf-space-1);border-radius:var(--qf-radius-sm);
+  color:var(--qf-text-secondary);text-decoration:none;cursor:pointer;
+  font:500 13px/1 var(--qf-font-body);
+  border-left:2px solid transparent;
+  transition:background var(--qf-dur-1) var(--qf-ease-standard),
+             color var(--qf-dur-1) var(--qf-ease-standard),
+             border-color var(--qf-dur-1) var(--qf-ease-standard);
+}
+/* 命中区扩展：上下各 2px（40 → 44）；列表 gap 4px 保证扩展后不重叠 */
+.qf-nav__item::before,.qf-nav__item::after{content:'';position:absolute;left:0;right:0;height:2px}
+.qf-nav__item::before{top:-2px}
+.qf-nav__item::after{bottom:-2px}
+.qf-nav{display:flex;flex-direction:column;gap:var(--qf-space-half)}
+.qf-nav__item:hover{background:rgba(255,255,255,.05);color:var(--qf-text-primary)}
+.qf-nav__item[aria-current="page"]{
+  background:rgba(34,227,255,.08);color:var(--qf-neon-cyan);border-left-color:var(--qf-neon-cyan);
+}
+.qf-nav__item .qf-nav__icon{width:20px;text-align:center;font-size:15px;line-height:1}
+
+.qf-main{flex:1;min-width:0;overflow-y:auto;overflow-x:hidden;padding:var(--qf-space-4)}
+
+/* 移动端底部标签栏：默认不渲染占位，由容器查询切换 display */
+.qf-tabbar{
+  display:none;position:sticky;bottom:0;z-index:var(--qf-z-nav);
+  height:calc(56px + env(safe-area-inset-bottom,0px));
+  padding:0 var(--qf-space-half) env(safe-area-inset-bottom,0px);
+  background:rgba(18,28,43,.92);
+  backdrop-filter:blur(16px) saturate(130%);
+  border-top:1px solid var(--qf-line-2);
+}
+.qf-tabbar__item{
+  flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  min-width:0;text-decoration:none;color:var(--qf-text-muted);cursor:pointer;
+  font:500 10px/1 var(--qf-font-body);border:0;background:transparent;
+  transition:color var(--qf-dur-1) var(--qf-ease-standard),background var(--qf-dur-1) var(--qf-ease-standard);
+}
+.qf-tabbar__item .qf-nav__icon{font-size:17px}
+.qf-tabbar__item[aria-current="page"]{color:var(--qf-neon-cyan);background:rgba(34,227,255,.08);border-radius:var(--qf-radius-sm)}
+
+/* ---------- 3. 按钮 ---------- */
+.qf-btn{
+  position:relative;display:inline-flex;align-items:center;justify-content:center;gap:var(--qf-space-1);
+  height:40px;padding:0 20px;border:1px solid transparent;border-radius:var(--qf-radius-sm);
+  font:500 14px/1 var(--qf-font-body);white-space:nowrap;cursor:pointer;
+  transition:transform var(--qf-dur-1) var(--qf-ease-standard),
+             background-color var(--qf-dur-1) var(--qf-ease-standard),
+             background-position var(--qf-dur-1) var(--qf-ease-standard),
+             border-color var(--qf-dur-1) var(--qf-ease-standard),
+             box-shadow var(--qf-dur-1) var(--qf-ease-standard),
+             color var(--qf-dur-1) var(--qf-ease-standard);
+}
+/* 命中区扩展到 ≥44×44（小号按钮 32/40 同样达标） */
+.qf-btn::before{content:'';position:absolute;left:50%;top:50%;width:max(44px,100%);height:max(44px,100%);transform:translate(-50%,-50%)}
+.qf-btn:active{transform:scale(.98)}
+.qf-btn[disabled],.qf-btn[aria-disabled="true"]{opacity:.45;cursor:not-allowed;transform:none}
+
+.qf-btn--primary{
+  background-image:linear-gradient(100deg,#22E3FF,#3D7BFF 52%,#22E3FF);
+  background-size:190% 100%;background-position:0 0;
+  color:var(--qf-ink);font-weight:600;
+  box-shadow:0 0 0 1px rgba(34,227,255,.30),0 6px 20px rgba(34,227,255,.16);
+}
+.qf-btn--primary:hover{background-position:100% 0;box-shadow:0 0 0 1px rgba(34,227,255,.5),0 8px 26px rgba(34,227,255,.26)}
+.qf-btn--neon{background:rgba(34,227,255,.07);border-color:rgba(34,227,255,.34);color:var(--qf-neon-cyan);font-weight:600}
+.qf-btn--neon:hover{background:rgba(34,227,255,.14);border-color:rgba(34,227,255,.7);box-shadow:0 0 22px rgba(34,227,255,.20)}
+.qf-btn--ghost{background:transparent;border-color:var(--qf-line-2);color:var(--qf-text-secondary)}
+.qf-btn--ghost:hover{background:rgba(255,255,255,.05);border-color:#3B5270;color:var(--qf-text-primary)}
+.qf-btn--danger{background:rgba(255,90,95,.10);border-color:rgba(255,90,95,.40);color:var(--qf-sem-critical)}
+.qf-btn--danger:hover{background:rgba(255,90,95,.18);border-color:rgba(255,90,95,.7)}
+.qf-btn--quiet{background:transparent;border-color:transparent;color:var(--qf-text-secondary);padding:0 var(--qf-space-1)}
+.qf-btn--quiet:hover{background:rgba(255,255,255,.05);color:var(--qf-text-primary)}
+.qf-btn--sm{height:32px;padding:0 14px;font-size:13px}
+.qf-btn--lg{height:48px;padding:0 28px;font-size:15px}
+/* 主 CTA：单屏最多 1 个 */
+.qf-btn--cta{height:48px;padding:0 28px;font-size:15px}
+
+.qf-btn__spinner{
+  width:14px;height:14px;border-radius:50%;flex:0 0 auto;
+  border:2px solid rgba(255,255,255,.22);border-top-color:currentColor;
+  animation:qf-spin .7s linear infinite;
+}
+.qf-btn--primary .qf-btn__spinner{border-color:rgba(4,7,14,.28);border-top-color:var(--qf-ink)}
+@keyframes qf-spin{to{transform:rotate(360deg)}}
+
+.qf-icon-btn{
+  position:relative;width:40px;height:40px;display:inline-grid;place-items:center;flex:0 0 auto;
+  border:1px solid var(--qf-line-1);border-radius:var(--qf-radius-sm);
+  background:rgba(255,255,255,.03);color:var(--qf-text-secondary);cursor:pointer;
+  transition:background var(--qf-dur-1) var(--qf-ease-standard),color var(--qf-dur-1) var(--qf-ease-standard),
+             border-color var(--qf-dur-1) var(--qf-ease-standard),transform var(--qf-dur-1) var(--qf-ease-standard);
+}
+.qf-icon-btn::after{content:'';position:absolute;left:50%;top:50%;width:44px;height:44px;transform:translate(-50%,-50%)}
+.qf-icon-btn:hover{background:rgba(255,255,255,.07);color:var(--qf-text-primary);border-color:var(--qf-line-2)}
+.qf-icon-btn:active{transform:scale(.96)}
+
+/* ---------- 4. 输入 ---------- */
+.qf-field{
+  position:relative;display:flex;align-items:center;height:40px;
+  border:1px solid var(--qf-line-1);border-radius:var(--qf-radius-sm);background:var(--qf-bg-deep);
+  transition:border-color var(--qf-dur-1) var(--qf-ease-standard),
+             box-shadow var(--qf-dur-2) var(--qf-ease-standard),
+             background var(--qf-dur-1) var(--qf-ease-standard);
+}
+/* 命中区扩展：上下各 2px 透明条，不遮挡输入区域 */
+.qf-field::before,.qf-field::after{content:'';position:absolute;left:0;right:0;height:2px}
+.qf-field::before{top:-2px}
+.qf-field::after{bottom:-2px}
+.qf-field:focus-within{border-color:var(--qf-neon-cyan);box-shadow:0 0 0 3px rgba(34,227,255,.14),0 0 18px rgba(34,227,255,.10);background:#08101B}
+.qf-field.is-invalid{border-color:rgba(255,90,95,.75);box-shadow:0 0 0 3px rgba(255,90,95,.12)}
+.qf-field.is-valid{border-color:rgba(52,211,153,.6)}
+.qf-field[data-disabled]{opacity:.5;pointer-events:none}
+.qf-field__input{
+  flex:1;min-width:0;height:100%;padding:0 12px;border:0;background:transparent;outline:none;
+  color:var(--qf-text-primary);font:400 14px/1 var(--qf-font-body);letter-spacing:.01em;
+}
+.qf-field__input::placeholder{color:var(--qf-text-muted)}
+.qf-field__lead{padding-left:12px;color:var(--qf-text-muted);line-height:1;font-size:14px}
+.qf-field__trail{padding-right:10px;color:var(--qf-text-muted);font:500 11px/1 var(--qf-font-mono)}
+.qf-textarea{
+  position:relative;display:block;width:100%;min-height:88px;padding:10px 12px;
+  border:1px solid var(--qf-line-1);border-radius:var(--qf-radius-sm);background:var(--qf-bg-deep);
+  color:var(--qf-text-primary);font:400 14px/22px var(--qf-font-body);resize:vertical;outline:none;
+  transition:border-color var(--qf-dur-1) var(--qf-ease-standard),box-shadow var(--qf-dur-2) var(--qf-ease-standard);
+}
+.qf-textarea:focus{border-color:var(--qf-neon-cyan);box-shadow:0 0 0 3px rgba(34,227,255,.14)}
+.qf-label{display:block;margin-bottom:var(--qf-space-1);font:500 13px/1 var(--qf-font-body);color:var(--qf-text-secondary)}
+.qf-help{margin-top:6px;font:400 12px/16px var(--qf-font-body);color:var(--qf-text-muted)}
+.qf-help.is-error{color:var(--qf-sem-critical)}
+
+/* ---------- 5. 选择控件 ---------- */
+.qf-check{
+  position:relative;display:inline-flex;align-items:center;gap:10px;min-height:44px;cursor:pointer;
+  font:400 13px/1 var(--qf-font-body);color:var(--qf-text-secondary);
+}
+.qf-check input{position:absolute;opacity:0;width:0;height:0}
+.qf-check__box{
+  width:18px;height:18px;border-radius:4px;border:1px solid var(--qf-line-2);
+  background:var(--qf-bg-deep);display:grid;place-items:center;
+  transition:background var(--qf-dur-2) var(--qf-ease-standard),border-color var(--qf-dur-2) var(--qf-ease-standard),
+             box-shadow var(--qf-dur-2) var(--qf-ease-standard);
+}
+.qf-check__box::after{
+  content:'';width:9px;height:5px;border-left:2px solid var(--qf-ink);border-bottom:2px solid var(--qf-ink);
+  transform:rotate(-45deg) scale(.4);opacity:0;
+  transition:opacity var(--qf-dur-2),transform var(--qf-dur-2) var(--qf-ease-emphasis);
+}
+.qf-check input:checked + .qf-check__box{background:var(--qf-neon-cyan);border-color:var(--qf-neon-cyan);box-shadow:0 0 14px rgba(34,227,255,.35)}
+.qf-check input:checked + .qf-check__box::after{opacity:1;transform:rotate(-45deg) scale(1)}
+.qf-check input:focus-visible + .qf-check__box{box-shadow:var(--qf-focus-ring)}
+
+.qf-switch{
+  position:relative;width:40px;height:22px;flex:0 0 auto;border:0;border-radius:var(--qf-radius-full);
+  background:#22324a;cursor:pointer;
+  transition:background var(--qf-dur-2) var(--qf-ease-standard),box-shadow var(--qf-dur-1) var(--qf-ease-standard);
+}
+.qf-switch::before{content:'';position:absolute;left:50%;top:50%;width:max(44px,100%);height:44px;transform:translate(-50%,-50%)}
+.qf-switch::after{
+  content:'';position:absolute;left:2px;top:2px;width:18px;height:18px;border-radius:50%;
+  background:var(--qf-text-muted);
+  transition:transform var(--qf-dur-2) var(--qf-ease-emphasis),background var(--qf-dur-2) var(--qf-ease-standard);
+}
+.qf-switch[aria-checked="true"]{background-image:var(--qf-grad-cyan);box-shadow:0 0 16px rgba(34,227,255,.28)}
+.qf-switch[aria-checked="true"]::after{transform:translateX(18px);background:var(--qf-ink)}
+.qf-switch:active::after{transform:scale(.92)}
+.qf-switch[aria-checked="true"]:active::after{transform:translateX(18px) scale(.92)}
+
+/* ---------- 6. 标签页 / 分段控件 ---------- */
+.qf-tabs{display:inline-flex;gap:2px;padding:4px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid var(--qf-line-1)}
+.qf-tab{
+  position:relative;height:32px;padding:0 16px;border:0;border-radius:7px;background:transparent;cursor:pointer;
+  color:var(--qf-text-secondary);font:500 13px/1 var(--qf-font-body);
+  transition:background var(--qf-dur-1) var(--qf-ease-standard),color var(--qf-dur-1) var(--qf-ease-standard),
+             box-shadow var(--qf-dur-1) var(--qf-ease-standard),transform var(--qf-dur-1) var(--qf-ease-standard);
+}
+/* 命中区扩展：上下各 6px（32 → 44） */
+.qf-tab::before,.qf-tab::after{content:'';position:absolute;left:0;right:0;height:6px}
+.qf-tab::before{top:-6px}
+.qf-tab::after{bottom:-6px}
+.qf-tab:hover{color:var(--qf-text-primary);background:rgba(255,255,255,.05)}
+.qf-tab[aria-selected="true"]{background:rgba(34,227,255,.13);color:var(--qf-neon-cyan);box-shadow:inset 0 0 0 1px rgba(34,227,255,.32)}
+.qf-tab:active{transform:scale(.98)}
+.qf-seg{display:inline-flex;padding:3px;gap:2px;background:rgba(255,255,255,.04);border:1px solid var(--qf-line-1);border-radius:var(--qf-radius-full)}
+.qf-seg__btn{
+  height:28px;padding:0 12px;border:0;border-radius:var(--qf-radius-full);background:transparent;cursor:pointer;
+  color:var(--qf-text-secondary);font:500 12px/1 var(--qf-font-body);
+  transition:background var(--qf-dur-1) var(--qf-ease-standard),color var(--qf-dur-1) var(--qf-ease-standard);
+}
+.qf-seg__btn:hover{color:var(--qf-text-primary);background:rgba(255,255,255,.06)}
+.qf-seg__btn[aria-pressed="true"]{background:rgba(34,227,255,.14);color:var(--qf-neon-cyan);box-shadow:inset 0 0 0 1px rgba(34,227,255,.34)}
+
+/* ---------- 7. 徽章 ---------- */
+.qf-badge{
+  display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:4px;
+  font:600 11px/1 var(--qf-font-body);letter-spacing:.03em;white-space:nowrap;
+}
+.qf-badge--up{color:var(--qf-sem-up);background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.28)}
+.qf-badge--down{color:var(--qf-sem-down);background:rgba(52,211,153,.12);border:1px solid rgba(52,211,153,.28)}
+.qf-badge--warn{color:var(--qf-sem-warn);background:rgba(245,165,36,.12);border:1px solid rgba(245,165,36,.28)}
+.qf-badge--info{color:var(--qf-sem-info);background:rgba(90,200,250,.12);border:1px solid rgba(90,200,250,.26)}
+.qf-badge--neon{color:var(--qf-neon-cyan);background:rgba(34,227,255,.10);border:1px solid rgba(34,227,255,.28)}
+.qf-badge--plain{color:var(--qf-text-secondary);background:rgba(255,255,255,.05);border:1px solid var(--qf-line-1)}
+.qf-dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto;background:var(--qf-sem-down);box-shadow:0 0 8px var(--qf-sem-down)}
+.qf-dot--warn{background:var(--qf-sem-warn);box-shadow:0 0 8px var(--qf-sem-warn)}
+.qf-dot--up{background:var(--qf-sem-up);box-shadow:0 0 8px var(--qf-sem-up)}
+
+/* ---------- 8. 卡片 ---------- */
+.qf-card{
+  background:var(--qf-bg-surface);border:1px solid var(--qf-line-1);border-radius:var(--qf-radius-md);
+  padding:var(--qf-space-3);
+  transition:border-color var(--qf-dur-1) var(--qf-ease-standard),
+             box-shadow var(--qf-dur-1) var(--qf-ease-standard),
+             transform var(--qf-dur-1) var(--qf-ease-standard);
+}
+.qf-card--interactive{cursor:pointer}
+.qf-card--interactive:hover{border-color:var(--qf-line-2);box-shadow:var(--qf-shadow-2);transform:translateY(-1px)}
+.qf-card--interactive:active{transform:translateY(-1px) scale(.995)}
+.qf-card--flush{padding:0;overflow:hidden}
+.qf-glass{
+  background:var(--qf-bg-glass);
+  backdrop-filter:blur(16px) saturate(130%);
+  -webkit-backdrop-filter:blur(16px) saturate(130%);
+  border:1px solid rgba(255,255,255,.09);border-radius:var(--qf-radius-md);
+  box-shadow:var(--qf-inner-hairline),var(--qf-shadow-2);
+}
+.qf-card__head{display:flex;align-items:center;gap:var(--qf-space-1);flex-wrap:wrap}
+.qf-card__title{display:flex;align-items:center;gap:var(--qf-space-1);font:600 15px/1.5 var(--qf-font-body)}
+.qf-card__title::before{content:'';width:3px;height:14px;border-radius:2px;background:var(--qf-grad-cyan);flex:0 0 auto}
+.qf-card__sub{font:400 12px/16px var(--qf-font-body);color:var(--qf-text-muted);margin-top:4px}
+.qf-card__body{margin-top:var(--qf-space-2)}
+.qf-metric__label{font:500 12px/16px var(--qf-font-body);letter-spacing:.04em;color:var(--qf-text-muted)}
+.qf-metric__value{font:var(--qf-t-data-xl);font-variant-numeric:tabular-nums slashed-zero;letter-spacing:-.01em;margin-top:var(--qf-space-1)}
+.qf-metric__sub{font:500 12px/16px var(--qf-font-body);margin-top:6px}
+.qf-up{color:var(--qf-sem-up)}
+.qf-down{color:var(--qf-sem-down)}
+
+/* ---------- 9. 表格 ---------- */
+.qf-table-wrap{overflow-x:auto;border:1px solid var(--qf-line-1);border-radius:var(--qf-radius-md);background:var(--qf-bg-surface)}
+.qf-table{width:100%;border-collapse:collapse;font:400 13px/20px var(--qf-font-body);font-variant-numeric:tabular-nums slashed-zero}
+.qf-table th{
+  height:40px;padding:0 14px;text-align:left;white-space:nowrap;position:sticky;top:0;z-index:1;
+  background:#0F1826;border-bottom:1px solid var(--qf-line-1);
+  font:500 12px/20px var(--qf-font-body);letter-spacing:.03em;color:var(--qf-text-secondary);
+}
+.qf-table td{height:44px;padding:0 14px;border-bottom:1px solid rgba(28,42,61,.7);color:var(--qf-text-primary)}
+.qf-table tr:last-child td{border-bottom:0}
+.qf-table tbody tr{transition:background var(--qf-dur-1) var(--qf-ease-standard)}
+.qf-table tbody tr:hover{background:rgba(255,255,255,.035)}
+.qf-table .qf-table__num{text-align:right;font-weight:600}
+.qf-table .qf-table__code{font:500 12px/18px var(--qf-font-mono);color:var(--qf-text-secondary)}
+.qf-table th[aria-sort]{cursor:pointer;user-select:none}
+.qf-table th[aria-sort]::after{content:'⇅';margin-left:6px;opacity:.45;font-size:11px}
+.qf-table th[aria-sort="ascending"]::after{content:'▲';opacity:.9;color:var(--qf-neon-cyan)}
+.qf-table th[aria-sort="descending"]::after{content:'▼';opacity:.9;color:var(--qf-neon-cyan)}
+
+/* ---------- 10. 进度 / 骨架 ---------- */
+.qf-progress{height:4px;border-radius:var(--qf-radius-full);background:rgba(255,255,255,.07);overflow:hidden}
+.qf-progress__bar{display:block;height:100%;width:0;border-radius:inherit;background:var(--qf-grad-cyan);box-shadow:0 0 12px rgba(34,227,255,.5);
+  transition:width var(--qf-dur-3) var(--qf-ease-standard)}
+.qf-progress--indeterminate .qf-progress__bar{width:36%;animation:qf-indet 2.4s var(--qf-ease-standard) infinite}
+@keyframes qf-indet{0%{transform:translateX(-110%)}100%{transform:translateX(320%)}}
+.qf-ring{
+  width:64px;height:64px;border-radius:50%;display:grid;place-items:center;position:relative;
+  background:conic-gradient(var(--qf-neon-cyan) 0 var(--qf-ring-value,64%),rgba(255,255,255,.08) var(--qf-ring-value,64%) 100%);
+}
+.qf-ring::before{content:'';position:absolute;inset:5px;border-radius:50%;background:var(--qf-bg-surface)}
+.qf-ring span{position:relative;font:700 15px/1 var(--qf-font-display);font-variant-numeric:tabular-nums}
+
+.qf-skel{display:block;height:16px;border-radius:4px;background:linear-gradient(90deg,#16202F 0%,#22314A 48%,#16202F 100%);
+  background-size:220% 100%;animation:qf-shimmer 1.4s linear infinite}
+@keyframes qf-shimmer{0%{background-position:130% 0}100%{background-position:-30% 0}}
+.qf-skel--line{height:12px}
+.qf-skel--title{height:20px;width:38%}
+.qf-skel--block{height:88px}
+
+/* ---------- 11. 空 / 错 / 载 ---------- */
+.qf-state{padding:var(--qf-space-5) var(--qf-space-2);text-align:center}
+.qf-state__icon{
+  width:44px;height:44px;margin:0 auto var(--qf-space-1);border-radius:50%;display:grid;place-items:center;
+  font-size:17px;background:rgba(34,227,255,.08);border:1px solid rgba(34,227,255,.22);color:var(--qf-neon-cyan);
+}
+.qf-state__title{font:600 14px/1.4 var(--qf-font-body);color:var(--qf-text-primary)}
+.qf-state__hint{font:400 12px/18px var(--qf-font-body);color:var(--qf-text-muted);margin-top:6px}
+.qf-state__action{margin-top:var(--qf-space-2)}
+.qf-state--error .qf-state__icon{background:rgba(255,90,95,.10);border-color:rgba(255,90,95,.3);color:var(--qf-sem-critical)}
+.qf-state--warn .qf-state__icon{background:rgba(245,165,36,.10);border-color:rgba(245,165,36,.3);color:var(--qf-sem-warn)}
+
+/* ---------- 12. 浮层：Toast / Modal / Tooltip ---------- */
+.qf-toast{
+  display:inline-flex;align-items:center;gap:var(--qf-space-1);padding:12px 16px;border-radius:10px;
+  background:var(--qf-bg-glass-hi);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+  border:1px solid var(--qf-line-2);box-shadow:var(--qf-shadow-2);
+  font:500 13px/1.4 var(--qf-font-body);color:var(--qf-text-primary);
+}
+.qf-toast-stack{
+  position:fixed;right:var(--qf-space-3);bottom:var(--qf-space-3);z-index:var(--qf-z-toast);
+  display:flex;flex-direction:column;gap:var(--qf-space-1);align-items:flex-end;
+}
+.qf-modal-mask{
+  position:fixed;inset:0;z-index:var(--qf-z-modal);display:none;align-items:center;justify-content:center;
+  background:var(--qf-bg-scrim);
+}
+.qf-modal-mask.is-open{display:flex;animation:qf-fade var(--qf-dur-3) var(--qf-ease-enter)}
+.qf-modal{
+  width:min(560px,calc(100vw - 32px));border-radius:var(--qf-radius-lg);padding:var(--qf-space-3);
+  background:var(--qf-bg-elev);border:1px solid var(--qf-line-2);box-shadow:var(--qf-shadow-3);
+  animation:qf-pop var(--qf-dur-4) var(--qf-ease-enter);
+}
+@keyframes qf-fade{from{opacity:0}to{opacity:1}}
+@keyframes qf-pop{from{opacity:0;transform:translateY(8px) scale(.99)}to{opacity:1;transform:none}}
+.qf-modal__title{font:600 18px/26px var(--qf-font-body)}
+.qf-modal__body{margin-top:var(--qf-space-1);font:400 13px/22px var(--qf-font-body);color:var(--qf-text-secondary)}
+.qf-modal__actions{display:flex;gap:10px;justify-content:flex-end;margin-top:var(--qf-space-3)}
+
+.qf-tip{
+  position:absolute;z-index:var(--qf-z-overlay);max-width:240px;padding:8px 10px;border-radius:6px;
+  background:var(--qf-bg-elev2);border:1px solid var(--qf-line-2);box-shadow:var(--qf-shadow-2);
+  font:400 12px/16px var(--qf-font-body);color:var(--qf-text-secondary);
+}
+
+/* ---------- 13. 分页 ---------- */
+.qf-pager{display:flex;align-items:center;gap:4px}
+.qf-pager__btn{
+  min-width:32px;height:32px;padding:0 8px;border:1px solid var(--qf-line-1);border-radius:6px;
+  background:transparent;color:var(--qf-text-secondary);cursor:pointer;font:500 12px/1 var(--qf-font-mono);
+  position:relative;
+  transition:background var(--qf-dur-1) var(--qf-ease-standard),color var(--qf-dur-1) var(--qf-ease-standard),border-color var(--qf-dur-1) var(--qf-ease-standard);
+}
+.qf-pager__btn::before{content:'';position:absolute;left:50%;top:50%;width:max(44px,100%);height:44px;transform:translate(-50%,-50%)}
+.qf-pager__btn:hover{background:rgba(255,255,255,.05);color:var(--qf-text-primary)}
+.qf-pager__btn[aria-current="page"]{background:rgba(34,227,255,.12);border-color:var(--qf-line-neon);color:var(--qf-neon-cyan)}
+
+/* ---------- 14. 页面转场 ---------- */
+.qf-page{animation:qf-page-in var(--qf-dur-3) var(--qf-ease-enter)}
+@keyframes qf-page-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+/* ============================================================
+   15. 断点规则（容器查询；契约见 tokens.css）
+   移动 <768px ｜ 平板 768–1200px ｜ 桌面 >1200px
+   ============================================================ */
+
+/* --------- 移动端 --------- */
+@container qfapp (max-width: 767px){
+  .qf-topbar{height:56px;padding:0 var(--qf-space-2);gap:var(--qf-space-1)}
+  .qf-brand__mark{width:28px;height:28px;border-radius:8px;font-size:12px}
+  .qf-brand__name{font-size:13px;letter-spacing:.06em}
+  .qf-brand__sub{display:none}
+  .qf-nav{display:none}
+  .qf-main{padding:var(--qf-space-2)}
+  .qf-tabbar{display:flex}
+
+  .qf-btn{height:48px;padding:0 var(--qf-space-2);font-size:15px}
+  .qf-btn--sm{height:40px;padding:0 12px;font-size:13px}
+  .qf-btn--lg,.qf-btn--cta{height:52px;padding:0 var(--qf-space-3);font-size:16px}
+  .qf-icon-btn{width:48px;height:48px}
+  .qf-icon-btn::after{width:48px;height:48px}
+
+  .qf-field{height:48px}
+  .qf-field__input{font-size:16px}   /* 防 iOS 聚焦自动缩放 */
+  .qf-textarea{font-size:16px;line-height:24px}
+
+  .qf-check{font-size:14px;min-height:48px}
+  .qf-check__box{width:20px;height:20px}
+  .qf-switch{width:44px;height:24px}
+  .qf-switch::after{width:20px;height:20px}
+  .qf-switch[aria-checked="true"]::after{transform:translateX(20px)}
+  .qf-switch[aria-checked="true"]:active::after{transform:translateX(20px) scale(.92)}
+
+  .qf-tabs{display:flex;width:100%}
+  .qf-tab{flex:1;height:44px;padding:0 var(--qf-space-1);font-size:14px}
+  .qf-tab::before,.qf-tab::after{height:0}   /* 44 已达标，取消扩展 */
+
+  .qf-card{padding:var(--qf-space-2);border-radius:12px}
+  .qf-grid{gap:var(--qf-space-2)}
+  .qf-grid--2,.qf-grid--3{grid-template-columns:1fr}
+  .qf-grid--4{grid-template-columns:repeat(2,minmax(0,1fr))}
+
+  .qf-table{min-width:600px}     /* 横向滚动，不压缩字号 */
+  .qf-table td{height:52px}
+  .qf-table th,.qf-table td{padding:0 12px}
+
+  .qf-progress{height:6px}
+  .qf-badge{height:28px;font-size:12px}
+  .qf-card__title{font-size:14px}
+
+  .qf-toast-stack{left:var(--qf-space-1);right:var(--qf-space-1);bottom:calc(64px + env(safe-area-inset-bottom,0px));align-items:stretch}
+  .qf-toast{width:100%}
+
+  .qf-modal-mask{align-items:flex-end}
+  .qf-modal{
+    width:100%;max-width:none;border-radius:16px 16px 0 0;
+    padding:var(--qf-space-3) var(--qf-space-2) calc(var(--qf-space-3) + env(safe-area-inset-bottom,0px));
+    animation:qf-sheet var(--qf-dur-4) var(--qf-ease-enter);
+  }
+  @keyframes qf-sheet{from{transform:translateY(24px);opacity:0}to{transform:none;opacity:1}}
+  .qf-modal__actions{flex-direction:column-reverse}
+  .qf-modal__actions .qf-btn{width:100%}
+
+  .qf-pager{width:100%;justify-content:center}
+  .qf-pager__btn{min-width:40px;height:40px}
+
+  .qf-h2{font:600 22px/30px var(--qf-font-body)}
+}
+
+/* --------- 平板端 --------- */
+@container qfapp (min-width: 768px) and (max-width: 1200px){
+  .qf-topbar{height:60px;padding:0 var(--qf-space-3)}
+  .qf-nav{flex-basis:176px;width:176px}
+  .qf-main{padding:var(--qf-space-3)}
+  .qf-grid{gap:var(--qf-space-2)}
+  .qf-grid--4{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .qf-card{padding:var(--qf-space-2)}
+  .qf-field{height:44px}
+  .qf-btn{height:40px}
+}
+
+/* --------- 桌面端 --------- */
+@container qfapp (min-width: 1201px){
+  .qf-nav{flex-basis:200px;width:200px}
+}
+
+/* ============================================================
+   16. 减少动效：系统级与用户级开关
+   ============================================================ */
+@media (prefers-reduced-motion:reduce){
+  .qf-ds *, .qf-ds *::before, .qf-ds *::after{
+    animation-duration:.001ms !important;animation-iteration-count:1 !important;
+    transition-duration:.001ms !important;scroll-behavior:auto !important;
+  }
+}
+.qf-ds.qf-no-motion *, .qf-ds.qf-no-motion *::before, .qf-ds.qf-no-motion *::after{
+  animation:none !important;transition:none !important;
+}

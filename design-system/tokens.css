@@ -1,0 +1,163 @@
+/* ============================================================
+   Aurora Terminal · Token 层
+   QuantFlow Pro Design System v1.0  (2026-11-06)
+   ------------------------------------------------------------
+   文件职责：只定义 token，不含任何组件样式。
+   作用域契约：所有 token 定义在 `.qf-ds` 容器上（原型根节点同样挂该类）。
+   生产接入：把 `qf-ds` 挂到应用根容器即可；若需与存量 hud 主题共存，
+   使用文末「宿主映射」段把 --qf-* 映射到 --hud-* / --bg-*，零组件改写。
+
+   响应式契约（全系统唯一的结构性要求）：
+   `.qf-ds` 本身就是容器查询容器 —— container-type: inline-size。
+   因此组件的断点规则写在 @container 内，而不是 @media。
+   落地要求：应用根容器宽度必须等于视口宽度（100vw / 100%），
+   此时容器宽度与视口一一对应，断点行为与媒体查询完全一致。
+   ============================================================ */
+
+/* ---------- 1. 底座 ---------- */
+:where(.qf-ds){
+  /* 表面：4 级深度，越靠上层越亮，禁止跨级跳跃使用 */
+  --qf-bg-void:#04070E;
+  --qf-bg-deep:#070C15;
+  --qf-bg-surface:#0C131F;
+  --qf-bg-elev:#121C2B;
+  --qf-bg-elev2:#182335;
+
+  /* 玻璃：必须配合 1px 发丝描边 + 顶部内高光使用 */
+  --qf-bg-glass:rgba(14,22,35,.62);
+  --qf-bg-glass-hi:rgba(24,35,53,.72);
+  --qf-bg-scrim:rgba(4,7,14,.78);
+
+  /* ---------- 2. 霓虹（只描边、只标记，不做内容填充） ---------- */
+  --qf-neon-cyan:#22E3FF;
+  --qf-neon-azure:#3D7BFF;
+  --qf-neon-violet:#9B6BFF;
+  --qf-neon-magenta:#FF4FD8;
+  --qf-grad-aurora:linear-gradient(100deg,#22E3FF 0%,#3D7BFF 34%,#9B6BFF 66%,#FF4FD8 100%);
+  --qf-grad-cyan:linear-gradient(135deg,#22E3FF 0%,#3D7BFF 100%);
+
+  /* ---------- 3. 语义（唯一承担含义的色彩） ---------- */
+  --qf-sem-up:#F87171;      /* 涨（A 股红涨），必须与 ▲ / + 共现 */
+  --qf-sem-down:#34D399;    /* 跌，必须与 ▼ / - 共现 */
+  --qf-sem-warn:#F5A524;
+  --qf-sem-info:#5AC8FA;
+  --qf-sem-critical:#FF5A5F;
+
+  /* ---------- 4. 文本 ---------- */
+  --qf-text-primary:#EAF3FF;
+  --qf-text-secondary:#A7BAD2;
+  --qf-text-muted:#8B9DB4;
+  --qf-text-disabled:#5C6E85;
+  --qf-ink:#04070E;         /* 实心亮底上的文字 */
+
+  /* ---------- 5. 线与光 ---------- */
+  --qf-line-1:#1C2A3D;
+  --qf-line-2:#2A3D55;
+  --qf-line-neon:rgba(34,227,255,.28);
+  --qf-glow-cyan:0 0 0 1px rgba(34,227,255,.35),0 0 24px rgba(34,227,255,.16);
+  --qf-inner-hairline:inset 0 1px 0 rgba(255,255,255,.06);
+
+  /* ---------- 6. 形状 ---------- */
+  --qf-radius-xs:4px;
+  --qf-radius-sm:8px;
+  --qf-radius-md:12px;
+  --qf-radius-lg:16px;
+  --qf-radius-full:999px;
+  --qf-border:1px;
+
+  /* ---------- 7. 阴影 ---------- */
+  --qf-shadow-1:0 2px 8px rgba(0,0,0,.32);
+  --qf-shadow-2:0 8px 24px rgba(0,0,0,.45);
+  --qf-shadow-3:0 24px 64px rgba(0,0,0,.55);
+  --qf-focus-ring:0 0 0 2px var(--qf-bg-surface),0 0 0 4px var(--qf-neon-cyan);
+
+  /* ---------- 8. 间距（8px 栅格；0_5 为唯一 4px 子栅格） ---------- */
+  --qf-space-0:0px;
+  --qf-space-1:8px;
+  --qf-space-2:16px;
+  --qf-space-3:24px;
+  --qf-space-4:32px;
+  --qf-space-5:40px;
+  --qf-space-6:48px;
+  --qf-space-8:64px;
+  --qf-space-10:80px;
+  --qf-space-12:96px;
+  --qf-space-half:4px;
+
+  /* ---------- 9. 字体 ---------- */
+  --qf-font-display:'Chakra Petch','Bahnschrift','DIN Alternate','Rajdhani',ui-sans-serif,sans-serif;
+  --qf-font-body:'HarmonyOS Sans SC','PingFang SC','Source Han Sans SC','Noto Sans SC','Microsoft YaHei UI','Microsoft YaHei',sans-serif;
+  --qf-font-mono:'JetBrains Mono','Cascadia Mono','SF Mono','Consolas',monospace;
+
+  /* ---------- 10. 动效（交互动效硬约束 200–500ms） ---------- */
+  --qf-dur-1:200ms;
+  --qf-dur-2:240ms;
+  --qf-dur-3:320ms;
+  --qf-dur-4:420ms;
+  --qf-dur-5:500ms;
+  --qf-ease-standard:cubic-bezier(.2,.8,.2,1);
+  --qf-ease-enter:cubic-bezier(.16,1,.3,1);
+  --qf-ease-exit:cubic-bezier(.4,0,1,1);
+  --qf-ease-emphasis:cubic-bezier(.34,1.4,.64,1);
+
+  /* ---------- 11. 层级 ---------- */
+  --qf-z-base:0;
+  --qf-z-sticky:30;
+  --qf-z-nav:40;
+  --qf-z-overlay:60;
+  --qf-z-modal:90;
+  --qf-z-toast:100;
+}
+
+/* ---------- 12. 字阶工具类（字号/字重/行高/字间距四要素绑定） ---------- */
+:where(.qf-ds){
+  --qf-t-display-1:700 56px/64px var(--qf-font-display);
+  --qf-t-display-2:700 40px/48px var(--qf-font-display);
+  --qf-t-h1:700 32px/40px var(--qf-font-body);
+  --qf-t-h2:600 24px/32px var(--qf-font-body);
+  --qf-t-h3:600 20px/28px var(--qf-font-body);
+  --qf-t-h4:600 18px/26px var(--qf-font-body);
+  --qf-t-body-l:400 16px/24px var(--qf-font-body);
+  --qf-t-body:400 14px/22px var(--qf-font-body);
+  --qf-t-body-s:400 13px/20px var(--qf-font-body);
+  --qf-t-caption:500 12px/16px var(--qf-font-body);
+  --qf-t-micro:600 11px/16px var(--qf-font-body);
+  --qf-t-data-xl:700 32px/36px var(--qf-font-display);
+  --qf-t-data:600 14px/20px var(--qf-font-body);
+  --qf-t-code:500 12px/18px var(--qf-font-mono);
+}
+.qf-ds{font-family:var(--qf-font-body)}
+
+/* ---------- 13. 字体资源 ----------
+   生产环境应自托管 woff2（同域、可缓存、无第三方依赖）。
+   这里的 CDN 仅作原型的可用性兜底；local() 优先，离线时回退到系统字。 */
+@font-face{font-family:'Chakra Petch';font-style:normal;font-weight:600;font-display:swap;
+  src:local('Chakra Petch SemiBold'),local('ChakraPetch-SemiBold'),
+      url('https://cdn.jsdelivr.net/npm/@fontsource/chakra-petch@5/files/chakra-petch-latin-600-normal.woff2') format('woff2');}
+@font-face{font-family:'Chakra Petch';font-style:normal;font-weight:700;font-display:swap;
+  src:local('Chakra Petch Bold'),local('ChakraPetch-Bold'),
+      url('https://cdn.jsdelivr.net/npm/@fontsource/chakra-petch@5/files/chakra-petch-latin-700-normal.woff2') format('woff2');}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:500;font-display:swap;
+  src:local('JetBrains Mono Medium'),local('JetBrainsMono-Medium'),
+      url('https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5/files/jetbrains-mono-latin-500-normal.woff2') format('woff2');}
+
+/* ---------- 14. 宿主映射（可选：接入存量 hud 主题时启用） ---------- */
+body.hud-theme .qf-ds,
+body.hud-theme .qf-app{
+  --bg-primary:var(--qf-bg-void);
+  --bg-card:var(--qf-bg-surface);
+  --bg-card-hover:var(--qf-bg-elev2);
+  --border:var(--qf-line-1);
+  --border-light:var(--qf-line-2);
+  --text-primary:var(--qf-text-primary);
+  --text-secondary:var(--qf-text-secondary);
+  --text-muted:var(--qf-text-muted);
+  --accent:var(--qf-neon-cyan);
+  --accent-blue:var(--qf-neon-azure);
+  --accent-cyan:var(--qf-neon-cyan);
+  --accent-purple:var(--qf-neon-violet);
+  --color-up:var(--qf-sem-up);
+  --color-down:var(--qf-sem-down);
+  --color-warning:var(--qf-sem-warn);
+  --color-critical:var(--qf-sem-critical);
+}
