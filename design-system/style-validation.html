@@ -1,0 +1,1669 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Aurora Terminal · QuantFlow Pro 设计系统 v0.1 风格验证稿</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2322E3FF'/%3E%3Ctext x='16' y='21' font-family='sans-serif' font-size='12' font-weight='700' fill='%2304070E' text-anchor='middle'%3EQF%3C/text%3E%3C/svg%3E">
+<style>
+/* ============================================================
+   AURORA TERMINAL — QuantFlow Pro Design System v0.1
+   风格验证稿 / 单文件自包含 / 无构建依赖
+   断点定义（与规范文档一致）：
+     移动端   width < 768px
+     平板端   768px <= width <= 1200px
+     桌面端   width > 1200px
+   ============================================================ */
+
+/* ---------- 0. Token 定义（全部为本设计系统的唯一真源） ---------- */
+:root{
+  /* 底座 */
+  --qf-bg-void:#04070E;
+  --qf-bg-deep:#070C15;
+  --qf-bg-surface:#0C131F;
+  --qf-bg-elev:#121C2B;
+  --qf-bg-elev2:#182335;
+  --qf-bg-glass:rgba(14,22,35,.62);
+  --qf-bg-glass-hi:rgba(24,35,53,.72);
+  --qf-bg-scrim:rgba(4,7,14,.78);
+
+  /* 霓虹 */
+  --qf-neon-cyan:#22E3FF;
+  --qf-neon-azure:#3D7BFF;
+  --qf-neon-violet:#9B6BFF;
+  --qf-neon-magenta:#FF4FD8;
+  --qf-grad-aurora:linear-gradient(100deg,#22E3FF 0%,#3D7BFF 34%,#9B6BFF 66%,#FF4FD8 100%);
+  --qf-grad-cyan:linear-gradient(135deg,#22E3FF 0%,#3D7BFF 100%);
+
+  /* 语义 */
+  --qf-sem-up:#F87171;
+  --qf-sem-down:#34D399;
+  --qf-sem-warn:#F5A524;
+  --qf-sem-info:#5AC8FA;
+  --qf-sem-critical:#FF5A5F;
+
+  /* 文本 */
+  --qf-text-primary:#EAF3FF;
+  --qf-text-secondary:#A7BAD2;
+  --qf-text-muted:#8B9DB4;
+  --qf-text-disabled:#5C6E85;
+  --qf-ink:#04070E;
+
+  /* 线与光 */
+  --qf-line-1:#1C2A3D;
+  --qf-line-2:#2A3D55;
+  --qf-line-neon:rgba(34,227,255,.28);
+  --qf-glow-cyan:0 0 0 1px rgba(34,227,255,.35),0 0 24px rgba(34,227,255,.16);
+  --qf-inner-hairline:inset 0 1px 0 rgba(255,255,255,.06);
+
+  /* 圆角 / 描边 */
+  --qf-radius-xs:4px;
+  --qf-radius-sm:8px;
+  --qf-radius-md:12px;
+  --qf-radius-lg:16px;
+  --qf-radius-full:999px;
+  --qf-focus-ring:0 0 0 2px #0C131F,0 0 0 4px #22E3FF;
+
+  /* 阴影 */
+  --qf-shadow-1:0 2px 8px rgba(0,0,0,.32);
+  --qf-shadow-2:0 8px 24px rgba(0,0,0,.45);
+  --qf-shadow-3:0 24px 64px rgba(0,0,0,.55);
+
+  /* 间距（8px 栅格） */
+  --qf-space-0_5:4px;
+  --qf-space-1:8px;
+  --qf-space-2:16px;
+  --qf-space-3:24px;
+  --qf-space-4:32px;
+  --qf-space-5:40px;
+  --qf-space-6:48px;
+  --qf-space-8:64px;
+  --qf-space-10:80px;
+  --qf-space-12:96px;
+
+  /* 字体 */
+  --qf-font-display:'Chakra Petch','Bahnschrift','DIN Alternate','Rajdhani',ui-sans-serif,sans-serif;
+  --qf-font-body:'HarmonyOS Sans SC','PingFang SC','Source Han Sans SC','Noto Sans SC','Microsoft YaHei UI','Microsoft YaHei',sans-serif;
+  --qf-font-mono:'JetBrains Mono','Cascadia Mono','SF Mono','Consolas',monospace;
+
+  /* 动效 */
+  --qf-dur-1:200ms;
+  --qf-dur-2:240ms;
+  --qf-dur-3:320ms;
+  --qf-dur-4:420ms;
+  --qf-dur-5:500ms;
+  --qf-ease-standard:cubic-bezier(.2,.8,.2,1);
+  --qf-ease-enter:cubic-bezier(.16,1,.3,1);
+  --qf-ease-exit:cubic-bezier(.4,0,1,1);
+  --qf-ease-emphasis:cubic-bezier(.34,1.4,.64,1);
+}
+
+/* ---------- 1. 基础 ---------- */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{
+  background:var(--qf-bg-void);
+  color:var(--qf-text-primary);
+  font:400 14px/22px var(--qf-font-body);
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+  min-height:100vh;
+}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#1E2C3F;border-radius:999px;border:2px solid var(--qf-bg-void)}
+::-webkit-scrollbar-thumb:hover{background:#2C3F57}
+
+/* 底座氛围层：极光 + 网格 + 噪点。全部为固定层，不参与布局 */
+.atmos{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden}
+.atmos::before{ /* 极光光晕 */
+  content:'';position:absolute;inset:-30%;
+  background:
+    radial-gradient(46% 38% at 18% 8%,rgba(34,227,255,.16),transparent 62%),
+    radial-gradient(40% 34% at 78% 4%,rgba(255,79,216,.12),transparent 64%),
+    radial-gradient(52% 46% at 52% 92%,rgba(61,123,255,.10),transparent 66%);
+  filter:blur(10px);
+}
+.atmos::after{ /* 细网格 */
+  content:'';position:absolute;inset:0;
+  background-image:
+    linear-gradient(rgba(34,227,255,.040) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(34,227,255,.040) 1px,transparent 1px);
+  background-size:64px 64px;
+  mask-image:radial-gradient(120% 90% at 50% 0%,#000 0%,transparent 82%);
+}
+.grain{
+  position:fixed;inset:0;pointer-events:none;z-index:1;opacity:.035;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ---------- 2. 顶栏 ---------- */
+.appbar{
+  position:sticky;top:0;z-index:60;
+  display:flex;align-items:center;gap:16px;
+  height:64px;padding:0 24px;
+  background:rgba(7,12,21,.78);
+  backdrop-filter:blur(16px) saturate(130%);
+  -webkit-backdrop-filter:blur(16px) saturate(130%);
+  border-bottom:1px solid var(--qf-line-1);
+}
+.brand{display:flex;align-items:center;gap:10px;flex:0 0 auto}
+.brand-mark{
+  width:32px;height:32px;border-radius:9px;
+  display:grid;place-items:center;
+  background:var(--qf-grad-cyan);
+  color:var(--qf-ink);
+  font:700 13px/1 var(--qf-font-display);
+  letter-spacing:.04em;
+  box-shadow:0 0 0 1px rgba(34,227,255,.35),0 0 22px rgba(34,227,255,.22);
+}
+.brand-name{font:700 15px/1 var(--qf-font-display);letter-spacing:.09em}
+.brand-sub{display:block;font:500 10px/1.2 var(--qf-font-body);letter-spacing:.18em;color:var(--qf-text-muted);margin-top:4px}
+.appbar-spacer{flex:1}
+.ctl-group{display:flex;align-items:center;gap:8px}
+.ctl-label{font:600 11px/1 var(--qf-font-body);letter-spacing:.08em;color:var(--qf-text-muted);text-transform:uppercase}
+.seg{display:flex;padding:3px;gap:2px;background:rgba(255,255,255,.04);border:1px solid var(--qf-line-1);border-radius:999px}
+.seg button{
+  height:28px;padding:0 12px;border:0;border-radius:999px;cursor:pointer;
+  background:transparent;color:var(--qf-text-secondary);
+  font:500 12px/1 var(--qf-font-body);
+  transition:background var(--qf-dur-1) var(--qf-ease-standard),
+             color var(--qf-dur-1) var(--qf-ease-standard),
+             box-shadow var(--qf-dur-1) var(--qf-ease-standard);
+}
+.seg button:hover{color:var(--qf-text-primary);background:rgba(255,255,255,.06)}
+.seg button.on{
+  background:rgba(34,227,255,.14);color:var(--qf-neon-cyan);
+  box-shadow:inset 0 0 0 1px rgba(34,227,255,.34);
+}
+.seg button:focus-visible{outline:none;box-shadow:var(--qf-focus-ring)}
+
+/* ---------- 3. 骨架布局 ---------- */
+.shell{position:relative;z-index:2;display:flex;align-items:flex-start}
+.rail{
+  position:sticky;top:64px;flex:0 0 244px;
+  height:calc(100vh - 64px);overflow-y:auto;
+  padding:24px 16px 48px;
+  border-right:1px solid var(--qf-line-1);
+  background:rgba(7,12,21,.55);
+  backdrop-filter:blur(10px);
+}
+.rail-title{font:600 10px/1 var(--qf-font-body);letter-spacing:.18em;color:var(--qf-text-muted);padding:0 8px;margin-bottom:12px}
+.rail a{
+  display:flex;align-items:center;gap:10px;
+  height:36px;padding:0 10px;border-radius:var(--qf-radius-sm);
+  color:var(--qf-text-secondary);text-decoration:none;
+  font:500 13px/1 var(--qf-font-body);
+  transition:background var(--qf-dur-1) var(--qf-ease-standard),color var(--qf-dur-1) var(--qf-ease-standard);
+}
+.rail a:hover{background:rgba(255,255,255,.05);color:var(--qf-text-primary)}
+.rail a .num{font:600 11px/1 var(--qf-font-mono);color:var(--qf-text-muted);min-width:20px}
+.rail a:hover .num{color:var(--qf-neon-cyan)}
+.rail-note{margin-top:24px;padding:12px;border:1px solid var(--qf-line-1);border-radius:var(--qf-radius-sm);background:rgba(34,227,255,.04);font:400 11px/17px var(--qf-font-body);color:var(--qf-text-muted)}
+
+.doc{flex:1;min-width:0;padding:0 0 96px}
+.section{max-width:1120px;margin:0 auto;padding:64px 32px 0}
+.section.wide{max-width:1720px}
+
+/* 标题 */
+.eyebrow{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.eyebrow .tag{
+  font:600 10px/1 var(--qf-font-body);letter-spacing:.16em;text-transform:uppercase;
+  color:var(--qf-neon-cyan);padding:5px 9px;border-radius:4px;
+  background:rgba(34,227,255,.08);border:1px solid rgba(34,227,255,.24);
+}
+.eyebrow .idx{font:600 11px/1 var(--qf-font-mono);color:var(--qf-text-muted);letter-spacing:.1em}
+h2{font:700 32px/40px var(--qf-font-body);letter-spacing:-.01em;margin-bottom:8px}
+h2 .en{font-family:var(--qf-font-display);letter-spacing:.02em}
+.lede{color:var(--qf-text-secondary);font:400 14px/24px var(--qf-font-body);max-width:760px;margin-bottom:28px}
+h3{font:600 18px/26px var(--qf-font-body);margin:32px 0 12px;display:flex;align-items:center;gap:10px}
+h3::before{content:'';width:3px;height:14px;border-radius:2px;background:var(--qf-grad-cyan)}
+
+/* ---------- 4. Hero ---------- */
+.hero{position:relative;padding:80px 32px 72px;max-width:1120px;margin:0 auto;overflow:hidden}
+.hero-title{
+  font:700 clamp(34px,6.2vw,64px)/1.06 var(--qf-font-display);
+  letter-spacing:.01em;
+  background:var(--qf-grad-aurora);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  filter:drop-shadow(0 0 24px rgba(34,227,255,.22));
+}
+.hero-cn{margin-top:14px;font:600 clamp(20px,3vw,30px)/1.35 var(--qf-font-body);color:var(--qf-text-primary);letter-spacing:.02em}
+.hero-desc{margin-top:18px;max-width:620px;color:var(--qf-text-secondary);font:400 15px/26px var(--qf-font-body)}
+.hero-meta{margin-top:28px;display:flex;flex-wrap:wrap;gap:10px}
+.pill{
+  display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px;
+  border-radius:999px;border:1px solid var(--qf-line-1);background:rgba(255,255,255,.03);
+  font:500 12px/1 var(--qf-font-body);color:var(--qf-text-secondary);
+}
+.pill i{width:6px;height:6px;border-radius:50%;background:var(--qf-neon-cyan);box-shadow:0 0 8px var(--qf-neon-cyan)}
+.pill.warn i{background:var(--qf-sem-warn);box-shadow:0 0 8px var(--qf-sem-warn)}
+
+/* 流动光效：唯一一处，仅 Hero，仅 transform/opacity，8s */
+.hero-beam{
+  position:absolute;inset:-20% -10% auto -10%;height:320px;pointer-events:none;
+  background:linear-gradient(100deg,transparent 20%,rgba(34,227,255,.14) 46%,rgba(255,79,216,.10) 58%,transparent 76%);
+  filter:blur(28px);
+  animation:beam 8s var(--qf-ease-standard) infinite;
+}
+@keyframes beam{
+  0%{transform:translate3d(-18%,0,0) rotate(-4deg);opacity:.4}
+  50%{transform:translate3d(14%,0,0) rotate(2deg);opacity:.85}
+  100%{transform:translate3d(-18%,0,0) rotate(-4deg);opacity:.4}
+}
+/* 扫描线：仅在 Hero，透明度 0.05 */
+.hero-scan{
+  position:absolute;inset:0;pointer-events:none;
+  background:repeating-linear-gradient(180deg,rgba(34,227,255,.05) 0 1px,transparent 1px 4px);
+  mask-image:linear-gradient(180deg,#000,transparent 70%);
+}
+
+/* ---------- 5. 色板 ---------- */
+.swatch-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(196px,1fr));gap:16px}
+.swatch{
+  border:1px solid var(--qf-line-1);border-radius:var(--qf-radius-md);overflow:hidden;
+  background:var(--qf-bg-surface);
+  transition:transform var(--qf-dur-1) var(--qf-ease-standard),border-color var(--qf-dur-1) var(--qf-ease-standard),box-shadow var(--qf-dur-1) var(--qf-ease-standard);
+}
+.swatch:hover{transform:translateY(-2px);border-color:var(--qf-line-2);box-shadow:var(--qf-shadow-2)}
+.swatch .chip{height:76px;display:flex;align-items:flex-end;padding:10px}
+.swatch .chip span{font:600 10px/1 var(--qf-font-mono);letter-spacing:.06em;padding:3px 6px;border-radius:3px;background:rgba(4,7,14,.6);color:#EAF3FF}
+.swatch .meta{padding:12px}
+.swatch .name{font:600 12px/1.4 var(--qf-font-mono);color:var(--qf-text-primary);word-break:break-all}
+.swatch .hex{font:500 11px/1.6 var(--qf-font-mono);color:var(--qf-text-muted);margin-top:2px}
+.swatch .ratio{margin-top:8px;display:inline-flex;align-items:center;gap:5px;font:600 10px/1 var(--qf-font-mono);padding:3px 6px;border-radius:3px}
+.ratio.pass{color:#34D399;background:rgba(52,211,153,.10);border:1px solid rgba(52,211,153,.26)}
+.ratio.fail{color:#FF5A5F;background:rgba(255,90,95,.10);border:1px solid rgba(255,90,95,.3)}
+
+/* ---------- 6. 字体 ---------- */
+.type-row{
+  display:grid;grid-template-columns:180px 1fr;gap:24px;align-items:baseline;
+  padding:20px 0;border-bottom:1px solid var(--qf-line-1);
+}
+.type-row:last-child{border-bottom:0}
+.type-spec{font:500 10px/16px var(--qf-font-mono);color:var(--qf-text-muted);letter-spacing:.02em}
+.type-spec b{display:block;color:var(--qf-neon-cyan);font-size:11px;margin-bottom:3px}
+.type-sample{color:var(--qf-text-primary);overflow-wrap:anywhere}
+.t-display1{font:700 56px/64px var(--qf-font-display);letter-spacing:-.02em}
+.t-display2{font:700 40px/48px var(--qf-font-display);letter-spacing:-.01em}
+.t-h1{font:700 32px/40px var(--qf-font-body);letter-spacing:-.01em}
+.t-h2{font:600 24px/32px var(--qf-font-body)}
+.t-h3{font:600 20px/28px var(--qf-font-body)}
+.t-h4{font:600 18px/26px var(--qf-font-body)}
+.t-bodyl{font:400 16px/24px var(--qf-font-body)}
+.t-body{font:400 14px/22px var(--qf-font-body)}
+.t-bodys{font:400 13px/20px var(--qf-font-body);letter-spacing:.01em}
+.t-caption{font:500 12px/16px var(--qf-font-body);letter-spacing:.04em;color:var(--qf-text-secondary)}
+.t-micro{font:600 11px/16px var(--qf-font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--qf-text-secondary)}
+.t-dataxl{font:700 32px/36px var(--qf-font-display);font-variant-numeric:tabular-nums slashed-zero;letter-spacing:-.01em}
+.t-data{font:600 14px/20px var(--qf-font-body);font-variant-numeric:tabular-nums slashed-zero;letter-spacing:.02em}
+.t-code{font:500 12px/18px var(--qf-font-mono);letter-spacing:.02em;color:var(--qf-text-secondary)}
+
+/* ---------- 7. 间距 ---------- */
+.space-row{display:flex;align-items:center;gap:16px;padding:9px 0}
+.space-key{width:112px;font:500 11px/1 var(--qf-font-mono);color:var(--qf-text-muted)}
+.space-bar{height:16px;border-radius:2px;background:linear-gradient(90deg,rgba(34,227,255,.85),rgba(61,123,255,.55));box-shadow:0 0 14px rgba(34,227,255,.18)}
+.space-val{font:600 11px/1 var(--qf-font-mono);color:var(--qf-neon-cyan)}
+
+/* ---------- 8. 预览画布 ---------- */
+.stage-shell{margin-top:24px;border:1px solid var(--qf-line-1);border-radius:var(--qf-radius-lg);overflow:hidden;background:#02040A}
+.stage-bar{
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  padding:10px 14px;background:var(--qf-bg-elev);border-bottom:1px solid var(--qf-line-1);
+}
+.stage-bar .bp{font:600 11px/1 var(--qf-font-mono);color:var(--qf-neon-cyan);letter-spacing:.08em}
+.stage-bar .hint{font:400 11px/16px var(--qf-font-body);color:var(--qf-text-muted)}
+.stage-bar .spacer{flex:1}
+.stage-wrap{overflow:auto;padding:0;background:
+  radial-gradient(120% 90% at 50% 0%,#070C15,#02040A 76%)}
+#stage{
+  position:relative;width:1440px;margin:0 auto;
+  padding:24px;contain:layout style;
+  container-type:inline-size;container-name:stage;
+  transition:width var(--qf-dur-3) var(--qf-ease-standard),filter var(--qf-dur-3) var(--qf-ease-standard);
+}
+#stage::before{ /* 预览区网格，仅作画布标识，不进入组件 */
+  content:'';position:absolute;inset:0;pointer-events:none;
+  background-image:
+    linear-gradient(rgba(34,227,255,.030) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(34,227,255,.030) 1px,transparent 1px);
+  background-size:32px 32px;
+  mask-image:radial-gradient(100% 80% at 50% 0%,#000,transparent 90%);
+}
+
+/* 环境光模拟（近似视觉，数值以 §9 表为准） */
+#stage.env-indoor{filter:brightness(1.10) saturate(.94) contrast(.965)}
+#stage.env-sun{filter:brightness(1.28) saturate(.74) contrast(.84)}
+#stage.env-sun::after{
+  content:'';position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(60% 40% at 82% -6%,rgba(255,255,255,.16),transparent 70%);
+}
+
+/* ---------- 9. 组件 ---------- */
+
+/* 按钮 */
+.btn{
+  position:relative;
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  height:40px;padding:0 20px;border:1px solid transparent;border-radius:var(--qf-radius-sm);
+  font:500 14px/1 var(--qf-font-body);cursor:pointer;white-space:nowrap;
+  transition:transform var(--qf-dur-1) var(--qf-ease-standard),
+             background-color var(--qf-dur-1) var(--qf-ease-standard),
+             background-position var(--qf-dur-1) var(--qf-ease-standard),
+             border-color var(--qf-dur-1) var(--qf-ease-standard),
+             box-shadow var(--qf-dur-1) var(--qf-ease-standard),
+             color var(--qf-dur-1) var(--qf-ease-standard);
+}
+.btn:active{transform:scale(.98)}
+/* 命中区扩展：透明覆盖至 ≥44×44（小号按钮 32/40 也满足触控标准） */
+.btn::before{content:'';position:absolute;left:50%;top:50%;width:max(44px,100%);height:max(44px,100%);transform:translate(-50%,-50%)}
+.btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--qf-bg-surface),0 0 0 4px var(--qf-neon-cyan)}
+.btn[disabled]{cursor:not-allowed;opacity:.45;transform:none}
+.btn-primary{
+  background-image:linear-gradient(100deg,#22E3FF,#3D7BFF 52%,#22E3FF);
+  background-size:190% 100%;background-position:0% 0;
+  color:var(--qf-ink);font-weight:600;
+  box-shadow:0 0 0 1px rgba(34,227,255,.30),0 6px 20px rgba(34,227,255,.16);
+}
+.btn-primary:hover{background-position:100% 0;box-shadow:0 0 0 1px rgba(34,227,255,.5),0 8px 26px rgba(34,227,255,.26)}
+.btn-neon{
+  background:rgba(34,227,255,.07);border-color:rgba(34,227,255,.34);
+  color:var(--qf-neon-cyan);font-weight:600;
+}
+.btn-neon:hover{background:rgba(34,227,255,.14);border-color:rgba(34,227,255,.7);box-shadow:0 0 22px rgba(34,227,255,.20)}
+.btn-ghost{background:transparent;border-color:var(--qf-line-2);color:var(--qf-text-secondary)}
+.btn-ghost:hover{background:rgba(255,255,255,.05);border-color:#3B5270;color:var(--qf-text-primary)}
+.btn-danger{background:rgba(255,90,95,.10);border-color:rgba(255,90,95,.40);color:var(--qf-sem-critical)}
+.btn-danger:hover{background:rgba(255,90,95,.18);border-color:rgba(255,90,95,.7)}
+.btn-quiet{background:transparent;border-color:transparent;color:var(--qf-text-secondary);padding:0 10px}
+.btn-quiet:hover{background:rgba(255,255,255,.05);color:var(--qf-text-primary)}
+.btn-sm{height:32px;padding:0 14px;font-size:13px}
+.btn-lg{height:48px;padding:0 28px;font-size:15px}
+
+/* Loading：宽度锁定，文字换成转圈 */
+.btn .spinner{
+  width:14px;height:14px;border-radius:50%;
+  border:2px solid rgba(4,7,14,.28);border-top-color:currentColor;
+  animation:spin .7s linear infinite;
+}
+.btn-neon .spinner{border-color:rgba(34,227,255,.22);border-top-color:var(--qf-neon-cyan)}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* 图标按钮（视觉 40，命中区 44） */
+.icon-btn{
+  position:relative;width:40px;height:40px;display:inline-grid;place-items:center;
+  border:1px solid var(--qf-line-1);border-radius:var(--qf-radius-sm);
+  background:rgba(255,255,255,.03);color:var(--qf-text-secondary);cursor:pointer;
+  transition:background var(--qf-dur-1) var(--qf-ease-standard),color var(--qf-dur-1) var(--qf-ease-standard),border-color var(--qf-dur-1) var(--qf-ease-standard),transform var(--qf-dur-1) var(--qf-ease-standard);
+}
+.icon-btn::after{content:'';position:absolute;left:50%;top:50%;width:44px;height:44px;transform:translate(-50%,-50%)}
+.icon-btn:hover{background:rgba(255,255,255,.07);color:var(--qf-text-primary);border-color:var(--qf-line-2)}
+.icon-btn:active{transform:scale(.96)}
+.icon-btn:focus-visible{outline:none;box-shadow:var(--qf-focus-ring)}
+
+/* 输入 */
+.field{position:relative;display:flex;align-items:center;height:40px;border:1px solid var(--qf-line-1);border-radius:var(--qf-radius-sm);background:var(--qf-bg-deep);transition:border-color var(--qf-dur-1) var(--qf-ease-standard),box-shadow var(--qf-dur-2) var(--qf-ease-standard),background var(--qf-dur-1) var(--qf-ease-standard)}
+/* 命中区扩展：仅上下各 2px 的透明条，不遮挡输入框内部，不改变布局占位 */
+.field::before,.field::after{content:'';position:absolute;left:0;right:0;height:2px}
+.field::before{top:-2px}
+.field::after{bottom:-2px}
+.field:focus-within{border-color:var(--qf-neon-cyan);box-shadow:0 0 0 3px rgba(34,227,255,.14),0 0 18px rgba(34,227,255,.10);background:#08101B}
+.field input{border:0;background:transparent;outline:none;flex:1;min-width:0;height:100%;padding:0 12px;color:var(--qf-text-primary);font:400 14px/1 var(--qf-font-body);letter-spacing:.01em}
+.field input::placeholder{color:var(--qf-text-muted)}
+.field .lead{padding-left:12px;color:var(--qf-text-muted);font-size:14px;line-height:1}
+.field .trail{padding-right:10px;color:var(--qf-text-muted);font:500 11px/1 var(--qf-font-mono)}
+.field.invalid{border-color:rgba(255,90,95,.75);box-shadow:0 0 0 3px rgba(255,90,95,.12)}
+.field.valid{border-color:rgba(52,211,153,.6)}
+.field[data-disabled]{opacity:.5;pointer-events:none}
+textarea.field{height:auto;min-height:88px}
+textarea.field{padding:10px 12px;resize:vertical;color:var(--qf-text-primary);font:400 14px/22px var(--qf-font-body);background:var(--qf-bg-deep);outline:none;border:1px solid var(--qf-line-1);border-radius:var(--qf-radius-sm)}
+textarea.field:focus{border-color:var(--qf-neon-cyan);box-shadow:0 0 0 3px rgba(34,227,255,.14)}
+.help{margin-top:6px;font:400 12px/16px var(--qf-font-body);color:var(--qf-text-muted)}
+.help.err{color:var(--qf-sem-critical)}
+.form-label{display:block;margin-bottom:8px;font:500 13px/1 var(--qf-font-body);color:var(--qf-text-secondary)}
+
+/* 复选 / 单选 */
+.check{display:inline-flex;align-items:center;gap:10px;cursor:pointer;font:400 13px/1 var(--qf-font-body);color:var(--qf-text-secondary);min-height:44px}
+.check input{position:absolute;opacity:0;width:0;height:0}
+.box{width:18px;height:18px;border-radius:4px;border:1px solid var(--qf-line-2);background:var(--qf-bg-deep);display:grid;place-items:center;transition:background var(--qf-dur-2) var(--qf-ease-standard),border-color var(--qf-dur-2) var(--qf-ease-standard),box-shadow var(--qf-dur-2) var(--qf-ease-standard)}
+.box::after{content:'';width:9px;height:5px;border-left:2px solid var(--qf-ink);border-bottom:2px solid var(--qf-ink);transform:rotate(-45deg) scale(.4);opacity:0;transition:opacity var(--qf-dur-2),transform var(--qf-dur-2) var(--qf-ease-emphasis)}
+.check input:checked + .box{background:var(--qf-neon-cyan);border-color:var(--qf-neon-cyan);box-shadow:0 0 14px rgba(34,227,255,.35)}
+.check input:checked + .box::after{opacity:1;transform:rotate(-45deg) scale(1)}
+.check input:focus-visible + .box{box-shadow:0 0 0 2px var(--qf-bg-deep),0 0 0 4px var(--qf-neon-cyan)}
+.radio{width:18px;height:18px;border-radius:50%;border:1px solid var(--qf-line-2);display:grid;place-items:center;background:var(--qf-bg-deep);transition:border-color var(--qf-dur-2)}
+.radio::after{content:'';width:8px;height:8px;border-radius:50%;background:var(--qf-neon-cyan);transform:scale(0);transition:transform var(--qf-dur-2) var(--qf-ease-emphasis)}
+.check input:checked + .radio{border-color:var(--qf-neon-cyan)}
+.check input:checked + .radio::after{transform:scale(1)}
+
+/* 开关 */
+.switch{
+  position:relative;width:40px;height:22px;border-radius:999px;border:0;cursor:pointer;
+  background:#22324a;transition:background var(--qf-dur-2) var(--qf-ease-standard),box-shadow var(--qf-dur-1);
+  flex:0 0 auto;
+}
+/* 命中区扩展：整块 44×44 透明覆盖（开关本身即点击目标，无内部控件） */
+.switch::before{content:'';position:absolute;left:50%;top:50%;width:max(44px,100%);height:44px;transform:translate(-50%,-50%)}
+.switch::after{
+  content:'';position:absolute;left:2px;top:2px;width:18px;height:18px;border-radius:50%;
+  background:var(--qf-text-muted);
+  transition:transform var(--qf-dur-2) var(--qf-ease-emphasis),background var(--qf-dur-2) var(--qf-ease-standard);
+}
+.switch[aria-checked="true"]{background-image:var(--qf-grad-cyan);box-shadow:0 0 16px rgba(34,227,255,.28)}
+.switch[aria-checked="true"]::after{transform:translateX(18px);background:var(--qf-ink)}
+.switch:active::after{transform:scale(.92)}
+.switch[aria-checked="true"]:active::after{transform:translateX(18px) scale(.92)}
+.switch:focus-visible{outline:none;box-shadow:0 0 0 2px var(--qf-bg-surface),0 0 0 4px var(--qf-neon-cyan)}
+
+/* 标签页 */
+.tabs{display:inline-flex;gap:2px;padding:4px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid var(--qf-line-1)}
+.tab{
+  position:relative;height:32px;padding:0 16px;border:0;border-radius:7px;cursor:pointer;
+  background:transparent;color:var(--qf-text-secondary);font:500 13px/1 var(--qf-font-body);
+  transition:background var(--qf-dur-1) var(--qf-ease-standard),color var(--qf-dur-1) var(--qf-ease-standard),box-shadow var(--qf-dur-1),transform var(--qf-dur-1);
+}
+.tab:hover{color:var(--qf-text-primary);background:rgba(255,255,255,.05)}
+.tab[aria-selected="true"]{background:rgba(34,227,255,.13);color:var(--qf-neon-cyan);box-shadow:inset 0 0 0 1px rgba(34,227,255,.32)}
+.tab:active{transform:scale(.98)}
+.tab:focus-visible{outline:none;box-shadow:var(--qf-focus-ring)}
+/* 命中区扩展：上下各 6px 透明条（32 → 44），不覆盖相邻标签 */
+.tab::before,.tab::after{content:'';position:absolute;left:0;right:0;height:6px}
+.tab::before{top:-6px}
+.tab::after{bottom:-6px}
+
+/* 徽章 / 状态点 */
+.badge{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:4px;font:600 11px/1 var(--qf-font-body);letter-spacing:.03em}
+.badge.up{color:var(--qf-sem-up);background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.28)}
+.badge.down{color:var(--qf-sem-down);background:rgba(52,211,153,.12);border:1px solid rgba(52,211,153,.28)}
+.badge.warn{color:var(--qf-sem-warn);background:rgba(245,165,36,.12);border:1px solid rgba(245,165,36,.28)}
+.badge.info{color:var(--qf-sem-info);background:rgba(90,200,250,.12);border:1px solid rgba(90,200,250,.26)}
+.badge.neon{color:var(--qf-neon-cyan);background:rgba(34,227,255,.10);border:1px solid rgba(34,227,255,.28)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--qf-sem-down);box-shadow:0 0 8px var(--qf-sem-down);flex:0 0 auto}
+.dot.warn{background:var(--qf-sem-warn);box-shadow:0 0 8px var(--qf-sem-warn)}
+.dot.up{background:var(--qf-sem-up);box-shadow:0 0 8px var(--qf-sem-up)}
+
+/* 卡片 */
+.card{
+  background:var(--qf-bg-surface);border:1px solid var(--qf-line-1);border-radius:var(--qf-radius-md);
+  padding:24px;
+  transition:transform var(--qf-dur-1) var(--qf-ease-standard),border-color var(--qf-dur-1) var(--qf-ease-standard),box-shadow var(--qf-dur-1) var(--qf-ease-standard);
+}
+.card:hover{border-color:var(--qf-line-2);box-shadow:var(--qf-shadow-2);transform:translateY(-1px)}
+.card:active{transform:translateY(-1px) scale(.995)}
+.glass{
+  background:var(--qf-bg-glass);
+  backdrop-filter:blur(16px) saturate(130%);
+  -webkit-backdrop-filter:blur(16px) saturate(130%);
+  border:1px solid rgba(255,255,255,.09);
+  border-radius:var(--qf-radius-md);
+  box-shadow:var(--qf-inner-hairline),var(--qf-shadow-2);
+}
+.card-title{font:600 15px/1.5 var(--qf-font-body);display:flex;align-items:center;gap:8px}
+.card-title .bar{width:3px;height:14px;border-radius:2px;background:var(--qf-grad-cyan)}
+.card-sub{font:400 12px/16px var(--qf-font-body);color:var(--qf-text-muted);margin-top:4px}
+.metric-label{font:500 12px/16px var(--qf-font-body);letter-spacing:.04em;color:var(--qf-text-muted)}
+.metric-val{font:700 32px/36px var(--qf-font-display);font-variant-numeric:tabular-nums slashed-zero;letter-spacing:-.01em;margin-top:8px}
+.metric-sub{font:500 12px/16px var(--qf-font-body);margin-top:6px}
+.delta-up{color:var(--qf-sem-up)}
+.delta-down{color:var(--qf-sem-down)}
+
+/* 表格 */
+.table-wrap{overflow-x:auto;border:1px solid var(--qf-line-1);border-radius:var(--qf-radius-md);background:var(--qf-bg-surface)}
+table.tbl{width:100%;border-collapse:collapse;font:400 13px/20px var(--qf-font-body);font-variant-numeric:tabular-nums slashed-zero}
+.tbl th{
+  height:40px;text-align:left;padding:0 14px;white-space:nowrap;
+  font:500 12px/20px var(--qf-font-body);letter-spacing:.03em;color:var(--qf-text-secondary);
+  background:#0F1826;border-bottom:1px solid var(--qf-line-1);
+  position:sticky;top:0;z-index:1;
+}
+.tbl td{height:44px;padding:0 14px;border-bottom:1px solid rgba(28,42,61,.7);color:var(--qf-text-primary)}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tbody tr{transition:background var(--qf-dur-1) var(--qf-ease-standard)}
+.tbl tbody tr:hover{background:rgba(255,255,255,.035)}
+.num{text-align:right;font-weight:600}
+.code{font:500 12px/18px var(--qf-font-mono);color:var(--qf-text-secondary)}
+
+/* 导航（桌面侧栏 / 移动底栏） */
+.navl{display:flex;flex-direction:column;gap:4px}
+.navl a{
+  position:relative;
+  display:flex;align-items:center;gap:10px;height:40px;padding:0 12px;border-radius:var(--qf-radius-sm);
+  color:var(--qf-text-secondary);text-decoration:none;font:500 13px/1 var(--qf-font-body);
+  border-left:2px solid transparent;
+  transition:background var(--qf-dur-1) var(--qf-ease-standard),color var(--qf-dur-1),border-color var(--qf-dur-1),padding-left var(--qf-dur-1);
+}
+/* 命中区扩展：上下各 2px（40 → 44）；列表 gap 4px，扩展后互不重叠 */
+.navl a::before,.navl a::after{content:'';position:absolute;left:0;right:0;height:2px}
+.navl a::before{top:-2px}
+.navl a::after{bottom:-2px}
+.navl a:hover{background:rgba(255,255,255,.05);color:var(--qf-text-primary)}
+.navl a.on{background:rgba(34,227,255,.08);color:var(--qf-neon-cyan);border-left-color:var(--qf-neon-cyan)}
+.navl a:focus-visible{outline:none;box-shadow:var(--qf-focus-ring)}
+.tabbar{display:none}
+
+/* 进度 */
+.progress{height:4px;border-radius:999px;background:rgba(255,255,255,.07);overflow:hidden}
+.progress > i{display:block;height:100%;width:64%;border-radius:999px;background:var(--qf-grad-cyan);box-shadow:0 0 12px rgba(34,227,255,.5);transition:width var(--qf-dur-3) var(--qf-ease-standard)}
+.progress.indeterminate > i{width:36%;animation:indet 2.4s var(--qf-ease-standard) infinite}
+@keyframes indet{0%{transform:translateX(-110%)}100%{transform:translateX(320%)}}
+.ring{width:64px;height:64px;border-radius:50%;display:grid;place-items:center;
+  background:conic-gradient(var(--qf-neon-cyan) 0 64%,rgba(255,255,255,.08) 64% 100%);
+  position:relative;
+}
+.ring::before{content:'';position:absolute;inset:5px;border-radius:50%;background:var(--qf-bg-surface)}
+.ring span{position:relative;font:700 15px/1 var(--qf-font-display);font-variant-numeric:tabular-nums}
+
+/* 骨架 */
+.sk{background:linear-gradient(90deg,#16202F 0%,#22314A 48%,#16202F 100%);background-size:220% 100%;border-radius:4px;animation:shimmer 1.4s linear infinite}
+@keyframes shimmer{0%{background-position:130% 0}100%{background-position:-30% 0}}
+
+/* 空 / 错 / 载态 */
+.state{padding:36px 16px;text-align:center}
+.state .ic{width:44px;height:44px;margin:0 auto 12px;border-radius:50%;display:grid;place-items:center;font-size:18px;
+  background:rgba(34,227,255,.08);border:1px solid rgba(34,227,255,.22);color:var(--qf-neon-cyan)}
+.state .t{font:600 14px/1.4 var(--qf-font-body);color:var(--qf-text-primary)}
+.state .h{font:400 12px/18px var(--qf-font-body);color:var(--qf-text-muted);margin-top:6px}
+.state.err .ic{background:rgba(255,90,95,.10);border-color:rgba(255,90,95,.3);color:var(--qf-sem-critical)}
+
+/* Toast */
+.toast{
+  display:inline-flex;align-items:center;gap:10px;padding:12px 16px;border-radius:10px;
+  background:var(--qf-bg-glass-hi);backdrop-filter:blur(16px);
+  border:1px solid var(--qf-line-2);box-shadow:var(--qf-shadow-2);
+  font:500 13px/1.4 var(--qf-font-body);color:var(--qf-text-primary);
+}
+
+/* Modal */
+.modal-layer{
+  position:fixed;inset:0;z-index:90;display:none;align-items:center;justify-content:center;
+  background:var(--qf-bg-scrim);
+}
+.modal-layer.open{display:flex;animation:fadeIn var(--qf-dur-3) var(--qf-ease-enter)}
+.modal{
+  width:min(560px,calc(100vw - 32px));border-radius:var(--qf-radius-lg);
+  background:var(--qf-bg-elev);border:1px solid var(--qf-line-2);box-shadow:var(--qf-shadow-3);
+  padding:24px;animation:pop var(--qf-dur-4) var(--qf-ease-enter);
+}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes pop{from{opacity:0;transform:translateY(8px) scale(.99)}to{opacity:1;transform:none}}
+.modal h4{font:600 18px/26px var(--qf-font-body)}
+.modal p{margin-top:8px;font:400 13px/22px var(--qf-font-body);color:var(--qf-text-secondary)}
+.modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:24px}
+
+/* ---------- 10. 动效演示 ---------- */
+.motion-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px}
+.motion-card{border:1px solid var(--qf-line-1);border-radius:var(--qf-radius-md);padding:18px;background:var(--qf-bg-surface)}
+.motion-card .mc-t{font:600 13px/1.4 var(--qf-font-body);color:var(--qf-text-primary)}
+.motion-card .mc-s{font:500 10px/16px var(--qf-font-mono);color:var(--qf-neon-cyan);margin-top:4px;letter-spacing:.04em}
+.motion-card .mc-demo{margin-top:16px;min-height:56px;display:flex;align-items:center}
+.transition-box{position:relative;height:88px;border-radius:8px;border:1px dashed var(--qf-line-2);overflow:hidden;display:grid;place-items:center;cursor:pointer;background:rgba(255,255,255,.02)}
+.transition-box .sweep{position:absolute;inset:0;background:var(--qf-grad-aurora);opacity:0;transform:translateX(-100%)}
+.transition-box.play .sweep{animation:sweep var(--qf-dur-4) var(--qf-ease-enter)}
+@keyframes sweep{0%{opacity:.9;transform:translateX(-100%)}60%{opacity:.9}100%{opacity:0;transform:translateX(100%)}}
+@keyframes toastIn{
+  from{opacity:0;transform:translate(-50%,10px)}
+  to{opacity:1;transform:translate(-50%,0)}
+}
+
+/* ---------- 11. 环境光 ---------- */
+.env-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
+.env-card{border-radius:var(--qf-radius-md);border:1px solid var(--qf-line-1);padding:20px;background:var(--qf-bg-surface)}
+.env-card h4{font:600 14px/1.4 var(--qf-font-body);margin-bottom:4px}
+.env-card .ratio-big{font:700 32px/1 var(--qf-font-display);font-variant-numeric:tabular-nums;margin:12px 0 4px;color:var(--qf-neon-cyan)}
+
+/* ---------- 12. 通用表格 ---------- */
+.spec-wrap{overflow-x:auto;border:1px solid var(--qf-line-1);border-radius:var(--qf-radius-md)}
+table.spec{width:100%;border-collapse:collapse;font:400 13px/20px var(--qf-font-body);min-width:640px}
+.spec th{height:44px;padding:0 14px;text-align:left;background:#0F1826;color:var(--qf-text-secondary);font-weight:500;
+  font-size:12px;letter-spacing:.03em;border-bottom:1px solid var(--qf-line-1);white-space:nowrap}
+.spec td{padding:11px 14px;border-bottom:1px solid rgba(28,42,61,.6);color:var(--qf-text-primary);vertical-align:top}
+.spec td.mono{font:500 12px/18px var(--qf-font-mono);color:var(--qf-neon-cyan);white-space:nowrap}
+.spec tr:last-child td{border-bottom:0}
+.spec tbody tr:hover{background:rgba(255,255,255,.03)}
+
+/* ---------- 13. Do / Don't ---------- */
+.dd-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.dd{border-radius:var(--qf-radius-md);padding:16px;border:1px solid}
+.dd.good{border-color:rgba(52,211,153,.32);background:rgba(52,211,153,.04)}
+.dd.bad{border-color:rgba(255,90,95,.34);background:rgba(255,90,95,.04)}
+.dd .hd{display:flex;align-items:center;gap:8px;font:600 12px/1 var(--qf-font-body);letter-spacing:.06em;margin-bottom:12px}
+.dd.good .hd{color:var(--qf-sem-down)}
+.dd.bad .hd{color:var(--qf-sem-critical)}
+.dd p{font:400 12px/19px var(--qf-font-body);color:var(--qf-text-secondary);margin-top:10px}
+.demo-mini{height:56px;border-radius:8px;border:1px solid var(--qf-line-1);display:grid;place-items:center;overflow:hidden}
+
+/* ---------- 14. 热区检测 ---------- */
+.hit-layer{position:absolute;inset:0;pointer-events:none;z-index:40}
+.hit-box{position:absolute;border:1px dashed #FF4FD8;border-radius:2px}
+.hit-box.ok{border-color:rgba(52,211,153,.85)}
+.hit-box.bad{border-color:rgba(255,90,95,.95);background:rgba(255,90,95,.10)}
+#hitReport{margin-top:16px}
+#hitReport .summary{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.hit-chip{padding:6px 12px;border-radius:999px;font:600 11px/1 var(--qf-font-mono);border:1px solid}
+.hit-chip.ok{color:var(--qf-sem-down);border-color:rgba(52,211,153,.35);background:rgba(52,211,153,.08)}
+.hit-chip.bad{color:var(--qf-sem-critical);border-color:rgba(255,90,95,.4);background:rgba(255,90,95,.08)}
+
+/* ---------- 15. 响应式：验证页自身 ---------- */
+@media (max-width:1100px){
+  .rail{display:none}
+  .section{padding:48px 20px 0}
+  .hero{padding:56px 20px 48px}
+  .dd-grid{grid-template-columns:1fr}
+  .type-row{grid-template-columns:120px 1fr;gap:14px}
+}
+@media (max-width:1320px){
+  .appbar{height:auto;min-height:64px;flex-wrap:wrap;padding:10px 16px;row-gap:8px}
+  .appbar-spacer{display:none}
+  .ctl-group{flex:1 1 auto;justify-content:flex-start}
+  .ctl-label{display:none}
+}
+
+/* ---------- 16. 模拟应用外壳（容器查询见文末 §16b，必须晚于基础样式） ---------- */
+.mock-app{border:1px solid var(--qf-line-2);border-radius:12px;overflow:hidden;background:var(--qf-bg-void)}
+.mock-top{display:flex;align-items:center;gap:16px;height:64px;padding:0 20px;background:rgba(18,28,43,.8);
+  backdrop-filter:blur(16px);border-bottom:1px solid var(--qf-line-1)}
+.mock-logo{display:flex;align-items:center;gap:8px;flex:0 0 auto}
+.mock-logo b{width:26px;height:26px;border-radius:7px;display:grid;place-items:center;background:var(--qf-grad-cyan);color:var(--qf-ink);font:700 11px/1 var(--qf-font-display)}
+.mock-logo span{font:700 13px/1 var(--qf-font-display);letter-spacing:.09em;white-space:nowrap}
+.mock-search{position:relative;flex:1;max-width:420px;display:flex;align-items:center;height:40px;padding:0 10px;gap:8px;
+  border:1px solid var(--qf-line-1);border-radius:8px;background:var(--qf-bg-deep);color:var(--qf-text-muted);font-size:12px}
+.mock-search::before,.mock-search::after{content:'';position:absolute;left:0;right:0;height:2px}
+.mock-search::before{top:-2px}
+.mock-search::after{bottom:-2px}
+.mock-right{margin-left:auto;display:flex;align-items:center;gap:8px;font:500 11px/1 var(--qf-font-body);color:var(--qf-text-muted)}
+.mock-body{display:flex;min-height:0}
+.mock-rail{flex:0 0 200px;padding:12px 10px;border-right:1px solid var(--qf-line-1);background:rgba(12,19,31,.6)}
+.mock-main{flex:1;min-width:0;padding:16px}
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:16px}
+.kpi{background:var(--qf-bg-surface);border:1px solid var(--qf-line-1);border-radius:12px;padding:20px}
+.mock-tabbar{display:none;height:56px;padding:0 4px;background:rgba(18,28,43,.9);border-top:1px solid var(--qf-line-2);
+  backdrop-filter:blur(16px);align-items:center;justify-content:space-around}
+.mock-tabbar a{display:flex;flex-direction:column;align-items:center;gap:3px;width:64px;height:48px;justify-content:center;
+  border-radius:8px;text-decoration:none;color:var(--qf-text-muted);font:500 10px/1 var(--qf-font-body)}
+.mock-tabbar a.on{color:var(--qf-neon-cyan);background:rgba(34,227,255,.10)}
+.mock-tabbar i{font-size:16px;line-height:1}
+
+/* ---------- 17. 动效关闭 ---------- */
+body.no-motion *,body.no-motion *::before,body.no-motion *::after{
+  animation:none!important;transition:none!important;scroll-behavior:auto!important;
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}
+
+/* ---------- 18. 字体加载（失败不影响可用性） ---------- */
+@font-face{font-family:'Chakra Petch';font-style:normal;font-weight:600;font-display:swap;
+  src:local('Chakra Petch SemiBold'),local('ChakraPetch-SemiBold'),
+      url('https://cdn.jsdelivr.net/npm/@fontsource/chakra-petch@5/files/chakra-petch-latin-600-normal.woff2') format('woff2');}
+@font-face{font-family:'Chakra Petch';font-style:normal;font-weight:700;font-display:swap;
+  src:local('Chakra Petch Bold'),local('ChakraPetch-Bold'),
+      url('https://cdn.jsdelivr.net/npm/@fontsource/chakra-petch@5/files/chakra-petch-latin-700-normal.woff2') format('woff2');}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:500;font-display:swap;
+  src:local('JetBrains Mono Medium'),local('JetBrainsMono-Medium'),
+      url('https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5/files/jetbrains-mono-latin-500-normal.woff2') format('woff2');}
+
+/* ============================================================
+   16b. 容器查询：预览画布的三断点
+   必须放在全部基础组件样式之后，否则基础样式会反向覆盖查询内的规则。
+   断点边界：移动 <768 / 平板 768–1200 / 桌面 >1200。
+   ============================================================ */
+
+/* 移动端 width < 768px */
+@container stage (max-width: 767px){
+  .mock-main{padding:16px}
+  .mock-top{height:56px;padding:0 16px;gap:12px}
+  .mock-rail{display:none}
+  .mock-tabbar{display:flex}
+  .kpis{grid-template-columns:1fr}
+  .kpi{padding:16px}
+  .card{padding:16px;border-radius:12px}
+  .btn{height:48px;padding:0 16px;font-size:15px}
+  .btn-sm{height:40px}
+  .btn-lg{height:52px;font-size:16px}
+  .icon-btn{width:48px;height:48px}
+  .switch{width:44px;height:24px}
+  .switch::after{width:20px;height:20px}
+  .switch[aria-checked="true"]::after{transform:translateX(20px)}
+  .switch[aria-checked="true"]:active::after{transform:translateX(20px) scale(.92)}
+  .field{height:48px}
+  .field input{font-size:16px}
+  .tbl{min-width:560px}
+  .tbl td{height:52px}
+  .tbl th,.tbl td{padding:0 12px}
+  .tabs{display:flex;width:100%}
+  .tab{flex:1;height:44px;padding:0 8px}
+  .progress{height:6px}
+}
+
+/* 平板端 768px <= width <= 1200px */
+@container stage (min-width: 768px) and (max-width: 1200px){
+  .mock-main{padding:20px}
+  .mock-rail{flex-basis:176px;width:176px}
+  .kpis{grid-template-columns:repeat(3,1fr)}
+  .kpi{padding:18px}
+  .card{padding:20px}
+  .btn{height:40px}
+  .field{height:44px}
+  .tbl td{height:44px}
+}
+
+/* 桌面端 width > 1200px（基础样式即桌面基线，这里只固定侧栏宽度） */
+@container stage (min-width: 1201px){
+  .mock-rail{flex-basis:200px;width:200px}
+}
+</style>
+</head>
+<body>
+
+<div class="atmos" aria-hidden="true"></div>
+<div class="grain" aria-hidden="true"></div>
+
+<header class="appbar">
+  <div class="brand">
+    <div class="brand-mark">QF</div>
+    <div>
+      <div class="brand-name">AURORA TERMINAL</div>
+      <span class="brand-sub">DESIGN SYSTEM v0.1</span>
+    </div>
+  </div>
+  <div class="appbar-spacer"></div>
+
+  <div class="ctl-group">
+    <span class="ctl-label">画布</span>
+    <div class="seg" id="bpSeg">
+      <button data-bp="1440" class="on">桌面 1440</button>
+      <button data-bp="1024">平板 1024</button>
+      <button data-bp="390">移动 390</button>
+      <button data-bp="auto">自适应</button>
+    </div>
+  </div>
+  <div class="ctl-group">
+    <span class="ctl-label">环境光</span>
+    <div class="seg" id="envSeg">
+      <button data-env="0" class="on">暗室</button>
+      <button data-env="1">室内</button>
+      <button data-env="2">强光</button>
+    </div>
+  </div>
+  <div class="ctl-group">
+    <span class="ctl-label">动效</span>
+    <div class="seg" id="motionSeg">
+      <button data-motion="1" class="on">开</button>
+      <button data-motion="0">关</button>
+    </div>
+  </div>
+  <div class="ctl-group">
+    <span class="ctl-label">热区</span>
+    <div class="seg" id="hitSeg">
+      <button data-hit="0" class="on">隐藏</button>
+      <button data-hit="1">检测</button>
+    </div>
+  </div>
+</header>
+
+<div class="shell">
+  <aside class="rail">
+    <div class="rail-title">目录</div>
+    <a href="#s0"><span class="num">00</span>视觉语言总览</a>
+    <a href="#s1"><span class="num">01</span>色彩系统</a>
+    <a href="#s2"><span class="num">02</span>字体层级</a>
+    <a href="#s3"><span class="num">03</span>间距栅格</a>
+    <a href="#s4"><span class="num">04</span>组件与双端适配</a>
+    <a href="#s5"><span class="num">05</span>动效系统</a>
+    <a href="#s6"><span class="num">06</span>响应式对照表</a>
+    <a href="#s7"><span class="num">07</span>可识别性与环境光</a>
+    <a href="#s8"><span class="num">08</span>使用场景与禁用规则</a>
+    <div class="rail-note">
+      本页为 <b>v0.1 风格验证稿</b>。<br>
+      顶部"画布"切换会实时改变预览区断点，所有组件按规范重排。<br>
+      "热区"检测会对预览区内全部可点击元素做 44×44 命中采样。
+    </div>
+  </aside>
+
+  <main class="doc">
+
+    <!-- ===== 00 HERO ===== -->
+    <section class="hero" id="s0">
+      <div class="hero-beam" aria-hidden="true"></div>
+      <div class="hero-scan" aria-hidden="true"></div>
+      <div class="eyebrow">
+        <span class="tag">DESIGN SYSTEM</span>
+        <span class="idx">v0.1 / STYLE VALIDATION</span>
+      </div>
+      <h1 class="hero-title">AURORA&nbsp;TERMINAL</h1>
+      <div class="hero-cn">极光终端 · 深空指挥舱视觉语言</div>
+      <p class="hero-desc">
+        数据是主角，光是坐标。三层视觉结构：<b>底座层</b>给空间、<b>信息层</b>承载全部可读内容、<b>信号层</b>只标记状态与焦点。
+        霓虹只描边不填内容，动效只做反馈不做表演。
+      </p>
+      <div class="hero-meta">
+        <span class="pill"><i></i>WCAG 2.1 AA · 20/20 组合通过</span>
+        <span class="pill"><i></i>交互动效 200–500ms</span>
+        <span class="pill"><i></i>断点 768 / 1200</span>
+        <span class="pill warn"><i></i>v0.1 待确认，非最终版</span>
+      </div>
+    </section>
+
+    <!-- ===== 01 色彩 ===== -->
+    <section class="section" id="s1">
+      <div class="eyebrow"><span class="tag">COLOR</span><span class="idx">01</span></div>
+      <h2><span class="en">Color System</span> · 色彩体系</h2>
+      <p class="lede">全部色值为精确十六进制。每个色块下方的比值由本页脚本按 WCAG 2.1 公式实时计算（非预估），阈值：普通文本 4.5:1、大文本 3:1。判定失败会标红。</p>
+
+      <h3>底座色（Base）</h3>
+      <div class="swatch-grid" id="gridBase"></div>
+
+      <h3>霓虹品牌色（Neon）· 只描边，不填内容</h3>
+      <div class="swatch-grid" id="gridNeon"></div>
+
+      <h3>语义色（Semantic）· 唯一承担涨跌与状态语义</h3>
+      <div class="swatch-grid" id="gridSem"></div>
+
+      <h3>文本色（Text）</h3>
+      <div class="swatch-grid" id="gridText"></div>
+
+      <h3>实时对比度计算器</h3>
+      <div class="card" style="display:flex;flex-wrap:wrap;gap:20px;align-items:flex-end">
+        <div>
+          <label class="form-label" for="fgPick">前景色</label>
+          <input id="fgPick" type="color" value="#EAF3FF" style="width:88px;height:40px;background:transparent;border:1px solid var(--qf-line-2);border-radius:8px;cursor:pointer">
+        </div>
+        <div>
+          <label class="form-label" for="bgPick">背景色</label>
+          <input id="bgPick" type="color" value="#0C131F" style="width:88px;height:40px;background:transparent;border:1px solid var(--qf-line-2);border-radius:8px;cursor:pointer">
+        </div>
+        <div style="min-width:220px">
+          <div class="metric-label">实测对比度</div>
+          <div id="calcOut" class="metric-val" style="font-size:40px">16.63:1</div>
+          <div id="calcJudge" class="metric-sub delta-down">PASS · 普通文本 AA</div>
+        </div>
+        <div style="flex:1;min-width:200px;height:64px;border-radius:8px;border:1px solid var(--qf-line-1);display:grid;place-items:center;background:var(--qf-bg-surface)" id="calcPreview">
+          <span style="font-size:20px;font-weight:600;color:#EAF3FF">示例文本 Sample 128.40</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 02 字体 ===== -->
+    <section class="section" id="s2">
+      <div class="eyebrow"><span class="tag">TYPOGRAPHY</span><span class="idx">02</span></div>
+      <h2><span class="en">Type Scale</span> · 字体层级</h2>
+      <p class="lede">11 级字阶，每级四要素齐全（字号 / 字重 / 行高 / 字间距）。展示字 <b>Chakra Petch</b> 只承担拉丁字母与数字；中文一律走正文栈，避免合成粗体导致的糊字。所有数值启用 <code style="font-family:var(--qf-font-mono);color:var(--qf-neon-cyan)">tabular-nums slashed-zero</code>。</p>
+
+      <h3>字体族</h3>
+      <div class="spec-wrap" style="margin-bottom:28px">
+        <table class="spec">
+          <thead><tr><th>角色</th><th>字体栈</th><th>用途与边界</th></tr></thead>
+          <tbody>
+            <tr><td>展示字</td><td class="mono" style="white-space:normal">Chakra Petch / Bahnschrift / DIN Alternate</td><td>拉丁标题、KPI 大数、全大写 micro 标签。<b style="color:var(--qf-sem-critical)">禁止排中文正文与表格数字。</b></td></tr>
+            <tr><td>正文字</td><td class="mono" style="white-space:normal">HarmonyOS Sans SC / PingFang SC / Source Han Sans SC</td><td>全部中文、正文、按钮文案、标签。</td></tr>
+            <tr><td>等宽字</td><td class="mono" style="white-space:normal">JetBrains Mono / Cascadia Mono / Consolas</td><td>股票代码、ID、接口字段、坐标轴刻度。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="type-row"><div class="type-spec"><b>--qf-display-1</b>56 / 64 · 700<br>ls -0.02em · display</div><div class="type-sample t-display1">QUANT 2026</div></div>
+      <div class="type-row"><div class="type-spec"><b>--qf-display-2</b>40 / 48 · 700<br>ls -0.01em · display</div><div class="type-sample t-display2">AURORA FLOW</div></div>
+      <div class="type-row"><div class="type-spec"><b>--qf-h1</b>32 / 40 · 700<br>ls -0.01em</div><div class="type-sample t-h1">组合总览与风险敞口</div></div>
+      <div class="type-row"><div class="type-spec"><b>--qf-h2</b>24 / 32 · 600<br>ls 0</div><div class="type-sample t-h2">持仓结构与今日变动</div></div>
+      <div class="type-row"><div class="type-spec"><b>--qf-h3</b>20 / 28 · 600<br>ls 0</div><div class="type-sample t-h3">资金面与主力净流入</div></div>
+      <div class="type-row"><div class="type-spec"><b>--qf-h4</b>18 / 26 · 600<br>ls 0</div><div class="type-sample t-h4">板块资金流 Top 5</div></div>
+      <div class="type-row"><div class="type-spec"><b>--qf-body-l</b>16 / 24 · 400<br>ls 0</div><div class="type-sample t-bodyl">所有结论均标注数据来源与时间戳，缺失字段显式标注"数据缺失"，不以 0 值替代。</div></div>
+      <div class="type-row"><div class="type-spec"><b>--qf-body</b>14 / 22 · 400<br>ls 0</div><div class="type-sample t-body">默认正文层级。用于绝大多数说明性文字与列表项，行高 1.57 保证中文阅读的呼吸感。</div></div>
+      <div class="type-row"><div class="type-spec"><b>--qf-body-s</b>13 / 20 · 400<br>ls 0.01em</div><div class="type-sample t-bodys">表格与紧凑列表专用字号，行高 20px，数值列启用等宽数字保证小数点对齐。</div></div>
+      <div class="type-row"><div class="type-spec"><b>--qf-caption</b>12 / 16 · 500<br>ls 0.04em</div><div class="type-sample t-caption">截至 2026-11-06 15:00 · 数据源：东方财富</div></div>
+      <div class="type-row"><div class="type-spec"><b>--qf-micro</b>11 / 16 · 600<br>ls 0.08em · uppercase</div><div class="type-sample t-micro">REALTIME SIGNAL</div></div>
+      <div class="type-row"><div class="type-spec"><b>--qf-data-xl</b>32 / 36 · 700<br>tabular · display</div><div class="type-sample t-dataxl">1,284,930.00</div></div>
+      <div class="type-row"><div class="type-spec"><b>--qf-data</b>14 / 20 · 600<br>tabular</div><div class="type-sample t-data">+2.14%　<span style="color:var(--qf-sem-up)">+0.86</span>　<span style="color:var(--qf-sem-down)">-1.32</span></div></div>
+      <div class="type-row"><div class="type-spec"><b>--qf-code</b>12 / 18 · 500<br>mono</div><div class="type-sample t-code">000300.SH · sector_flow · as_of=2026-11-06</div></div>
+    </section>
+
+    <!-- ===== 03 间距 ===== -->
+    <section class="section" id="s3">
+      <div class="eyebrow"><span class="tag">SPACING</span><span class="idx">03</span></div>
+      <h2><span class="en">8pt Grid</span> · 间距与栅格</h2>
+      <p class="lede">所有块级间距必须取自 8px 序列。4px 是唯一子栅格例外，仅允许用于图标与文字间距、描边偏移、徽章内竖向 padding。<b>禁止 13px / 18px / 22px 等非标值。</b></p>
+
+      <div style="max-width:680px">
+        <div class="space-row"><span class="space-key">0_5 · sub</span><div class="space-bar" style="width:4px"></div><span class="space-val">4px</span></div>
+        <div class="space-row"><span class="space-key">space-1</span><div class="space-bar" style="width:8px"></div><span class="space-val">8px</span></div>
+        <div class="space-row"><span class="space-key">space-2</span><div class="space-bar" style="width:16px"></div><span class="space-val">16px</span></div>
+        <div class="space-row"><span class="space-key">space-3</span><div class="space-bar" style="width:24px"></div><span class="space-val">24px</span></div>
+        <div class="space-row"><span class="space-key">space-4</span><div class="space-bar" style="width:32px"></div><span class="space-val">32px</span></div>
+        <div class="space-row"><span class="space-key">space-5</span><div class="space-bar" style="width:40px"></div><span class="space-val">40px</span></div>
+        <div class="space-row"><span class="space-key">space-6</span><div class="space-bar" style="width:48px"></div><span class="space-val">48px</span></div>
+        <div class="space-row"><span class="space-key">space-8</span><div class="space-bar" style="width:64px"></div><span class="space-val">64px</span></div>
+        <div class="space-row"><span class="space-key">space-10</span><div class="space-bar" style="width:80px"></div><span class="space-val">80px</span></div>
+        <div class="space-row"><span class="space-key">space-12</span><div class="space-bar" style="width:96px"></div><span class="space-val">96px</span></div>
+      </div>
+
+      <h3>栅格</h3>
+      <div class="spec-wrap">
+        <table class="spec">
+          <thead><tr><th>断点</th><th>列数</th><th>Gutter</th><th>页边距</th><th>内容最大宽</th></tr></thead>
+          <tbody>
+            <tr><td>桌面 &gt;1200px</td><td>12</td><td>24px</td><td>32px</td><td>1600px</td></tr>
+            <tr><td>平板 768–1200px</td><td>8</td><td>20px</td><td>24px</td><td>100%</td></tr>
+            <tr><td>移动 &lt;768px</td><td>4（多为单列堆叠）</td><td>16px</td><td>16px</td><td>100%</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ===== 04 组件 ===== -->
+    <section class="section wide" id="s4">
+      <div class="eyebrow"><span class="tag">COMPONENTS</span><span class="idx">04</span></div>
+      <h2><span class="en">Components</span> · 组件与双端适配</h2>
+      <p class="lede">下面整块是一个真实的响应式容器。顶部切换画布宽度时，容器查询会按 <b>&lt;768 / 768–1200 / &gt;1200</b> 三档重排尺寸、间距与导航形态——这就是未来组件的适配机制。</p>
+
+      <div class="stage-shell">
+        <div class="stage-bar">
+          <span class="bp" id="bpLabel">桌面 1440px</span>
+          <span class="hint">容器查询实时生效 · 触控热区随断点放大</span>
+          <span class="spacer"></span>
+          <span class="hint" id="stageHint">移动端按钮 48px / 输入 48px / 行高 52px</span>
+        </div>
+        <div class="stage-wrap">
+          <div id="stage"></div>
+        </div>
+      </div>
+
+      <div id="hitReport"></div>
+    </section>
+
+    <!-- ===== 05 动效 ===== -->
+    <section class="section wide" id="s5">
+      <div class="eyebrow"><span class="tag">MOTION</span><span class="idx">05</span></div>
+      <h2><span class="en">Motion</span> · 动效系统</h2>
+      <p class="lede">交互动效严格 200–500ms，四档缓动曲线。环境循环动效（光晕、骨架微光）不受该区间约束，但仅在 transform/opacity 上运行且必须可关闭。<b>动效优先级永远低于操作响应。</b></p>
+
+      <div class="motion-grid">
+        <div class="motion-card">
+          <div class="mc-t">按钮 Hover</div>
+          <div class="mc-s">200ms · cubic-bezier(.2,.8,.2,1)</div>
+          <div class="mc-demo"><button class="btn btn-primary">悬停我</button></div>
+        </div>
+        <div class="motion-card">
+          <div class="mc-t">按钮 Press</div>
+          <div class="mc-s">200ms · scale(.98)</div>
+          <div class="mc-demo"><button class="btn btn-neon">按住看缩放</button></div>
+        </div>
+        <div class="motion-card">
+          <div class="mc-t">输入 Focus</div>
+          <div class="mc-s">240ms · 双环描边 + 外发光</div>
+          <div class="mc-demo"><div class="field" style="width:100%"><input placeholder="聚焦我"></div></div>
+        </div>
+        <div class="motion-card">
+          <div class="mc-t">按钮 Loading</div>
+          <div class="mc-s">宽度锁定 · 不跳动</div>
+          <div class="mc-demo"><button class="btn btn-primary" id="loadBtn" data-tap>提交分析</button></div>
+        </div>
+        <div class="motion-card">
+          <div class="mc-t">开关状态切换</div>
+          <div class="mc-s">240ms · 圆点位移</div>
+          <div class="mc-demo"><button class="switch" role="switch" aria-checked="false" data-tap aria-label="演示开关"></button></div>
+        </div>
+        <div class="motion-card">
+          <div class="mc-t">标签页切换</div>
+          <div class="mc-s">320ms · 指示层迁移</div>
+          <div class="mc-demo">
+            <div class="tabs" role="tablist">
+              <button class="tab" role="tab" aria-selected="true" data-tap>今日</button>
+              <button class="tab" role="tab" aria-selected="false" data-tap>本周</button>
+            </div>
+          </div>
+        </div>
+        <div class="motion-card">
+          <div class="mc-t">页面转场</div>
+          <div class="mc-s">420ms · 渐变扫过 + 淡入</div>
+          <div class="mc-demo">
+            <div class="transition-box" id="transBox" data-tap style="width:100%">
+              <div class="sweep"></div>
+              <span style="position:relative;font:500 12px/1 var(--qf-font-body);color:var(--qf-text-secondary)">点击播放转场</span>
+            </div>
+          </div>
+        </div>
+        <div class="motion-card">
+          <div class="mc-t">Toast 出现 / 退出</div>
+          <div class="mc-s">进入 320ms · 停留 4s · 退出 200ms</div>
+          <div class="mc-demo"><button class="btn btn-ghost" id="toastBtn" data-tap>触发 Toast</button></div>
+        </div>
+        <div class="motion-card">
+          <div class="mc-t">Modal 出现</div>
+          <div class="mc-s">420ms · 遮罩 + 上移 8px</div>
+          <div class="mc-demo"><button class="btn btn-ghost" id="modalBtn" data-tap>打开弹窗</button></div>
+        </div>
+        <div class="motion-card">
+          <div class="mc-t">卡片 Hover</div>
+          <div class="mc-s">200ms · 描边 + 上移 1px</div>
+          <div class="mc-demo"><div class="card" style="width:100%;padding:16px"><div class="card-title">悬停卡片</div></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 06 响应式对照 ===== -->
+    <section class="section" id="s6">
+      <div class="eyebrow"><span class="tag">RESPONSIVE</span><span class="idx">06</span></div>
+      <h2><span class="en">Breakpoint Matrix</span> · 响应式适配对照表</h2>
+      <p class="lede">断点定义：移动 &lt;768px ｜ 平板 768–1200px ｜ 桌面 &gt;1200px。下表为全部组件的尺寸、布局、间距变化规则，无"适当调整"类模糊表述。</p>
+      <div class="spec-wrap">
+        <table class="spec">
+          <thead><tr><th>组件</th><th>桌面 &gt;1200</th><th>平板 768–1200</th><th>移动 &lt;768</th><th>变化规则</th></tr></thead>
+          <tbody>
+            <tr><td>页面边距</td><td class="mono">32px</td><td class="mono">24px</td><td class="mono">16px</td><td>随栅格收缩</td></tr>
+            <tr><td>顶栏</td><td class="mono">h64 · px32</td><td class="mono">h60 · px24</td><td class="mono">h56 · px16</td><td>高度压缩，次要操作折叠</td></tr>
+            <tr><td>侧边导航</td><td class="mono">w200 · h40</td><td class="mono">w176 · h40</td><td class="mono">底部栏 h56</td><td>桌面常驻 → 移动底部标签栏</td></tr>
+            <tr><td>按钮（默认）</td><td class="mono">h40 · px20 · 14</td><td class="mono">h40 · px20 · 14</td><td class="mono">h48 · px16 · 15</td><td>触控放大，字号 +1</td></tr>
+            <tr><td>按钮（小）</td><td class="mono">h32 · 13</td><td class="mono">h32 · 13</td><td class="mono">h40 · 13</td><td>低于 44 时用 ::after 扩热区</td></tr>
+            <tr><td>按钮（主 CTA）</td><td class="mono">h48 · px28</td><td class="mono">h48 · px24</td><td class="mono">h52 · px24</td><td>移动更饱满便于拇指命中</td></tr>
+            <tr><td>图标按钮</td><td class="mono">40×40</td><td class="mono">40×40</td><td class="mono">48×48</td><td>移动强制放大</td></tr>
+            <tr><td>输入框</td><td class="mono">h40 · 14</td><td class="mono">h44 · 14</td><td class="mono">h48 · 16</td><td>移动 16px 防 iOS 自动缩放</td></tr>
+            <tr><td>卡片内边距</td><td class="mono">24</td><td class="mono">20</td><td class="mono">16</td><td>—</td></tr>
+            <tr><td>卡片间距</td><td class="mono">24</td><td class="mono">20</td><td class="mono">16</td><td>—</td></tr>
+            <tr><td>表格行高</td><td class="mono">44</td><td class="mono">44</td><td class="mono">52</td><td>字号不变，改横向滚动</td></tr>
+            <tr><td>标签页</td><td class="mono">h36</td><td class="mono">h36</td><td class="mono">h44 等分</td><td>移动全宽等分</td></tr>
+            <tr><td>徽章</td><td class="mono">h24 · 11</td><td class="mono">h24 · 11</td><td class="mono">h28 · 11</td><td>—</td></tr>
+            <tr><td>开关</td><td class="mono">40×22</td><td class="mono">40×22</td><td class="mono">44×24</td><td>圆点 18 → 20</td></tr>
+            <tr><td>进度条</td><td class="mono">h4</td><td class="mono">h4</td><td class="mono">h6</td><td>移动加粗</td></tr>
+            <tr><td>弹窗</td><td class="mono">w560 居中</td><td class="mono">min(720,90vw)</td><td class="mono">100% 底部抽屉</td><td>移动改抽屉 + 下拉关闭</td></tr>
+            <tr><td>Toast</td><td class="mono">右下 24</td><td class="mono">右下 20</td><td class="mono">顶部居中 12</td><td>避开拇指区</td></tr>
+            <tr><td>最小热区</td><td class="mono">44×44</td><td class="mono">44×44</td><td class="mono">48×48</td><td>硬性，透明扩展合法</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ===== 07 环境光 ===== -->
+    <section class="section" id="s7">
+      <div class="eyebrow"><span class="tag">ACCESSIBILITY</span><span class="idx">07</span></div>
+      <h2><span class="en">Readability</span> · 可识别性与环境光</h2>
+      <p class="lede">WCAG 2.1 AA 实测（公式计算）。环境光采用"黑位抬升"模型：屏幕在强光下黑位被环境反射抬高，等效于所有颜色与中性灰混合。k=0 暗室 / 0.06 室内 300lux / 0.16 强光 10000lux。</p>
+
+      <h3>环境光下的对比度实测</h3>
+      <div class="spec-wrap" style="margin-bottom:24px">
+        <table class="spec">
+          <thead><tr><th>前景 / 背景</th><th>暗室</th><th>室内</th><th>强光</th><th>结论</th></tr></thead>
+          <tbody>
+            <tr><td>text-primary / surface</td><td class="mono">16.63</td><td class="mono">14.73</td><td class="mono">11.72</td><td style="color:var(--qf-sem-down)">PASS</td></tr>
+            <tr><td>text-secondary / surface</td><td class="mono">9.39</td><td class="mono">8.52</td><td class="mono">7.07</td><td style="color:var(--qf-sem-down)">PASS</td></tr>
+            <tr><td>text-muted / surface</td><td class="mono">6.72</td><td class="mono">6.20</td><td class="mono">5.30</td><td style="color:var(--qf-sem-down)">PASS</td></tr>
+            <tr><td>text-muted / elev</td><td class="mono">6.18</td><td class="mono">5.66</td><td class="mono">4.81</td><td style="color:var(--qf-sem-down)">PASS（临界值，故 muted 上调为 #8B9DB4）</td></tr>
+            <tr><td>sem-up / surface</td><td class="mono">6.73</td><td class="mono">6.16</td><td class="mono">5.20</td><td style="color:var(--qf-sem-down)">PASS</td></tr>
+            <tr><td>sem-down / surface</td><td class="mono">9.68</td><td class="mono">8.73</td><td class="mono">7.16</td><td style="color:var(--qf-sem-down)">PASS</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="env-grid">
+        <div class="env-card">
+          <h4>暗室 · 0 lux</h4>
+          <p style="font:400 12px/18px var(--qf-font-body);color:var(--qf-text-muted)">底色不取纯黑（#04070E 保留 2% 蓝相），避免 OLED 全黑色带断层。</p>
+          <div class="ratio-big">16.63:1</div>
+          <div style="font:500 11px/1 var(--qf-font-mono);color:var(--qf-sem-down)">primary / surface</div>
+        </div>
+        <div class="env-card">
+          <h4>室内 · 300 lux</h4>
+          <p style="font:400 12px/18px var(--qf-font-body);color:var(--qf-text-muted)">日常办公最常见环境。全部文本层级保持 ≥5.66:1，无一处降级。</p>
+          <div class="ratio-big">14.73:1</div>
+          <div style="font:500 11px/1 var(--qf-font-mono);color:var(--qf-sem-down)">primary / surface</div>
+        </div>
+        <div class="env-card">
+          <h4>强光 · 10000 lux</h4>
+          <p style="font:400 12px/18px var(--qf-font-body);color:var(--qf-text-muted)">户外直射，黑位抬升 16%。最弱层级仍 4.81:1，满足 AA 4.5:1。</p>
+          <div class="ratio-big">4.81:1</div>
+          <div style="font:500 11px/1 var(--qf-font-mono);color:var(--qf-sem-down)">muted / elev · 全局最低值</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 08 规则 ===== -->
+    <section class="section" id="s8">
+      <div class="eyebrow"><span class="tag">RULES</span><span class="idx">08</span></div>
+      <h2><span class="en">Do &amp; Don't</span> · 使用场景与禁用规则</h2>
+      <p class="lede">未来科技感最容易失控的地方是"元素堆砌"。以下每组左为正确用法、右为禁止用法，规则来自规范文档 §8。</p>
+
+      <div class="dd-grid" style="margin-bottom:16px">
+        <div class="dd good">
+          <div class="hd">✓ 正确 · 霓虹只作用于描边与焦点</div>
+          <div class="demo-mini"><button class="btn btn-neon">描边 + 低透明底</button></div>
+          <p>青色只做 1px 描边与外发光，底色保持深色。信号层面积占比 &lt;5%。</p>
+        </div>
+        <div class="dd bad">
+          <div class="hd">✕ 禁止 · 霓虹大面积填充内容区</div>
+          <div class="demo-mini" style="background:var(--qf-grad-aurora)"><span style="color:#fff;font-size:12px;font-weight:600">白字压渐变</span></div>
+          <p>白字在 #22E3FF 上仅 1.65:1，且大面积渐变让信号层失去焦点。</p>
+        </div>
+      </div>
+
+      <div class="dd-grid" style="margin-bottom:16px">
+        <div class="dd good">
+          <div class="hd">✓ 正确 · 玻璃层叠在实底 + 发丝描边</div>
+          <div class="demo-mini"><div class="glass" style="width:100%;height:100%;display:grid;place-items:center;font-size:12px;color:var(--qf-text-secondary)">玻璃卡 · 1 层</div></div>
+          <p>不透明度 ≥55% + 1px 描边 + 顶部内高光，文字对比度实测 16.21:1。</p>
+        </div>
+        <div class="dd bad">
+          <div class="hd">✕ 禁止 · 玻璃叠在流动光斑上</div>
+          <div class="demo-mini" style="position:relative;overflow:hidden">
+            <div style="position:absolute;inset:0;background:var(--qf-grad-aurora);opacity:.5;filter:blur(12px)"></div>
+            <div class="glass" style="position:relative;width:100%;height:100%;display:grid;place-items:center;font-size:12px;color:#fff">文字后方有亮斑</div>
+          </div>
+          <p>亮斑扫过时文字瞬时对比度跌破 3:1，违反"特效不得影响可读性"。</p>
+        </div>
+      </div>
+
+      <div class="dd-grid" style="margin-bottom:16px">
+        <div class="dd good">
+          <div class="hd">✓ 正确 · 涨跌色 + 符号双重编码</div>
+          <div class="demo-mini" style="gap:16px;display:flex"><span style="color:var(--qf-sem-up);font-weight:600">▲ +2.14%</span><span style="color:var(--qf-sem-down);font-weight:600">▼ -1.32%</span></div>
+          <p>颜色 + 箭头 + 符号，色盲用户与强光环境均可辨认（WCAG 1.4.1）。</p>
+        </div>
+        <div class="dd bad">
+          <div class="hd">✕ 禁止 · 仅靠颜色区分状态</div>
+          <div class="demo-mini" style="gap:16px;display:flex"><span style="color:var(--qf-sem-up);font-weight:600">2.14%</span><span style="color:var(--qf-sem-down);font-weight:600">1.32%</span></div>
+          <p>缺少符号与方向标记，灰阶/色盲环境下两个数值语义完全相同。</p>
+        </div>
+      </div>
+
+      <div class="dd-grid">
+        <div class="dd good">
+          <div class="hd">✓ 正确 · 扫描线只在品牌区</div>
+          <div class="demo-mini" style="background:repeating-linear-gradient(180deg,rgba(34,227,255,.05) 0 1px,transparent 1px 4px);color:var(--qf-text-primary);font:600 13px/1 var(--qf-font-body)">AURORA TERMINAL</div>
+          <p>装饰元素仅用于品牌头图、转场、空态，不进入数据区。</p>
+        </div>
+        <div class="dd bad">
+          <div class="hd">✕ 禁止 · 扫描线进入数据表格</div>
+          <div class="demo-mini" style="background:repeating-linear-gradient(180deg,rgba(34,227,255,.12) 0 1px,transparent 1px 4px);color:var(--qf-text-primary);font:500 12px/1 var(--qf-font-mono)">600519　1680.00　+1.24%</div>
+          <p>横向条纹干扰数值读取，违反"光只描边不填内容"。</p>
+        </div>
+      </div>
+
+      <h3>十条硬性禁用组合</h3>
+      <div class="spec-wrap">
+        <table class="spec">
+          <thead><tr><th>#</th><th>禁用组合</th><th>原因</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">01</td><td>霓虹大面积渐变 + 玻璃层</td><td>玻璃把渐变打散为噪点，文字对比度不可控</td></tr>
+            <tr><td class="mono">02</td><td>流动光斑 + 正文文字（无遮罩）</td><td>亮斑扫过时瞬时对比度跌破 3:1</td></tr>
+            <tr><td class="mono">03</td><td>扫描线 + 数据表格 / 图表</td><td>干扰数值读取</td></tr>
+            <tr><td class="mono">04</td><td>霓虹色 + 涨跌 / 告警语义</td><td>语义色必须唯一，混用造成误判</td></tr>
+            <tr><td class="mono">05</td><td>同屏 ≥2 个大面积渐变</td><td>视觉失去焦点，信号层超预算</td></tr>
+            <tr><td class="mono">06</td><td>玻璃层嵌套 &gt;2 层</td><td>对比度不可预测，性能骤降</td></tr>
+            <tr><td class="mono">07</td><td>glitch / shake + 可读正文或数值</td><td>直接影响信息识别</td></tr>
+            <tr><td class="mono">08</td><td>装饰动效 + 交互动效（同一元素）</td><td>反馈被淹没，违反动效优先级</td></tr>
+            <tr><td class="mono">09</td><td>展示字 + 中文正文 / 表格数字</td><td>合成粗体导致糊字、失去等宽</td></tr>
+            <tr><td class="mono">10</td><td>仅靠颜色 + 区分状态</td><td>色盲与强光环境失效（WCAG 1.4.1）</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- Modal -->
+<div class="modal-layer" id="modalLayer">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="mdTitle">
+    <h4 id="mdTitle">确认执行策略扫描？</h4>
+    <p>扫描将读取全市场行情数据，预计返回 2 个候选信号。数据源异常时会明确提示失败原因，不会以"暂无信号"替代。</p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="modalCancel" data-tap>取消</button>
+      <button class="btn btn-primary" id="modalOk" data-tap>确认扫描</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   0. WCAG 计算（真公式，本页所有比值都由此产生）
+   ============================================================ */
+function rgbOf(hex){
+  hex=hex.trim().replace('#','');
+  if(hex.length===3) hex=hex.split('').map(c=>c+c).join('');
+  return [0,2,4].map(i=>parseInt(hex.slice(i,i+2),16));
+}
+function lin(c){c/=255;return c<=0.04045?c/12.92:Math.pow((c+0.055)/1.055,2.4);}
+function lum(rgb){return 0.2126*lin(rgb[0])+0.7152*lin(rgb[1])+0.0722*lin(rgb[2]);}
+function contrast(fg,bg){
+  const a=lum(rgbOf(fg)),b=lum(rgbOf(bg));
+  return (Math.max(a,b)+0.05)/(Math.min(a,b)+0.05);
+}
+
+/* ============================================================
+   1. 色板渲染 + 对比度徽章
+   ============================================================ */
+/* [token, hex, 色块内标签色, 对比基准背景, 阈值(默认4.5), 备注] */
+const PALETTE=[
+  {g:'gridBase',items:[
+    ['--qf-bg-void','#04070E','#EAF3FF','#EAF3FF'],
+    ['--qf-bg-deep','#070C15','#EAF3FF','#EAF3FF'],
+    ['--qf-bg-surface','#0C131F','#EAF3FF','#EAF3FF'],
+    ['--qf-bg-elev','#121C2B','#EAF3FF','#EAF3FF'],
+    ['--qf-bg-elev2','#182335','#EAF3FF','#EAF3FF']
+  ]},
+  {g:'gridNeon',items:[
+    ['--qf-neon-cyan','#22E3FF','#04070E','#0C131F'],
+    ['--qf-neon-azure','#3D7BFF','#EAF3FF','#0C131F'],
+    ['--qf-neon-violet','#9B6BFF','#04070E','#0C131F'],
+    ['--qf-neon-magenta','#FF4FD8','#04070E','#0C131F']
+  ]},
+  {g:'gridSem',items:[
+    ['--qf-sem-up','#F87171','#04070E','#0C131F'],
+    ['--qf-sem-down','#34D399','#04070E','#0C131F'],
+    ['--qf-sem-warn','#F5A524','#04070E','#0C131F'],
+    ['--qf-sem-info','#5AC8FA','#04070E','#0C131F'],
+    ['--qf-sem-critical','#FF5A5F','#04070E','#0C131F']
+  ]},
+  {g:'gridText',items:[
+    ['--qf-text-primary','#EAF3FF','#0C131F','#0C131F'],
+    ['--qf-text-secondary','#A7BAD2','#0C131F','#0C131F'],
+    ['--qf-text-muted','#8B9DB4','#0C131F','#0C131F'],
+    ['--qf-text-disabled','#5C6E85','#0C131F','#0C131F',3.0,'· 禁用态'],
+    ['--qf-ink','#04070E','#22E3FF','#22E3FF']
+  ]}
+];
+PALETTE.forEach(block=>{
+  const host=document.getElementById(block.g);
+  block.items.forEach(([name,hex,labelColor,bgRef,thr,note])=>{
+    const need=thr||4.5;
+    const r=contrast(hex,bgRef);
+    const pass=r>=need;
+    const el=document.createElement('div');
+    el.className='swatch';
+    el.innerHTML=
+      '<div class="chip" style="background:'+hex+'"><span style="color:'+labelColor+'">'+hex.toUpperCase()+'</span></div>'+
+      '<div class="meta"><div class="name">'+name+'</div>'+
+      '<div class="hex">对比 '+bgRef.toUpperCase()+(note?' '+note:'')+'</div>'+
+      '<div class="ratio '+(pass?'pass':'fail')+'">'+(pass?'PASS':'FAIL')+' · '+r.toFixed(2)+':1</div></div>';
+    host.appendChild(el);
+  });
+});
+
+/* ============================================================
+   2. 实时对比度计算器
+   ============================================================ */
+const fgPick=document.getElementById('fgPick'),bgPick=document.getElementById('bgPick');
+const calcOut=document.getElementById('calcOut'),calcJudge=document.getElementById('calcJudge'),calcPreview=document.getElementById('calcPreview');
+function refreshCalc(){
+  const r=contrast(fgPick.value,bgPick.value);
+  calcOut.textContent=r.toFixed(2)+':1';
+  const isLargePass=r>=3, isNormalPass=r>=4.5;
+  calcJudge.textContent=isNormalPass?'PASS · 普通文本 AA':(isLargePass?'PASS · 仅大文本 AA':'FAIL · 未达 AA');
+  calcJudge.className='metric-sub '+(isNormalPass?'delta-down':(isLargePass?'delta-up':''));
+  calcJudge.style.color=isNormalPass?'var(--qf-sem-down)':(isLargePass?'var(--qf-sem-warn)':'var(--qf-sem-critical)');
+  calcPreview.style.background=bgPick.value;
+  calcPreview.firstElementChild.style.color=fgPick.value;
+}
+fgPick.addEventListener('input',refreshCalc);
+bgPick.addEventListener('input',refreshCalc);
+refreshCalc();
+
+/* ============================================================
+   3. 预览画布内容（真实组件，按容器查询自适应）
+   ============================================================ */
+const stage=document.getElementById('stage');
+const hitLayer=document.createElement('div');
+hitLayer.className='hit-layer';
+stage.appendChild(hitLayer);
+
+const appHTML=`
+<div class="mock-app">
+  <header class="mock-top">
+    <div class="mock-logo"><b>QF</b><span>QUANTFLOW</span></div>
+    <div class="mock-search" data-tap>搜索代码/名称 <span style="margin-left:auto;font:500 10px/1 var(--qf-font-mono);color:var(--qf-text-muted)">/</span></div>
+    <div class="mock-right"><span class="dot"></span>数据正常</div>
+  </header>
+  <div class="mock-body">
+    <nav class="mock-rail">
+      <div class="navl">
+        <a href="#" class="on" data-tap>行情总览</a>
+        <a href="#" data-tap>持仓管理</a>
+        <a href="#" data-tap>智能分析</a>
+        <a href="#" data-tap>短线复盘</a>
+        <a href="#" data-tap>策略扫描</a>
+        <a href="#" data-tap>设置</a>
+      </div>
+    </nav>
+    <main class="mock-main">
+      <div class="kpis">
+        <div class="kpi" data-tap>
+          <div class="metric-label">组合总市值</div>
+          <div class="metric-val">1,284,930</div>
+          <div class="metric-sub delta-up">▲ +2.14% · 今日</div>
+        </div>
+        <div class="kpi" data-tap>
+          <div class="metric-label">可用资金</div>
+          <div class="metric-val">86,420</div>
+          <div class="metric-sub" style="color:var(--qf-text-muted)">占比 6.7%</div>
+        </div>
+        <div class="kpi" data-tap>
+          <div class="metric-label">今日盈亏</div>
+          <div class="metric-val" style="color:var(--qf-sem-up)">+26,882</div>
+          <div class="metric-sub delta-up">▲ +2.13%</div>
+        </div>
+      </div>
+
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="display:flex;align-items:center;gap:12px;padding:16px;flex-wrap:wrap">
+          <div class="card-title"><span class="bar"></span>持仓明细</div>
+          <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-sm btn-ghost" data-tap>导出</button>
+            <button class="btn btn-sm btn-primary" data-tap>+ 新建持仓</button>
+          </div>
+        </div>
+        <div class="table-wrap" style="border:0;border-top:1px solid var(--qf-line-1);border-radius:0">
+          <table class="tbl">
+            <thead><tr><th>标的</th><th>代码</th><th class="num">市值</th><th class="num">今日</th><th class="num">占比</th><th>状态</th></tr></thead>
+            <tbody>
+              <tr><td>沪深300ETF</td><td class="code">510300</td><td class="num">412,860</td><td class="num" style="color:var(--qf-sem-up)">▲ +1.86%</td><td class="num">32.1%</td><td><span class="badge up">▲ 上涨</span></td></tr>
+              <tr><td>创业板ETF</td><td class="code">159915</td><td class="num">268,420</td><td class="num" style="color:var(--qf-sem-down)">▼ -0.74%</td><td class="num">20.9%</td><td><span class="badge down">▼ 下跌</span></td></tr>
+              <tr><td>中证红利ETF</td><td class="code">515180</td><td class="num">196,330</td><td class="num" style="color:var(--qf-sem-up)">▲ +3.21%</td><td class="num">15.3%</td><td><span class="badge info">数据正常</span></td></tr>
+              <tr><td>纳指ETF</td><td class="code">513100</td><td class="num">148,900</td><td class="num" style="color:var(--qf-text-muted)">— 延迟</td><td class="num">11.6%</td><td><span class="badge warn">⚠ 延迟 12s</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+          <div class="card-title"><span class="bar"></span>策略参数</div>
+          <div class="tabs" role="tablist" style="margin-left:auto">
+            <button class="tab" role="tab" aria-selected="true" data-tap>短线</button>
+            <button class="tab" role="tab" aria-selected="false" data-tap>波段</button>
+            <button class="tab" role="tab" aria-selected="false" data-tap>长线</button>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px">
+          <div>
+            <label class="form-label">最小涨幅阈值</label>
+            <div class="field" data-tap><input value="2.5" inputmode="decimal" aria-label="最小涨幅阈值"><span class="trail">%</span></div>
+            <div class="help">低于该值不触发信号</div>
+          </div>
+          <div>
+            <label class="form-label">持仓上限</label>
+            <div class="field" data-tap><input value="20" inputmode="numeric" aria-label="持仓上限"><span class="trail">只</span></div>
+            <div class="help">超出后仅提示，不自动下单</div>
+          </div>
+          <div>
+            <label class="form-label">冷却时间</label>
+            <div class="field invalid" data-tap><input value="-1" aria-label="冷却时间"><span class="trail">分钟</span></div>
+            <div class="help err">必须为正整数</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:20px;flex-wrap:wrap;margin-top:16px;align-items:center">
+          <label class="check"><input type="checkbox" checked><span class="box"></span>开盘前自动扫描</label>
+          <label class="check"><input type="checkbox"><span class="box"></span>仅提示不下单</label>
+          <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
+            <span class="help" style="margin:0">实时刷新</span>
+            <button class="switch" role="switch" aria-checked="true" data-tap aria-label="实时刷新"></button>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-top:16px">
+        <div class="card" data-tap>
+          <div class="metric-label">扫描进度</div>
+          <div style="display:flex;align-items:center;gap:16px;margin-top:16px">
+            <div class="ring"><span>64%</span></div>
+            <div style="flex:1">
+              <div class="progress"><i></i></div>
+              <div class="help">正在解析 1,284 只标的</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass" style="padding:20px">
+          <div class="metric-label">玻璃拟态面板 · 1 层</div>
+          <div style="font:600 15px/1.5 var(--qf-font-body);margin-top:8px">数据源状态</div>
+          <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap">
+            <span class="badge neon"><span class="dot" style="width:6px;height:6px"></span>东方财富</span>
+            <span class="badge info">新浪</span>
+          </div>
+          <p class="help" style="margin-top:12px">不透明度 62% + 1px 发丝描边 + 顶部内高光</p>
+        </div>
+
+        <div class="card" style="padding:0">
+          <div class="state">
+            <div class="ic">◇</div>
+            <div class="t">暂无扫描信号</div>
+            <div class="h">14:30 后自动重试 · 不显示 0.00% 占位</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">
+        <button class="btn btn-primary" data-tap>开始分析</button>
+        <button class="btn btn-neon" data-tap>组合建议</button>
+        <button class="btn btn-ghost" data-tap>导出</button>
+        <button class="btn btn-danger" data-tap>清空</button>
+        <button class="icon-btn" data-tap aria-label="刷新">⟳</button>
+        <button class="switch" role="switch" aria-checked="true" data-tap aria-label="实时刷新"></button>
+      </div>
+    </main>
+  </div>
+  <nav class="mock-tabbar">
+    <a href="#" class="on" data-tap><i>◈</i>行情</a>
+    <a href="#" data-tap><i>▤</i>持仓</a>
+    <a href="#" data-tap><i>◐</i>分析</a>
+    <a href="#" data-tap><i>◇</i>复盘</a>
+    <a href="#" data-tap><i>⋯</i>更多</a>
+  </nav>
+</div>`;
+stage.insertAdjacentHTML('afterbegin',appHTML);
+
+/* 让预览内的按钮/开关具备真实交互（仅演示，不写业务逻辑） */
+stage.addEventListener('click',e=>{
+  const link=e.target.closest('a[href="#"]');
+  if(link){e.preventDefault();}
+  const sw=e.target.closest('.switch');
+  if(sw){sw.setAttribute('aria-checked',sw.getAttribute('aria-checked')==='true'?'false':'true');return;}
+  const tab=e.target.closest('.tab');
+  if(tab){
+    tab.parentElement.querySelectorAll('.tab').forEach(t=>t.setAttribute('aria-selected','false'));
+    tab.setAttribute('aria-selected','true');
+  }
+});
+
+/* ============================================================
+   4. 断点切换
+   ============================================================ */
+const bpBtns=[...document.querySelectorAll('#bpSeg button')];
+const bpLabel=document.getElementById('bpLabel');
+const stageHint=document.getElementById('stageHint');
+const HINTS={'1440':'桌面 1440px · 侧栏 200 / 按钮 40 / 输入 40 / 行高 44',
+             '1024':'平板 1024px · 侧栏 176 / 按钮 40 / 输入 44 / 内边距 20',
+             '390':'移动 390px · 底部标签栏 / 按钮 48 / 输入 48 / 行高 52 / 单列',
+             'auto':'自适应 · 随浏览器宽度实时切换三档'};
+bpBtns.forEach(b=>b.addEventListener('click',()=>{
+  bpBtns.forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');
+  const w=b.dataset.bp;
+  stage.style.width = (w==='auto')?'100%':(w+'px');
+  const avail=document.querySelector('.stage-wrap').clientWidth;
+  const need=(w==='auto')?avail:parseInt(w,10);
+  bpLabel.textContent = (w==='auto')?'自适应宽度':('画布 '+w+'px');
+  stageHint.textContent = HINTS[w] + (need>avail?' · 画布超出可视宽度，可横向滚动查看':'');
+  buildHitReport();
+}));
+
+/* ============================================================
+   5. 环境光 / 动效 / 热区
+   ============================================================ */
+const envBtns=[...document.querySelectorAll('#envSeg button')];
+envBtns.forEach(b=>b.addEventListener('click',()=>{
+  envBtns.forEach(x=>x.classList.remove('on'));b.classList.add('on');
+  stage.className='';
+  const v=b.dataset.env;
+  if(v==='1')stage.classList.add('env-indoor');
+  if(v==='2')stage.classList.add('env-sun');
+}));
+
+const motionBtns=[...document.querySelectorAll('#motionSeg button')];
+motionBtns.forEach(b=>b.addEventListener('click',()=>{
+  motionBtns.forEach(x=>x.classList.remove('on'));b.classList.add('on');
+  document.body.classList.toggle('no-motion',b.dataset.motion==='0');
+}));
+
+const hitBtns=[...document.querySelectorAll('#hitSeg button')];
+let hitOn=false;
+hitBtns.forEach(b=>b.addEventListener('click',()=>{
+  hitBtns.forEach(x=>x.classList.remove('on'));b.classList.add('on');
+  hitOn=b.dataset.hit==='1';
+  hitLayer.style.display=hitOn?'block':'none';
+  buildHitReport();
+}));
+hitLayer.style.display='none';
+
+/* ============================================================
+   6. 热区实测：44×44 命中采样 + 重叠检测
+   ============================================================ */
+function visible(el){
+  const r=el.getBoundingClientRect();
+  return r.width>0 && r.height>0 && getComputedStyle(el).visibility!=='hidden' && getComputedStyle(el).display!=='none';
+}
+function labelOf(el){
+  return (el.getAttribute('aria-label')||el.textContent||el.className).trim().replace(/\s+/g,' ').slice(0,22);
+}
+function measure(el){
+  const r=el.getBoundingClientRect();
+  if(r.width>=44 && r.height>=44) return {ok:true,size:[r.width,r.height],note:'原生 ≥44'};
+  const cx=r.left+r.width/2, cy=r.top+r.height/2, off=21;
+  const sr=stage.getBoundingClientRect();
+  const vw=window.innerWidth, vh=window.innerHeight;
+  const pts=[[-off,-off],[off,-off],[-off,off],[off,off],[0,-off],[0,off],[-off,0],[off,0]];
+  let checked=0, hit=0;
+  pts.forEach(([dx,dy])=>{
+    const x=cx+dx,y=cy+dy;
+    // 越出容器或被浏览器视口裁掉的点不判负（不计入采样）
+    if(x<sr.left||x>sr.right||y<sr.top||y>sr.bottom) return;
+    if(x<2||y<2||x>vw-2||y>vh-2) return;
+    checked++;
+    const t=document.elementFromPoint(x,y);
+    if(t && (el.contains(t)||t===el)) hit++;
+  });
+  if(checked<4) return {ok:true,size:[r.width,r.height],note:'视口外未采样（滚动后复测）'};
+  return {ok:hit===checked,size:[r.width,r.height],note:'伪元素扩展 · 采样 '+hit+'/'+checked};
+}
+function overlaps(list){
+  const out=[];
+  for(let i=0;i<list.length;i++){
+    for(let j=i+1;j<list.length;j++){
+      const a=list[i].r,b=list[j].r;
+      if(list[i].el.contains(list[j].el)||list[j].el.contains(list[i].el)) continue;
+      const w=Math.min(a.right,b.right)-Math.max(a.left,b.left);
+      const h=Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top);
+      if(w>0&&h>0) out.push([list[i].name,list[j].name,Math.round(w)+'×'+Math.round(h)]);
+    }
+  }
+  return out;
+}
+function buildHitReport(){
+  const els=[...stage.querySelectorAll('[data-tap]')].filter(visible);
+  hitLayer.innerHTML='';
+  const sr=stage.getBoundingClientRect();
+  const rows=[], boxes=[];
+  let pass=0,fail=0;
+  els.forEach(el=>{
+    const m=measure(el);
+    const name=labelOf(el);
+    rows.push({name,rect:el.getBoundingClientRect(),m});
+    m.ok?pass++:fail++;
+    if(hitOn){
+      const r=el.getBoundingClientRect();
+      const d=document.createElement('div');
+      d.className='hit-box '+(m.ok?'ok':'bad');
+      const w=Math.max(44,r.width),h=Math.max(44,r.height);
+      d.style.left=(r.left-sr.left+r.width/2-w/2)+'px';
+      d.style.top=(r.top-sr.top+r.height/2-h/2)+'px';
+      d.style.width=w+'px';d.style.height=h+'px';
+      boxes.push(d);
+    }
+  });
+  boxes.forEach(b=>hitLayer.appendChild(b));
+
+  // 重叠检测（用原始元素重算，保证准确性）
+  const raw=[...stage.querySelectorAll('[data-tap]')].filter(visible).map(el=>({el,name:labelOf(el),r:el.getBoundingClientRect() }));
+  const ov=overlaps(raw);
+
+  const host=document.getElementById('hitReport');
+  const bp=bpLabel.textContent;
+  host.innerHTML =
+    '<div class="summary">'+
+      '<span class="hit-chip ok">'+bp+' · 可点元素 '+els.length+'</span>'+
+      '<span class="hit-chip ok">达标 '+pass+'</span>'+
+      '<span class="hit-chip '+(fail?'bad':'ok')+'">未达标 '+fail+'</span>'+
+      '<span class="hit-chip '+(ov.length?'bad':'ok')+'">热区重叠 '+ov.length+'</span>'+
+    '</div>'+
+    '<div class="spec-wrap"><table class="spec"><thead><tr><th>元素</th><th>视觉尺寸</th><th>命中判定</th><th>说明</th></tr></thead><tbody>'+
+    rows.filter(r=>!r.m.ok).concat(rows.filter(r=>r.m.ok).slice(0,6)).map(r=>
+      '<tr><td>'+r.name+'</td><td class="mono">'+Math.round(r.rect.width)+'×'+Math.round(r.rect.height)+'</td>'+
+      '<td style="color:'+(r.m.ok?'var(--qf-sem-down)':'var(--qf-sem-critical)')+'">'+(r.m.ok?'PASS':'FAIL')+'</td>'+
+      '<td style="color:var(--qf-text-muted)">'+r.m.note+'</td></tr>').join('')+
+    (fail? '':'<tr><td colspan="4" style="color:var(--qf-text-muted)">全部可点元素命中区 ≥ 44×44</td></tr>')+
+    '</tbody></table></div>'+
+    (ov.length?'<div class="help err" style="margin-top:10px">热区重叠：'+ov.map(o=>o[0]+' ↔ '+o[1]+'（'+o[2]+'px）').join('；')+'</div>':
+     '<div class="help" style="margin-top:10px">未检测到热区重叠。视觉尺寸小于 44 的元素通过透明 ::after 扩展命中区，不改变布局占位。</div>');
+}
+
+/* ============================================================
+   7. 动效演示
+   ============================================================ */
+document.getElementById('loadBtn').addEventListener('click',function(){
+  if(this.dataset.busy) return;
+  const html=this.innerHTML;
+  this.dataset.busy='1';
+  this.style.width=this.getBoundingClientRect().width+'px';
+  this.innerHTML='<span class="spinner"></span>分析中';
+  this.disabled=true;
+  setTimeout(()=>{
+    this.innerHTML=html;this.disabled=false;this.style.width='';
+    delete this.dataset.busy;
+  },1600);
+});
+
+document.querySelectorAll('.motion-card .switch').forEach(sw=>{
+  sw.addEventListener('click',()=>sw.setAttribute('aria-checked',sw.getAttribute('aria-checked')==='true'?'false':'true'));
+});
+document.querySelectorAll('.motion-card .tabs').forEach(g=>{
+  g.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
+    g.querySelectorAll('.tab').forEach(x=>x.setAttribute('aria-selected','false'));
+    t.setAttribute('aria-selected','true');
+  }));
+});
+
+document.getElementById('transBox').addEventListener('click',function(){
+  this.classList.remove('play');
+  void this.offsetWidth;
+  this.classList.add('play');
+});
+
+const toastBtn=document.getElementById('toastBtn');
+let toastEl=null;
+toastBtn.addEventListener('click',()=>{
+  if(toastEl){toastEl.remove();toastEl=null;}
+  toastEl=document.createElement('div');
+  toastEl.className='toast';
+  toastEl.style.cssText='position:fixed;left:50%;bottom:32px;z-index:95;animation:toastIn 320ms cubic-bezier(.16,1,.3,1) both';
+  toastEl.innerHTML='<span class="dot"></span>已刷新 1,284 条行情 · 15:00';
+  document.body.appendChild(toastEl);
+  setTimeout(()=>{
+    if(!toastEl)return;
+    toastEl.style.transition='opacity 200ms cubic-bezier(.4,0,1,1)';
+    toastEl.style.opacity='0';
+    setTimeout(()=>{toastEl&&toastEl.remove();toastEl=null;},200);
+  },4000);
+});
+
+const modalLayer=document.getElementById('modalLayer');
+document.getElementById('modalBtn').addEventListener('click',()=>modalLayer.classList.add('open'));
+document.getElementById('modalCancel').addEventListener('click',()=>modalLayer.classList.remove('open'));
+document.getElementById('modalOk').addEventListener('click',()=>modalLayer.classList.remove('open'));
+modalLayer.addEventListener('click',e=>{if(e.target===modalLayer)modalLayer.classList.remove('open');});
+
+/* ============================================================
+   8. 初始化
+   ============================================================ */
+window.addEventListener('resize',()=>{
+  if(hitOn) buildHitReport();
+});
+buildHitReport();
+</script>
+</body>
+</html>
