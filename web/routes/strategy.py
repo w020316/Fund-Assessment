@@ -291,20 +291,37 @@ async def analyze(req: AnalyzeRequest):
         )
 
 
+def _scan_unavailable(operation: str) -> HTTPException:
+    """阶段二 R-13(2026-11-06):扫描失败必须显式 503, 不能返回 [] 冒充“今天没有机会”。"""
+    return HTTPException(
+        status_code=503,
+        detail={
+            "code": "SCAN_DATA_UNAVAILABLE",
+            "message": f"{operation}数据源暂不可用,请稍后重试。",
+            "retryable": True,
+        },
+    )
+
+
 @router.get("/scan/new_high", response_model=list[NewHighItem])
 async def scan_new_high():
     if not _HAS_STRATEGIES:
         top = []
+        source_failed = False
         try:
             # P1 修复(2026-07-30):ds2 同步调用包裹到线程池
             top = await asyncio.to_thread(ds2.get_stock_ranking_em, sort_field="f3", sort_order=0, count=30)
         except Exception as e:
+            source_failed = True
             logger.warning(f"get_stock_ranking_em failed: {e}")
         if not top:
             try:
                 top = await asyncio.to_thread(ds2._get_stock_ranking_sina, "f3", 0, 30)
             except Exception as e:
+                source_failed = True
                 logger.warning(f"get_stock_ranking_sina failed: {e}")
+        if not top and source_failed:
+            raise _scan_unavailable("新高扫描")
         items: list[NewHighItem] = []
         for s in top:
             if s.get("change_pct", 0) >= 3:
@@ -315,9 +332,7 @@ async def scan_new_high():
                     volume=s.get("volume", 0),
                     amount=s.get("amount", 0),
                 ))
-        if items:
-            return items
-        return []
+        return items
     try:
         import akshare as ak
         items: list[NewHighItem] = []
@@ -337,9 +352,9 @@ async def scan_new_high():
                 ))
         return items
     except Exception:
-        # P2 修复(2026-07-30):补日志,避免静默吞异常无法排查
+        # P2 修复(2026-07-30):补日志; R-13:显式 503 而非 return []
         logger.exception("scan_new_high akshare path failed")
-        return []
+        raise _scan_unavailable("新高扫描")
 
 
 @router.get("/scan/limit_up", response_model=list[LimitUpItem])
@@ -356,9 +371,9 @@ async def scan_limit_up():
             seal_volume=r.seal_volume, quality_score=r.quality_score,
         ) for r in results]
     except Exception:
-        # P2 修复(2026-07-30):补日志
+        # P2 修复(2026-07-30):补日志; R-13:显式 503 而非 return []
         logger.exception("scan_limit_up failed")
-        return []
+        raise _scan_unavailable("涨停扫描")
 
 
 @router.get("/scan/cb", response_model=list[CBItem])
@@ -377,9 +392,9 @@ async def scan_cb():
             volume_ratio=r.volume_ratio, turnover_rate=r.turnover_rate,
         ) for r in results]
     except Exception:
-        # P2 修复(2026-07-30):补日志
+        # P2 修复(2026-07-30):补日志; R-13:显式 503 而非 return []
         logger.exception("scan_cb failed")
-        return []
+        raise _scan_unavailable("可转债扫描")
 
 
 @router.post("/backtest", response_model=BacktestResponse,

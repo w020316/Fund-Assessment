@@ -4097,42 +4097,44 @@ async function runScan(type) {
   if (type === 'new_high') url = '/api/strategy/scan/new_high';
   if (type === 'convertible') url = '/api/strategy/scan/cb';
 
-  const data = await api(url);
+  let data;
+  try {
+    data = await api(url);
+  } catch (e) {
+    // api() 已展示持久错误卡(含重试按钮), 这里不再渲染“暂无信号”误导用户
+    return;
+  }
   const card = document.getElementById('scanResultCard');
   const body = document.getElementById('scanResultBody');
   card.style.display = 'block';
 
-  const defaultResults = [
-    {code:'300999',name:'金龙鱼',price:45.67,change_pct:10.01,volume:2345678900,signal:'涨停'},
-    {code:'688981',name:'中芯国际',price:78.90,change_pct:8.52,volume:5678901234,signal:'强势'},
-    {code:'002594',name:'比亚迪',price:267.80,change_pct:6.34,volume:8901234567,signal:'突破'},
-    {code:'600519',name:'贵州茅台',price:1856.00,change_pct:4.21,volume:3456789012,signal:'新高'},
-    {code:'000858',name:'五粮液',price:156.78,change_pct:3.89,volume:2345678901,signal:'放量'}
-  ];
+  // 阶段二 R-13:删除 defaultResults 假标的; 空数组就是“暂无扫描结果”, 不伪造涨停/新高
+  const results = (Array.isArray(data) ? data : []).map(r => ({
+    code: r.stock_code || r.code || '',
+    name: r.stock_name || r.name || '',
+    price: r.price,
+    change_pct: r.change_pct,
+    volume: r.volume,
+    signal: r.reason || r.level || ''
+  }));
 
-  let results = defaultResults;
-  if (data && Array.isArray(data) && data.length > 0) {
-    // scan/new_high返回list[NewHighItem]: stock_code, stock_name, change_pct, volume, amount
-    // scan/limit_up返回list[LimitUpItem]: stock_code, stock_name, level, reason, seal_time, open_count, seal_volume, quality_score
-    results = data.map(r => ({
-      code: r.stock_code || r.code || '',
-      name: r.stock_name || r.name || '',
-      price: r.price || 0,
-      change_pct: r.change_pct || 0,
-      volume: r.volume || 0,
-      signal: r.reason || r.level || '强势'
-    }));
+  if (!results.length) {
+    body.innerHTML = '<tr><td colspan="6" style="color:var(--text-muted);text-align:center;padding:20px;">暂无扫描结果</td></tr>';
+    return;
   }
 
   body.innerHTML = results.map(r => {
     const color = changeColor(r.change_pct);
+    const price = (typeof r.price === 'number') ? fmtNum(r.price) : '—';
+    const pct = (typeof r.change_pct === 'number') ? `${changeSign(r.change_pct)}${fmtNum(r.change_pct)}%` : '—';
+    const vol = (typeof r.volume === 'number') ? fmtMoney(r.volume) : '—';
     return `<tr>
-      <td style="color:var(--accent-cyan);">${r.code}</td>
-      <td>${r.name}</td>
-      <td style="color:${color}">${fmtNum(r.price)}</td>
-      <td style="color:${color}">${changeSign(r.change_pct)}${fmtNum(r.change_pct)}%</td>
-      <td>${fmtMoney(r.volume)}</td>
-      <td><span class="signal signal-bullish">${r.signal}</span></td>
+      <td style="color:var(--accent-cyan);">${escapeHtml(r.code)}</td>
+      <td>${escapeHtml(r.name)}</td>
+      <td style="color:${color}">${price}</td>
+      <td style="color:${color}">${pct}</td>
+      <td>${vol}</td>
+      <td><span class="signal signal-bullish">${escapeHtml(r.signal)}</span></td>
     </tr>`;
   }).join('');
 }
