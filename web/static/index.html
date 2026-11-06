@@ -2558,7 +2558,9 @@ const ALERT_ICON_MAP = {
 // API请求封装
 // 超时映射:特定慢接口允许更长等待(智能分析/检索类)
 const API_TIMEOUT_MS = (url) => {
-  if (url.startsWith('/api/agent/') || url.includes('/fund_analyze')) return 90000; // 多智能体 90s
+  // 阶段二 R-09:与后端 LLM_TOTAL_TIMEOUT=25s 对齐, 不再让用户空等 90s
+  if (url.includes('/fund_analyze')) return 40000; // 7 角色多智能体: 数据聚合 + 25s LLM 预算
+  if (url.startsWith('/api/agent/')) return 30000; // 单次分析: 后端总预算 25s + 网络余量
   if (url.startsWith('/api/review/')) return 30000; // 复盘需并行拉取涨停/炸板/跌停池,冷启动较慢
   if (url.startsWith('/api/news/search')) return 30000; // 智能检索 30s
   if (url.startsWith('/api/market/outlook') || url.startsWith('/api/scripts/ai-generate')) return 30000;

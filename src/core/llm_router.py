@@ -563,6 +563,7 @@ class LLMRouter:
         temperature: float = 0.7,
         json_mode: bool = False,
         timeout: int | None = None,
+        total_timeout: float | None = None,
     ) -> LLMResponse:
         """发送聊天请求，自动故障切换 + 令牌桶限流 + 指数退避重试
 
@@ -571,13 +572,14 @@ class LLMRouter:
             model: 指定模型（覆盖Provider默认模型）
             temperature: 温度参数
             json_mode: 是否启用JSON输出模式
-            timeout: 超时时间（秒）
+            timeout: 单 Provider 超时时间（秒），会被总预算进一步收紧
+            total_timeout: 本次调用的总预算（秒）；缺省读 LLM_TOTAL_TIMEOUT，默认 25s
 
         Returns:
             LLMResponse
 
         Raises:
-            RuntimeError: 所有Provider均不可用
+            RuntimeError: 所有Provider均不可用，或总预算耗尽
         """
         # P0:LLM 结果缓存(命中直接返回,不消耗免费额度)
         cached = _llm_cache.get(messages, model, temperature, json_mode)
@@ -585,27 +587,49 @@ class LLMRouter:
             logger.debug(f"LLM 缓存命中(provider={cached.provider}, model={cached.model})")
             return cached
 
+        # 阶段二 R-09(2026-11-06):单次 chat 的端到端总预算。
+        # 原实现逐个 Provider 串行等待,3~4 个 30s Provider 会让前端空等 90s+;
+        # 现在剩余预算会实时收紧每个 Provider 的超时,预算耗尽立即失败。
+        budget = (
+            float(total_timeout)
+            if total_timeout is not None
+            else float(os.getenv("LLM_TOTAL_TIMEOUT", "25"))
+        )
+        budget = max(budget, 0.0)
+        deadline = time.monotonic() + budget
+
         last_error = None
         last_error_provider: LLMProvider | None = None
+        budget_exhausted = False
         for provider in self._providers:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                budget_exhausted = True
+                break
             if not provider.is_available:
                 continue
 
             # 令牌桶限流:获取令牌,超时则跳过该Provider
             bucket = self._token_buckets.get(provider.name)
-            if bucket and not bucket.acquire(timeout=10):
+            if bucket and not bucket.acquire(timeout=min(10.0, max(remaining, 0.1))):
                 logger.warning(f"LLM Provider [{provider.name}] 令牌桶限流超时,跳过")
                 continue
 
             # 指数退避重试(1s → 2s → 4s)
             max_attempts = min(provider.max_retries + 1, 3)
             for attempt in range(max_attempts):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    budget_exhausted = True
+                    break
+                # 单次请求超时 = min(Provider 配置, 剩余总预算),至少 1s
+                call_timeout = max(1, int(min(timeout or provider.timeout, remaining)))
                 try:
                     logger.debug(f"尝试 LLM Provider: {provider.name} (第{attempt+1}次)")
                     response = self._call_provider(
                         provider, messages,
                         model=model, temperature=temperature,
-                        json_mode=json_mode, timeout=timeout,
+                        json_mode=json_mode, timeout=call_timeout,
                     )
                     provider.record_success()
                     # P0:写入 LLM 结果缓存(下次相同 prompt 直接命中)
@@ -631,11 +655,16 @@ class LLMRouter:
                         break
                     if attempt < max_attempts - 1:
                         delay = provider.retry_delay * (2 ** attempt)
+                        # 重试等待同样不能突破总预算
+                        delay = max(0.0, min(delay, deadline - time.monotonic()))
                         logger.warning(f"LLM Provider [{provider.name}] 第{attempt+1}次失败: {safe_error},{delay:.1f}s后重试")
-                        time.sleep(delay)
+                        if delay > 0:
+                            time.sleep(delay)
                     else:
                         provider.record_failure()
                         logger.warning(f"LLM Provider [{provider.name}] 全部{max_attempts}次重试失败: {safe_error}")
+            if budget_exhausted:
+                break
 
         # 修复(2026-07-31): 所有 Provider 不可用时返回明确错误。
         # 当所有 Provider 被熔断或未配置时,循环不执行,last_error 仍为 None,
@@ -646,6 +675,8 @@ class LLMRouter:
                 if last_error_provider is not None else "unknown"
             )
             raise RuntimeError(f"所有LLM Provider均不可用，最后错误: {safe_last}")
+        if budget_exhausted:
+            raise RuntimeError(f"LLM 总预算 {budget:.0f}s 已耗尽，未拿到有效响应")
         raise RuntimeError("所有LLM Provider均不可用: 无可用Provider(全部被熔断或未配置)")
 
     def _call_provider(
