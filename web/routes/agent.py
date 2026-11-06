@@ -126,6 +126,12 @@ def _raise_if_degraded(result: Any, op: str) -> None:
     if code == "DATA_UNAVAILABLE" or "无法获取" in reason:
         code = "DATA_UNAVAILABLE"
         message = "行情数据暂不可用,暂时无法完成分析,请稍后重试。"
+    elif code == "DATA_INCOMPLETE":
+        # P1 修复(2026-11-06):核心数据不足时不再让模型“基于 0 值编结论”。
+        message = (
+            f"核心数据不足,未生成分析结论(完整性 {result.get('data_completeness')}/100)。"
+            "请稍后重试或更换标的。"
+        )
     else:
         message = "AI 模型服务暂时不可用(所有 Provider 调用失败),请稍后重试。"
     raise HTTPException(

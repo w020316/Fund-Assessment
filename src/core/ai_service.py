@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import os
 import re
 from datetime import datetime
@@ -153,6 +154,106 @@ def _gather_stock_data(stock_code: str) -> dict[str, Any]:
     return data
 
 
+def _prompt_value(mapping: dict[str, Any], key: str, unit: str = "", digits: int | None = None) -> str:
+    """把缺失数据显式渲染为“缺失”，禁止用 0 冒充真实数值。
+
+    P1 修复(2026-11-06):原 Prompt 统一用 `.get(key, 0)`，当行情/财务/资金流
+    全部缺失时，模型会看到“当前价格 0 / PE 0 / ROE 0”等伪数据并据此给出结论。
+    """
+    if not isinstance(mapping, dict) or key not in mapping:
+        return "缺失"
+    val = mapping.get(key)
+    if val is None or val == "":
+        return "缺失"
+    if isinstance(val, bool):
+        return "是" if val else "否"
+    if isinstance(val, (int, float)):
+        num = float(val)
+        if not math.isfinite(num):
+            return "缺失"
+        if digits is not None:
+            return f"{num:.{digits}f}{unit}"
+        return f"{val}{unit}"
+    text = str(val).strip()
+    return f"{text}{unit}" if text else "缺失"
+
+
+# 核心数据完整性权重(总分 100)。低于 40 直接标记 degraded，由路由层返回 503。
+_COMPLETENESS_WEIGHTS = {
+    "quote_price": 30,
+    "kline": 20,
+    "financial": 20,
+    "capital_flow": 10,
+    "company": 5,
+    "news": 5,
+    "margin": 5,
+    "shareholder": 5,
+}
+
+
+def _compute_data_completeness(stock_data: dict[str, Any]) -> tuple[int, list[str]]:
+    """计算个股数据完整性(0-100)与缺失项清单。只做客观计数，不做推断。"""
+    score = 0
+    missing: list[str] = []
+
+    quote = stock_data.get("quote") if isinstance(stock_data.get("quote"), dict) else {}
+    price = quote.get("price")
+    has_price = False
+    if isinstance(price, (int, float)) and math.isfinite(float(price)) and float(price) > 0:
+        has_price = True
+    score += _COMPLETENESS_WEIGHTS["quote_price"] if has_price else 0
+    if not has_price:
+        missing.append("实时行情/现价")
+
+    kline = stock_data.get("kline_daily")
+    has_kline = isinstance(kline, list) and len(kline) >= 5
+    score += _COMPLETENESS_WEIGHTS["kline"] if has_kline else 0
+    if not has_kline:
+        missing.append("K线")
+
+    for key, label in (
+        ("financial", "财务指标"),
+        ("capital_flow", "资金流"),
+        ("company", "公司资料"),
+        ("margin", "融资融券"),
+        ("shareholder", "股东户数"),
+    ):
+        value = stock_data.get(key)
+        ok = isinstance(value, dict) and bool(value)
+        score += _COMPLETENESS_WEIGHTS[key] if ok else 0
+        if not ok:
+            missing.append(label)
+
+    news = stock_data.get("news")
+    has_news = isinstance(news, list) and bool(news)
+    score += _COMPLETENESS_WEIGHTS["news"] if has_news else 0
+    if not has_news:
+        missing.append("个股新闻")
+
+    return score, missing
+
+
+def _attach_data_quality(result: dict[str, Any], stock_data: dict[str, Any]) -> dict[str, Any]:
+    """把数据完整性写入结果；低于阈值时标记 degraded，路由层据此返回 503。
+
+    注意:解析失败/无数据路径已由 `_fallback_result` 标记 degraded，这里不覆盖。
+    """
+    if not isinstance(result, dict):
+        return result
+    score, missing = _compute_data_completeness(stock_data)
+    result["data_completeness"] = score
+    result["missing_fields"] = missing
+    if score < 40:
+        # 保留已有 degraded 原因(例如 LLM 全失败)，补足数据不足语义
+        result.setdefault("degraded", True)
+        result.setdefault("error_code", "DATA_INCOMPLETE")
+        result.setdefault(
+            "degraded_reason",
+            f"核心数据不足(完整性{score}/100): " + "、".join(missing),
+        )
+    return result
+
+
 def _build_analysis_prompt(stock_code: str, stock_data: dict[str, Any], search_news: list[dict], mode: str) -> str:
     quote = stock_data.get("quote", {})
     financial = stock_data.get("financial", {})
@@ -167,7 +268,7 @@ def _build_analysis_prompt(stock_code: str, stock_data: dict[str, Any], search_n
     northbound_flow = stock_data.get("northbound_flow", {})
     global_news = stock_data.get("global_news", [])
 
-    kline_summary = ""
+    kline_summary = "  缺失(无K线数据)"
     if kline:
         recent = kline[-5:]
         kline_summary = "\n".join(
@@ -175,14 +276,14 @@ def _build_analysis_prompt(stock_code: str, stock_data: dict[str, Any], search_n
             for d in recent
         )
 
-    reports_summary = ""
+    reports_summary = "  缺失(无研报数据)"
     if reports:
         reports_summary = "\n".join(
             f"  [{r.get('publish_date', '')}] {r.get('org_name', '')} - {r.get('title', '')} 评级:{r.get('rating', '')}"
             for r in reports[:5]
         )
 
-    news_summary = ""
+    news_summary = "  缺失(无新闻数据)"
     all_news = list(stock_news) + list(search_news)
     if all_news:
         news_summary = "\n".join(
@@ -190,18 +291,18 @@ def _build_analysis_prompt(stock_code: str, stock_data: dict[str, Any], search_n
             for n in all_news[:10]
         )
 
-    dragon_tiger_summary = ""
+    dragon_tiger_summary = "  缺失(无龙虎榜数据)"
     if dragon_tiger:
         dragon_tiger_summary = "\n".join(
             f"  {d.get('name', '')}({d.get('code', '')}) 涨跌:{d.get('change_pct', 0)}% 买入:{d.get('buy_amount', 0)} 卖出:{d.get('sell_amount', 0)} 净额:{d.get('net_amount', 0)} 原因:{d.get('reason', '')}"
             for d in dragon_tiger[:10]
         )
 
-    northbound_summary = ""
+    northbound_summary = "  缺失(无北向资金数据)"
     if northbound_flow:
         northbound_summary = f"  沪股通净流入: {northbound_flow.get('sh_net_inflow', 0)}  深股通净流入: {northbound_flow.get('sz_net_inflow', 0)}  北向合计净流入: {northbound_flow.get('total_net_inflow', 0)}"
 
-    global_news_summary = ""
+    global_news_summary = "  缺失(无全球新闻数据)"
     if global_news:
         global_news_summary = "\n".join(
             f"  [{n.get('publish_time', '')}] {n.get('title', '')} - {n.get('source', '')}"
@@ -220,45 +321,47 @@ def _build_analysis_prompt(stock_code: str, stock_data: dict[str, Any], search_n
 
     prompt = f"""你是一位专业的A股投资研究总监，现在需要对股票 {stock_code} 进行全面的多智能体分析。
 
+> 数据缺失时字段会显示“缺失”。禁止把“缺失”当作 0，禁止在关键数据缺失时编造具体数值；请在 reasoning 中明确说明数据不足，并相应降低置信度。
+
 ## 实时行情
-- 股票代码: {quote.get('code', stock_code)}
-- 股票名称: {quote.get('name', '')}
-- 当前价格: {quote.get('price', 0)}
-- 涨跌幅: {quote.get('change_pct', 0)}%
-- 成交量: {quote.get('volume', 0)}
-- 成交额: {quote.get('amount', 0)}
-- 换手率: {quote.get('turnover', 0)}
-- PE(TTM): {quote.get('pe_ttm', 0)}
-- PB: {quote.get('pb', 0)}
-- 总市值: {quote.get('total_market_value', 0)}
-- 流通市值: {quote.get('circ_market_value', 0)}
-- 涨停价: {quote.get('high_limit', 0)}
-- 跌停价: {quote.get('low_limit', 0)}
+- 股票代码: {quote.get('code', stock_code) if isinstance(quote, dict) and quote.get('code') else stock_code}
+- 股票名称: {_prompt_value(quote, 'name')}
+- 当前价格: {_prompt_value(quote, 'price', digits=2)}
+- 涨跌幅: {_prompt_value(quote, 'change_pct', unit='%', digits=2)}
+- 成交量: {_prompt_value(quote, 'volume', digits=0)}
+- 成交额: {_prompt_value(quote, 'amount', digits=2)}
+- 换手率: {_prompt_value(quote, 'turnover', unit='%', digits=2)}
+- PE(TTM): {_prompt_value(quote, 'pe_ttm', digits=2)}
+- PB: {_prompt_value(quote, 'pb', digits=2)}
+- 总市值: {_prompt_value(quote, 'total_market_value', digits=2)}
+- 流通市值: {_prompt_value(quote, 'circ_market_value', digits=2)}
+- 涨停价: {_prompt_value(quote, 'high_limit', digits=2)}
+- 跌停价: {_prompt_value(quote, 'low_limit', digits=2)}
 
 ## 基本面数据
-- PE(TTM): {financial.get('pe_ttm', 0)}
-- PB: {financial.get('pb', 0)}
-- ROE: {financial.get('roe', 0)}%
-- 毛利率: {financial.get('gross_margin', 0)}%
-- 净利率: {financial.get('net_margin', 0)}%
-- 营收同比增长: {financial.get('revenue_yoy', 0)}%
-- 净利润同比增长: {financial.get('profit_yoy', 0)}%
+- PE(TTM): {_prompt_value(financial, 'pe_ttm', digits=2)}
+- PB: {_prompt_value(financial, 'pb', digits=2)}
+- ROE: {_prompt_value(financial, 'roe', unit='%', digits=2)}
+- 毛利率: {_prompt_value(financial, 'gross_margin', unit='%', digits=2)}
+- 净利率: {_prompt_value(financial, 'net_margin', unit='%', digits=2)}
+- 营收同比增长: {_prompt_value(financial, 'revenue_yoy', unit='%', digits=2)}
+- 净利润同比增长: {_prompt_value(financial, 'profit_yoy', unit='%', digits=2)}
 
 ## 资金流向
-- 主力净流入: {capital_flow.get('main_net_inflow', 0)}
-- 主力流入占比: {capital_flow.get('main_inflow_pct', 0)}%
-- 超大单净流入: {capital_flow.get('super_large_net_inflow', 0)}
-- 大单净流入: {capital_flow.get('large_net_inflow', 0)}
-- 中单净流入: {capital_flow.get('medium_net_inflow', 0)}
-- 小单净流入: {capital_flow.get('small_net_inflow', 0)}
+- 主力净流入: {_prompt_value(capital_flow, 'main_net_inflow', digits=2)}
+- 主力流入占比: {_prompt_value(capital_flow, 'main_inflow_pct', unit='%', digits=2)}
+- 超大单净流入: {_prompt_value(capital_flow, 'super_large_net_inflow', digits=2)}
+- 大单净流入: {_prompt_value(capital_flow, 'large_net_inflow', digits=2)}
+- 中单净流入: {_prompt_value(capital_flow, 'medium_net_inflow', digits=2)}
+- 小单净流入: {_prompt_value(capital_flow, 'small_net_inflow', digits=2)}
 
 ## 融资融券
-- 融资余额: {margin.get('margin_balance', 0)}
-- 融券余额: {margin.get('short_balance', 0)}
+- 融资余额: {_prompt_value(margin, 'margin_balance', digits=2)}
+- 融券余额: {_prompt_value(margin, 'short_balance', digits=2)}
 
 ## 股东户数
-- 户数: {shareholder.get('holder_num', 0)}
-- 变化: {shareholder.get('change_pct', 0)}%
+- 户数: {_prompt_value(shareholder, 'holder_num', digits=0)}
+- 变化: {_prompt_value(shareholder, 'change_pct', unit='%', digits=2)}
 
 ## 近5日K线
 {kline_summary}
@@ -1002,7 +1105,11 @@ def analyze_stock(stock_code: str, mode: str = "deep") -> dict[str, Any]:
     try:
         response_text = _call_llm(messages, temperature=0.5 if mode == "deep" else 0.3)
         result = _parse_analysis_response(response_text, stock_code)
-        logger.info(f"analysis completed for {stock_code}: action={result['action']}, confidence={result['confidence']}")
+        result = _attach_data_quality(result, stock_data)
+        logger.info(
+            f"analysis completed for {stock_code}: action={result['action']}, "
+            f"confidence={result['confidence']}, completeness={result.get('data_completeness')}"
+        )
         return result
     except Exception as e:
         logger.error(f"AI analysis failed for {stock_code}: {e}")
@@ -1031,7 +1138,11 @@ def quick_analysis(stock_code: str) -> dict[str, Any]:
     try:
         response_text = _call_llm(messages, temperature=0.3)
         result = _parse_analysis_response(response_text, stock_code)
-        logger.info(f"quick analysis completed for {stock_code}: action={result['action']}")
+        result = _attach_data_quality(result, stock_data)
+        logger.info(
+            f"quick analysis completed for {stock_code}: action={result['action']}, "
+            f"completeness={result.get('data_completeness')}"
+        )
         return result
     except Exception as e:
         logger.error(f"quick analysis failed for {stock_code}: {e}")
@@ -1061,9 +1172,13 @@ def multi_analyze(stock_code: str, mode: str = "deep") -> dict[str, Any]:
     try:
         response_text = _call_llm(messages, temperature=0.5 if mode == "deep" else 0.3)
         result = _parse_analysis_response(response_text, stock_code)
+        result = _attach_data_quality(result, stock_data)
         result["analysis_mode"] = "multi_agent"
         result["analyst_count"] = len(result.get("agent_opinions", []))
-        logger.info(f"multi-agent analysis completed for {stock_code}: action={result['action']}, analysts={result['analyst_count']}")
+        logger.info(
+            f"multi-agent analysis completed for {stock_code}: action={result['action']}, "
+            f"analysts={result['analyst_count']}, completeness={result.get('data_completeness')}"
+        )
         return result
     except Exception as e:
         logger.error(f"multi-agent analysis failed for {stock_code}: {e}")
