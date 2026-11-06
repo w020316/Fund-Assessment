@@ -4208,6 +4208,9 @@ async function runStrategyValidate() {
   const code = _strategyLabCode();
   const runsEl = document.getElementById('strategyLabRuns');
   const runs = Math.max(100, Math.min(5000, parseInt(runsEl.value, 10) || 1000));
+  const labBox = document.getElementById('strategyLabResult');
+  // 阶段六:先给预期时长,避免"点了没反应"(1000 次蒙特卡洛约 3–10 秒)
+  if (labBox) labBox.textContent = '样本外验证计算中(约 3–10 秒)…';
   try {
     // 用真实K线收盘价构造收益率序列, 数据不足则直接提示, 不生成合成序列
     const kline = await api(`/api/market/stock_kline?code=${encodeURIComponent(code)}&count=120`);
@@ -4223,9 +4226,29 @@ async function runStrategyValidate() {
       method: 'POST',
       body: JSON.stringify({ returns, runs })
     });
+    // 阶段六 F6:字段化渲染,不再把原始 JSON 直接糊给用户
+    const r = (data && data.data) || data || {};
+    if (r.available === false) {
+      _renderStrategyLab(`样本外验证 ${code}`, [['状态', String(r.message || '数据不可用')]]);
+      return;
+    }
+    const wf = r.walk_forward || {};
+    const mc = r.monte_carlo || {};
+    const fr = mc.final_return || {};
+    const dd = mc.max_drawdown || {};
+    const wr = mc.win_rate || {};
+    const pct = (v) => (v == null ? '—' : (Number(v) * 100).toFixed(1) + '%');
+    const num = (v) => (v == null ? '—' : String(v));
     _renderStrategyLab(`样本外验证 ${code}(${returns.length} 期收益, ${runs} 次蒙特卡洛)`, [
-      ['结果', JSON.stringify(data && data.data ? data.data : data).slice(0, 200)]
-    ]);
+      ['样本数', num(r.samples)],
+      ['滚动窗口数', num(wf.window_count) + '(训练' + num(wf.train_size) + '/测试' + num(wf.test_size) + ')'],
+      ['窗口平均收益', num(wf.avg_test_return_pct) + '%'],
+      ['正收益窗口占比', pct(wf.positive_ratio)],
+      ['稳定性', String(wf.stability || '—')],
+      ['蒙特卡洛收益 p5 / p50 / p95', num(fr.p5) + '% / ' + num(fr.p50) + '% / ' + num(fr.p95) + '%'],
+      ['蒙特卡洛最大回撤 p50 / p95', num(dd.p50) + '% / ' + num(dd.p95) + '%'],
+      ['蒙特卡洛胜率 p50', num(wr.p50) + '%']
+    ], (r.notes || []).join('；'));
   } catch (e) {
     _strategyLabError(`样本外验证失败(数据不可用或鉴权失败)`, e);
   }
@@ -5424,7 +5447,11 @@ async function multiAgentAnalyze(fundCode, fundName, costNav, shares) {
         <div style="font-size:32px;margin-bottom:12px;opacity:0.5;">⚠</div>
         <div style="font-size:15px;color:var(--color-warning);margin-bottom:8px;">分析失败</div>
         <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">所有 AI 模型调用均失败,未生成任何结论。可能原因:1.未配置管理Token 2.触发限流(3次/分钟) 3.LLM服务暂不可用。请稍后重试。</div>
-        <button class="btn btn-primary" data-code="${escapeHtml(fundCode)}" data-name="${escapeHtml(fundName || '')}" data-cost="${costNav||0}" data-shares="${shares||0}" onclick="onMultiAgentAnalyzeClick(this)">重试分析</button>
+        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
+          <button class="btn btn-primary" data-code="${escapeHtml(fundCode)}" data-name="${escapeHtml(fundName || '')}" data-cost="${costNav||0}" data-shares="${shares||0}" onclick="onMultiAgentAnalyzeClick(this)">重试分析</button>
+          <button class="btn btn-sm" onclick="closeMultiAgentModal(); loadFundAdviceV2();">改用组合规则建议(不依赖 AI)</button>
+        </div>
+        <div style="margin-top:12px;font-size:11px;color:var(--text-tertiary);">规则建议由本地信号引擎计算,不调用任何 AI Provider。</div>
       </div>`;
       return;
     }
