@@ -28,6 +28,8 @@ _EM_SESSION.headers.update({
 })
 
 _last_em_request_time: float = 0.0
+# 下一次最早可发送时间(阶段二 R-07):锁内仅预约时间片,网络 IO 移到锁外
+_em_next_slot: float = 0.0
 _EM_MIN_INTERVAL: float = 0.3
 _EM_AVAILABLE: bool | None = None
 # P2 修复(2026-07-29):原 _check_em_available 无锁保护,多线程并发首次调用时
@@ -180,20 +182,21 @@ def _em_secid(code: str) -> str:
 def em_get(url: str, params: dict[str, Any] | None = None, **kwargs: Any) -> requests.Response:
     if "push2.eastmoney.com" in url and not _ensure_em_checked():
         raise requests.ConnectionError("EastMoney push2 API unavailable (proxy blocked)")
-    # P2 修复(2026-07-30):整段限速逻辑加锁,确保 "检查间隔→sleep→发请求→更新时间" 原子化,
-    # 避免多线程并发时同时通过限速检查导致瞬时请求堆积触发反爬。
-    # 注意:锁内包含网络 IO(sleep + requests.get),会串行化所有 em 请求,
-    # 但 _EM_MIN_INTERVAL=0.3s + 网络 5s 超时,最坏情况下 N 个请求排队 ~5.3*N 秒,
-    # 而原本设计就是串行限速,加锁只是让设计意图真正生效。
+    # P2 修复(2026-11-06):原实现把 sleep + 5s 网络请求都包在 _em_rate_lock 里,
+    # 并发时 N 个请求排队,最坏 ~5.3*N 秒,首页多接口并发被放大为秒级等待。
+    # 现在锁内只“预约发送时间片”,锁外 sleep + 发请求:
+    #   - 仍保证相邻请求发送间隔 >= _EM_MIN_INTERVAL(反爬语义不变);
+    #   - 网络 IO 可并发,不再互相阻塞。
+    global _last_em_request_time, _em_next_slot
     with _em_rate_lock:
-        global _last_em_request_time
-        elapsed = time.monotonic() - _last_em_request_time
-        wait = _EM_MIN_INTERVAL - elapsed + random.uniform(0, 0.5)
-        if wait > 0:
-            time.sleep(wait)
-        resp = _EM_SESSION.get(url, params=params, timeout=5, **kwargs)
-        _last_em_request_time = time.monotonic()
-        return resp
+        now = time.monotonic()
+        slot = max(now, _em_next_slot)
+        wait = slot - now
+        _em_next_slot = slot + _EM_MIN_INTERVAL + random.uniform(0, 0.5)
+        _last_em_request_time = slot
+    if wait > 0:
+        time.sleep(wait)
+    return _EM_SESSION.get(url, params=params, timeout=5, **kwargs)
 
 
 def _mootdx_client() -> Any:
