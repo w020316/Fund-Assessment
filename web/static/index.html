@@ -2325,6 +2325,17 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
           </div>
         </div>
 
+        <!-- 阶段二 R-11: 策略参数 -->
+        <div class="card mt-16" id="strategyParamsCard" role="region" aria-labelledby="strategyParamsTitle">
+          <div class="card-title" id="strategyParamsTitle" style="display:flex;justify-content:space-between;align-items:center;">
+            <span>策略参数</span>
+            <button class="btn btn-outline" style="padding:4px 10px;font-size:12px;" onclick="loadStrategyParams()">重新加载</button>
+          </div>
+          <div id="strategyParamsForm" style="font-size:12px;color:var(--text-muted);">加载中...</div>
+          <button class="btn btn-primary mt-16" onclick="saveStrategyParams()" style="width:100%;">保存策略参数</button>
+          <div style="margin-top:8px;font-size:11px;color:var(--text-muted);">数值参数直接编辑；布尔参数用下拉选择；保存前会校验数值合法性。</div>
+        </div>
+
         <div class="grid-2">
           <!-- 通知测试 -->
           <div class="card">
@@ -7241,10 +7252,119 @@ async function loadHotSignals() {
 /* ========== 8. 系统配置 ========== */
 let currentConfig = {};
 
+/* ===== 阶段二 R-11: 策略参数配置 ===== */
+function _flattenStrategy(obj, prefix, out) {
+  Object.keys(obj || {}).forEach(k => {
+    const v = obj[k];
+    const path = prefix ? prefix + '.' + k : k;
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      _flattenStrategy(v, path, out);
+    } else {
+      out.push([path, v]);
+    }
+  });
+}
+
+function _setStrategyPath(target, path, value) {
+  const parts = path.split('.');
+  let cur = target;
+  parts.forEach((p, i) => {
+    if (i === parts.length - 1) {
+      cur[p] = value;
+    } else {
+      if (!cur[p] || typeof cur[p] !== 'object') cur[p] = {};
+      cur = cur[p];
+    }
+  });
+}
+
+async function loadStrategyParams() {
+  const form = document.getElementById('strategyParamsForm');
+  if (!form) return;
+  if (!localStorage.getItem('admin_token')) {
+    form.innerHTML = '<div style="color:var(--color-warning);padding:8px 0;">请先在下方「管理鉴权」配置管理员 Token 后查看策略参数</div>';
+    return;
+  }
+  form.innerHTML = '<div style="color:var(--text-muted);padding:8px 0;">加载中...</div>';
+  let resp;
+  try {
+    resp = await api('/api/config/strategies');
+  } catch (e) {
+    form.innerHTML = '<div style="color:var(--color-warning);padding:8px 0;">策略参数读取失败，请稍后重试</div>';
+    return;
+  }
+  const strategies = (resp && resp.strategies) || {};
+  const leaves = [];
+  _flattenStrategy(strategies, '', leaves);
+  if (!leaves.length) {
+    form.innerHTML = '<div style="color:var(--text-muted);padding:8px 0;">策略参数为空</div>';
+    return;
+  }
+  const groups = {};
+  leaves.forEach(([path, value]) => {
+    const group = path.split('.')[0];
+    (groups[group] = groups[group] || []).push([path, value]);
+  });
+  form.innerHTML = Object.keys(groups).map(group => `
+    <div style="margin-bottom:12px;">
+      <div style="font-weight:600;color:var(--text-primary);margin-bottom:6px;">${escapeHtml(group)}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        ${groups[group].map(([path, value]) => {
+          const type = typeof value === 'boolean' ? 'boolean' : (typeof value === 'number' ? 'number' : 'text');
+          const input = type === 'boolean'
+            ? `<select class="select" data-skey="${escapeHtml(path)}" data-stype="boolean">
+                <option value="true" ${value === true ? 'selected' : ''}>true</option>
+                <option value="false" ${value === false ? 'selected' : ''}>false</option>
+              </select>`
+            : `<input class="input" data-skey="${escapeHtml(path)}" data-stype="${type}" type="${type === 'number' ? 'number' : 'text'}" step="any" value="${escapeHtml(value == null ? '' : value)}">`;
+          return `<div><label style="font-size:11px;color:var(--text-muted);">${escapeHtml(path)}</label>${input}</div>`;
+        }).join('')}
+      </div>
+    </div>`).join('');
+}
+
+async function saveStrategyParams() {
+  if (!localStorage.getItem('admin_token')) {
+    showToast('请先配置管理员 Token', 'error');
+    return;
+  }
+  const form = document.getElementById('strategyParamsForm');
+  if (!form) return;
+  const payload = {};
+  const fields = form.querySelectorAll('[data-skey]');
+  for (const el of fields) {
+    const path = el.dataset.skey;
+    let value;
+    if (el.dataset.stype === 'boolean') {
+      value = el.value === 'true';
+    } else if (el.dataset.stype === 'number') {
+      value = Number(el.value);
+      if (!isFinite(value)) {
+        showToast('参数 ' + path + ' 不是有效数字', 'error');
+        return;
+      }
+    } else {
+      value = el.value;
+    }
+    _setStrategyPath(payload, path, value);
+  }
+  const resp = await api('/api/config/strategies', {
+    method: 'PUT',
+    body: JSON.stringify({ strategies: payload })
+  });
+  if (resp && resp.strategies && Object.keys(resp.strategies).length) {
+    showToast('策略参数已保存', 'success');
+    loadStrategyParams();
+  } else {
+    showToast('保存失败，请检查参数或稍后重试', 'error');
+  }
+}
+
 async function loadConfigData() {
   loadSettings();
   loadHealthStatus();
   loadAuthStatus();
+  loadStrategyParams();
 }
 
 function loadAuthStatus() {
