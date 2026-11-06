@@ -1308,6 +1308,17 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
           </div>
         </div>
 
+        <!-- 阶段二 R-10: 大盘研判 + 全市场统计 -->
+        <div class="card mb-16" id="marketAssessmentCard" role="region" aria-labelledby="marketAssessmentTitle">
+          <div class="card-title" id="marketAssessmentTitle" style="display:flex;justify-content:space-between;align-items:center;">
+            <span>大盘研判</span>
+            <button class="btn btn-outline" style="padding:4px 10px;font-size:12px;" onclick="loadMarketAssessment()">刷新</button>
+          </div>
+          <div id="marketAssessmentBody">
+            <div style="color:var(--text-muted);font-size:12px;padding:8px 0;">加载中...</div>
+          </div>
+        </div>
+
         <div class="grid-2 mb-16">
           <div class="card">
             <div class="card-title">今日 vs 昨日</div>
@@ -2867,6 +2878,58 @@ function switchPage(name) {
 }
 
 /* ========== 短线复盘 / 出手三问 / 一句话调度 ========== */
+/* ===== 阶段二 R-10: 大盘研判 + 全市场统计 ===== */
+async function loadMarketAssessment() {
+  const body = document.getElementById('marketAssessmentBody');
+  if (!body) return;
+  body.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0;">加载中...</div>';
+  const [assessmentResp, wideResp, sentimentResp] = await Promise.all([
+    api('/api/market/assessment').catch(() => null),
+    api('/api/market/market_wide_stats').catch(() => null),
+    api('/api/market/market_sentiment').catch(() => null),
+  ]);
+  if (!assessmentResp && !wideResp && !sentimentResp) {
+    body.innerHTML = '<div style="color:var(--color-warning);font-size:12px;padding:8px 0;">大盘研判数据暂不可用，请稍后刷新</div>';
+    return;
+  }
+  const a = (assessmentResp && assessmentResp.data) || {};
+  const t = a.thermometer || {};
+  const wide = (wideResp && wideResp.data) || {};
+  const s = (sentimentResp && sentimentResp.data) || {};
+  const score = (typeof t.score === 'number') ? t.score.toFixed(1) : '—';
+  const level = t.level || '—';
+  const scoreColor = (typeof t.score === 'number') ? (t.score >= 60 ? 'var(--color-up)' : t.score >= 40 ? 'var(--color-warning)' : 'var(--color-down)') : 'var(--text-muted)';
+  const margin = (typeof wide.margin_balance === 'number' && wide.margin_balance > 0)
+    ? (wide.margin_balance / 1e8).toFixed(2) + ' 亿'
+    : '数据缺失';
+  const blockCount = (typeof wide.block_trades_count === 'number') ? wide.block_trades_count + ' 笔' : '—';
+  const holderChange = (typeof wide.avg_shareholder_change_pct === 'number' && wide.avg_shareholder_change_pct !== 0)
+    ? _pctOrDash(wide.avg_shareholder_change_pct)
+    : '—';
+  const sentimentLabel = s.sentiment && s.sentiment !== '--' ? s.sentiment : '数据缺失';
+  const ratio = (typeof s.ratio === 'number') ? (s.ratio * 100).toFixed(1) + '%' : '—';
+  const note = t.note ? `<div style="margin-top:6px;font-size:11px;color:var(--color-warning);">${escapeHtml(t.note)}</div>` : '';
+
+  body.innerHTML = `
+    <div class="grid-4" style="gap:8px;margin-bottom:10px;">
+      <div class="card" style="text-align:center;padding:10px;"><div style="font-size:11px;color:var(--text-muted);">温度计</div><div style="font-size:16px;font-weight:600;color:${scoreColor};">${score}</div></div>
+      <div class="card" style="text-align:center;padding:10px;"><div style="font-size:11px;color:var(--text-muted);">市场状态</div><div style="font-size:16px;font-weight:600;">${escapeHtml(level)}</div></div>
+      <div class="card" style="text-align:center;padding:10px;"><div style="font-size:11px;color:var(--text-muted);">涨跌比</div><div style="font-size:16px;font-weight:600;">${ratio}</div></div>
+      <div class="card" style="text-align:center;padding:10px;"><div style="font-size:11px;color:var(--text-muted);">情绪</div><div style="font-size:16px;font-weight:600;">${escapeHtml(sentimentLabel)}</div></div>
+    </div>
+    <div class="grid-3" style="gap:8px;margin-bottom:10px;">
+      <div class="card" style="text-align:center;padding:10px;"><div style="font-size:11px;color:var(--text-muted);">融资余额</div><div style="font-size:16px;font-weight:600;">${margin}</div></div>
+      <div class="card" style="text-align:center;padding:10px;"><div style="font-size:11px;color:var(--text-muted);">大宗交易</div><div style="font-size:16px;font-weight:600;">${blockCount}</div></div>
+      <div class="card" style="text-align:center;padding:10px;"><div style="font-size:11px;color:var(--text-muted);">股东户数变化</div><div style="font-size:16px;font-weight:600;">${holderChange}</div></div>
+    </div>
+    <div class="card" style="padding:10px;font-size:12px;color:var(--text-secondary);">
+      <div style="margin-bottom:6px;"><b>综合研判：</b>${escapeHtml(a.assessment || '数据缺失')}</div>
+      <div><b>板块信号：</b>${escapeHtml(a.sector_signal || '—')} · <b>资金信号：</b>${escapeHtml(a.capital_signal || '—')}</div>
+      ${note}
+      <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">更新：${escapeHtml(a.update_time || '—')} · 涨${s.rise_count != null ? s.rise_count : '—'} / 跌${s.fall_count != null ? s.fall_count : '—'} / 平${s.flat_count != null ? s.flat_count : '—'}</div>
+    </div>`;
+}
+
 const ReviewDesk = {
   _skills: null,
   _lastGate: null,
@@ -2876,7 +2939,7 @@ const ReviewDesk = {
     if (this._loading) return;
     this._loading = true;
     try {
-      await Promise.all([this.loadBoard(force), this.loadCycle(force), this.loadFirst(force), this.loadJournal()]);
+      await Promise.all([this.loadBoard(force), this.loadCycle(force), this.loadFirst(force), this.loadJournal(), loadMarketAssessment()]);
     } catch (e) {
       console.error('ReviewDesk.loadAll', e);
     } finally {

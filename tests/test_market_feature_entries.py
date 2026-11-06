@@ -50,3 +50,37 @@ def test_frontend_has_search_and_capital_flow_entries():
     assert 'id="capitalFlowBody"' in text
     assert "async function loadMarketCapitalFlow" in text
     assert "loadMarketCapitalFlow()" in text
+
+
+def test_assessment_entry_shape():
+    payload = {
+        "thermometer": {"score": 62.0, "level": "偏强", "note": ""},
+        "assessment": "市场偏强，可适度参与",
+        "sector_signal": "板块分化",
+        "capital_signal": "北向资金小幅净流入",
+        "update_time": "2026-11-06 15:00:00",
+    }
+    with patch("src.analysis.market_assessment.get_market_assessment", new=AsyncMock(return_value=payload)):
+        resp = client.get("/api/market/assessment")
+    assert resp.status_code == 200
+    assert resp.json()["data"]["assessment"].startswith("市场偏强")
+
+
+def test_wide_stats_and_sentiment_shape():
+    with patch("web.routes.market.ds2.get_market_wide_stats", return_value={
+        "margin_balance": 1.5e11, "block_trades_count": 12, "avg_shareholder_change_pct": -2.3,
+    }), patch("web.routes.market.ds2.get_market_sentiment", return_value={
+        "rise_count": 3200, "fall_count": 1800, "flat_count": 200, "sentiment": "偏多", "ratio": 0.615,
+    }):
+        wide = client.get("/api/market/market_wide_stats").json()["data"]
+        sentiment = client.get("/api/market/market_sentiment").json()["data"]
+    assert wide["margin_balance"] == 1.5e11
+    assert sentiment["sentiment"] == "偏多"
+
+
+def test_frontend_has_market_assessment_entry():
+    text = INDEX.read_text(encoding="utf-8")
+    assert 'id="marketAssessmentCard"' in text
+    assert "async function loadMarketAssessment" in text
+    assert "loadMarketAssessment()" in text
+
