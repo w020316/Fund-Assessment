@@ -3741,7 +3741,7 @@ function renderAgentCards(opinions, result) {
         </div>
       </div>
       <div style="font-size:12px;color:var(--text-secondary);">
-        ${opData.points.map(p => `<div style="padding:3px 0;">• ${p}</div>`).join('')}
+        ${opData.points.map(p => `<div style="padding:3px 0;">• ${escapeHtml(p)}</div>`).join('')}
       </div>
     `;
   });
@@ -3764,8 +3764,8 @@ function renderDebate(debate, result) {
   const bearPoints = d.bear_arguments || d.bear_points || defaultDebate.bear_points;
   const consensusText = d.consensus || defaultDebate.consensus;
 
-  document.getElementById('bullPoints').innerHTML = bullPoints.map(p => `<div style="padding:4px 0;">• ${typeof p === 'string' ? p : (p.argument || p.point || JSON.stringify(p))}</div>`).join('');
-  document.getElementById('bearPoints').innerHTML = bearPoints.map(p => `<div style="padding:4px 0;">• ${typeof p === 'string' ? p : (p.argument || p.point || JSON.stringify(p))}</div>`).join('');
+  document.getElementById('bullPoints').innerHTML = bullPoints.map(p => `<div style="padding:4px 0;">• ${typeof p === 'string' ? escapeHtml(p) : escapeHtml(p.argument || p.point || JSON.stringify(p))}</div>`).join('');
+  document.getElementById('bearPoints').innerHTML = bearPoints.map(p => `<div style="padding:4px 0;">• ${typeof p === 'string' ? escapeHtml(p) : escapeHtml(p.argument || p.point || JSON.stringify(p))}</div>`).join('');
   document.getElementById('debateConsensus').textContent = consensusText || '—';
 }
 
@@ -3797,7 +3797,7 @@ function renderFinalDecision(result) {
         <div><span style="color:var(--text-muted);font-size:12px;">建议仓位</span><br><span style="font-size:18px;font-weight:600;">${d.position}</span></div>
         <div><span style="color:var(--text-muted);font-size:12px;">置信度</span><br><span style="font-size:18px;font-weight:600;">${d.confidence}%</span></div>
       </div>
-      <div style="margin-top:12px;color:var(--text-secondary);font-size:13px;">${d.reason}</div>
+      <div style="margin-top:12px;color:var(--text-secondary);font-size:13px;">${escapeHtml(d.reason)}</div>
     </div>
   `;
 }
@@ -6611,7 +6611,7 @@ async function loadDataTab() {
       }
       if (typeof c === 'number' && c > 10000) return `<td>${fmtMoney(c)}</td>`;
       if (typeof c === 'number') return `<td>${fmtNum(c)}</td>`;
-      return `<td>${c}</td>`;
+      return `<td>${escapeHtml(c)}</td>`;
     }).join('') + '</tr>';
   }).join('');
 }
