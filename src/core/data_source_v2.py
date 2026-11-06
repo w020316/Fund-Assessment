@@ -286,6 +286,29 @@ def _kline_sina_fallback(symbol: str, period: str = "daily", count: int = 30) ->
         return []
 
 
+def _sanitize_kline_rows(rows: list[dict]) -> list[dict]:
+    """过滤 K 线中的 0/负价行,并用 close 兜底缺失的 OHLC。
+
+    阶段二 R-08(2026-11-06):上游停牌日/缺字段时原实现用 _safe_float 默认 0.0,
+    0 价会进入 MA/RSI 与回测收益序列,产生虚假信号。这里统一丢弃 close<=0 的行,
+    open/high/low 缺失时用 close 兜底(不再出现 0 价),成交量/额缺失仍可为 0。
+    """
+    clean: list[dict] = []
+    for row in rows:
+        close = _safe_float(row.get("close"))
+        if close <= 0:
+            continue
+        fixed = dict(row)
+        fixed["close"] = close
+        for field in ("open", "high", "low"):
+            value = _safe_float(fixed.get(field), close)
+            fixed[field] = value if value > 0 else close
+        fixed["volume"] = _safe_float(fixed.get("volume"), 0.0)
+        fixed["amount"] = _safe_float(fixed.get("amount"), 0.0)
+        clean.append(fixed)
+    return clean
+
+
 def get_kline_mootdx(symbol: str, period: str = "daily", count: int = 120) -> list[dict]:
     category_map = {"daily": 9, "weekly": 5, "monthly": 6}
     category = category_map.get(period, 9)
@@ -306,13 +329,13 @@ def get_kline_mootdx(symbol: str, period: str = "daily", count: int = 120) -> li
                         "volume": _safe_float(row.get("vol")),
                         "amount": _safe_float(row.get("amount")),
                     })
-                return result
+                return _sanitize_kline_rows(result)
         except Exception as e:
             logger.warning(f"get_kline_mootdx mootdx failed, fallback to em: {e}")
     em_result = _kline_em_fallback(symbol, period, count)
     if em_result:
-        return em_result
-    return _kline_sina_fallback(symbol, period, count)
+        return _sanitize_kline_rows(em_result)
+    return _sanitize_kline_rows(_kline_sina_fallback(symbol, period, count))
 
 
 def get_realtime_quote_tencent(codes: list[str]) -> list[dict]:
@@ -705,8 +728,9 @@ def _search_stock_tencent(keyword: str) -> list[dict]:
             result.append({
                 "code": code,
                 "name": name,
-                "price": 0.0,
-                "change_pct": 0.0,
+                # 阶段二 R-08:行情缺失时返回 null,由 UI 显示“—”,不再伪装成 0.00
+                "price": None,
+                "change_pct": None,
             })
             if len(result) >= 20:
                 break
@@ -716,8 +740,10 @@ def _search_stock_tencent(keyword: str) -> list[dict]:
             quote_map = {q["code"]: q for q in quotes}
             for r in result:
                 q = quote_map.get(r["code"], {})
-                r["price"] = _safe_float(q.get("price"))
-                r["change_pct"] = _safe_float(q.get("change_pct"))
+                raw_price = q.get("price")
+                raw_change = q.get("change_pct")
+                r["price"] = round(_safe_float(raw_price), 3) if raw_price not in (None, "") else None
+                r["change_pct"] = round(_safe_float(raw_change), 2) if raw_change not in (None, "") else None
         return result
     except Exception as e:
         logger.warning(f"_search_stock_tencent failed: {e}")
