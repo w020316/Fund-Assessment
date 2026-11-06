@@ -1,0 +1,403 @@
+/* ============================================================
+   Aurora Terminal · 存量应用接入层
+   QuantFlow Pro Design System v1.0  (2026-11-06)
+   ------------------------------------------------------------
+   作用域铁律：全部规则挂在 body.hud-theme 之下。
+   移除 body 上的 hud-theme 类即整体回退到原始主题，不动任何存量代码。
+
+   与 design-system/components.css 的关系：
+   - components.css 是新页面/新组件的组件库（容器查询轨）；
+   - 本文件是存量页面的接入层，沿用存量类名（.card/.btn/.tab…），
+     断点沿用存量已验证的布局（移动 ≤768 / 平板 769–1200 / 桌面 >1200），
+     不改动任何布局逻辑，只替换视觉语言与交互状态。
+   两者共用同一套 token 与同一套数值规范，样式规则不做二次发明。
+
+   加载顺序：必须排在 hud.css 之后（index.html 中其后）。
+   ============================================================ */
+
+/* ---------- 1. Token 覆盖（最高杠杆：存量规则自动继承新色板） ---------- */
+body.hud-theme{
+  /* Aurora 专属 token */
+  --qf-bg-void:#04070E;
+  --qf-bg-deep:#070C15;
+  --qf-bg-surface:#0C131F;
+  --qf-bg-elev:#121C2B;
+  --qf-bg-elev2:#182335;
+  --qf-neon-cyan:#22E3FF;
+  --qf-neon-azure:#3D7BFF;
+  --qf-neon-violet:#9B6BFF;
+  --qf-neon-magenta:#FF4FD8;
+  --qf-grad-cyan:linear-gradient(135deg,#22E3FF 0%,#3D7BFF 100%);
+  --qf-grad-aurora:linear-gradient(100deg,#22E3FF 0%,#3D7BFF 34%,#9B6BFF 66%,#FF4FD8 100%);
+  --qf-line-1:#1C2A3D;
+  --qf-line-2:#2A3D55;
+  --qf-text-primary:#EAF3FF;
+  --qf-text-secondary:#A7BAD2;
+  --qf-text-muted:#8B9DB4;
+  --qf-ink:#04070E;
+  --qf-font-display:'Chakra Petch','Bahnschrift','DIN Alternate','Rajdhani',ui-sans-serif,sans-serif;
+  --qf-font-body:'HarmonyOS Sans SC','PingFang SC','Source Han Sans SC','Noto Sans SC','Microsoft YaHei UI','Microsoft YaHei',sans-serif;
+  --qf-font-mono:'JetBrains Mono','Cascadia Mono','SF Mono','Consolas',monospace;
+  --qf-focus-ring:0 0 0 2px #0C131F,0 0 0 4px #22E3FF;
+  --qf-dur-1:200ms;
+  --qf-dur-2:240ms;
+  --qf-dur-3:320ms;
+  --qf-ease-standard:cubic-bezier(.2,.8,.2,1);
+  --qf-ease-enter:cubic-bezier(.16,1,.3,1);
+
+  /* 存量变量重映射（所有 var(--bg-card) 等自动生效） */
+  --bg-primary:#04070E;
+  --bg-card:#0C131F;
+  --bg-card-hover:#182335;
+  --bg-hover:rgba(255,255,255,.05);
+  --border:#1C2A3D;
+  --border-light:#2A3D55;
+  --text-primary:#EAF3FF;
+  --text-secondary:#A7BAD2;
+  --text-muted:#8B9DB4;
+  --text-tertiary:#5C6E85;
+  --text-warning:#F5A524;
+  --accent:#22E3FF;
+  --accent-blue:#22E3FF;
+  --accent-cyan:#22E3FF;
+  --accent-purple:#9B6BFF;
+  --color-up:#F87171;
+  --color-down:#34D399;
+  --color-flat:#8B9DB4;
+  --color-info:#5AC8FA;
+  --color-warning:#F5A524;
+  --color-critical:#FF5A5F;
+  --radius:8px;
+  --radius-lg:12px;
+  --shadow:0 2px 8px rgba(0,0,0,.32);
+  --transition:all .2s cubic-bezier(.2,.8,.2,1);
+
+  /* hud.css 的组件直接引用 --hud-*，必须同步覆盖，否则主按钮仍是旧青色 */
+  --hud-bg:#04070E;
+  --hud-panel:#0C131F;
+  --hud-panel-border:#1C2A3D;
+  --hud-accent:#22E3FF;
+  --hud-warn:#F5A524;
+  --hud-up:#F87171;
+  --hud-down:#34D399;
+  --hud-up-strong:#FCA5A5;
+  --hud-down-strong:#6EE7B7;
+  --hud-text:#EAF3FF;
+  --hud-text-dim:#8B9DB4;
+
+  background:#04070E;
+  color:#EAF3FF;
+  font-family:var(--qf-font-body);
+}
+
+/* 视觉氛围：底座层极光 + 细网格（静态，零动画开销） */
+body.hud-theme .app{
+  background:
+    radial-gradient(52% 38% at 12% -6%,rgba(34,227,255,.10),transparent 62%),
+    radial-gradient(46% 32% at 88% -4%,rgba(255,79,216,.07),transparent 64%),
+    #04070E;
+}
+body.hud-theme .content{
+  background-image:
+    linear-gradient(rgba(34,227,255,.030) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(34,227,255,.030) 1px,transparent 1px);
+  background-size:32px 32px;
+}
+
+/* 滚动条 */
+body.hud-theme ::-webkit-scrollbar{width:10px;height:10px}
+body.hud-theme ::-webkit-scrollbar-thumb{background:#1E2C3F;border-radius:999px;border:2px solid #04070E}
+body.hud-theme ::-webkit-scrollbar-thumb:hover{background:#2C3F57}
+
+/* ---------- 2. 顶栏 ---------- */
+body.hud-theme .topbar{
+  height:64px;min-height:64px;padding:0 32px;gap:24px;
+  background:rgba(7,12,21,.82);
+  backdrop-filter:blur(16px) saturate(130%);
+  -webkit-backdrop-filter:blur(16px) saturate(130%);
+  border-bottom:1px solid #1C2A3D;
+}
+body.hud-theme .logo{font-family:var(--qf-font-display);font-size:15px;letter-spacing:.09em}
+body.hud-theme .logo-icon{
+  width:32px;height:32px;border-radius:9px;
+  background:var(--qf-grad-cyan);color:#04070E;
+  font:700 13px/1 var(--qf-font-display);
+  box-shadow:0 0 0 1px rgba(34,227,255,.35),0 0 22px rgba(34,227,255,.22);
+}
+body.hud-theme .index-item{
+  padding:4px 10px;border-radius:6px;background:rgba(255,255,255,.03);
+  transition:background .2s var(--qf-ease-standard);
+}
+body.hud-theme .index-item:hover{background:rgba(255,255,255,.06)}
+body.hud-theme .index-name{color:var(--qf-text-muted);font-size:12px}
+body.hud-theme .index-price{
+  font-family:var(--qf-font-display);font-weight:600;font-size:14px;
+  font-variant-numeric:tabular-nums slashed-zero;letter-spacing:.01em;
+}
+body.hud-theme .status-dot{width:7px;height:7px}
+body.hud-theme .topbar-right{font-size:12px;color:var(--qf-text-muted)}
+body.hud-theme .topbar-right .freshness-badge,
+body.hud-theme #freshnessText{color:var(--qf-text-muted)}
+
+/* ---------- 3. 侧栏导航 ---------- */
+body.hud-theme .sidebar{
+  width:200px;min-width:200px;padding:16px 12px;
+  background:rgba(12,19,31,.62);
+  border-right:1px solid #1C2A3D;
+  backdrop-filter:blur(10px);
+}
+body.hud-theme .nav-item{
+  height:40px;padding:0 12px;margin-bottom:4px;
+  border-left:2px solid transparent;border-radius:8px;
+  font:500 13px/1 var(--qf-font-body);color:var(--qf-text-secondary);
+  transition:background .2s var(--qf-ease-standard),color .2s var(--qf-ease-standard),
+             border-color .2s var(--qf-ease-standard);
+}
+body.hud-theme .nav-item:hover{background:rgba(255,255,255,.05);color:var(--qf-text-primary)}
+body.hud-theme .nav-item.active{
+  background:rgba(34,227,255,.08);color:var(--qf-neon-cyan);
+  border-left-color:var(--qf-neon-cyan);
+}
+body.hud-theme .nav-icon{width:20px;font-size:15px}
+body.hud-theme .nav-item .kbd{
+  font:500 10px/1 var(--qf-font-mono);color:var(--qf-text-muted);
+  border:1px solid #1C2A3D;border-radius:4px;padding:2px 4px;
+}
+
+/* ---------- 4. 内容区与卡片 ---------- */
+body.hud-theme .content{padding:32px}
+body.hud-theme .card{
+  background:#0C131F;border:1px solid #1C2A3D;border-radius:12px;padding:24px;
+  transition:border-color .2s var(--qf-ease-standard),
+             box-shadow .2s var(--qf-ease-standard),
+             transform .2s var(--qf-ease-standard);
+}
+body.hud-theme .card:hover{
+  border-color:#2A3D55;
+  box-shadow:0 8px 24px rgba(0,0,0,.45);
+  transform:translateY(-1px);
+}
+body.hud-theme .card-title{font:600 15px/1.5 var(--qf-font-body)}
+body.hud-theme .card-title::before{
+  width:3px;height:14px;border-radius:2px;background:var(--qf-grad-cyan);
+}
+
+/* ---------- 5. 表格 ---------- */
+body.hud-theme .table-wrap{border-radius:12px}
+body.hud-theme table{font-variant-numeric:tabular-nums slashed-zero}
+body.hud-theme th{
+  height:40px;padding:0 14px;
+  background:#0F1826;color:var(--qf-text-secondary);
+  font:500 12px/20px var(--qf-font-body);letter-spacing:.03em;
+  border-bottom:1px solid #1C2A3D;position:sticky;top:0;z-index:1;
+}
+body.hud-theme td{
+  height:44px;padding:0 14px;border-bottom:1px solid rgba(28,42,61,.7);
+}
+body.hud-theme tr:hover td{background:rgba(255,255,255,.035)}
+body.hud-theme tr:nth-child(even) td{background:transparent}
+body.hud-theme tr:nth-child(even):hover td{background:rgba(255,255,255,.035)}
+
+/* ---------- 6. 标签页 / 分段 ---------- */
+body.hud-theme .tabs,
+body.hud-theme .hud-subtabs{
+  display:inline-flex;flex-wrap:wrap;gap:2px;padding:4px;
+  background:rgba(255,255,255,.04);border:1px solid #1C2A3D;border-radius:10px;
+}
+body.hud-theme .tab,
+body.hud-theme .hud-subtab{
+  height:32px;min-height:44px;padding:0 16px;border-radius:7px;
+  font:500 13px/1 var(--qf-font-body);color:var(--qf-text-secondary);
+  transition:background .2s var(--qf-ease-standard),color .2s var(--qf-ease-standard),
+             box-shadow .2s var(--qf-ease-standard),transform .2s var(--qf-ease-standard);
+}
+body.hud-theme .tab:hover,
+body.hud-theme .hud-subtab:hover{background:rgba(255,255,255,.05);color:var(--qf-text-primary)}
+body.hud-theme .tab.active,
+body.hud-theme .hud-subtab.active{
+  background:rgba(34,227,255,.13);color:var(--qf-neon-cyan);
+  box-shadow:inset 0 0 0 1px rgba(34,227,255,.32);
+}
+body.hud-theme .tab:active,
+body.hud-theme .hud-subtab:active{transform:scale(.98)}
+
+/* ---------- 7. 按钮 ---------- */
+body.hud-theme .btn{
+  height:40px;min-height:44px;padding:0 20px;border-radius:8px;
+  font:500 14px/1 var(--qf-font-body);border:1px solid transparent;
+  transition:transform .2s var(--qf-ease-standard),background-color .2s var(--qf-ease-standard),
+             background-position .2s var(--qf-ease-standard),border-color .2s var(--qf-ease-standard),
+             box-shadow .2s var(--qf-ease-standard),color .2s var(--qf-ease-standard);
+}
+body.hud-theme .btn:active{transform:scale(.98)}
+body.hud-theme .btn-primary{
+  background-image:linear-gradient(100deg,#22E3FF,#3D7BFF 52%,#22E3FF);
+  background-size:190% 100%;background-position:0 0;
+  color:#04070E;font-weight:600;
+  box-shadow:0 0 0 1px rgba(34,227,255,.30),0 6px 20px rgba(34,227,255,.16);
+}
+body.hud-theme .btn-primary:hover{
+  background-position:100% 0;
+  box-shadow:0 0 0 1px rgba(34,227,255,.5),0 8px 26px rgba(34,227,255,.26);
+}
+body.hud-theme .btn-outline{
+  background:rgba(34,227,255,.07);border-color:rgba(34,227,255,.34);color:#22E3FF;
+}
+body.hud-theme .btn-outline:hover{background:rgba(34,227,255,.14);border-color:rgba(34,227,255,.7)}
+body.hud-theme .btn-success{
+  background:rgba(52,211,153,.14);border-color:rgba(52,211,153,.36);color:#6EE7B7;
+}
+body.hud-theme .btn-success:hover{background:rgba(52,211,153,.22)}
+body.hud-theme .btn-danger{
+  background:rgba(255,90,95,.12);border-color:rgba(255,90,95,.40);color:#FF8589;
+}
+body.hud-theme .btn-danger:hover{background:rgba(255,90,95,.20)}
+body.hud-theme .btn-sm{height:32px;min-height:44px;padding:0 14px;border-radius:8px;font-size:13px}
+
+/* ---------- 8. 表单 ---------- */
+body.hud-theme .input,
+body.hud-theme .select,
+body.hud-theme textarea{
+  background:#070C15;border:1px solid #1C2A3D;border-radius:8px;
+  color:var(--qf-text-primary);
+  transition:border-color .2s var(--qf-ease-standard),box-shadow .24s var(--qf-ease-standard),
+             background .2s var(--qf-ease-standard);
+}
+body.hud-theme .input:hover,
+body.hud-theme .select:hover{border-color:#2A3D55}
+body.hud-theme .input:focus,
+body.hud-theme .select:focus,
+body.hud-theme textarea:focus{
+  border-color:#22E3FF;
+  box-shadow:0 0 0 3px rgba(34,227,255,.14),0 0 18px rgba(34,227,255,.10);
+  background:#08101B;
+}
+body.hud-theme .form-label{font:500 13px/1 var(--qf-font-body);color:var(--qf-text-secondary)}
+body.hud-theme .input::placeholder{color:var(--qf-text-muted)}
+
+/* ---------- 9. 徽章 / 状态 ---------- */
+body.hud-theme .badge,
+body.hud-theme .freshness-badge{
+  display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;
+  border-radius:4px;font:600 11px/1 var(--qf-font-body);letter-spacing:.03em;
+}
+body.hud-theme .badge-realtime{background:rgba(52,211,153,.12);color:#6EE7B7;border:1px solid rgba(52,211,153,.28)}
+body.hud-theme .badge-delayed{background:rgba(245,165,36,.12);color:#FBBF5C;border:1px solid rgba(245,165,36,.28)}
+body.hud-theme .badge-mock{background:rgba(255,90,95,.12);color:#FF8589;border:1px solid rgba(255,90,95,.30)}
+
+/* ---------- 10. 弹窗 / Toast ---------- */
+body.hud-theme .modal-mask{background:rgba(4,7,14,.78)}
+body.hud-theme .modal-box{
+  background:#121C2B;border:1px solid #2A3D55;border-radius:16px;
+  box-shadow:0 24px 64px rgba(0,0,0,.55);
+}
+body.hud-theme .modal-header{border-bottom:1px solid #2A3D55;padding:20px 24px}
+body.hud-theme .modal-body{padding:24px}
+body.hud-theme .modal-close{
+  width:44px;height:44px;border-radius:8px;color:var(--qf-text-muted);
+  transition:background .2s var(--qf-ease-standard),color .2s var(--qf-ease-standard);
+}
+body.hud-theme .modal-close:hover{background:rgba(255,255,255,.06);color:var(--qf-text-primary)}
+
+body.hud-theme .toast-container{top:76px;right:24px}
+body.hud-theme .toast{
+  background:rgba(24,35,53,.86);backdrop-filter:blur(16px);
+  border:1px solid #2A3D55;border-radius:10px;color:var(--qf-text-primary);
+  box-shadow:0 8px 24px rgba(0,0,0,.45);
+  font:500 13px/1.4 var(--qf-font-body);
+  animation:qf-toast-in .32s var(--qf-ease-enter);
+}
+body.hud-theme .toast-success{background:rgba(52,211,153,.14);color:#9BEBC9;border-color:rgba(52,211,153,.34)}
+body.hud-theme .toast-error{background:rgba(255,90,95,.14);color:#FFA3A6;border-color:rgba(255,90,95,.36)}
+body.hud-theme .toast-info{background:rgba(90,200,250,.14);color:#A8E0FF;border-color:rgba(90,200,250,.32)}
+@keyframes qf-toast-in{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+
+/* ---------- 11. 空 / 错 / 载 ---------- */
+body.hud-theme .hud-status{padding:36px 16px}
+body.hud-theme .hud-status .hud-status-icon{
+  width:44px;height:44px;margin:0 auto 12px;border-radius:50%;display:grid;place-items:center;
+  font-size:17px;background:rgba(34,227,255,.08);border:1px solid rgba(34,227,255,.22);
+  color:var(--qf-neon-cyan);opacity:1;
+}
+body.hud-theme .hud-status .hud-status-msg{font:600 14px/1.4 var(--qf-font-body);color:var(--qf-text-primary)}
+body.hud-theme .hud-status .hud-status-hint{font:400 12px/18px var(--qf-font-body);color:var(--qf-text-muted);opacity:1}
+body.hud-theme .hud-status-error .hud-status-icon{
+  background:rgba(255,90,95,.10);border-color:rgba(255,90,95,.3);color:#FF8589;
+}
+body.hud-theme .skeleton-line{background:linear-gradient(90deg,#16202F,#22314A 48%,#16202F);background-size:220% 100%;
+  animation:qf-shimmer 1.4s linear infinite;border-radius:4px}
+@keyframes qf-shimmer{0%{background-position:130% 0}100%{background-position:-30% 0}}
+
+/* ---------- 12. 移动端底栏 ---------- */
+body.hud-theme .bottom-tab-bar{
+  height:calc(56px + env(safe-area-inset-bottom,0px));
+  padding:0 4px env(safe-area-inset-bottom,0px);
+  background:rgba(18,28,43,.92);
+  backdrop-filter:blur(16px) saturate(130%);
+  border-top:1px solid #2A3D55;
+}
+body.hud-theme .bottom-tab-item{
+  min-height:56px;color:var(--qf-text-muted);
+  font:500 10px/1 var(--qf-font-body);
+  transition:color .2s var(--qf-ease-standard),background .2s var(--qf-ease-standard);
+}
+body.hud-theme .bottom-tab-item.active{
+  color:var(--qf-neon-cyan);background:rgba(34,227,255,.08);border-radius:8px;
+}
+
+/* ---------- 13. 焦点环（全局统一，任意底色可见） ---------- */
+body.hud-theme :focus-visible{
+  outline:none;
+  box-shadow:0 0 0 2px #0C131F,0 0 0 4px #22E3FF;
+}
+body.hud-theme .input:focus-visible,
+body.hud-theme .select:focus-visible,
+body.hud-theme textarea:focus-visible{box-shadow:0 0 0 3px rgba(34,227,255,.14),0 0 18px rgba(34,227,255,.10)}
+
+/* ---------- 14. 断点：仅调整视觉密度，不改布局结构 ---------- */
+/* 平板 769–1200：侧栏由存量规则折叠为图标轨（60px），此处只做视觉收口 */
+@media (max-width:1200px) and (min-width:769px){
+  /* 必须在这里把宽度还原成 60px：上面的 200px 覆盖优先级高于存量媒体查询 */
+  body.hud-theme .sidebar{width:60px;min-width:60px;padding:12px 6px}
+  body.hud-theme .nav-item{padding:0 6px;justify-content:center}
+  body.hud-theme .content{padding:24px}
+  body.hud-theme .card{padding:20px}
+  body.hud-theme .topbar{height:60px;min-height:60px;padding:0 24px}
+  body.hud-theme .btn{height:40px}
+}
+/* 移动 ≤768 */
+@media (max-width:768px){
+  body.hud-theme .topbar{height:56px;min-height:56px;padding:0 16px;gap:12px}
+  body.hud-theme .content{padding:16px 16px 72px}
+  body.hud-theme .card{padding:16px;border-radius:12px}
+  body.hud-theme .btn{height:48px;min-height:48px;padding:0 16px;font-size:15px}
+  body.hud-theme .btn-sm{height:40px;min-height:44px;font-size:13px}
+  body.hud-theme .input,body.hud-theme .select,body.hud-theme textarea{
+    min-height:48px;font-size:16px;   /* 16px 防 iOS 聚焦自动缩放 */
+  }
+  body.hud-theme .tabs,body.hud-theme .hud-subtabs{display:flex;width:100%;flex-wrap:nowrap}
+  body.hud-theme .tab,body.hud-theme .hud-subtab{flex:1;min-width:0;height:44px;padding:0 8px;font-size:14px}
+  body.hud-theme .toast-container{top:64px;left:12px;right:12px}
+  body.hud-theme .toast{width:100%}
+}
+
+/* ---------- 15. 动效降级 ---------- */
+@media (prefers-reduced-motion:reduce){
+  body.hud-theme *,body.hud-theme *::before,body.hud-theme *::after{
+    animation:none !important;transition:none !important;
+  }
+}
+
+/* ---------- 16. 展示字体 ----------
+   加载失败不影响可用性：local() 优先 + font-display:swap，
+   离线/被墙时回退到 Bahnschrift / DIN Alternate 等系统窄体。
+   CSP 已单独放行 font-src https://cdn.jsdelivr.net（见 web/api.py）。 */
+@font-face{font-family:'Chakra Petch';font-style:normal;font-weight:600;font-display:swap;
+  src:local('Chakra Petch SemiBold'),local('ChakraPetch-SemiBold'),
+      url('https://cdn.jsdelivr.net/npm/@fontsource/chakra-petch@5/files/chakra-petch-latin-600-normal.woff2') format('woff2');}
+@font-face{font-family:'Chakra Petch';font-style:normal;font-weight:700;font-display:swap;
+  src:local('Chakra Petch Bold'),local('ChakraPetch-Bold'),
+      url('https://cdn.jsdelivr.net/npm/@fontsource/chakra-petch@5/files/chakra-petch-latin-700-normal.woff2') format('woff2');}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:500;font-display:swap;
+  src:local('JetBrains Mono Medium'),local('JetBrainsMono-Medium'),
+      url('https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5/files/jetbrains-mono-latin-500-normal.woff2') format('woff2');}

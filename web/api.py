@@ -177,10 +177,14 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     # CSP 允许 unpkg.com(前端 lightweight-charts CDN)与 data:(内联图表)
+    # font-src(2026-11-06,设计系统 v1.0):仅放行展示字体所在 CDN,
+    # 不放开 script/style/connect;字体请求失败时按 font-display:swap 回退系统字,
+    # 不影响功能与安全面。若后续改为自托管 woff2,应删除该条并回到 'self'。
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline' https://unpkg.com; "
         "style-src 'self' 'unsafe-inline'; "
+        "font-src 'self' https://cdn.jsdelivr.net; "
         "img-src 'self' data: https:; "
         "connect-src 'self' https:;"
     )
