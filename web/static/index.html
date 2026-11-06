@@ -1980,7 +1980,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
         <div class="grid-2 fund-grid mb-16">
           <!-- 基金持仓列表 -->
           <div class="card">
-            <div class="card-title">基金持仓 <span style="font-size:11px;color:var(--text-muted);font-weight:500;margin-left:6px;">点击"分析"/"深度"查看P1新功能</span></div>
+            <div class="card-title">基金持仓 <span style="font-size:11px;color:var(--text-muted);font-weight:500;margin-left:6px;">「分析」看重仓板块，「深度」跑多智能体解读</span></div>
             <!-- ===== STAGE6: groups ===== 批次B 功能#8:分组筛选条 + 管理面板(由 stage6-portfolio.js 渲染) -->
             <div class="st6-group-bar" id="st6GroupBar" role="toolbar" aria-label="持仓分组筛选"></div>
             <div class="st6-group-manage" id="st6GroupManage" hidden></div>
@@ -4141,14 +4141,17 @@ function _strategyLabCode() {
   return (document.getElementById('strategyLabCode').value.trim() || '600519');
 }
 
-function _renderStrategyLab(title, rows) {
+function _renderStrategyLab(title, rows, note) {
   const box = document.getElementById('strategyLabResult');
   const body = rows.map(([k, v]) =>
     `<div style="display:flex;justify-content:space-between;gap:12px;padding:3px 0;border-bottom:1px solid var(--border);">
       <span style="color:var(--text-muted);">${escapeHtml(k)}</span>
       <span style="font-weight:600;">${escapeHtml(String(v))}</span>
     </div>`).join('');
-  box.innerHTML = `<div style="font-weight:600;margin-bottom:6px;">${escapeHtml(title)}</div>${body}`;
+  const noteHtml = note
+    ? `<div style="margin-top:8px;font-size:11px;color:var(--text-tertiary);">${escapeHtml(note)}</div>`
+    : '';
+  box.innerHTML = `<div style="font-weight:600;margin-bottom:6px;">${escapeHtml(title)}</div>${body}${noteHtml}`;
 }
 
 function _strategyLabError(title, err) {
@@ -4180,6 +4183,9 @@ async function runStrategyAnalyze() {
 
 async function runStrategyBacktest() {
   const code = _strategyLabCode();
+  const box = document.getElementById('strategyLabResult');
+  // 阶段六:长任务先给预期时长,避免用户误以为"点了没反应"
+  if (box) box.textContent = '回测中(预计 5–30 秒,首次冷启动可能更久)…';
   try {
     const data = await api('/api/strategy/backtest', {
       method: 'POST',
@@ -4191,8 +4197,8 @@ async function runStrategyBacktest() {
       ['最大回撤', fmtNum(data.max_drawdown)],
       ['夏普比率', fmtNum(data.sharpe_ratio)],
       ['胜率', fmtNum(data.win_rate)],
-      ['交易次数', fmtNum(data.trades)]
-    ]);
+      ['样本只数', fmtNum(data.trades)]
+    ], '假设性回测:因子取当前快照,存在未来函数偏差;样本为候选池前 15 只中因子最高的 5 只,仅作筛选参考。');
   } catch (e) {
     _strategyLabError(`回测失败(执行异常或行情不可用)`, e);
   }
@@ -4482,7 +4488,8 @@ let _fundSearchTimer = null;
 // 当日收益(口径与后端一致:市值-市值/(1+涨幅),红涨绿跌语义色);
 // 置信度低条目带"⚠ 置信度低"标识与"复核"按钮(直达补录向导,P0-2)。
 function _fundCardHtml(p) {
-  const safeName = escapeHtml(p.fund_name || '—');
+  // 阶段六:名称缺失时回退显示基金代码
+  const safeName = escapeHtml(p.fund_name || p.fund_code || '—');
   const safeCode = escapeHtml(p.fund_code || '');
   // 阶段四 P0:净值/盈亏缺失时显示"数据缺失",不以 0 值伪装
   const navMissing = p.current_nav == null;
@@ -4577,7 +4584,8 @@ async function loadFundData() {
     const changeColorStr = changeColor(p.change_pct || 0);
     // P1-XSS 修复(2026-07-30):fund_name 经 escapeHtml 转义后再插入 DOM 和 onclick 属性,
     // 防止用户输入 <img onerror> 等 HTML 造成 XSS,或单引号破坏 onclick JS 字符串
-    const safeName = escapeHtml(p.fund_name || '—');
+    // 阶段六:名称缺失时回退显示基金代码,避免出现空白的"—"
+    const safeName = escapeHtml(p.fund_name || p.fund_code || '—');
     const safeNameAttr = escapeHtml(p.fund_name || '');  // 用于 onclick 字符串字面量
     return `<tr data-fund-code="${escapeHtml(p.fund_code)}">
       <td>${escapeHtml(p.fund_code)}</td>
@@ -4598,10 +4606,10 @@ async function loadFundData() {
         ? '数据缺失'
         : ((p.pnl_amount > 0 ? '+' : '') + p.pnl_amount.toFixed(2) + '<br><span style="font-size:11px;">(' + (p.pnl_pct >= 0 ? '+' : '') + p.pnl_pct.toFixed(2) + '%)</span>')}</td>
       <td style="white-space:nowrap;">
-        <button class="btn btn-sm" style="color:var(--accent-cyan);padding:3px 8px;" title="P1-2 重仓股板块分析" data-code="${escapeHtml(p.fund_code)}" data-name="${safeNameAttr}" onclick="onViewHoldingsClick(this)">分析</button>
-        <button class="btn btn-sm" style="color:var(--accent);padding:3px 8px;" title="P1-5 多智能体深度分析" data-code="${escapeHtml(p.fund_code)}" data-name="${safeNameAttr}" data-cost="${p.cost_nav || 0}" data-shares="${p.shares || 0}" onclick="onMultiAgentAnalyzeClick(this)">深度</button>
-        <button class="btn btn-sm" style="color:var(--text-muted);padding:3px 8px;" title="净值走势图" data-code="${escapeHtml(p.fund_code)}" onclick="onToggleFundChartClick(this)">走势</button>
-        <button class="btn btn-sm" style="color:var(--color-up);padding:3px 8px;" data-code="${escapeHtml(p.fund_code)}" onclick="onDeleteFundPositionClick(this)">删</button>
+        <button class="btn btn-sm" style="color:var(--accent-cyan);padding:3px 8px;" title="重仓股板块分析" aria-label="分析 ${escapeHtml(p.fund_code)} 的重仓板块" data-code="${escapeHtml(p.fund_code)}" data-name="${safeNameAttr}" onclick="onViewHoldingsClick(this)">分析</button>
+        <button class="btn btn-sm" style="color:var(--accent);padding:3px 8px;" title="多智能体深度分析" aria-label="深度分析 ${escapeHtml(p.fund_code)}" data-code="${escapeHtml(p.fund_code)}" data-name="${safeNameAttr}" data-cost="${p.cost_nav || 0}" data-shares="${p.shares || 0}" onclick="onMultiAgentAnalyzeClick(this)">深度</button>
+        <button class="btn btn-sm" style="color:var(--text-muted);padding:3px 8px;" title="净值走势图" aria-label="查看 ${escapeHtml(p.fund_code)} 的净值走势" data-code="${escapeHtml(p.fund_code)}" onclick="onToggleFundChartClick(this)">走势</button>
+        <button class="btn btn-sm" style="color:var(--color-up);padding:3px 8px;" title="删除该持仓" aria-label="删除 ${escapeHtml(p.fund_code)} 持仓" data-code="${escapeHtml(p.fund_code)}" onclick="onDeleteFundPositionClick(this)">删</button>
       </td>
     </tr>
     <tr id="chart-row-${p.fund_code}" data-chart-for="${escapeHtml(p.fund_code)}" style="display:none;">
@@ -6962,9 +6970,15 @@ function loadHealthStatus() {
       return;
     }
     let checks = [];
-    checks.push({name:'API服务', status: data.status === 'ok' ? 'ok' : 'err', detail: '运行正常'});
+    // 阶段六:degraded 与 version 为后端新增附加字段(旧版本缺省时保持原显示)
+    const degraded = data.degraded === true;
+    checks.push({name:'API服务', status: degraded ? 'warn' : 'ok',
+                 detail: degraded ? '降级运行(部分能力不可用)' : '运行正常'});
     checks.push({name:'AkShare', status: data.akshare ? 'ok' : 'warn', detail: data.akshare ? '已安装' : '未安装'});
     checks.push({name:'核心模块', status: data.core_modules ? 'ok' : 'warn', detail: data.core_modules ? '已加载' : '未加载'});
+    if (data.version) {
+      checks.push({name:'部署版本', status: data.version === 'unknown' ? 'warn' : 'ok', detail: String(data.version)});
+    }
     if (data.ai_keys) {
       const hasKey = data.ai_keys.ttapi || data.ai_keys.tavily || data.ai_keys.tinyfish || data.ai_keys.agnes;
       checks.push({name:'分析引擎', status: hasKey ? 'ok' : 'warn', detail: hasKey ? '已就绪' : '未配置'});
