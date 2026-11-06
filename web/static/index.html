@@ -1175,6 +1175,42 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 
       <!-- ==================== 1. 行情总览 ==================== -->
       <div class="page active" id="page-market">
+        <!-- ===== STAGE6: onboarding ===== 首次使用指引(4 步;进度只存本机浏览器,不写服务端) -->
+        <div class="card mb-16 st6-onb-card" id="onboardingCard" role="region" aria-labelledby="onboardingTitle">
+          <div class="flex-between" style="flex-wrap:wrap;gap:8px;">
+            <div class="card-title" id="onboardingTitle" style="margin-bottom:0;">首次使用指引<span class="st6-onb-progress" id="onboardingProgress">0/4</span></div>
+            <button class="btn btn-sm btn-outline" id="onboardingSkip" type="button" aria-label="不再显示首次使用指引">不再提示</button>
+          </div>
+          <div class="st6-onb-steps" id="onboardingSteps">
+            <button class="st6-onb-step" type="button" data-onb-step="market" aria-label="第1步:看行情总览">
+              <span class="st6-onb-idx">1</span>
+              <span class="st6-onb-text"><b>看行情总览</b><span>指数强弱、热门股票与板块热力图都在这一页</span></span>
+            </button>
+            <button class="st6-onb-step" type="button" data-onb-step="position" aria-label="第2步:录入或核对持仓">
+              <span class="st6-onb-idx">2</span>
+              <span class="st6-onb-text"><b>录入/核对持仓</b><span>持仓是后续基金分析、风控与建议的依据</span></span>
+            </button>
+            <button class="st6-onb-step" type="button" data-onb-step="fund" aria-label="第3步:查看基金分析">
+              <span class="st6-onb-idx">3</span>
+              <span class="st6-onb-text"><b>查看基金分析</b><span>卡片上的「分析」看重仓板块，「深度」跑多智能体解读</span></span>
+            </button>
+            <button class="st6-onb-step" type="button" data-onb-step="strategy" aria-label="第4步:跑一次策略回测">
+              <span class="st6-onb-idx">4</span>
+              <span class="st6-onb-text"><b>跑一次策略回测</b><span>回测后再用样本外验证看是否过拟合</span></span>
+            </button>
+          </div>
+          <div class="st6-onb-note">引导进度只保存在本机浏览器，不上传、不写服务端；可随时在「设置 → 使用指引」重新查看。</div>
+        </div>
+        <script>
+        /* 阶段六 N4: 已选"不再提示"或已完成的用户在首次渲染前隐藏，避免二次出现与布局位移 */
+        (function () {
+          try {
+            var s = JSON.parse(localStorage.getItem('qf_onboarding_v1') || '{}') || {};
+            if (s.dismissed) document.getElementById('onboardingCard').style.display = 'none';
+          } catch (e) { /* localStorage 禁用时保持显示 */ }
+        })();
+        </script>
+
         <!-- 指数卡片 -->
         <div class="flex-between mb-12">
           <div style="font-size:15px;font-weight:600;">指数行情</div>
@@ -2267,6 +2303,13 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
           <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> 管理鉴权</div>
           <div id="authPanel"></div>
         </div>
+
+        <!-- ===== STAGE6: onboarding ===== 使用指引入口(重新查看首次指引,不重置进度) -->
+        <div class="card mt-16">
+          <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 17h.01"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/></svg> 使用指引</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">首次使用指引共 4 步，可随时重新查看；进度与"不再提示"只记在本机浏览器。</div>
+          <button class="btn btn-sm btn-outline" id="onboardingReopen" type="button">重新查看首次使用指引</button>
+        </div>
       </div>
 
     </main>
@@ -2724,6 +2767,10 @@ function switchPage(name) {
     'hud-settings': 'config',
   };
   if (STAGE5_GROUP_DEFAULT[name]) name = STAGE5_GROUP_DEFAULT[name];
+
+  /* ===== STAGE6: onboarding ===== 用户实际访问到对应页面即视为完成该引导步骤
+     (不依赖"点引导按钮"这一条路径,避免已完成却仍显示未完成) */
+  if (typeof Onboarding !== 'undefined') Onboarding.mark(name);
 
   // P2-1 修复(2026-07-30):离开 market 页面时清理 marketRefreshTimer,
   // 避免后台持续 15s 轮询占用带宽与 API 配额(原代码只在 loadMarketData 内
@@ -7178,8 +7225,96 @@ function _renderSkeletons() {
   }
 }
 
+/* ===== STAGE6: onboarding ===== 首次使用指引
+   4 步对应现有页面;点击跳转,访问到对应页面即记完成;进度与"不再提示"仅存
+   localStorage(不上传、不写服务端)。全部完成或选择不再提示后,下次进入不再显示。 */
+const Onboarding = {
+  KEY: 'qf_onboarding_v1',
+  STEPS: ['market', 'position', 'fund', 'strategy'],
+  _card() { return document.getElementById('onboardingCard'); },
+  _state() {
+    try { return JSON.parse(localStorage.getItem(this.KEY) || '{}') || {}; }
+    catch (e) { return {}; }
+  },
+  _save(s) {
+    try { localStorage.setItem(this.KEY, JSON.stringify(s)); }
+    catch (e) { /* 隐私模式或配额满:静默降级,仅本次会话有效 */ }
+  },
+  init() {
+    const card = this._card();
+    if (!card) return;
+    // 事件绑定必须无条件执行:卡片可能通过"设置 → 使用指引"重新打开
+    const reopen = document.getElementById('onboardingReopen');
+    if (reopen) reopen.addEventListener('click', () => this.reopen());
+    const skip = document.getElementById('onboardingSkip');
+    if (skip) skip.addEventListener('click', () => {
+      const st = this._state();
+      st.dismissed = true;
+      this._save(st);
+      card.style.display = 'none';
+    });
+    card.querySelectorAll('[data-onb-step]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const step = btn.getAttribute('data-onb-step');
+        this.mark(step);
+        if (step !== 'market') switchPage(step);
+      });
+    });
+    const s = this._state();
+    const done = s.done || {};
+    // 已"不再提示"或 4 步全部完成:首次渲染前(HTML 内联脚本已按 dismissed 隐藏)保持隐藏
+    if (s.dismissed || this.STEPS.every(k => done[k])) {
+      s.dismissed = true;
+      this._save(s);
+      card.style.display = 'none';
+      return;
+    }
+    card.style.display = '';
+    this.render();
+  },
+  mark(step) {
+    if (!this.STEPS.includes(step)) return;
+    const s = this._state();
+    s.done = s.done || {};
+    if (s.done[step]) return;
+    s.done[step] = true;
+    this._save(s);
+    this.render();
+  },
+  render() {
+    const s = this._state();
+    const done = s.done || {};
+    const total = this.STEPS.length;
+    const n = this.STEPS.filter(k => done[k]).length;
+    const p = document.getElementById('onboardingProgress');
+    if (p) p.textContent = n + '/' + total + (n === total ? '（已完成）' : '');
+    document.querySelectorAll('#onboardingSteps [data-onb-step]').forEach(btn => {
+      const k = btn.getAttribute('data-onb-step');
+      const isDone = !!done[k];
+      btn.classList.toggle('st6-onb-done', isDone);
+      btn.setAttribute('aria-pressed', isDone ? 'true' : 'false');
+      const idx = btn.querySelector('.st6-onb-idx');
+      if (idx) idx.textContent = isDone ? '✓' : String(this.STEPS.indexOf(k) + 1);
+    });
+  },
+  reopen() {
+    const s = this._state();
+    s.dismissed = false;
+    this._save(s);
+    const card = this._card();
+    if (card) card.style.display = '';
+    this.render();
+    switchPage('market');
+    const title = document.getElementById('onboardingTitle');
+    if (title && typeof title.scrollIntoView === 'function') {
+      title.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  },
+};
+
 document.addEventListener('DOMContentLoaded', () => {
   _renderSkeletons(); // 立即填充骨架屏(0ms)
+  Onboarding.init();   // 首次使用指引(仅首次显示,状态存本机)
   loadMarketData();   // 后台加载数据(覆盖骨架屏)
   loadLlmProvider();
   updateFreshness();

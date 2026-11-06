@@ -358,3 +358,65 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* ===== STAGE6: onboarding ===== 首次使用指引(仅新增样式,不改存量布局/配色/字体)
+   卡片本身是第一屏静态内容(默认可见),因此不产生异步回填的布局位移(CLS)。 */
+.st6-onb-card { border-style: dashed; }
+.st6-onb-progress {
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted, #8b92a8);
+}
+.st6-onb-steps {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+.st6-onb-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 44px;
+  padding: 10px 12px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  border-radius: 8px;
+  cursor: pointer;
+  transition: var(--transition, all 0.2s ease);
+}
+.st6-onb-step:hover { border-color: var(--border-light, #484f58); }
+.st6-onb-step:focus-visible { outline: 2px solid var(--accent, #f59e0b); outline-offset: 2px; }
+.st6-onb-idx {
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--border-light, #484f58);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--text-secondary, #c3c9d9);
+}
+.st6-onb-step.st6-onb-done .st6-onb-idx {
+  border-color: var(--hud-down, #34D399);
+  color: var(--hud-down, #34D399);
+}
+.st6-onb-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.st6-onb-text b { font-size: 13px; font-weight: 600; }
+.st6-onb-text span { font-size: 11px; color: var(--text-muted, #8b92a8); }
+.st6-onb-step.st6-onb-done .st6-onb-text b {
+  text-decoration: line-through;
+  text-decoration-color: var(--text-muted, #8b92a8);
+  opacity: 0.75;
+}
+.st6-onb-note { margin-top: 10px; font-size: 11px; color: var(--text-muted, #8b92a8); }
+@media (max-width: 768px) {
+  .st6-onb-steps { grid-template-columns: 1fr; }
+}
