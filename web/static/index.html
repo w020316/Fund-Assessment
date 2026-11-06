@@ -1211,6 +1211,17 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
         })();
         </script>
 
+        <!-- 阶段二 R-03: 股票检索 + 个股详情 -->
+        <div class="card mb-16" id="stockSearchCard" role="region" aria-labelledby="stockSearchTitle">
+          <div class="card-title" id="stockSearchTitle">股票检索</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <input class="input" id="stockSearchInput" placeholder="输入代码或名称，如 600519 / 贵州茅台" style="flex:1;min-width:200px;" onkeydown="if(event.key==='Enter')searchStocks()">
+            <button class="btn btn-primary" onclick="searchStocks()">搜索</button>
+          </div>
+          <div id="stockSearchResults" style="margin-top:8px;"></div>
+          <div id="stockDetailPanel" style="margin-top:12px;display:none;"></div>
+        </div>
+
         <!-- 指数卡片 -->
         <div class="flex-between mb-12">
           <div style="font-size:15px;font-weight:600;">指数行情</div>
@@ -1238,6 +1249,17 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
           <div class="card">
             <div class="card-title">行业板块排名</div>
             <div class="heatmap" id="sectorHeatmap" role="group" tabindex="0" aria-label="行业板块热力图(可横向滚动)"></div>
+          </div>
+        </div>
+
+        <!-- 阶段二 R-04: 资金面(北向 + 板块主力) -->
+        <div class="card mb-16" id="capitalFlowCard" role="region" aria-labelledby="capitalFlowTitle">
+          <div class="card-title" id="capitalFlowTitle" style="display:flex;justify-content:space-between;align-items:center;">
+            <span>资金面</span>
+            <span id="capitalFlowMeta" style="font-size:11px;color:var(--text-muted);"></span>
+          </div>
+          <div id="capitalFlowBody">
+            <div style="color:var(--text-muted);font-size:12px;padding:8px 0;">加载中...</div>
           </div>
         </div>
 
@@ -3324,13 +3346,14 @@ updateTime();
 let marketRefreshTimer = null;
 
 async function loadMarketData() {
-  // 性能优化:5个API并行调用(原串行约5x时间,并行仅需最慢1个时间)
+  // 性能优化:6个API并行调用(原串行约5x时间,并行仅需最慢1个时间)
   Promise.all([
     loadIndexData(),
     loadHotStocks('gain'),
     loadSectorRanking(),
     loadGlobalNews(),
     loadGlobalIndexBar(),
+    loadMarketCapitalFlow(),
   ]).catch(() => {});
   // 自动刷新(改为15秒,减少请求频率,原5秒过于频繁)
   if (marketRefreshTimer) clearInterval(marketRefreshTimer);
@@ -3495,6 +3518,174 @@ function drawSparkline(svgId, isUp, seedStr) {
     <path d="${pathD}" fill="none" stroke="${color}" stroke-width="1.5"/>
     <path d="${pathD} L97,38 L2,38 Z" fill="url(#grad-${svgId})"/>
   `;
+}
+
+/* ===== 阶段二 R-03/R-04: 股票检索、个股详情、资金面 ===== */
+let _lastStockDetailCode = '';
+
+function _numOrDash(v, digits = 2) {
+  if (v == null || typeof v !== 'number' || !isFinite(v)) return '—';
+  return v.toFixed(digits);
+}
+
+function _pctOrDash(v) {
+  if (v == null || typeof v !== 'number' || !isFinite(v)) return '—';
+  return changeSign(v) + fmtNum(v) + '%';
+}
+
+async function searchStocks() {
+  const input = document.getElementById('stockSearchInput');
+  const body = document.getElementById('stockSearchResults');
+  if (!input || !body) return;
+  const q = input.value.trim();
+  if (!q) { showToast('请输入股票代码或名称', 'error'); return; }
+  body.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:6px 0;">搜索中...</div>';
+  let resp;
+  try {
+    resp = await api('/api/market/search?q=' + encodeURIComponent(q));
+  } catch (e) {
+    body.innerHTML = '<div style="color:var(--color-warning);font-size:12px;padding:6px 0;">搜索失败，请稍后重试</div>';
+    return;
+  }
+  const items = (resp && resp.data) || [];
+  if (!items.length) {
+    body.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:6px 0;">未找到匹配的股票</div>';
+    return;
+  }
+  body.innerHTML = items.map(it => {
+    const price = _numOrDash(it.price);
+    const pct = _pctOrDash(it.change_pct);
+    return `<button type="button" class="btn btn-sm btn-outline" data-stock-code="${escapeHtml(it.code)}" style="margin:0 6px 6px 0;">
+      <span style="color:var(--accent-cyan);">${escapeHtml(it.code)}</span>
+      <span style="margin-left:6px;">${escapeHtml(it.name)}</span>
+      <span style="margin-left:6px;color:var(--text-muted);">${price}</span>
+      <span style="margin-left:6px;color:${changeColor(it.change_pct)};">${pct}</span>
+    </button>`;
+  }).join('');
+  body.querySelectorAll('[data-stock-code]').forEach(btn => {
+    btn.addEventListener('click', () => loadStockDetail(btn.dataset.stockCode));
+  });
+}
+
+async function loadStockDetail(code) {
+  const panel = document.getElementById('stockDetailPanel');
+  if (!panel || !code) return;
+  panel.style.display = 'block';
+  panel.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0;">加载个股详情...</div>';
+  let resp;
+  try {
+    resp = await api('/api/market/stock_detail?code=' + encodeURIComponent(code));
+  } catch (e) {
+    panel.innerHTML = '<div style="color:var(--color-warning);font-size:12px;padding:8px 0;">个股详情加载失败，请稍后重试</div>';
+    return;
+  }
+  const d = (resp && resp.data) || {};
+  if (!d.code) {
+    panel.innerHTML = '<div style="color:var(--color-warning);font-size:12px;padding:8px 0;">未获取到该股票的详情数据</div>';
+    return;
+  }
+  _lastStockDetailCode = d.code;
+  renderStockDetail(d, (resp && resp._meta) || {});
+}
+
+function renderStockDetail(d, meta) {
+  const q = d.quote || {};
+  const f = d.financial || {};
+  const c = d.capital_flow || {};
+  const k = d.kline_summary || {};
+  const name = d.name || q.name || d.code;
+  const quality = (meta && meta.quality_score != null) ? meta.quality_score : null;
+  const degraded = quality !== null && Number(quality) <= 0;
+  const metric = (label, value, extra = '') => `<div class="card" style="text-align:center;padding:10px;">
+      <div style="font-size:11px;color:var(--text-muted);">${label}</div>
+      <div style="font-size:16px;font-weight:600;${extra}">${value}</div>
+    </div>`;
+
+  const panel = document.getElementById('stockDetailPanel');
+  panel.innerHTML = `
+    <div class="flex-between" style="flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+      <div><b style="font-size:15px;">${escapeHtml(name)}</b>
+        <span style="color:var(--text-muted);font-size:12px;margin-left:6px;">${escapeHtml(d.code)}</span>
+      </div>
+      <button class="btn btn-sm btn-outline" onclick="openKlineFromLastStock()">查看K线</button>
+    </div>
+    ${degraded ? '<div style="margin-bottom:8px;padding:6px 10px;border:1px dashed var(--color-warning);border-radius:6px;font-size:12px;color:var(--color-warning);">行情/财务数据缺失，以下显示“—”而非 0</div>' : ''}
+    <div class="grid-4" style="gap:8px;margin-bottom:10px;">
+      ${metric('现价', _numOrDash(q.price))}
+      ${metric('涨跌幅', _pctOrDash(q.change_pct), 'color:' + changeColor(q.change_pct) + ';')}
+      ${metric('换手率', _pctOrDash(q.turnover))}
+      ${metric('PE(TTM)', _numOrDash(f.pe_ttm != null ? f.pe_ttm : q.pe_ttm))}
+      ${metric('PB', _numOrDash(f.pb != null ? f.pb : q.pb))}
+      ${metric('ROE', _pctOrDash(f.roe))}
+      ${metric('总市值', _numOrDash(q.total_market_value))}
+      ${metric('流通市值', _numOrDash(q.circ_market_value))}
+    </div>
+    <div class="grid-2" style="gap:8px;">
+      <div class="card" style="padding:10px;font-size:12px;color:var(--text-secondary);">
+        <div style="font-weight:600;margin-bottom:6px;">资金流</div>
+        <div>主力净流入：${_numOrDash(c.main_net_inflow)}</div>
+        <div>主力占比：${_pctOrDash(c.main_inflow_pct)}</div>
+        <div>超大单：${_numOrDash(c.super_large_net_inflow)} / 大单：${_numOrDash(c.large_net_inflow)}</div>
+        <div>中单：${_numOrDash(c.medium_net_inflow)} / 小单：${_numOrDash(c.small_net_inflow)}</div>
+      </div>
+      <div class="card" style="padding:10px;font-size:12px;color:var(--text-secondary);">
+        <div style="font-weight:600;margin-bottom:6px;">近期区间</div>
+        <div>最新收盘：${_numOrDash(k.latest_close)}（${escapeHtml(k.latest_date || '—')}）</div>
+        <div>30日高/低：${_numOrDash(k.high_30d)} / ${_numOrDash(k.low_30d)}</div>
+        <div>30日均量：${_numOrDash(k.avg_volume_30d, 0)}</div>
+      </div>
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">
+      数据源：${escapeHtml((meta && meta.data_source) || '—')} · 质量评分：${quality == null ? '—' : quality}
+    </div>`;
+}
+
+function openKlineFromLastStock() {
+  if (!_lastStockDetailCode) return;
+  const input = document.getElementById('klineCode');
+  if (input) input.value = _lastStockDetailCode;
+  switchPage('strategy');
+  loadKline();
+}
+
+async function loadMarketCapitalFlow() {
+  const body = document.getElementById('capitalFlowBody');
+  const metaEl = document.getElementById('capitalFlowMeta');
+  if (!body) return;
+  let resp;
+  try {
+    resp = await api('/api/market/capital-flow');
+  } catch (e) {
+    body.innerHTML = '<div style="color:var(--color-warning);font-size:12px;">资金面数据暂不可用，请稍后刷新</div>';
+    return;
+  }
+  const d = (resp && resp.data) || {};
+  const nb = d.northbound || {};
+  const sf = d.sector_main_flow || {};
+  const quality = resp && resp._meta ? resp._meta.quality_score : null;
+  if (metaEl) {
+    metaEl.textContent = '更新 ' + (d.update_time || '—') + ' · 质量 ' + (quality == null ? '—' : quality);
+  }
+  const top = (arr) => (Array.isArray(arr) ? arr : []).map(s =>
+    `<div style="display:flex;justify-content:space-between;padding:3px 0;">
+      <span>${escapeHtml(s.name || '—')}</span>
+      <span style="color:${(s.main_net_inflow || 0) >= 0 ? 'var(--color-up)' : 'var(--color-down)'};">${_numOrDash(s.main_net_inflow)} 亿</span>
+    </div>`).join('') || '<div style="color:var(--text-muted);">数据缺失</div>';
+
+  body.innerHTML = `
+    <div class="grid-3" style="gap:8px;margin-bottom:10px;">
+      <div class="card" style="text-align:center;padding:10px;"><div style="font-size:11px;color:var(--text-muted);">北向合计(亿)</div><div style="font-size:16px;font-weight:600;">${_numOrDash(nb.total_net_inflow)}</div></div>
+      <div class="card" style="text-align:center;padding:10px;"><div style="font-size:11px;color:var(--text-muted);">沪股通(亿)</div><div style="font-size:16px;font-weight:600;">${_numOrDash(nb.sh_net_inflow)}</div></div>
+      <div class="card" style="text-align:center;padding:10px;"><div style="font-size:11px;color:var(--text-muted);">深股通(亿)</div><div style="font-size:16px;font-weight:600;">${_numOrDash(nb.sz_net_inflow)}</div></div>
+    </div>
+    <div class="grid-2" style="gap:8px;">
+      <div class="card" style="padding:10px;font-size:12px;color:var(--text-secondary);">
+        <div style="font-weight:600;margin-bottom:6px;">板块主力净流入 Top5</div>${top(sf.top_inflow)}
+      </div>
+      <div class="card" style="padding:10px;font-size:12px;color:var(--text-secondary);">
+        <div style="font-weight:600;margin-bottom:6px;">板块主力净流出 Top5</div>${top(sf.top_outflow)}
+      </div>
+    </div>`;
 }
 
 // 热门股票

@@ -705,8 +705,9 @@ class HeatmapItem(BaseModel):
 class SearchResultItem(BaseModel):
     code: str
     name: str
-    price: float
-    change_pct: float
+    # 阶段二 R-03/R-08:行情缺失返回 null, 由前端显示“—”而非 0.00
+    price: float | None = None
+    change_pct: float | None = None
 
 
 class MarketStatusResponse(BaseModel):
@@ -765,11 +766,13 @@ async def stock_search(q: str = Query(..., min_length=1, max_length=50, descript
         data = await asyncio.to_thread(ds2.search_stock, q)
         result: list[SearchResultItem] = []
         for item in data:
+            raw_price = item.get("price")
+            raw_change = item.get("change_pct")
             result.append(SearchResultItem(
                 code=_safe_str(item.get("code")),
                 name=_safe_str(item.get("name")),
-                price=_safe_float(item.get("price")),
-                change_pct=_safe_float(item.get("change_pct")),
+                price=_safe_float(raw_price) if raw_price not in (None, "") else None,
+                change_pct=_safe_float(raw_change) if raw_change not in (None, "") else None,
             ))
         cache.set(cache_key, result, ttl=600)
         return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
