@@ -1548,6 +1548,19 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
           <div id="scriptLibraryBody" style="max-height:400px;overflow-y:auto;" tabindex="0" role="region" aria-label="话术库列表(可滚动)">
             <div style="text-align:center;color:var(--text-muted);padding:20px;">点击加载...</div>
           </div>
+          <div id="scriptPreviewBody" style="margin-top:8px;"></div>
+
+          <!-- 阶段二 R-12: 股票话术匹配 / 生成 -->
+          <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">股票话术匹配 / 生成</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <input class="input" id="stockScriptCode" placeholder="股票代码，如 600519" maxlength="6" style="max-width:160px;">
+              <input class="input" id="stockScriptName" placeholder="名称(可选)" style="max-width:160px;">
+              <button class="btn btn-primary btn-sm" onclick="matchStockScripts()">匹配话术</button>
+            </div>
+            <div id="stockScriptBody" style="margin-top:8px;"></div>
+          </div>
+          <div id="scriptCategoryStats" style="margin-top:8px;font-size:11px;color:var(--text-muted);"></div>
         </div>
 
         <!-- 分析历史 -->
@@ -5937,13 +5950,111 @@ async function loadScriptLibrary() {
     const categoryLabel = s.category === 'stock' ? '股市' : '基金';
     return `<div style="padding:10px;border-bottom:1px solid var(--border);">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-        <strong style="color:var(--accent-cyan);">${s.title || '—'}</strong>
-        <span style="font-size:11px;color:var(--text-muted);">${categoryLabel} · ${sceneLabel} · ${s.dimension || ''}</span>
+        <strong style="color:var(--accent-cyan);">${escapeHtml(s.title || '—')}</strong>
+        <span style="font-size:11px;color:var(--text-muted);">${escapeHtml(categoryLabel)} · ${escapeHtml(String(sceneLabel))} · ${escapeHtml(s.dimension || '')}</span>
       </div>
-      <div style="font-size:12px;color:var(--text-secondary);line-height:1.6;">${s.template || '—'}</div>
-      <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">变量: ${(s.variables || []).join(', ')}</div>
+      <div style="font-size:12px;color:var(--text-secondary);line-height:1.6;">${escapeHtml(s.template || '—')}</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">变量: ${escapeHtml((s.variables || []).join(', '))}</div>
+      <button class="btn btn-sm btn-outline" style="margin-top:6px;" data-script-id="${escapeHtml(s.id)}">生成预览</button>
     </div>`;
   }).join('');
+  body.querySelectorAll('[data-script-id]').forEach(btn => {
+    btn.addEventListener('click', () => generateScriptPreview(btn.dataset.scriptId));
+  });
+  loadScriptCategoryStats();
+}
+
+/* ===== 阶段二 R-12: 话术分类统计 / 生成预览 / 股票话术匹配 ===== */
+let _lastStockScripts = [];
+
+async function loadScriptCategoryStats() {
+  const el = document.getElementById('scriptCategoryStats');
+  if (!el) return;
+  try {
+    const resp = await api('/api/scripts/categories');
+    const d = (resp && resp.data) || {};
+    el.textContent = `话术库统计：股市 ${d.stock ? d.stock.count : 0} 条 · 基金 ${d.fund ? d.fund.count : 0} 条 · 合计 ${d.total || 0} 条`;
+  } catch (e) {
+    el.textContent = '话术库统计暂不可用';
+  }
+}
+
+async function generateScriptPreview(scriptId) {
+  const out = document.getElementById('scriptPreviewBody');
+  if (!out || !scriptId) return;
+  if (!localStorage.getItem('admin_token')) {
+    out.innerHTML = '<div style="color:var(--color-warning);font-size:12px;">请先在「设置」页配置管理员 Token 后生成话术</div>';
+    return;
+  }
+  out.innerHTML = '<div style="color:var(--text-muted);font-size:12px;">生成中...</div>';
+  try {
+    const resp = await api('/api/scripts/generate', {
+      method: 'POST',
+      body: JSON.stringify({ script_id: scriptId, variables: {} })
+    });
+    const content = (resp && resp.data && resp.data.content) || '';
+    out.innerHTML = content
+      ? `<div class="card" style="padding:10px;font-size:12px;color:var(--text-secondary);"><b style="color:var(--accent-cyan);">预览</b><div style="margin-top:6px;line-height:1.7;">${escapeHtml(content)}</div></div>`
+      : '<div style="color:var(--color-warning);font-size:12px;">该模板暂未生成内容</div>';
+  } catch (e) {
+    out.innerHTML = '<div style="color:var(--color-warning);font-size:12px;">话术生成失败，请稍后重试</div>';
+  }
+}
+
+async function matchStockScripts() {
+  const body = document.getElementById('stockScriptBody');
+  const codeInput = document.getElementById('stockScriptCode');
+  const nameInput = document.getElementById('stockScriptName');
+  if (!body || !codeInput) return;
+  const code = codeInput.value.trim();
+  if (!/^\d{6}$/.test(code)) { showToast('股票代码需为 6 位数字', 'error'); return; }
+  if (!localStorage.getItem('admin_token')) {
+    body.innerHTML = '<div style="color:var(--color-warning);font-size:12px;">请先在「设置」页配置管理员 Token 后匹配话术</div>';
+    return;
+  }
+  body.innerHTML = '<div style="color:var(--text-muted);font-size:12px;">匹配中...</div>';
+  let quote = {};
+  try {
+    const q = await api('/api/market/stock_realtime?codes=' + encodeURIComponent(code));
+    quote = (q && Array.isArray(q.data) && q.data[0]) ? q.data[0] : {};
+  } catch (e) { /* 行情失败不影响匹配, 用空行情 */ }
+  const stockData = {
+    code,
+    name: (nameInput && nameInput.value.trim()) || quote.name || '',
+    price: typeof quote.price === 'number' ? quote.price : null,
+    change_pct: typeof quote.change_pct === 'number' ? quote.change_pct : null
+  };
+  try {
+    const resp = await api('/api/scripts/match/stock', {
+      method: 'POST',
+      body: JSON.stringify({ stock_data: stockData })
+    });
+    _lastStockScripts = ((resp && resp.data) || []).filter(Boolean);
+    if (!_lastStockScripts.length) {
+      body.innerHTML = '<div style="color:var(--text-muted);font-size:12px;">暂无匹配话术</div>';
+      return;
+    }
+    body.innerHTML = _lastStockScripts.map((s, i) => `
+      <div class="card" style="padding:10px;margin-bottom:8px;font-size:12px;color:var(--text-secondary);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <b style="color:var(--accent-cyan);">${escapeHtml(s.title || '—')}</b>
+          <button class="btn btn-sm btn-outline" data-copy-idx="${i}">复制</button>
+        </div>
+        <div style="line-height:1.7;">${escapeHtml(s.content || '')}</div>
+      </div>`).join('');
+    body.querySelectorAll('[data-copy-idx]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const item = _lastStockScripts[Number(btn.dataset.copyIdx)];
+        if (!item || !navigator.clipboard) { showToast('内容已显示，请手动复制', 'info'); return; }
+        navigator.clipboard.writeText(item.content || '').then(
+          () => showToast('已复制话术', 'success'),
+          () => showToast('复制失败，请手动选择文本', 'error')
+        );
+      });
+    });
+  } catch (e) {
+    body.innerHTML = '<div style="color:var(--color-warning);font-size:12px;">股票话术匹配失败，请稍后重试</div>';
+  }
 }
 
 async function addFundPosition() {
