@@ -29,6 +29,14 @@ class TestHealthEndpoint:
         assert "ai_ready" in data
         assert isinstance(data["ai_ready"], bool)
 
+    def test_health_degraded_checks_and_version(self, client):
+        """阶段六:degraded/checks/version 为附加可观测字段,状态码仍 200"""
+        data = client.get("/api/health").json()
+        assert isinstance(data["degraded"], bool)
+        assert set(data["checks"].keys()) == {"data_source", "ai"}
+        assert data["version"]
+        assert data["status"] == "ok"
+
 
 class TestMarketEndpoints:
     """行情端点测试"""

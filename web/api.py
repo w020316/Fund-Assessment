@@ -295,8 +295,18 @@ async def health_check():
     # 返回各 key 的配置状态(布尔值,不泄露 key 本身),供前端状态展示与诊断
     has_ai = any([keys.get("ttapi"), keys.get("agnes"), keys.get("tavily"),
                   keys.get("tinyfish"), keys.get("openai_key"), keys.get("api_key")]) or bool(os.getenv("ZHIPU_API_KEY"))
+    # 阶段六:把"能不能用"拆成可判定项,状态码仍保持 200(fail-open 探活),
+    # 但 degraded=True 让运维/前端一眼看出是"降级运行"而非"完全正常"。
+    checks = {
+        "data_source": bool(_HAS_AKSHARE and _HAS_CORE),
+        "ai": bool(has_ai),
+    }
     return {
         "status": "ok",
+        "degraded": not all(checks.values()),
+        "checks": checks,
+        # 部署版本(便于核对线上到底跑的哪个 commit;Render 自动注入 RENDER_GIT_COMMIT)
+        "version": (os.getenv("RENDER_GIT_COMMIT") or os.getenv("GIT_COMMIT") or "unknown")[:7],
         "akshare": _HAS_AKSHARE,
         "core_modules": _HAS_CORE,
         "ai_ready": has_ai,

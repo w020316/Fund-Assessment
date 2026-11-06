@@ -938,6 +938,7 @@ class LLMRouter:
             result[provider.name] = {
                 "available": provider.is_available,
                 "model": provider.model,
+                "base_url": provider.base_url,
                 "priority": provider.priority,
                 "fail_count": provider._fail_count,
                 "circuit_open": provider._circuit_open,

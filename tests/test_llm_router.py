@@ -844,6 +844,7 @@ class TestChatWithRateLimit:
         info = health["test_p"]
         assert info["available"] is True
         assert info["model"] == "m"
+        assert info["base_url"] == "https://test.com/v1"
         assert info["priority"] == 50
         assert info["rpm"] == 30
         assert info["has_multi_keys"] is True
