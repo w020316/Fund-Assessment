@@ -157,3 +157,84 @@ class TestNewsSearch:
             client.post("/api/news/search", json={"query": "降准"})
             client.post("/api/news/search", json={"query": "降准"})
         assert mock_fn.call_count == 2
+
+
+@pytest.fixture
+def tolerant_client():
+    """异常路径专用客户端:不重抛服务端异常,以便断言真实 HTTP 状态码。
+
+    Starlette 默认 raise_server_exceptions=True 会把服务端异常直接抛出到测试,
+    此时断言到的是异常而非响应码(500 与"异常被抛出"无法区分)。
+    降级分支用例必须关闭该行为,否则测不出真实线上表现。
+    """
+    from web.api import app
+    return TestClient(app, raise_server_exceptions=False)
+
+
+class TestNewsDegradation:
+    """异常(except)分支回归 —— 防止"优雅降级自己崩"缺陷复发。
+
+    本组用例覆盖 except 分支;补丁前该分支因 `_build_meta()` 不接受
+    `quality_score` 而抛 TypeError → HTTP 500。
+
+    历史缺陷(2026-11-07):`web/routes/news.py` 的 `_build_meta` 签名为
+    `(data_source, cached=False)`,但 feed/hot/sentiment/search 四个降级
+    分支均以 `quality_score=0.0` 调用,导致异常处理器自身抛 TypeError。
+    后果:新闻源抖动时 3 个**公开无鉴权** GET 端点返回 500,而非设计意图的
+    "空列表 + quality_score=0.0"。
+
+    该缺陷在 2305 条全绿测试下长期潜伏,原因是此前所有用例只 mock 成功路径,
+    异常分支覆盖为零。故本组用例的断言重点是:
+      1. HTTP 200(而非 500);
+      2. `_meta.quality_score == 0.0`(降级必须在 meta 上可见,
+         不能继续宣称默认的 80.0 健康度)。
+    """
+
+    def test_feed_degrades_on_upstream_error(self, tolerant_client):
+        """feed 上游异常时应优雅降级为 200 + 空列表 + quality_score=0.0"""
+        with patch(
+            "web.routes.news.get_news_feed",
+            new=AsyncMock(side_effect=RuntimeError("upstream news feed down")),
+        ):
+            resp = tolerant_client.get("/api/news/feed")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["data"] == []
+        assert body["_meta"]["quality_score"] == 0.0
+
+    def test_hot_degrades_on_upstream_error(self, tolerant_client):
+        """hot 上游异常时应优雅降级为 200 + 空列表 + quality_score=0.0"""
+        with patch(
+            "web.routes.news.get_hot_events",
+            new=AsyncMock(side_effect=RuntimeError("upstream hot events down")),
+        ):
+            resp = tolerant_client.get("/api/news/hot")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["data"] == []
+        assert body["_meta"]["quality_score"] == 0.0
+
+    def test_sentiment_degrades_on_upstream_error(self, tolerant_client):
+        """sentiment 上游异常时应降级为中性 50 + quality_score=0.0"""
+        with patch(
+            "web.routes.news.get_sentiment_index",
+            new=AsyncMock(side_effect=RuntimeError("upstream sentiment down")),
+        ):
+            resp = tolerant_client.get("/api/news/sentiment")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["data"]["score"] == 50
+        assert body["data"]["level"] == "neutral"
+        assert body["_meta"]["quality_score"] == 0.0
+
+    def test_search_degrades_on_upstream_error(self, tolerant_client):
+        """search 检索异常时应降级为 200 + 空结果提示 + quality_score=0.0"""
+        with patch(
+            "web.routes.news.ai_search",
+            new=AsyncMock(side_effect=RuntimeError("tavily down")),
+        ):
+            resp = tolerant_client.post("/api/news/search", json={"query": "降准"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["data"]["results"] == []
+        assert body["_meta"]["quality_score"] == 0.0

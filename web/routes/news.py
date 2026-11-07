@@ -29,10 +29,33 @@ router = APIRouter()
 cache = DataCache(default_ttl=60)
 
 
-def _build_meta(data_source: str, cached: bool = False) -> dict:
+def _build_meta(
+    data_source: str,
+    cached: bool = False,
+    quality_score: float | None = None,
+) -> dict:
+    """构建响应 meta。
+
+    Args:
+        data_source: 数据来源标识。
+        cached: 是否命中缓存。
+        quality_score: 显式质量分(0~100)。为 None 时沿用默认值:
+            命中缓存 100.0、未命中 80.0。
+
+    Returns:
+        含 data_source/quality_score/cached/timestamp 的 meta 字典。
+
+    Note:
+        quality_score 参数是必需的可选入参:降级分支(空结果/上游异常)需显式传
+        0.0,否则"降级"在 meta 上不可见,调用方会把失败误读为健康
+        (80.0)。签名须与 web/routes/global_market.py、web/routes/holdings.py
+        的同名函数保持一致。
+    """
+    if quality_score is None:
+        quality_score = 100.0 if cached else 80.0
     return {
         "data_source": data_source,
-        "quality_score": 100.0 if cached else 80.0,
+        "quality_score": quality_score,
         "cached": cached,
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
@@ -107,7 +130,11 @@ async def news_search(req: SearchRequest):
     # AI检索不缓存(实时性要求高)
     try:
         data = await ai_search(req.query)
-        return {"data": data, "_meta": _build_meta("tavily+llm", cached=False)}
+        # 无结果 = 检索未真正生效(如 TAVILY_API_KEY 未配置时 _ai_search 静默返回 [])。
+        # 此时必须显式 quality_score=0.0,否则 meta 仍报 80.0 且 data_source="tavily+llm",
+        # 把"检索没生效"伪装成"检索健康",线上无法观测降级。
+        quality_score = 0.0 if not data.get("results") else None
+        return {"data": data, "_meta": _build_meta("tavily+llm", cached=False, quality_score=quality_score)}
     except Exception as e:
         from loguru import logger
         logger.warning(f"news_search failed: {e}")
