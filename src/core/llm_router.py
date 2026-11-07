@@ -33,6 +33,8 @@ from src.core.llm_task_tier import (
     RoutingRecorder,
     TierRoute,
     correct_model_id,
+    hop_cap_seconds,
+    hop_timeout_env_key,
     match_routes,
     normalize_tier,
     resolve_budget_seconds,
@@ -1233,6 +1235,9 @@ class LLMRouter:
             "routes": routes_detail,
             "budgets_seconds": budgets,
             "budget_env_keys": {tier_name: tier_budget_env_key(tier_name) for tier_name in TIER_NAMES},
+            # B5：单跳上限的可选 env 覆盖（默认未设置 → None，即走 TierRoute.timeout_cap）
+            "hop_caps_seconds": {tier_name: hop_cap_seconds(tier_name) for tier_name in TIER_NAMES},
+            "hop_cap_env_keys": {tier_name: hop_timeout_env_key(tier_name) for tier_name in TIER_NAMES},
             "same_upstream_groups": same_upstream_groups,
             "last_routing": _recorder.last(),
             "counters": _recorder.snapshot(),

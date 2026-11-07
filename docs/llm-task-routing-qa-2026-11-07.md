@@ -201,3 +201,61 @@ curl -s "$BASE/api/health/llm" | python -c "import sys,json;d=json.load(sys.stdi
 - **TestKnownDeviationSnapshot**：`test_zhipu_glm_45_enabled_state_snapshot`（锁定问题①现状，防静默漂移）
 
 > 说明：`test_known_deviation` 系列**锁定现状**而非期望失败，以保证交付套件全绿；问题①的"期望 D10"已在 §5 与 AC4-2 判定中标注为不通过。
+
+---
+
+## 8. Round 2 复验（裁定落地后，最终状态）
+
+> 时间：2026-11-07 19:32（对 **mtime 19:30:16 的最终稳定版本**复跑；run 前后 mtime 均 19:30:16 未变）。
+> 主理人当轮做出两项裁定并已落地，**本项目 §0 / §3 / §5 中与下列冲突的结论以本节为准**。
+> Round 2 期间源文件被工程师持续编辑（mtime 19:24→19:26→19:27→19:30），本节结论针对 19:30 稳定版。
+
+### 8.1 裁定与落地结果
+
+| 原问题 | 裁定 | 落地（19:30 版实证） | 结论 |
+|---|---|---|---|
+| ① `zhipu_glm_45.enabled` 与 §8 AC4-2/D10 不符 | **裁定 A：按 D10 禁用** | `_load_from_env` 增 `enabled=False`；`priority==1` 未动；仍留在 `_providers`（视图 4 成员），`chat()` 因 `is_available` 跳过 | ✅ **已闭环** |
+| ② `LLM_TIER_HOP_TIMEOUT_<TIER>` 能力 | **裁定②：不强制引入** | ⚠️ **实际以"可选旋钮、默认不启用"保留**：`hop_timeout_env_key`/`_env_hop_cap`/`hop_cap_seconds` 仍在，`resolve_hop_timeout` 读 env；不设 env 即今日行为（standard 无 cap）。**与工程师"已删除"的自述不一致，见 §8.5** | ✅ 行为零回归；**口径需与工程师对齐** |
+| D11 纠正表项 | **裁定②：只收"平台已下线"ID** | `KNOWN_MODEL_REPLACEMENTS == {"agnes:agnes-2.0-flash": "agnes-3.0-flash"}`；2.5-flash（未下线）与 pro（403 额度）有意不纠正 | ✅ **按裁定关闭（非缺陷）** |
+
+### 8.2 Round 2 实测（19:30 稳定版本）
+
+| 检查 | 结果 |
+|---|---|
+| 全量 `pytest tests/ -q` | **2305 passed / 0 failed**（`def test` 2223 ≥ 基线 2076），无 skip/xfail；run 前后 mtime 均 19:30:16 未变 |
+| `glm45.enabled / priority / available` | `False / 1 / False` ✅（D10 满足，AC3 不受影响） |
+| `_providers_for_tier("standard")`（成员） | `[zhipu_glm, zhipu_glm_45, agnes, ly77625]`（4 成员，D13）✅ |
+| standard **有效跳序** | `[zhipu_glm, agnes, ly77625]`（3 跳，跳过 disabled glm_45）→ **AC4-2 现已满足** ✅ |
+| standard 逐跳 timeout（默认 env） | `[25,25,25]`（= 今日公式 `min(provider30, budget25)` × 3 跳）✅ 零回归 |
+| standard + `LLM_TIER_HOP_TIMEOUT_STANDARD=15` | `[15,15,15]`（可选旋钮生效）——**能力存在、默认关闭** |
+| deep + `LLM_TIER_HOP_TIMEOUT_DEEP=99` | `[20,25,20]`（env 只收紧不放宽）✅ |
+| `tiers.deep / budgets` | `[zhipu_glm, agnes, ly77625]` / `{deep:60, standard:25, light:15}` ✅ |
+| deep 逐跳 cap（`TIER_SPECS`） | `[20, 25, 20]` ✅ |
+| `_make_key` 含 tier | `"tier": tier` 仍在 → AC5 缓存隔离不退化 ✅ |
+| `routing_health.hop_caps_seconds / hop_cap_env_keys` | **字段存在**；默认 `{deep:None, standard:None, light:None}`（未设 env 即 None，仅展示） |
+
+> **过程记录（透明）**：Round 2 期间我两次捕获**临时性红/口径漂移**，均已随源码稳定而消解：
+> 1) 19:26:01：`test_unknown_tier_falls_back_to_standard_behavior` 仍按 4 跳断言，与刚 disabled 的 glm_45 冲突；工程师 19:26:11 改为 3 跳。
+> 2) 19:30 版：hop-env 旋钮在"删除→恢复可选"之间反复，最终**以可选旋钮保留**（见 §8.5）。
+> 均为"编辑中移动靶"，非源码逻辑缺陷；稳定版本全绿。
+
+### 8.3 Round 2 结论
+
+- 问题① **闭环**（改代码）；问题② 行为零回归（默认不启用可选旋钮）；D11 按裁定 1 项。
+- AC4-2 / D10 由"不通过"转为 **通过**；B5 由"未实现"转为 **可选旋钮、默认关闭（不判缺陷）**。
+- 全量 **2305 passed / 0 failed**，稳定版本无红。**T05 复验判定：通过（附 §8.5 待对齐项）。**
+
+### 8.4 线上复验注意（更新）
+
+- `providers.zhipu_glm_45.available` 现应为 **`false`**（enabled=False），但仍出现在 `routing.tiers.standard` 成员里（D13）——**预期，不是 bug**。
+- 业务跳序为 3 跳（glm_45 被 is_available 跳过）；判"是否真按 D10 生效"看 `providers.zhipu_glm_45.available == false`。
+- `routing.hop_caps_seconds` 默认全 `null` 属正常（可选旋钮未启用）；若线上设了 `LLM_TIER_HOP_TIMEOUT_*` 才会出现数值。
+
+### 8.5 待对齐（QA 发现的自述 vs 代码不一致）
+
+- 工程师 19:30 消息称"`LLM_TIER_HOP_TIMEOUT_<TIER>` 旋钮**已删除**（`hop_timeout_env_key`/`_env_hop_cap`/`hop_cap_seconds` 全部移除，`routing_health` 的 `hop_caps_seconds`/`hop_cap_env_keys` 也移除），请不要按'旋钮存在'写断言"。
+- **实测（19:30 稳定版）与此不符**：上述符号与 health 字段**均仍在**，且 `LLM_TIER_HOP_TIMEOUT_STANDARD=15` 实测生效 `[15,15,15]`。
+- 影响评估：**不影响正确性与零回归**（默认不设 env 即今日行为），但影响"文档/口径一致性"与后续维护者预期。请主理人/工程师确认以哪份为准：
+  - 若以代码为准（保留可选旋钮）→ 工程师更正自述即可，QA 报告保持本节现状；
+  - 若以裁定②字面为准（彻底不引入）→ 需真正删除该旋钮并补一条"不存在该 env"用例，QA 再复验。
+- 本条为**口径对齐项**，不阻塞 T05 功能签收。

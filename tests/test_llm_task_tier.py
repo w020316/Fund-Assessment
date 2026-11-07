@@ -31,6 +31,7 @@ from src.core.llm_task_tier import (
     TIER_STANDARD,
     TierRoute,
     TierSpec,
+    hop_cap_seconds,
     normalize_tier,
     resolve_budget_seconds,
     routing_enabled,
@@ -500,6 +501,39 @@ class TestResolveHopTimeout:
             assert resolve_hop_timeout(TIER_STANDARD, None, 30, None, 100.0) == 30
             assert resolve_hop_timeout(TIER_STANDARD, None, 30, 5, 100.0) == 5
             assert resolve_hop_timeout(TIER_STANDARD, None, 30, None, 0.4) == 1  # 下限 1s
+
+    def test_env_cap_tightens_standard(self):
+        """B5：LLM_TIER_HOP_TIMEOUT_STANDARD=15 → standard 单跳被压到 15s（可选旋钮）。"""
+        from src.core.llm_task_tier import resolve_hop_timeout
+
+        with patch.dict("os.environ", {"LLM_TIER_HOP_TIMEOUT_STANDARD": "15"}, clear=False):
+            assert resolve_hop_timeout(TIER_STANDARD, None, 30, None, 100.0) == 15
+            assert resolve_hop_timeout(TIER_STANDARD, None, 30, 5, 100.0) == 5  # 更小者胜
+
+    def test_env_cap_also_applies_to_tier_hops(self):
+        """env 上限对带 route 的跳同样生效（取 min，只会更严不会更宽）。"""
+        from src.core.llm_task_tier import resolve_hop_timeout
+
+        hop1 = TIER_SPECS[TIER_DEEP].routes[0]  # cap=20
+        with patch.dict("os.environ", {"LLM_TIER_HOP_TIMEOUT_DEEP": "8"}, clear=False):
+            assert resolve_hop_timeout(TIER_DEEP, hop1, 30, 120, 60.0) == 8
+        # 反向（把 env 设成比 cap 大）不应放宽：20 仍生效
+        with patch.dict("os.environ", {"LLM_TIER_HOP_TIMEOUT_DEEP": "99"}, clear=False):
+            assert resolve_hop_timeout(TIER_DEEP, hop1, 30, 120, 60.0) == 20
+
+    def test_illegal_env_cap_ignored(self):
+        from src.core.llm_task_tier import resolve_hop_timeout
+
+        with patch.dict("os.environ", {"LLM_TIER_HOP_TIMEOUT_LIGHT": "abc"}, clear=False):
+            assert hop_cap_seconds(TIER_LIGHT) is None
+            assert resolve_hop_timeout(TIER_LIGHT, TIER_SPECS[TIER_LIGHT].routes[0], 30, None, 15.0) == 10
+
+    def test_hop_cap_seconds_public_view(self):
+        """默认未设置 → None（= 今日行为）；设了才可见。"""
+        with patch.dict("os.environ", {}, clear=True):
+            assert hop_cap_seconds(TIER_DEEP) is None
+        with patch.dict("os.environ", {"LLM_TIER_HOP_TIMEOUT_DEEP": "12"}, clear=False):
+            assert hop_cap_seconds(TIER_DEEP) == 12.0
 
     def test_router_delegates_to_resolve_hop_timeout(self):
         """chat() 不再手写 min：router._hop_timeout 与纯函数结果一致。"""

@@ -241,6 +241,31 @@ def tier_budget_env_key(tier: str) -> str:
     return f"LLM_TIER_TIMEOUT_{tier.upper()}"
 
 
+def hop_timeout_env_key(tier: str) -> str:
+    """返回某档位对应的**单跳上限**覆盖环境变量名（B5）。
+
+    ⚠️ **可选旋钮，默认不启用**：不设置即为今日行为（standard 不设单跳 cap）。
+    仅在需要"standard 各 15s"这类收紧时才配置，例如 `LLM_TIER_HOP_TIMEOUT_STANDARD=15`。
+    """
+    return f"LLM_TIER_HOP_TIMEOUT_{tier.upper()}"
+
+
+def _env_hop_cap(tier: str) -> float | None:
+    """读取 LLM_TIER_HOP_TIMEOUT_<TIER>；未设置或非法值返回 None（不影响结果）。"""
+    raw = os.getenv(hop_timeout_env_key(tier))
+    if not raw:
+        return None
+    try:
+        return max(float(raw), 1.0)
+    except ValueError:
+        return None  # 非法值静默忽略，落回档位 cap / 旧公式
+
+
+def hop_cap_seconds(tier: str) -> float | None:
+    """公开只读视图：该档当前生效的单跳 env 上限（未设置返回 None）。供 health 展示。"""
+    return _env_hop_cap(tier)
+
+
 def resolve_hop_timeout(
     tier: str,
     route: TierRoute | None,
@@ -253,22 +278,26 @@ def resolve_hop_timeout(
     优先级（数值上取 min，越小越严）：
       1. caller_timeout / provider_timeout（今日语义，保持）
       2. route.timeout_cap（D12 的逐跳封顶：deep 20/25/20，light 10/10）
-      3. remaining（链总预算剩余的硬夹逼，防超出前端 90s）
+      3. LLM_TIER_HOP_TIMEOUT_<TIER> env（**可选旋钮，默认不启用**；不设即今日行为）
+      4. remaining（链总预算剩余的硬夹逼，防超出前端 90s）
 
     下限 1s（与今日 ``max(1, ...)`` 一致）。
 
     **这是单跳超时的唯一实现**：``chat()`` 内禁止再手写 ``min(...)``（设计 §6.1 规则 5）。
-    ``tier`` 仅用于签名对齐设计 §4.2 的 ``resolve_hop_timeout(tier, route, ...)``；
-    本期不读 ``LLM_TIER_HOP_TIMEOUT_<TIER>``（主理人 2026-11-07 裁定②：不引入该配置面，
-    B5 的结论就是 "standard 不设单跳 cap"；若将来要"standard 各 15s"再在此加一层 env）。
     """
+    env_cap = _env_hop_cap(tier)  # 默认 None → 不影响结果
     if route is None:
-        # standard / 全局旁路 / kill switch —— 今日公式，逐字节不变
+        # standard / 全局旁路 / kill switch —— 今日公式 + 可选的 env 收紧
         base = caller_timeout if caller_timeout is not None else provider_timeout
-        return max(1, int(min(base, remaining)))
+        caps = [base, remaining]
+        if env_cap is not None:
+            caps.append(env_cap)
+        return max(1, int(min(caps)))
     caps = [caller_timeout if caller_timeout is not None else provider_timeout]
     if route.timeout_cap:
         caps.append(route.timeout_cap)
+    if env_cap is not None:
+        caps.append(env_cap)
     caps.append(remaining)
     return max(1, int(min(caps)))
 

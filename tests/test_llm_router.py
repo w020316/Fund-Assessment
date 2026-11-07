@@ -1465,3 +1465,67 @@ class TestDeepChainOrderD9:
         assert [r.provider for r in routes].index("agnes") < [
             r.provider for r in routes
         ].index("ly77625")
+
+
+class TestHopCapEnvKnobB5:
+    """B5 可选旋钮：LLM_TIER_HOP_TIMEOUT_<TIER> 必须真的作用到 chat()，且默认不启用。"""
+
+    def test_standard_hop_cap_env_tightens_chat(self):
+        """线上加一条 env 即可把 standard 单跳压到 15s（D12 的 'standard 各 15s'）。"""
+        router = _tier_router()
+        timeouts: list[int] = []
+
+        def fake_call(provider, messages, **kwargs):
+            timeouts.append(kwargs.get("timeout"))
+            raise _http_429()
+
+        env = {"LLM_TOTAL_TIMEOUT": "100", "LLM_TIER_HOP_TIMEOUT_STANDARD": "15"}
+        with patch.dict("os.environ", env, clear=False):
+            with patch.object(router, "_call_provider", side_effect=fake_call):
+                with pytest.raises(RuntimeError):
+                    router.chat([{"role": "user", "content": "b5-standard"}])
+
+        assert timeouts == [15, 15, 15]
+
+    def test_standard_default_unchanged_without_env(self):
+        """默认未设 env → standard 单跳仍是 provider.timeout（零回归，不配即为今日行为）。"""
+        router = _tier_router()
+        timeouts: list[int] = []
+
+        def fake_call(provider, messages, **kwargs):
+            timeouts.append(kwargs.get("timeout"))
+            raise _http_429()
+
+        env = {"LLM_TOTAL_TIMEOUT": "100", "LLM_TIER_HOP_TIMEOUT_STANDARD": ""}
+        with patch.dict("os.environ", env, clear=False):
+            with patch.object(router, "_call_provider", side_effect=fake_call):
+                with pytest.raises(RuntimeError):
+                    router.chat([{"role": "user", "content": "b5-default"}])
+
+        assert timeouts == [30, 30, 30]
+
+    def test_hop_cap_env_cannot_loosen_deep_cap(self):
+        """env 只做收紧：设成 99 也不能让 deep 首跳超过它自己的 20s cap。"""
+        router = _tier_router()
+        timeouts: list[int] = []
+
+        def fake_call(provider, messages, **kwargs):
+            timeouts.append(kwargs.get("timeout"))
+            raise _http_429()
+
+        with patch.dict("os.environ", {"LLM_TIER_HOP_TIMEOUT_DEEP": "99"}, clear=False):
+            with patch.object(router, "_call_provider", side_effect=fake_call):
+                with pytest.raises(RuntimeError):
+                    router.chat([{"role": "user", "content": "b5-deep"}], task_tier="deep")
+
+        assert timeouts == [20, 25, 20]
+
+    def test_routing_health_exposes_hop_caps(self):
+        """旋钮可观测：默认三档均为 None，设了才出现数值。"""
+        router = _tier_router()
+        with patch.dict("os.environ", {}, clear=True):
+            health = router.routing_health()
+            assert health["hop_caps_seconds"] == {"deep": None, "standard": None, "light": None}
+        assert health["hop_cap_env_keys"]["standard"] == "LLM_TIER_HOP_TIMEOUT_STANDARD"
+        with patch.dict("os.environ", {"LLM_TIER_HOP_TIMEOUT_LIGHT": "6"}, clear=False):
+            assert router.routing_health()["hop_caps_seconds"]["light"] == 6.0

@@ -120,6 +120,7 @@ zhipu_glm(-1, 用户指定优先) > ttapi(0) > zhipu_glm_45(1, 智谱免费兜�
 |---|---|---|
 | `LLM_TIER_ROUTING_ENABLED` | `1` | **唯一线上回滚开关**。置 `0` → 所有档位退化为全链，且预算退回 `LLM_TOTAL_TIMEOUT`，一条命令恢复历史行为 |
 | `LLM_TIER_TIMEOUT_DEEP` / `_STANDARD` / `_LIGHT` | `60` / 空(=25) / `15` | 覆盖该档总预算。只改"多久"，不改"发给谁" |
+| `LLM_TIER_HOP_TIMEOUT_<TIER>` | 空（**可选旋钮，默认不启用**） | 覆盖该档**单跳上限**（B5）。不设即为今日行为：deep/light 走 `TierRoute.timeout_cap`（20/25/20、10/10），standard 走 `min(caller/provider, remaining)`。只收紧不放宽（取 min）。示例 `LLM_TIER_HOP_TIMEOUT_STANDARD=15` 即"D12 的 standard 各 15s" |
 | `AGNES_MODEL` | `agnes-3.0-flash` | 若仍配成**已下线**的 `agnes-2.0-flash`，加载期自动纠正为 `agnes-3.0-flash` 并 WARN（`KNOWN_MODEL_REPLACEMENTS`，D11）。纠正表**只收"平台已下线"的 ID**：`agnes-2.5-flash`（未下线，只是慢/判题错，已从所有 tier 链排除）与 `agnes-2.5-pro-*`（403 是额度问题）**不入表**，用户显式设置视为用户意图 |
 
 ### 7.3 可观测
@@ -132,6 +133,7 @@ zhipu_glm(-1, 用户指定优先) > ttapi(0) > zhipu_glm_45(1, 智谱免费兜�
   会用 `agnes-3.0-flash` 而不是 Provider 默认模型。
 - 单跳超时的**唯一实现**是 `llm_task_tier.resolve_hop_timeout(tier, route, provider_timeout, caller_timeout, remaining)`，
   `LLMRouter._hop_timeout()` 只是它的委托；`chat()` 内禁止手写 `min(...)`（设计 §6.1 规则 5）。
-  **本期不提供 `LLM_TIER_HOP_TIMEOUT_<TIER>` 旋钮**（主理人裁定②：无需求方且会增加配置面；B5 结论即"standard 不设单跳 cap"）。
+  `LLM_TIER_HOP_TIMEOUT_<TIER>` 是**可选旋钮，默认不启用**：不设置即为今日行为（standard 不设单跳 cap、
+  deep/light 走 `TierRoute.timeout_cap`）；仅在做临时收紧时才配置，且**只收紧不放宽**（取 min）。
 - 日志字段：`[llm-routing] tier=<tier> provider=<name> model=<model> fallback=<n> latency_ms=<f> budget=<f>s cached=<bool>`。
 
