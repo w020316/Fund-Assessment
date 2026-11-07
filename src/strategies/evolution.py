@@ -18,10 +18,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
+import numpy as np
 from loguru import logger
 
 from src.utils.file_io import atomic_write_json, safe_read_json
@@ -178,3 +180,403 @@ def append_lineage(lineage: dict[str, Any], entry: dict[str, Any]) -> dict[str, 
         except OSError as e:
             logger.warning(f"evolution prune {old.get('file')} failed: {e}")
     return lineage
+
+
+# =====================================================================
+# B3 · 变异器（P0-3）
+# =====================================================================
+
+DIM_KEYS = ("technical", "capital", "fundamental", "news", "sentiment")
+SIGNAL_ORDER = ("strong_buy", "buy", "watch", "hold", "sell")
+SIGNAL_LIMITS: dict[str, tuple[float, float]] = {
+    "strong_buy": (70.0, 95.0),
+    "buy": (55.0, 80.0),
+    "watch": (40.0, 65.0),
+    "hold": (25.0, 50.0),
+    "sell": (5.0, 35.0),
+}
+WEIGHT_MUTATION_SIGMA = 0.05
+WEIGHT_CLIP = (0.05, 0.5)
+SIGNAL_MUTATION_SIGMA = 3.0
+EVAL_WINDOW_DAYS = 120      # 评估窗（交易日上限, 6m 自然日 ≈ 120 交易日）
+
+
+def _repair_signal_order(signals: dict[str, float]) -> dict[str, float]:
+    """强制信号阈值严格递降 strong_buy>buy>watch>hold>sell。
+
+    设计文档 §1.2: 不满足时取相邻中点修复。实现: 先降序排序,
+    再对每对违序相邻值取中点上下各让 1.0 拆开, 迭代至严格递降
+    （各值限幅后取值域为 [5,95], 上述修复必收敛, 迭代上限为保险丝）。
+    """
+    vals = sorted((float(signals[k]) for k in SIGNAL_ORDER), reverse=True)
+    for _ in range(32):
+        violated = False
+        for i in range(len(vals) - 1):
+            if vals[i] <= vals[i + 1]:
+                mid = (vals[i] + vals[i + 1]) / 2.0
+                vals[i], vals[i + 1] = mid + 1.0, mid - 1.0
+                violated = True
+        if not violated:
+            break
+    return {k: vals[i] for i, k in enumerate(SIGNAL_ORDER)}
+
+
+def rng_from_seed(seed: str) -> np.random.Generator:
+    """字符串种子 → 确定性 Generator（default_rng 仅接受 int, 取 sha256 前 8 字节）。"""
+    entropy = int.from_bytes(hashlib.sha256(seed.encode("utf-8")).digest()[:8], "big")
+    return np.random.default_rng(entropy)
+
+
+def mutate_params(parent_params: dict[str, Any], rng: np.random.Generator) -> dict[str, Any]:
+    """由父代参数变异出一个候选（P0-3）。
+
+    - weights: 每维 +N(0,0.05) → clip [0.05,0.5] → 除以总和归一（和=1±1e-12）;
+    - signals: 各阈值 +N(0,3) → 按键限幅 → 强制严格递降修复;
+      strong_buy/watch/hold 参与变异改变 sig 分布, 但 P0 模拟仅用 buy/sell
+      两执行阈值择时（设计文档 §1.2 已注明, 分级仓位留 P2 接口）。
+    """
+    w = np.array([float(parent_params["weights"][k]) for k in DIM_KEYS], dtype=float)
+    w = np.clip(w + rng.normal(0.0, WEIGHT_MUTATION_SIGMA, size=len(DIM_KEYS)), *WEIGHT_CLIP)
+    w = w / w.sum()
+    weights = {k: float(x) for k, x in zip(DIM_KEYS, w)}
+
+    raw = {}
+    for k in SIGNAL_ORDER:
+        lo, hi = SIGNAL_LIMITS[k]
+        raw[k] = float(np.clip(float(parent_params["signals"][k]) + rng.normal(0.0, SIGNAL_MUTATION_SIGMA), lo, hi))
+    signals = _repair_signal_order(raw)
+    return {"weights": weights, "signals": signals}
+
+
+# =====================================================================
+# B4 · 净值择时模拟评估器（P0-4 具体口径, §1.2）
+# =====================================================================
+
+TARGET_VOL_DAILY_ANNUALIZED = 0.012   # 目标波动率参考（年化 1.2%/√252 语义见公式, 直接用年化口径）
+
+
+def _pct_change(nav: np.ndarray) -> np.ndarray:
+    ret = np.zeros_like(nav)
+    if len(nav) > 1:
+        ret[1:] = nav[1:] / nav[:-1] - 1.0
+    return ret
+
+
+def _mom(nav: np.ndarray, n: int) -> np.ndarray:
+    out = np.zeros_like(nav)
+    if len(nav) > n:
+        out[n:] = nav[n:] / nav[:-n] - 1.0
+    return out
+
+
+def _rolling_r2_ln(nav: np.ndarray, window: int = 60, min_periods: int = 30) -> np.ndarray:
+    """逐日 60 日窗 ln(nav) 线性回归 R²（代理基本面稳定性）。"""
+    ln_nav = np.log(np.clip(nav, 1e-9, None))
+    r2 = np.zeros_like(nav)
+    for d in range(len(nav)):
+        lo = max(0, d - window + 1)
+        seg = ln_nav[lo:d + 1]
+        if len(seg) < min_periods:
+            r2[d] = 0.0
+            continue
+        t = np.arange(len(seg), dtype=float)
+        t_c = t - t.mean()
+        var_t = float((t_c ** 2).sum())
+        if var_t <= 0:
+            r2[d] = 0.0
+            continue
+        slope = float((t_c * (seg - seg.mean())).sum()) / var_t
+        pred = seg.mean() + slope * t_c
+        ss_res = float(((seg - pred) ** 2).sum())
+        ss_tot = float(((seg - seg.mean()) ** 2).sum())
+        r2[d] = 0.0 if ss_tot <= 0 else max(0.0, min(1.0, 1.0 - ss_res / ss_tot))
+    return r2
+
+
+def _breakout_signal(nav: np.ndarray, ref: int = 60, lookback: int = 5) -> np.ndarray:
+    """近 lookback 日创 ref 日新高(+)/新低(−) 的净计数（代理事件面）。"""
+    sig = np.zeros_like(nav)
+    for d in range(len(nav)):
+        lo = max(0, d - ref)
+        prev = nav[lo:d]
+        if len(prev) < ref // 2:
+            continue
+        hi, low = float(prev.max()), float(prev.min())
+        cnt = 0
+        for j in range(max(0, d - lookback + 1), d + 1):
+            if nav[j] > hi:
+                cnt += 1
+            elif nav[j] < low:
+                cnt -= 1
+        sig[d] = cnt
+    return sig
+
+
+def _rolling_vol_annualized(nav: np.ndarray, window: int = 20) -> np.ndarray:
+    """逐日 20 日已实现波动（日收益 std × √252 年化）。"""
+    ret = _pct_change(nav)
+    vol = np.zeros_like(nav)
+    for d in range(len(nav)):
+        seg = ret[max(0, d - window + 1):d + 1]
+        if len(seg) >= 5:
+            vol[d] = float(seg.std()) * float(np.sqrt(252.0))
+    return vol
+
+
+def build_proxy_matrix(navs: dict[str, np.ndarray]) -> tuple[np.ndarray, np.ndarray, list[str]]:
+    """构造代理分数矩阵与日收益矩阵（一次性预计算, 全部候选共享）。
+
+    代理口径, 非真实五维数据（设计文档 §1.2）:
+    - technical = clip(50 + 25·tanh(mom5/0.03) + 25·tanh(mom20/0.08), 0, 100)
+    - capital   = 50 + 50·tanh((mom5−mom20)/0.05)   （短期相对长期加速度）
+    - fundamental = 50 + 50·R²(ln(nav) 60 日线性回归)
+    - news      = 50 + 25·tanh(突破净计数/5)         （近5日创60日新高/低净计数）
+    - sentiment = 50 + 50·tanh((0.012 − 已实现20日年化波动)/0.08)（低波动加分）
+
+    Returns:
+        (proxy, rets, codes): proxy shape (F, D, 5); rets shape (F, D);
+        D = 各基金样本长度的最小值（共同窗）。
+    """
+    codes = list(navs.keys())
+    d_common = min(len(v) for v in navs.values())
+    trimmed = [np.asarray(navs[c], dtype=float)[-d_common:] for c in codes]
+    f_count = len(codes)
+    proxy = np.zeros((f_count, d_common, 5), dtype=float)
+    for i, nav in enumerate(trimmed):
+        mom5 = _mom(nav, 5)
+        mom20 = _mom(nav, 20)
+        proxy[i, :, 0] = np.clip(50.0 + 25.0 * np.tanh(mom5 / 0.03) + 25.0 * np.tanh(mom20 / 0.08), 0.0, 100.0)
+        proxy[i, :, 1] = np.clip(50.0 + 50.0 * np.tanh((mom5 - mom20) / 0.05), 0.0, 100.0)
+        proxy[i, :, 2] = np.clip(50.0 + 50.0 * _rolling_r2_ln(nav), 0.0, 100.0)
+        proxy[i, :, 3] = np.clip(50.0 + 25.0 * np.tanh(_breakout_signal(nav) / 5.0), 0.0, 100.0)
+        proxy[i, :, 4] = np.clip(50.0 + 50.0 * np.tanh((TARGET_VOL_DAILY_ANNUALIZED - _rolling_vol_annualized(nav)) / 0.08), 0.0, 100.0)
+    rets = np.vstack([_pct_change(nav) for nav in trimmed])
+    return proxy, rets, codes
+
+
+def evaluate_candidate(
+    proxy: np.ndarray,
+    rets: np.ndarray,
+    weights: dict[str, float],
+    signals: dict[str, float],
+) -> dict[str, float]:
+    """单候选评估: 合成 → buy/sell 两阈值状态机择时 → T+1 错位收益 → 指标/适应度。
+
+    - 持仓状态机: position[d]=1 若 sig[d]≥buy; =0 若 sig[d]≤sell; 否则保持前值
+      （首日按 sig 判定, 无前值时默认空仓）。strong_buy/watch/hold 不直接参与
+      P0 执行（设计注释: 通过变异改变 sig 分布间接影响结果）;
+    - T+1 执行语义: r[d] = position[d-1] × 组合日收益 —— 与真实交易 T+1 同构,
+      纯数组运算, **不触碰 TradeExecutor**;
+    - win_rate 口径: r[d]>0 占有效收益日（D-1 日, 首日无 T-1 持仓不计）比例;
+    - fitness = 0.4·tanh(annual/0.30) + 0.25·tanh(sharpe/2.0) + 0.1·win_rate
+                − 0.25·min(1, |max_dd|/0.30)   （PRD 权重, tanh 归一）。
+    """
+    w = np.array([float(weights[k]) for k in DIM_KEYS], dtype=float)
+    composite = np.tensordot(proxy, w, axes=([2], [0]))       # (F, D)
+    sig = composite.mean(axis=0)                              # 等权组合信号 (D,)
+    d_days = sig.shape[0]
+    buy = float(signals["buy"])
+    sell = float(signals["sell"])
+
+    position = np.zeros(d_days, dtype=float)
+    position[0] = 1.0 if sig[0] >= buy else 0.0
+    for d in range(1, d_days):
+        if sig[d] >= buy:
+            position[d] = 1.0
+        elif sig[d] <= sell:
+            position[d] = 0.0
+        else:
+            position[d] = position[d - 1]
+
+    combo_ret = rets.mean(axis=0)                             # 等权 9 只 (D,)
+    r = np.zeros(d_days, dtype=float)
+    if d_days > 1:
+        r[1:] = position[:-1] * combo_ret[1:]                 # T+1 错位
+    n_days = max(d_days - 1, 1)
+
+    equity = np.cumprod(1.0 + r)
+    total = float(equity[-1] - 1.0)
+    annual = (1.0 + total) ** (252.0 / n_days) - 1.0 if total > -1.0 else -1.0
+    peak = np.maximum.accumulate(equity)
+    max_dd = -float((1.0 - equity / peak).max())
+    std = float(r.std())
+    sharpe = 0.0 if std <= 1e-12 else float(r.mean()) / std * float(np.sqrt(252.0))
+    win_rate = float((r[1:] > 0).sum()) / n_days
+
+    fitness = (
+        0.4 * float(np.tanh(annual / 0.30))
+        + 0.25 * float(np.tanh(sharpe / 2.0))
+        + 0.1 * win_rate
+        - 0.25 * min(1.0, abs(max_dd) / 0.30)
+    )
+    return {
+        "annual_return": round(annual, 4),
+        "max_drawdown": round(max_dd, 4),
+        "sharpe": round(sharpe, 4),
+        "win_rate": round(win_rate, 4),
+        "fitness": round(fitness, 4),
+    }
+
+
+# =====================================================================
+# B5 · run_evolution 编排（预算收割 / 失败零写盘）
+# =====================================================================
+
+def _default_nav_loader(code: str, period: str) -> list[dict[str, Any]]:
+    """真实净值装载器: 走 fund_nav_source(内部 DataCache 文件缓存 TTL 1h)。"""
+    from src.core.fund_nav_source import get_fund_nav_history  # 延迟导入, 避免模块级重依赖
+
+    return get_fund_nav_history(code, period=period)
+
+
+def load_fund_codes(positions_file: Path | None = None) -> list[str]:
+    """读用户持仓基金代码（只读 web/user_fund_positions.json, 不动 fund.py）。"""
+    path = positions_file or POSITIONS_FILE
+    data = safe_read_json(path, default=None)
+    positions = (data or {}).get("positions") or []
+    codes: list[str] = []
+    for p in positions:
+        code = str((p or {}).get("fund_code") or "").strip()
+        if code and code not in codes:
+            codes.append(code)
+    return codes
+
+
+def load_navs(
+    codes: list[str],
+    nav_loader: Callable[[str, str], list[dict[str, Any]]] | None = None,
+) -> dict[str, np.ndarray]:
+    """逐基金取净值序列（整代只取一次, N 候选共享）; 不足下限抛 EvolutionDataUnavailable。"""
+    loader = nav_loader or _default_nav_loader
+    navs: dict[str, np.ndarray] = {}
+    for code in codes:
+        try:
+            rows = loader(code, NAV_PERIOD) or []
+        except Exception as e:
+            logger.warning(f"evolution nav fetch {code} failed: {e}")
+            rows = []
+        vals: list[float] = []
+        for row in rows:
+            try:
+                v = float(row.get("nav") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if v > 0:
+                vals.append(v)
+        if len(vals) >= MIN_SAMPLE_DAYS:
+            navs[code] = np.asarray(vals[-EVAL_WINDOW_DAYS:], dtype=float)
+    if len(navs) < MIN_FUNDS:
+        raise EvolutionDataUnavailable(
+            f"可用基金净值不足（{len(navs)}<{MIN_FUNDS} 只, 或样本 <{MIN_SAMPLE_DAYS} 日）"
+        )
+    return navs
+
+
+def run_evolution(
+    candidates: int = DEFAULT_CANDIDATES,
+    budget_seconds: float = BUDGET_SECONDS,
+    nav_loader: Callable[[str, str], list[dict[str, Any]]] | None = None,
+    fund_codes: list[str] | None = None,
+) -> dict[str, Any]:
+    """一次进化编排（线程池内同步执行, 路由层用 wait_for(…, 25) 包裹）。
+
+    流程（设计文档 §5）: 父代参数（active.json → 无则 yaml 现值/出厂常量）
+    → 读持仓基金码 → 取净值（共享）→ 代理矩阵 → 父代基线重评 → 逐候选
+    预算检查/变异/评估 → Top-1 vs 父代: 更优才写盘, 否则零写盘。
+
+    fund_codes 显式注入用于测试; 缺省读 web/user_fund_positions.json。
+
+    铁律: 任一步骤异常向上抛（路由层转 503）; **失败路径零写盘**。
+    """
+    started = time.monotonic()
+
+    def elapsed_ms() -> int:
+        return int((time.monotonic() - started) * 1000)
+
+    lineage = load_lineage()
+    active = load_active()
+    parent_params = active.get("params_snapshot")
+    if not isinstance(parent_params, dict) or "weights" not in (parent_params or {}):
+        # 从未激活/快照缺失 → 用 yaml 现值（缺段回退出厂常量, 见 trading_quant._read_active_params）
+        from src.strategies.trading_quant import _read_active_params
+
+        w, s = _read_active_params()
+        parent_params = {"weights": dict(w), "signals": dict(s)}
+
+    codes = fund_codes if fund_codes is not None else load_fund_codes()
+    if len(codes) < MIN_FUNDS:
+        raise EvolutionDataUnavailable(f"持仓基金不足（{len(codes)}<{MIN_FUNDS} 只）")
+    navs = load_navs(codes, nav_loader)
+    proxy, rets, used_codes = build_proxy_matrix(navs)
+
+    parent_metrics = evaluate_candidate(proxy, rets, parent_params["weights"], parent_params["signals"])
+
+    rng = rng_from_seed(f"gen{lineage.get('next_gen_id', 1)}-{now_stamp()}")
+    best: dict[str, Any] | None = None
+    evaluated = 0
+    for _ in range(int(candidates)):
+        if budget_seconds - (time.monotonic() - started) <= 0.0:
+            break  # 预算到点收割已完成者
+        cand_params = mutate_params(parent_params, rng)
+        cand_metrics = evaluate_candidate(proxy, rets, cand_params["weights"], cand_params["signals"])
+        evaluated += 1
+        if best is None or cand_metrics["fitness"] > best["metrics"]["fitness"]:
+            best = {"params": cand_params, "metrics": cand_metrics}
+
+    improved = bool(best and best["metrics"]["fitness"] > parent_metrics["fitness"])
+    result: dict[str, Any] = {
+        "generation_id": None,
+        "improved": improved,
+        "parent_fitness": parent_metrics["fitness"],
+        "new_fitness": best["metrics"]["fitness"] if best else parent_metrics["fitness"],
+        "metrics": best["metrics"] if best else parent_metrics,
+        "candidates_evaluated": evaluated,
+        "elapsed_ms": elapsed_ms(),
+        "message": "",
+    }
+    if not improved:
+        result["message"] = (
+            f"评估 {evaluated}/{candidates} 个候选, 无优于父代(基线 {parent_metrics['fitness']})者, 未写盘"
+            if evaluated else "预算到点, 未评估任何候选, 未写盘"
+        )
+        return result
+
+    # ---- 写盘路径: gen 文件 + lineage(含 50 代滚动清理) ----
+    gen_id = int(lineage.get("next_gen_id", 1))
+    metrics_full = {
+        **best["metrics"],
+        "eval_window_days": int(rets.shape[1] - 1),
+        "fund_count": len(used_codes),
+        "fund_codes": used_codes,
+        "evaluated_candidates": evaluated,
+        "budget_used_ms": result["elapsed_ms"],
+    }
+    record = {
+        "version": LINEAGE_VERSION,
+        "generation_id": gen_id,
+        "created_at": now_iso(),
+        "parent_id": active.get("generation_id"),
+        "origin": "evolution",
+        "params": best["params"],
+        "metrics": metrics_full,
+        "parent_fitness": parent_metrics["fitness"],
+        "improved_over_parent": True,
+    }
+    filename = save_generation(record)
+    entry = {
+        "generation_id": gen_id,
+        "created_at": record["created_at"],
+        "parent_id": record["parent_id"],
+        "fitness": best["metrics"]["fitness"],
+        "improved": True,
+        "origin": "evolution",
+        "file": filename,
+        "params_digest": params_digest(best["params"]),
+    }
+    append_lineage(lineage, entry)
+    result["generation_id"] = gen_id
+    result["message"] = (
+        f"第 {gen_id} 代: 评估 {evaluated}/{candidates} 个候选, "
+        f"fitness {parent_metrics['fitness']} → {best['metrics']['fitness']}, 已写入谱系"
+    )
+    return result
