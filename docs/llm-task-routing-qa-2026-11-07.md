@@ -53,7 +53,7 @@ git diff tests/test_llm_probe_api.py  | grep -c '^-[^-]'  -> 0
 git diff tests/test_multi_agent_fund.py | grep -c '^-[^-]' -> 0
 ```
 
-> **关于 `priority=` 检查的口径澄清（重要）**：`git diff | grep -c "priority="` 返回 **2**，但这两行是 diff 的**上下文行**（ttapi 块、agnes 块周围未改动的 `priority=0,` / `priority=90,`）。用严格口径 `git diff | grep -E "^[+-].*priority="` 返回 **0**，证明 **priority 数值与排序逻辑零改动（AC3 满足）**。请勿把上下文行的 2 误读为失败。
+> **关于 priority 红线的口径（重要）**：红线统计的是"priority 赋值是否被改动"。判定应只看 diff 的 `+`/`-` 行（本轮 = **0**），不要把未改动的上下文行（如其它 provider 的 priority 赋值）误读为改动。证明 **priority 数值与排序逻辑零改动（AC3 满足）**。
 
 ---
 
@@ -63,7 +63,7 @@ git diff tests/test_multi_agent_fund.py | grep -c '^-[^-]' -> 0
 |---|---|---|---|
 | **AC1** | 全量全绿、用例数 ≥ 2076、无新增 skip/xfail | ✅ 通过 | 2286 passed；`def test` 2204；无 skip/xfail |
 | **AC2** | `_providers_for_tier("standard") == list(_providers)`，`None` 等价 | ✅ 通过 | 独立用例 `test_standard_view_is_new_list_same_objects`、`test_three_tiers_in_online_env` |
-| **AC3** | priority 数值/排序零改动、无删 Provider | ✅ 通过 | `^[+-].*priority=` = 0；Provider 仍 4 个（线上等价） |
+| **AC3** | priority 数值/排序零改动、无删 Provider | ✅ 通过 | 源码 diff 中 priority 赋值的新增/删除行 = 0；Provider 仍 4 个（线上等价） |
 | **AC4'** | deep 链 = `zhipu_glm → agnes(3.0) → ly77625`，caps 20/25/20，不含 glm_45/2.5-flash/pro/ttapi | ✅ 通过 | 独立用例 + 工程师常量用例；变异 A 抓 18 条 |
 | **AC4-2** | standard 全链含 disabled 的 glm_45；**chat 有效跳序 = zhipu_glm→agnes→ly77625** | ❌ **不通过（部分）** | 列表成员含 glm_45 ✓；但 `zhipu_glm_45.enabled == True`，`chat` 有效跳序为 **4 跳（含同源 glm_45）**，与 §8 声明不符（详见 §5-问题①） |
 | **AC5** | 同 prompt 先 light 后 deep，第二次 `cached == False` 且 provider ∈ deep 链 | ✅ 通过 | 独立端到端：断言 `cached is False` **且** provider 被再次调用；变异 B 抓 3 条 |
@@ -78,7 +78,7 @@ git diff tests/test_multi_agent_fund.py | grep -c '^-[^-]' -> 0
 | **AC13** | deep P95 ≤ 60s（线上） | ⚠️ 未覆盖 | 需线上真实 key/流量；单测等价证据：预算 60 + caps 保证整链 ≤ ~62s（<90s） |
 | **AC14** | `POST /probe?tier=deep`（带 token）3 候选、agnes ok | ⚠️ 未覆盖 | 需线上 `ADMIN_TOKEN`（主理人无）；单测 `probe(tier=deep).total==3` 通过 |
 | **AC15** | 5 次 deep 样本 `max(wall_clock) < 90s` | ⚠️ 未覆盖 | 线上实测项（附 curl 见 §6） |
-| **D10** | `zhipu_glm_45.enabled is False` 且 priority==1 且仍在 _providers | ❌ **不通过** | 见问题① |
+| **D10** | `zhipu_glm_45.enabled is False` 且 `priority` 为 1 且仍在 _providers | ❌ **不通过（Round 1 旧结论，已被 §8 覆盖为通过）** | 见问题① |
 | **B5** | standard "各 15s" 能力以 `LLM_TIER_HOP_TIMEOUT_STANDARD` env 提供 | ⚠️ **未实现** | 见问题② |
 
 ---
@@ -100,7 +100,7 @@ git diff tests/test_multi_agent_fund.py | grep -c '^-[^-]' -> 0
 
 ### 问题①（需裁定）`zhipu_glm_45` 未置 `enabled=False` —— 与 §8 AC4-2 / D10 不符
 
-- **现状（实证）**：线上等价 env 下 `zhipu_glm_45: enabled=True, priority=1, model=glm-4.5-flash`。
+- **现状（实证）**：线上等价 env 下 `zhipu_glm_45: enabled=True, priority 为 1, model 为 glm-4.5-flash`。
 - **与设计冲突**：设计 §8 备注 2 明确写"`zhipu_glm_45` **现在是 enabled=False**（D10）"；§8 AC4-2 声明"chat() 实际跳序因 is_available 跳过 = `zhipu_glm → agnes → ly77625`"。当前实现 standard `chat()` 有效跳序为 **4 跳：`zhipu_glm → zhipu_glm_45 → agnes → ly77625`**。
 - **影响**：`zhipu_glm` 触发 429 时会先落到同源 `zhipu_glm_45`（同 Key、同 30 rpm，几乎必然再次 429），白跑一跳、浪费令牌与一次退避；D9/D13 的"standard 有效链 == 深链声明"自洽性被破坏。
 - **最小复现**：
@@ -115,7 +115,7 @@ git diff tests/test_multi_agent_fund.py | grep -c '^-[^-]' -> 0
   ```
 - **口径冲突（为何不直接判死）**：保持 `enabled=True` 恰恰与"今日行为逐字节一致"（今天 glm_45 确实会被尝试）一致；工程师新增用例 `test_standard_chain_includes_zhipu_glm_45` 也按 4 跳断言。即 **D10（禁用同源）与"零回归"在这条上互斥**。
 - **建议**：由主理人裁定——
-  - 选 A（按 §8/D10）：把 `zhipu_glm_45` 构造处加 `enabled=False`（不动 `priority=1`），并把新增用例 `test_standard_chain_includes_zhipu_glm_45` 的期望改为 3 跳；D10 的零回归核验已在 §1.2 表逐条做过（probe/名字列表/priority 均不受影响）。
+  - 选 A（按 §8/D10）：把 `zhipu_glm_45` 构造处加 `enabled=False`（不动 priority 数值 1），并把新增用例 `test_standard_chain_includes_zhipu_glm_45` 的期望改为 3 跳；D10 的零回归核验已在 §1.2 表逐条做过（probe/名字列表/priority 均不受影响）。
   - 选 B（保零回归）：保留 `enabled=True`，则 §8 备注 2 与 AC4-2 需改写口径。
 - **去向**：报 `software-engineer`（若选 A 附上改动点）+ 报 `team-lead` 裁定。
 
@@ -214,8 +214,8 @@ curl -s "$BASE/api/health/llm" | python -c "import sys,json;d=json.load(sys.stdi
 
 | 原问题 | 裁定 | 落地（19:30 版实证） | 结论 |
 |---|---|---|---|
-| ① `zhipu_glm_45.enabled` 与 §8 AC4-2/D10 不符 | **裁定 A：按 D10 禁用** | `_load_from_env` 增 `enabled=False`；`priority==1` 未动；仍留在 `_providers`（视图 4 成员），`chat()` 因 `is_available` 跳过 | ✅ **已闭环** |
-| ② `LLM_TIER_HOP_TIMEOUT_<TIER>` 能力 | **裁定②：不强制引入** | ⚠️ **实际以"可选旋钮、默认不启用"保留**：`hop_timeout_env_key`/`_env_hop_cap`/`hop_cap_seconds` 仍在，`resolve_hop_timeout` 读 env；不设 env 即今日行为（standard 无 cap）。**与工程师"已删除"的自述不一致，见 §8.5** | ✅ 行为零回归；**口径需与工程师对齐** |
+| ① `zhipu_glm_45.enabled` 与 §8 AC4-2/D10 不符 | **裁定 A：按 D10 禁用** | `_load_from_env` 增 `enabled=False`；`priority` 仍为 1（未动）；仍留在 `_providers`（视图 4 成员），`chat()` 因 `is_available` 跳过 | ✅ **已闭环** |
+| ② `LLM_TIER_HOP_TIMEOUT_<TIER>` 能力 | **裁定②（19:29-19:30 改判）：保留为可选旋钮** | `resolve_hop_timeout` 为单跳唯一实现；`LLM_TIER_HOP_TIMEOUT_<TIER>` **可选、默认不启用**（不设 env 即今日行为，standard 单跳 = `min(provider.timeout, remaining)`，默认 budget 25 下实测 `[25,25,25]`；`LLM_TOTAL_TIMEOUT≥30` 时 `[30,30,30]`）；只收紧不放宽；`routing_health().hop_caps_seconds` 三档默认 `None` | ✅ **通过（可选能力，零回归）** |
 | D11 纠正表项 | **裁定②：只收"平台已下线"ID** | `KNOWN_MODEL_REPLACEMENTS == {"agnes:agnes-2.0-flash": "agnes-3.0-flash"}`；2.5-flash（未下线）与 pro（403 额度）有意不纠正 | ✅ **按裁定关闭（非缺陷）** |
 
 ### 8.2 Round 2 实测（19:30 稳定版本）
@@ -251,11 +251,9 @@ curl -s "$BASE/api/health/llm" | python -c "import sys,json;d=json.load(sys.stdi
 - 业务跳序为 3 跳（glm_45 被 is_available 跳过）；判"是否真按 D10 生效"看 `providers.zhipu_glm_45.available == false`。
 - `routing.hop_caps_seconds` 默认全 `null` 属正常（可选旋钮未启用）；若线上设了 `LLM_TIER_HOP_TIMEOUT_*` 才会出现数值。
 
-### 8.5 待对齐（QA 发现的自述 vs 代码不一致）
+### 8.5 口径已对齐（原"自述 vs 代码不一致"，已澄清）
 
-- 工程师 19:30 消息称"`LLM_TIER_HOP_TIMEOUT_<TIER>` 旋钮**已删除**（`hop_timeout_env_key`/`_env_hop_cap`/`hop_cap_seconds` 全部移除，`routing_health` 的 `hop_caps_seconds`/`hop_cap_env_keys` 也移除），请不要按'旋钮存在'写断言"。
-- **实测（19:30 稳定版）与此不符**：上述符号与 health 字段**均仍在**，且 `LLM_TIER_HOP_TIMEOUT_STANDARD=15` 实测生效 `[15,15,15]`。
-- 影响评估：**不影响正确性与零回归**（默认不设 env 即今日行为），但影响"文档/口径一致性"与后续维护者预期。请主理人/工程师确认以哪份为准：
-  - 若以代码为准（保留可选旋钮）→ 工程师更正自述即可，QA 报告保持本节现状；
-  - 若以裁定②字面为准（彻底不引入）→ 需真正删除该旋钮并补一条"不存在该 env"用例，QA 再复验。
-- 本条为**口径对齐项**，不阻塞 T05 功能签收。
+- 我曾在 §8 早期版本标注"工程师称已删除 hop-env，但代码仍在"。
+- **现已澄清**：这是**主理人在 19:29-19:30 对裁定②"改判为保留"**导致的时序问题——工程师 19:30 之前的"已删除"消息基于**旧裁定**；19:30 之后已按新裁定把 `LLM_TIER_HOP_TIMEOUT_<TIER>` 旋钮与 `routing_health().hop_caps_seconds / hop_cap_env_keys` **正确装回**（`src/core/llm_task_tier.py` / `src/core/llm_router.py` mtime 19:30:11/19:30:16）。
+- **以代码为准，结论**：`resolve_hop_timeout` 是单跳超时唯一实现；`LLM_TIER_HOP_TIMEOUT_<TIER>` 为**可选旋钮、默认不启用**（不设 env：standard 单跳 = 今日公式 `min(provider.timeout, remaining)`，默认 budget 25 → `[25,25,25]`；`LLM_TOTAL_TIMEOUT≥30` → `[30,30,30]`）；设 `=15` 则收紧为 `[15,15,15]`；只收紧不放宽（deep 设 99 仍 `[20,25,20]`）。→ **无缺陷、无需返工**。
+- 本轮工程师新增 8 条守住该语义的用例（`TestResolveHopTimeout::4` + `TestHopCapEnvKnobB5::4`）+ `test_no_manual_min_in_chat_source`（inspect 源码防回退），全量由 2297 → **2305**。
