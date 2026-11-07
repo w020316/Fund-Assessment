@@ -1,0 +1,36 @@
+/* ===== STAGE5: responsive ===== ============================================================
+   阶段5 R3 · 大屏正面设计（P1-11）
+   ------------------------------------------------------------
+   职责：≥1366 引入总览页双列仪表分区（卡片合理分组）；≥1920 内容区居中 + 留白放大。
+   铁律：只动布局容器，不改任何组件内部样式；断点沿用存量已验证阈值并向下兼容
+   1366（任务书"1366 复用 1440 规则"）。
+   双列分组依据（page-market 直接子元素）：
+   - 引导横幅 + 股票检索 → 第一对（引导卡可关闭，关闭后检索自动占位补齐）；
+   - 分区标题行 / 指数卡组 / 热门+热力(内部已双列) → 显式跨双列；
+   - 资金面 + 全球资讯 → 第二对（次级信息并列）。
+   ============================================================ */
+@media (min-width: 1366px) {
+  #page-market.active {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;                 /* 横纵节奏统一由 gap 负责 */
+    align-items: start;        /* 左右卡片高度解耦，不互相拉伸 */
+  }
+  /* 栅格化后行间距由 gap 承担，子元素的 mb-16/mb-12 不再叠加 */
+  #page-market.active > * { margin-bottom: 0; }
+  /* 显式跨双列：标题行、指数卡组、内部已双列的热门+热力块 */
+  #page-market.active > .flex-between,
+  #page-market.active > #indexCards,
+  #page-market.active > .grid-2 { grid-column: 1 / -1; }
+}
+
+@media (min-width: 1920px) {
+  /* 内容区居中收拢 + 留白放大（需同时压过 index.html 的 .content 与
+     aurora-theme 的 body.hud-theme .content，故用元素+类提升特异度） */
+  main.content,
+  body.hud-theme main.content {
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 40px 48px;
+  }
+}
