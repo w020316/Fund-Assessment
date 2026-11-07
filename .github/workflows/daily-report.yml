@@ -1,0 +1,78 @@
+name: Daily Report
+
+# 每个交易日 15:35(北京时间)自动生成 A股复盘报告。
+# UTC 07:35 周一~周五 = 北京时间 15:35 周一~周五。
+# 报告只推送到 daily-reports 分支(不推 main, 避免触发 Render 部署与 CI)。
+on:
+  schedule:
+    - cron: '35 7 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 非交易日脚本内部会打印"非交易日，跳过报告生成"并以 exit 0 结束,
+      # 不产出文件, 下一步的文件存在性判断会自动跳过提交。
+      # runner 为 UTC 环境, 脚本内部已显式换算北京时间, 此处无需设 TZ。
+      - name: Generate daily report
+        run: python scripts/gen_daily_report.py
+
+      - name: Push report to daily-reports branch
+        run: |
+          set -euo pipefail
+          REPORT_DIR="daily_reports"
+          NEW_FILE="$(ls -t "$REPORT_DIR"/*.html 2>/dev/null | head -1 || true)"
+          if [ -z "$NEW_FILE" ]; then
+            echo "::notice::非交易日或未产出报告文件，跳过提交"
+            exit 0
+          fi
+          FILENAME="$(basename "$NEW_FILE")"
+          cp "$NEW_FILE" /tmp/new_report.html
+          rm -f "$NEW_FILE"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin daily-reports || true
+          if git show-ref --verify --quiet refs/remotes/origin/daily-reports; then
+            # 既有历史分支: 只追加当天文件, 保留历史报告
+            git checkout -B daily-reports origin/daily-reports
+          else
+            # 首次运行: 建立仅含报告目录的孤立分支
+            git checkout --orphan daily-reports
+            git rm -r -q --ignore-unmatch .
+          fi
+          mkdir -p "$REPORT_DIR"
+          cp /tmp/new_report.html "$REPORT_DIR/$FILENAME"
+          git add "$REPORT_DIR"
+          if git diff --cached --quiet; then
+            echo "::notice::报告内容无变化，跳过提交"
+          else
+            git commit -m "docs: A股复盘报告 ${FILENAME%.html}"
+          fi
+          git push --force-with-lease origin daily-reports
