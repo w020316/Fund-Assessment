@@ -543,7 +543,12 @@ async def analyze_fund_with_agents(
             messages,
             temperature=0.5 if mode == "deep" else 0.3,
             json_mode=True,
+            # timeout=120 仅作"这是一次长调用"的上限提示：deep 档以 tier 预算 60s 为准，
+            # 且单跳还会被 provider.timeout 与 remaining 双重夹逼（设计 §3.3 ⑦）。
+            # 本期保留不删（零 diff 风险），P2 再清理。
             timeout=120,
+            # 7 智能体深度决策 = 最高难度档（多角色/多步骤推理 + 约束下裁决）
+            task_tier="deep",
         )
         result = _parse_fund_analysis_response(response.content, fund_code)
         # 附带原始数据快照(供前端展示)

@@ -488,6 +488,8 @@ def ai_generate_script(
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
             timeout=30,
+            # 100~200 字话术生成 = 最低难度档（无 schema 约束、失败可模板兜底）
+            task_tier="light",
         )
         content = response.content.strip() if response.content else ""
         if not content:

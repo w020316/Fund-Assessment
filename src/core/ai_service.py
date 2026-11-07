@@ -505,8 +505,18 @@ def _build_analysis_prompt(stock_code: str, stock_data: dict[str, Any], search_n
     return prompt
 
 
-def _call_llm(messages: list[dict[str, str]], model: str = _DEFAULT_MODEL, temperature: float = 0.7, json_mode: bool = True) -> str:
-    """调用LLM，优先使用多Provider路由，降级为直接TTAPI调用"""
+def _call_llm(messages: list[dict[str, str]], model: str = _DEFAULT_MODEL, temperature: float = 0.7, json_mode: bool = True, task_tier: str = "standard") -> str:
+    """调用LLM，优先使用多Provider路由，降级为直接TTAPI调用
+
+    Args:
+        messages: 消息列表
+        model: 指定模型（覆盖 Provider 默认模型；默认值 _DEFAULT_MODEL 表示"不指定"）
+        temperature: 温度参数
+        json_mode: 是否要求 JSON 输出
+        task_tier: 任务难度档位（deep / standard / light）。默认 "standard" ——
+            其链恒等于路由器的 Provider 全链原序，因此**既有调用点不传该参数时
+            行为与今日完全一致**（零回归，见设计 §1.1 矛盾 1）。
+    """
     # 优先使用LLM Router
     try:
         from src.core.llm_router import get_llm_router
@@ -517,6 +527,7 @@ def _call_llm(messages: list[dict[str, str]], model: str = _DEFAULT_MODEL, tempe
                 model=model if model != _DEFAULT_MODEL else None,
                 temperature=temperature,
                 json_mode=json_mode,
+                task_tier=task_tier,
             )
             logger.debug(f"LLM Router 使用 Provider: {response.provider}, 耗时: {response.latency_ms:.0f}ms")
             return response.content
@@ -528,11 +539,23 @@ def _call_llm(messages: list[dict[str, str]], model: str = _DEFAULT_MODEL, tempe
         logger.warning(f"LLM Router 异常: {e}，降级为直接TTAPI调用")
 
     # 降级：直接调用TTAPI
+    # 已知失效（P2 backlog，按 B7 方案 A 保留 + WARN，不删不抛）：ttapi.io 已 404 且线上未配置
+    # TTAPI_API_KEY，因此该兜底必然失败；删除它会改写 tests/test_ai_service.py 的
+    # 2 条既有断言，故留待下一增量处理。_call_ttapi_direct 入口已打 WARN。
     return _call_ttapi_direct(messages, model, temperature, json_mode)
 
 
 def _call_ttapi_direct(messages: list[dict[str, str]], model: str = _DEFAULT_MODEL, temperature: float = 0.7, json_mode: bool = True) -> str:
     """直接调用TTAPI（降级方案）"""
+    # P2 backlog（B7 方案 A：本期保留 + 显式 WARN，不删不抛）：
+    # ttapi.io 已 404 返回 HTML、线上也未配置 TTAPI_API_KEY → 本兜底在线上必然失败
+    # （无 key 时下方第一步即 raise，成本为 0）。保留的原因是
+    # tests/test_ai_service.py 有 2 条断言锁定该路径；已知代价是会掩盖
+    # "某一个 Provider 故障"的真实原因，需在 P2 增量里替换为"档位链末位重试"。
+    logger.warning(
+        "_call_ttapi_direct 被调用：该兜底已知失效（ttapi.io 404 / 线上未配 TTAPI key），"
+        "P2 backlog。真实失败原因见上一条 LLM Router 日志。"
+    )
     # P2 修复(2026-07-29):实时读取 API Key,支持 Render Dashboard 热更新
     ttapi_api_key = _get_ttapi_api_key()
     if not ttapi_api_key:
@@ -1103,7 +1126,12 @@ def analyze_stock(stock_code: str, mode: str = "deep") -> dict[str, Any]:
     ]
 
     try:
-        response_text = _call_llm(messages, temperature=0.5 if mode == "deep" else 0.3)
+        # 按 mode 动态判定档位：deep → 分层链 + 60s 预算；quick → 保底全链（今日行为）
+        response_text = _call_llm(
+            messages,
+            temperature=0.5 if mode == "deep" else 0.3,
+            task_tier="deep" if mode == "deep" else "standard",
+        )
         result = _parse_analysis_response(response_text, stock_code)
         result = _attach_data_quality(result, stock_data)
         logger.info(
@@ -1136,7 +1164,8 @@ def quick_analysis(stock_code: str) -> dict[str, Any]:
     ]
 
     try:
-        response_text = _call_llm(messages, temperature=0.3)
+        # 快速分析属"中等难度结构化抽取" → standard（显式声明，等价于默认值）
+        response_text = _call_llm(messages, temperature=0.3, task_tier="standard")
         result = _parse_analysis_response(response_text, stock_code)
         result = _attach_data_quality(result, stock_data)
         logger.info(
@@ -1170,7 +1199,12 @@ def multi_analyze(stock_code: str, mode: str = "deep") -> dict[str, Any]:
     ]
 
     try:
-        response_text = _call_llm(messages, temperature=0.5 if mode == "deep" else 0.3)
+        # 按 mode 动态判定档位：deep → 分层链 + 60s 预算；否则保底全链（今日行为）
+        response_text = _call_llm(
+            messages,
+            temperature=0.5 if mode == "deep" else 0.3,
+            task_tier="deep" if mode == "deep" else "standard",
+        )
         result = _parse_analysis_response(response_text, stock_code)
         result = _attach_data_quality(result, stock_data)
         result["analysis_mode"] = "multi_agent"
@@ -1331,7 +1365,8 @@ def analyze_portfolio(positions: list[dict]) -> dict[str, Any]:
 
     degraded = False
     try:
-        response_text = _call_llm(messages, temperature=0.3)
+        # 组合风险评估属"结构化抽取/中等分析" → standard（显式声明，等价于默认值）
+        response_text = _call_llm(messages, temperature=0.3, task_tier="standard")
         try:
             portfolio_result = json.loads(response_text)
         except json.JSONDecodeError:
@@ -1454,7 +1489,7 @@ def get_market_outlook() -> dict[str, Any]:
 
     degraded = False
     try:
-        response_text = _call_llm(messages, temperature=0.3, json_mode=True)
+        response_text = _call_llm(messages, temperature=0.3, json_mode=True, task_tier="standard")
         try:
             outlook_result = json.loads(response_text)
         except json.JSONDecodeError:
@@ -1467,7 +1502,7 @@ def get_market_outlook() -> dict[str, Any]:
     except Exception as e:
         logger.warning(f"market outlook json_mode failed: {e}, retrying without json_mode")
         try:
-            response_text = _call_llm(messages, temperature=0.3, json_mode=False)
+            response_text = _call_llm(messages, temperature=0.3, json_mode=False, task_tier="standard")
             start = response_text.find("{")
             end = response_text.rfind("}") + 1
             if start >= 0 and end > start:

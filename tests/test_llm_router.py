@@ -919,3 +919,549 @@ class TestChatWithRateLimit:
             assert provider._fail_count == 3
             assert provider._circuit_open
             assert not provider.is_available  # 熔断后不可用
+
+
+# ===== T02：chat() 分层执行引擎（2026-11-07 增量，只追加，不改既有断言）=====
+
+_ONLINE_TIER_ENV = {
+    "ZHIPU_API_KEY": "zk",
+    "AGNES_API_KEY": "ak",
+    "LY77625_API_KEY": "lk",
+}
+
+
+def _tier_router() -> LLMRouter:
+    """线上等价 4 Provider 环境：zhipu_glm(-1) / zhipu_glm_45(1) / agnes(90) / ly77625(95)。"""
+    from unittest.mock import patch as _patch
+    with _patch.dict("os.environ", _ONLINE_TIER_ENV, clear=True):
+        return LLMRouter()
+
+
+def _http_429() -> requests.exceptions.HTTPError:
+    resp = MagicMock()
+    resp.status_code = 429
+    return requests.exceptions.HTTPError("429 Too Many Requests", response=resp)
+
+
+def _ok(provider_name: str, model: str | None = None) -> LLMResponse:
+    return LLMResponse(
+        content=f"ok-{provider_name}", provider=provider_name, model=model or "m", latency_ms=1.0
+    )
+
+
+@pytest.fixture(autouse=True)
+def _reset_routing_recorder():
+    """每个用例前清空路由记录器，保证 last_routing 断言确定性。"""
+    from src.core.llm_router import _recorder
+    from src.core.llm_task_tier import reset_warn_cache
+    _recorder.reset()
+    reset_warn_cache()
+    yield
+    _recorder.reset()
+    reset_warn_cache()
+
+
+class TestChatTaskTier:
+    """chat(task_tier=...) 的分层执行：降级链 / 模型覆盖 / 预算 / 缓存 / 可观测。"""
+
+    def test_deep_429_falls_back_to_second_hop(self):
+        """AC6/AC9：deep 首跳 429 → 直接切第 2 跳成功，fallback_count == 1。"""
+        router = _tier_router()
+
+        def fake_call(provider, messages, **kwargs):
+            if provider.name == "zhipu_glm":
+                raise _http_429()
+            return _ok(provider.name, kwargs.get("model") or provider.model)
+
+        with patch.object(router, "_call_provider", side_effect=fake_call):
+            result = router.chat([{"role": "user", "content": "deep-429"}], task_tier="deep")
+
+        assert result.provider == "agnes"
+        assert result.content == "ok-agnes"
+        from src.core.llm_router import _recorder
+        last = _recorder.last()
+        assert last["tier"] == "deep"
+        assert last["provider"] == "agnes"
+        assert last["fallback_count"] == 1
+        assert last["cached"] is False
+        assert last["budget_seconds"] == 60.0
+
+    def test_deep_chain_skips_zhipu_glm_45(self):
+        """P0-6：deep 链不含 zhipu_glm_45（同源），即使它在 _providers 里。"""
+        router = _tier_router()
+        visited: list[str] = []
+
+        def fake_call(provider, messages, **kwargs):
+            visited.append(provider.name)
+            raise _http_429()
+
+        with patch.object(router, "_call_provider", side_effect=fake_call):
+            with pytest.raises(RuntimeError):
+                router.chat([{"role": "user", "content": "deep-excl"}], task_tier="deep")
+
+        assert visited == ["zhipu_glm", "agnes", "ly77625"]
+
+    def test_standard_chain_skips_disabled_zhipu_glm_45(self):
+        """D10：glm_45 已 enabled=False → standard 的**有效跳**只有 3 个（同源位被跳过）。
+
+        注意区分两层：
+        - `_providers_for_tier("standard")` 仍返回 4 个（视图不减员，C-1/D13 要求
+          `== list(self._providers)`）；
+        - `chat()` 的**有效跳**靠 `is_available` 跳过 disabled → 3 个。
+        """
+        router = _tier_router()
+        visited: list[str] = []
+
+        def fake_call(provider, messages, **kwargs):
+            visited.append(provider.name)
+            raise _http_429()
+
+        with patch.object(router, "_call_provider", side_effect=fake_call):
+            with pytest.raises(RuntimeError):
+                router.chat([{"role": "user", "content": "std-excl"}])
+
+        assert visited == ["zhipu_glm", "agnes", "ly77625"]
+        # 视图层仍是 4 个（含 disabled）
+        assert [p.name for p in router._providers_for_tier("standard")] == [
+            "zhipu_glm", "zhipu_glm_45", "agnes", "ly77625"
+        ]
+
+    def test_light_chain_has_two_hops(self):
+        router = _tier_router()
+        visited: list[str] = []
+
+        def fake_call(provider, messages, **kwargs):
+            visited.append(provider.name)
+            raise _http_429()
+
+        with patch.object(router, "_call_provider", side_effect=fake_call):
+            with pytest.raises(RuntimeError):
+                router.chat([{"role": "user", "content": "light-excl"}], task_tier="light")
+
+        assert visited == ["zhipu_glm", "agnes"]
+
+    def test_model_override_is_per_hop_not_broadcast(self):
+        """矛盾 2：agnes 条目拿到 agnes-3.0-flash，前两跳拿不到该 model。"""
+        router = _tier_router()
+        captured: list[tuple[str, str | None]] = []
+
+        def fake_call(provider, messages, **kwargs):
+            captured.append((provider.name, kwargs.get("model")))
+            if provider.name != "agnes":
+                raise _http_429()
+            return _ok(provider.name, kwargs.get("model") or provider.model)
+
+        with patch.object(router, "_call_provider", side_effect=fake_call):
+            result = router.chat([{"role": "user", "content": "model-per-hop"}], task_tier="deep")
+
+        # D9 顺序：zhipu_glm(第1跳) → agnes(第2跳, 带 model 覆盖) → ly77625(末位兜底, 不下发 model)
+        assert captured == [
+            ("zhipu_glm", None),
+            ("agnes", "agnes-3.0-flash"),
+        ]
+        assert result.model == "agnes-3.0-flash"
+        assert result.provider == "agnes"
+
+    def test_explicit_model_overrides_every_hop(self):
+        """显式 model= 入参仍保持"最强覆盖"语义。"""
+        router = _tier_router()
+        captured: list[str | None] = []
+
+        def fake_call(provider, messages, **kwargs):
+            captured.append(kwargs.get("model"))
+            return _ok(provider.name, kwargs.get("model") or provider.model)
+
+        with patch.object(router, "_call_provider", side_effect=fake_call):
+            result = router.chat(
+                [{"role": "user", "content": "explicit-model"}],
+                model="explicit-x",
+                task_tier="deep",
+            )
+
+        assert captured == ["explicit-x"]
+        assert result.model == "explicit-x"
+
+    def test_route_model_none_uses_provider_model(self):
+        """route.model=None → 沿用 Provider 自身 model（保留 ZHIPU_MODEL 等 env 覆盖）。"""
+        from unittest.mock import patch as _patch
+        with _patch.dict(
+            "os.environ",
+            {**_ONLINE_TIER_ENV, "ZHIPU_MODEL": "glm-custom"},
+            clear=True,
+        ):
+            router = LLMRouter()
+        captured: list[tuple[str, str | None]] = []
+
+        def fake_call(provider, messages, **kwargs):
+            captured.append((provider.name, kwargs.get("model")))
+            return _ok(provider.name)
+
+        with patch.object(router, "_call_provider", side_effect=fake_call):
+            router.chat([{"role": "user", "content": "zm"}], task_tier="deep")
+
+        # zhipu_glm 的 Provider.model 已是 env 覆盖值，chat 不再重复下发 model
+        zhipu = next(p for p in router._providers if p.name == "zhipu_glm")
+        assert zhipu.model == "glm-custom"
+        assert captured[0] == ("zhipu_glm", None)
+
+    def test_cross_tier_cache_isolation(self):
+        """AC5：同 prompt 先 light 后 deep，第二次 cached == False。"""
+        router = _tier_router()
+        messages = [{"role": "user", "content": "same-prompt-cross-tier"}]
+
+        def fake_call(provider, messages, **kwargs):
+            return _ok(provider.name, kwargs.get("model") or provider.model)
+
+        with patch.object(router, "_call_provider", side_effect=fake_call):
+            first = router.chat(messages, task_tier="light")
+            second = router.chat(messages, task_tier="deep")
+
+        assert first.cached is False
+        assert second.cached is False  # 若 key 不含 tier，这里会变成 True（F3 污染）
+        assert first.provider == "zhipu_glm"
+
+    def test_same_tier_cache_hits(self):
+        """同 prompt 同 tier → 第二次命中缓存（证明缓存本身仍生效）。"""
+        router = _tier_router()
+        messages = [{"role": "user", "content": "same-tier-hit"}]
+
+        with patch.object(
+            router, "_call_provider",
+            side_effect=lambda p, m, **kw: _ok(p.name, kw.get("model") or p.model),
+        ):
+            router.chat(messages, task_tier="light")
+            second = router.chat(messages, task_tier="light")
+
+        assert second.cached is True
+
+    def test_cache_hit_records_last_routing(self):
+        """§6.4：缓存命中也必须写 last_routing（AC12 依赖）。"""
+        router = _tier_router()
+        messages = [{"role": "user", "content": "cache-hit-last-routing"}]
+
+        with patch.object(
+            router, "_call_provider",
+            side_effect=lambda p, m, **kw: _ok(p.name, kw.get("model") or p.model),
+        ):
+            router.chat(messages, task_tier="deep")
+            router.chat(messages, task_tier="deep")
+
+        from src.core.llm_router import _recorder
+        last = _recorder.last()
+        assert last["tier"] == "deep"
+        assert last["cached"] is True
+        assert last["latency_ms"] == 0.0
+
+    def test_budget_exhausted_records_error(self):
+        """预算耗尽 → last_routing.budget_exhausted=True 且 error == "budget_exhausted"。"""
+        router = _tier_router()
+        with patch.object(router, "_call_provider") as mocked:
+            with pytest.raises(RuntimeError, match="总预算 0s 已耗尽"):
+                router.chat([{"role": "user", "content": "zero"}], task_tier="deep", total_timeout=0)
+        mocked.assert_not_called()
+        from src.core.llm_router import _recorder
+        last = _recorder.last()
+        assert last["tier"] == "deep"
+        assert last["budget_exhausted"] is True
+        assert last["error"] == "budget_exhausted"
+
+    def test_all_failed_records_error(self):
+        router = _tier_router()
+        with patch.object(router, "_call_provider", side_effect=_http_429()):
+            with pytest.raises(RuntimeError, match="所有LLM Provider均不可用"):
+                router.chat([{"role": "user", "content": "allfail"}], task_tier="light")
+        from src.core.llm_router import _recorder
+        assert _recorder.last()["error"] == "all_failed"
+        assert _recorder.last()["fallback_count"] == 2
+
+    def test_unknown_tier_falls_back_to_standard_behavior(self):
+        """AC8：未知 tier 不抛异常，链路 == 全链。"""
+        router = _tier_router()
+        visited: list[str] = []
+
+        def fake_call(provider, messages, **kwargs):
+            visited.append(provider.name)
+            raise _http_429()
+
+        with patch.object(router, "_call_provider", side_effect=fake_call):
+            with pytest.raises(RuntimeError):
+                router.chat([{"role": "user", "content": "bogus-tier"}], task_tier="bogus")
+
+        # standard 有效跳 = 3 个（glm_45 disabled 被 is_available 跳过）
+        assert visited == ["zhipu_glm", "agnes", "ly77625"]
+        from src.core.llm_router import _recorder
+        assert _recorder.last()["tier"] == "standard"
+
+    def test_kill_switch_restores_full_chain_and_old_formula(self):
+        """B4/C-8：LLM_TIER_ROUTING_ENABLED=0 → deep 也退化全链，且单跳超时回到旧公式。"""
+        router = _tier_router()
+        timeouts: list[int] = []
+
+        def fake_call(provider, messages, **kwargs):
+            timeouts.append(kwargs.get("timeout"))
+            raise _http_429()
+
+        with patch.dict("os.environ", {"LLM_TIER_ROUTING_ENABLED": "0"}, clear=False):
+            with patch.object(router, "_call_provider", side_effect=fake_call):
+                with pytest.raises(RuntimeError):
+                    router.chat([{"role": "user", "content": "killswitch"}], task_tier="deep")
+
+        # 全链但 glm_45 disabled → 3 跳，且每跳 timeout == min(provider.timeout, 25) 的旧公式
+        assert len(timeouts) == 3
+        assert all(t <= 25 for t in timeouts)
+
+    def test_failed_hop_counts_fallback_after_retries_exhausted(self):
+        """非 429 异常重试耗尽 → fallback_count 仍只 +1（每跳计一次）。"""
+        router = _tier_router()
+        calls = {"n": 0}
+
+        def fake_call(provider, messages, **kwargs):
+            if provider.name == "zhipu_glm":
+                calls["n"] += 1
+                raise requests.exceptions.ConnectionError("boom")
+            return _ok(provider.name, kwargs.get("model") or provider.model)
+
+        zhipu = next(p for p in router._providers if p.name == "zhipu_glm")
+        zhipu.max_retries = 1
+        zhipu.retry_delay = 0.0
+        with patch.object(router, "_call_provider", side_effect=fake_call):
+            result = router.chat([{"role": "user", "content": "retry-exhaust"}], task_tier="deep")
+
+        assert calls["n"] == 2  # max_attempts = min(max_retries+1, 3) = 2
+        assert result.provider == "agnes"  # D9：deep 第 2 跳 = agnes
+        from src.core.llm_router import _recorder
+        assert _recorder.last()["fallback_count"] == 1
+
+    def test_circuit_open_provider_skipped_without_counting_fallback(self):
+        """disabled/熔断的 Provider 静默跳过，不计入 fallback（与原实现一致）。"""
+        router = _tier_router()
+        zhipu = next(p for p in router._providers if p.name == "zhipu_glm")
+        zhipu.enabled = False
+        with patch.object(
+            router, "_call_provider",
+            side_effect=lambda p, m, **kw: _ok(p.name, kw.get("model") or p.model),
+        ):
+            result = router.chat([{"role": "user", "content": "skip-disabled"}], task_tier="deep")
+        assert result.provider == "agnes"  # 首跳被跳过 → 直接落 deep 第 2 跳
+        from src.core.llm_router import _recorder
+        assert _recorder.last()["fallback_count"] == 0
+
+    def test_probe_tier_uses_route_model(self):
+        """probe(tier=deep) 逐跳使用 route.model 覆盖（agnes 第 2 跳打 agnes-3.0-flash）。"""
+        router = _tier_router()
+        captured: list[tuple[str, str | None]] = []
+
+        def fake_call(provider, messages, **kwargs):
+            captured.append((provider.name, kwargs.get("model")))
+            return _ok(provider.name, kwargs.get("model") or provider.model)
+
+        with patch.object(router, "_call_provider", side_effect=fake_call):
+            result = router.probe(tier="deep")
+
+        assert result["status"] == "ok"
+        assert result["tier"] == "deep"
+        assert result["total"] == 3
+        assert [c[0] for c in captured] == ["zhipu_glm", "agnes", "ly77625"]
+        assert captured[1][1] == "agnes-3.0-flash"
+
+    def test_probe_name_still_backward_compatible(self):
+        """probe(name=...) 保持既有语义：只探该 Provider，不下发 model 覆盖。"""
+        router = _tier_router()
+        captured: list[tuple[str, str | None]] = []
+
+        def fake_call(provider, messages, **kwargs):
+            captured.append((provider.name, kwargs.get("model")))
+            return _ok(provider.name, provider.model)
+
+        with patch.object(router, "_call_provider", side_effect=fake_call):
+            result = router.probe(name="agnes")
+
+        assert result["total"] == 1
+        assert captured == [("agnes", None)]
+        assert "tier" not in result
+
+    def test_probe_unknown_provider_message_unchanged(self):
+        router = _tier_router()
+        result = router.probe(name="does-not-exist")
+        assert result["status"] == "error"
+        assert result["message"] == "未配置 Provider: does-not-exist"
+
+
+class TestTierHopTimeoutCap:
+    """R2/D12：单跳 timeout_cap —— 保证 deep 名义 3 跳时第 3 跳真的还有预算。"""
+
+    def test_deep_per_hop_timeouts_follow_cap(self):
+        """deep 三跳实际下发的 timeout == 20 / 25 / 20（不是 provider.timeout=30）。"""
+        router = _tier_router()
+        timeouts: list[int] = []
+
+        def fake_call(provider, messages, **kwargs):
+            timeouts.append(kwargs.get("timeout"))
+            raise _http_429()
+
+        with patch.object(router, "_call_provider", side_effect=fake_call):
+            with pytest.raises(RuntimeError):
+                router.chat([{"role": "user", "content": "deep-caps"}], task_tier="deep")
+
+        assert timeouts == [20, 25, 20]
+
+    def test_deep_third_hop_is_really_attempted(self):
+        """F2/D12 回归：前两跳快速失败后，deep 第 3 跳（ly77625）仍被调用。"""
+        router = _tier_router()
+        visited: list[tuple[str, int | None]] = []
+
+        def fake_call(provider, messages, **kwargs):
+            visited.append((provider.name, kwargs.get("timeout")))
+            if provider.name != "ly77625":
+                raise _http_429()  # 前两跳快速失败，只消耗极少时间
+            return _ok(provider.name, kwargs.get("model") or provider.model)
+
+        with patch.object(router, "_call_provider", side_effect=fake_call):
+            result = router.chat([{"role": "user", "content": "deep-3rd"}], task_tier="deep")
+
+        assert [v[0] for v in visited] == ["zhipu_glm", "agnes", "ly77625"]
+        assert result.provider == "ly77625"
+        # 第 3 跳拿到的超时是它自己的 cap，而不是 0 / 1
+        assert visited[2][1] == 20
+
+    def test_deep_cap_sum_within_budget_tolerance(self):
+        """三跳 cap 之和 ≤ 65（预算 60 + 5s 容差），否则末位跳必然拿不到时间。"""
+        from src.core.llm_task_tier import TIER_DEEP, TIER_SPECS
+
+        spec = TIER_SPECS[TIER_DEEP]
+        caps = [r.timeout_cap or 30 for r in spec.routes or ()]
+        assert caps == [20, 25, 20]
+        assert sum(caps) <= 65
+        assert sum(caps) > spec.budget_seconds  # 允许"最后一跳被预算夹逼"，但差距必须很小
+        assert sum(caps) - spec.budget_seconds <= 5
+
+    def test_light_per_hop_timeouts_follow_cap(self):
+        """light 两跳各 10s（< 15s 总预算），保证第 2 跳一定还有时间。"""
+        router = _tier_router()
+        timeouts: list[int] = []
+
+        def fake_call(provider, messages, **kwargs):
+            timeouts.append(kwargs.get("timeout"))
+            raise _http_429()
+
+        with patch.object(router, "_call_provider", side_effect=fake_call):
+            with pytest.raises(RuntimeError):
+                router.chat([{"role": "user", "content": "light-caps"}], task_tier="light")
+
+        assert timeouts == [10, 10]
+
+    def test_standard_has_no_hop_cap(self):
+        """B5：standard 不做任何 cap，单跳仍是 provider.timeout（今日行为）。"""
+        router = _tier_router()
+        timeouts: list[int] = []
+
+        def fake_call(provider, messages, **kwargs):
+            timeouts.append(kwargs.get("timeout"))
+            raise _http_429()
+
+        with patch.dict("os.environ", {"LLM_TOTAL_TIMEOUT": "100"}, clear=False):
+            with patch.object(router, "_call_provider", side_effect=fake_call):
+                with pytest.raises(RuntimeError):
+                    router.chat([{"role": "user", "content": "std-caps"}])
+
+        # 3 个有效跳（glm_45 disabled 被跳过）的 timeout 都是 30 → 未被任何 cap 收紧到 10/20
+        assert timeouts == [30, 30, 30]
+
+    def test_caller_timeout_still_wins_when_smaller(self):
+        """调用方 timeout < cap 时，仍以调用方为准（例如 light 调用传 timeout=5）。"""
+        router = _tier_router()
+        timeouts: list[int] = []
+
+        def fake_call(provider, messages, **kwargs):
+            timeouts.append(kwargs.get("timeout"))
+            raise _http_429()
+
+        with patch.object(router, "_call_provider", side_effect=fake_call):
+            with pytest.raises(RuntimeError):
+                router.chat(
+                    [{"role": "user", "content": "caller-cap"}],
+                    timeout=5,
+                    task_tier="light",
+                )
+        assert timeouts == [5, 5]
+
+
+class TestRetiredModelIdRemap:
+    """R3/D11：线上 AGNES_MODEL 指向已下线模型时，加载期自动纠正 + WARN。"""
+
+    def test_retired_agnes_model_is_remapped(self):
+        with patch.dict(
+            "os.environ", {"AGNES_API_KEY": "ak", "AGNES_MODEL": "agnes-2.0-flash"}, clear=True
+        ):
+            with patch("src.core.llm_router.logger") as mock_logger:
+                router = LLMRouter()
+
+        agnes = router._providers[0]
+        assert agnes.name == "agnes"
+        assert agnes.model == "agnes-3.0-flash"
+        warnings = [str(c) for c in mock_logger.warning.call_args_list]
+        assert any("agnes-2.0-flash" in w and ("已不可用" in w or "已下线" in w) for w in warnings), warnings
+
+    def test_default_agnes_model_is_current(self):
+        """不配 AGNES_MODEL 时，代码默认值本身就是可用 ID（不需要纠正）。"""
+        with patch.dict("os.environ", {"AGNES_API_KEY": "ak"}, clear=True):
+            router = LLMRouter()
+        assert router._providers[0].model == "agnes-3.0-flash"
+
+    def test_valid_agnes_model_is_not_touched(self):
+        with patch.dict(
+            "os.environ", {"AGNES_API_KEY": "ak", "AGNES_MODEL": "agnes-3.0-flash"}, clear=True
+        ):
+            router = LLMRouter()
+        assert router._providers[0].model == "agnes-3.0-flash"
+
+    def test_remap_does_not_affect_other_providers(self):
+        """纠正只作用于 agnes，ZHIPU_MODEL 等既有覆盖能力不受影响。"""
+        with patch.dict(
+            "os.environ",
+            {
+                "AGNES_API_KEY": "ak",
+                "AGNES_MODEL": "agnes-2.0-flash",
+                "ZHIPU_API_KEY": "zk",
+                "ZHIPU_MODEL": "glm-custom",
+            },
+            clear=True,
+        ):
+            router = LLMRouter()
+
+        by_name = {p.name: p for p in router._providers}
+        assert by_name["agnes"].model == "agnes-3.0-flash"
+        assert by_name["zhipu_glm"].model == "glm-custom"
+
+    def test_standard_chain_uses_corrected_model(self):
+        """standard 全链走到 agnes 时不再打已下线的 500 模型。"""
+        with patch.dict(
+            "os.environ", {"AGNES_API_KEY": "ak", "AGNES_MODEL": "agnes-2.0-flash"}, clear=True
+        ):
+            router = LLMRouter()
+        std = router._providers_for_tier("standard")
+        assert [p.model for p in std] == ["agnes-3.0-flash"]
+
+    def test_retired_map_declared_in_module(self):
+        from src.core.llm_router import RETIRED_MODEL_IDS
+
+        assert RETIRED_MODEL_IDS["agnes-2.0-flash"] == "agnes-3.0-flash"
+
+
+class TestDeepChainOrderD9:
+    """R1/D9：deep 链顺序 = zhipu_glm → agnes-3.0-flash → ly77625。"""
+
+    def test_deep_chain_order(self):
+        router = _tier_router()
+        assert [p.name for p in router._providers_for_tier("deep")] == [
+            "zhipu_glm", "agnes", "ly77625"
+        ]
+
+    def test_agnes_precedes_gemini_relay(self):
+        """agnes-3.0-flash（E1 已验 JSON 严格）必须排在第三方中转 gemini 之前。"""
+        from src.core.llm_task_tier import TIER_DEEP, TIER_SPECS
+
+        routes = TIER_SPECS[TIER_DEEP].routes or ()
+        assert [r.provider for r in routes].index("agnes") < [
+            r.provider for r in routes
+        ].index("ly77625")

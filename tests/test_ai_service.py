@@ -983,3 +983,58 @@ class TestGetMarketOutlook:
             with patch.object(ai_service, "_call_llm", return_value=mock_outlook):
                 result = get_market_outlook()
         assert len(result["market_data"]["global_news"]) == 8
+
+
+class TestCallLlmTaskTier:
+    """T03（2026-11-07）：_call_llm 的 task_tier 透传与默认值。"""
+
+    def test_default_task_tier_is_standard(self, monkeypatch):
+        """不传 task_tier → 透传 "standard"（等价于今日全链行为）。"""
+        from unittest.mock import MagicMock
+
+        mock_router = MagicMock()
+        mock_router.available_providers = ["zhipu_glm"]
+        mock_response = MagicMock()
+        mock_response.content = "ok"
+        mock_response.provider = "zhipu_glm"
+        mock_response.latency_ms = 1.0
+        mock_router.chat.return_value = mock_response
+        monkeypatch.setattr("src.core.llm_router.get_llm_router", lambda: mock_router)
+
+        assert _call_llm([{"role": "user", "content": "t"}]) == "ok"
+        assert mock_router.chat.call_args.kwargs["task_tier"] == "standard"
+
+    def test_explicit_task_tier_is_forwarded(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        mock_router = MagicMock()
+        mock_router.available_providers = ["zhipu_glm"]
+        mock_response = MagicMock()
+        mock_response.content = "ok"
+        mock_response.provider = "zhipu_glm"
+        mock_response.latency_ms = 1.0
+        mock_router.chat.return_value = mock_response
+        monkeypatch.setattr("src.core.llm_router.get_llm_router", lambda: mock_router)
+
+        _call_llm([{"role": "user", "content": "t"}], task_tier="light")
+        assert mock_router.chat.call_args.kwargs["task_tier"] == "light"
+
+    def test_positional_args_still_compatible(self, monkeypatch):
+        """既有调用点用位置参数传前 4 个参数必须继续工作。"""
+        from unittest.mock import MagicMock
+
+        mock_router = MagicMock()
+        mock_router.available_providers = ["zhipu_glm"]
+        mock_response = MagicMock()
+        mock_response.content = "ok"
+        mock_response.provider = "zhipu_glm"
+        mock_response.latency_ms = 1.0
+        mock_router.chat.return_value = mock_response
+        monkeypatch.setattr("src.core.llm_router.get_llm_router", lambda: mock_router)
+
+        assert _call_llm([{"role": "user", "content": "t"}], "some-model", 0.3, True) == "ok"
+        kwargs = mock_router.chat.call_args.kwargs
+        assert kwargs["model"] == "some-model"
+        assert kwargs["temperature"] == 0.3
+        assert kwargs["json_mode"] is True
+        assert kwargs["task_tier"] == "standard"

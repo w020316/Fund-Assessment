@@ -86,3 +86,52 @@ zhipu_glm(-1, 用户指定优先) > ttapi(0) > zhipu_glm_45(1, 智谱免费兜�
 
 > 线上实测（2026-10-27 13:01）：4.7-Flash 在高负载下首个请求读超时 30s，旧逻辑随后才原地重试拿到 429，用户共等 31s。修正后同一场景在「超时预算 + 下一 Provider 单次请求」内完成降级。
 
+
+---
+
+## 七、任务难度分层（Task-Tier Routing，2026-11-07 新增）
+
+`LLMRouter.chat()` 新增 `task_tier` 参数（默认 `"standard"`）。三档映射是**代码常量**
+（`src/core/llm_task_tier.py` 的 `TIER_SPECS`），不进 `config/*.yaml` —— "发给谁"属于
+合规/成本决策，必须过 code review；只有"多久/开不开"走环境变量。
+
+| tier | 有序链（provider → 使用的 model） | 总预算 | 说明 |
+|---|---|---|---|
+| **deep** | `zhipu_glm`(glm-4.7-flash, cap 20s) → `agnes`(**agnes-3.0-flash**, cap 25s) → `ly77625`(gemini-3.8-flash, cap 20s) | 60s | 7 智能体基金决策（`multi_agent_fund`）；`ai_service` 中 `mode=="deep"` 的两处。D9：agnes（E1 已验 JSON 严格）优先于第三方中转 gemini；D12：三跳 cap 合计 65s，保证末位跳仍可能被尝试 |
+| **standard** | **恒等于 `_providers` 全链原序**（`zhipu_glm` → `zhipu_glm_45` → `agnes` → `ly77625`） | 继承 `LLM_TOTAL_TIMEOUT`（默认 25s） | 保底档，不承担分层职责；不传 `task_tier` 时行为与历史完全一致。**B5：不设任何单跳 cap**（单跳仍是 `provider.timeout`） |
+| **light** | `zhipu_glm`(glm-4.7-flash, cap 10s) → `agnes`(**agnes-3.0-flash**, cap 10s) | 15s | 话术生成（`script_library`）、新闻摘要（`news_aggregator`） |
+
+### 7.1 档位归属与失效标注
+
+| provider / model | 归属 | 备注 |
+|---|---|---|
+| `zhipu_glm` / glm-4.7-flash | deep 第 1（cap 20s）、standard、light 第 1（cap 10s） | 合规优先（数据不出境）+ 免费 30 RPM；JSON mode 仅 E2 支持，故不入 deep 首位之外的高置信位 |
+| `ly77625` / gemini-3.8-flash | deep 第 **3**（末位兜底，cap 20s） | 第三方免费中转，额度/合规 E4 未验证 → 只做异源兜底，不给 light 消耗（D9 把第 2 顺位让给 E1 已验 JSON 严格的 agnes） |
+| `agnes` / **agnes-3.0-flash** | deep 第 **2**（cap 25s）、light 第 2（cap 10s） | 经 `TierRoute.model` 覆盖为 `agnes-3.0-flash`；D11：`_load_from_env` 用 `RETIRED_MODEL_IDS` 把 `agnes-2.0-flash` 自动纠正为 `agnes-3.0-flash` 并 WARN，代码默认值同步改为 `agnes-3.0-flash` |
+| `zhipu_glm_45` / glm-4.5-flash | **不入任何 tier 链，且 `enabled=False`（D10）** | 与 `zhipu_glm` **同源**（GLM-4.5-Flash 已于 2026-01-30 下线并自动路由到 4.7-Flash）、共享同一 Key 与 30 RPM → 标准链上的同源重试是伪冗余。`priority` 仍为 1 且对象本身保留不动（`probe()`/`health` 仍可见，`health` 标注 `same_upstream_as: "zhipu_glm"`） |
+| `ttapi` / gpt-4o | **全档排除** | 平台已 404 返回 HTML；保留配置但 `enabled=False`（`probe` 仍可探测） |
+| `agnes-2.5-flash` | **全档排除** | 22.36s + 2123 reasoning tokens 且趋势判断错误 |
+| `agnes-2.5-pro-alpha` / `beta` | **全档排除** | 403（账户 remaining $0），代码中无对应 Provider |
+| `qwen3.8-27b` / `x-deepseek-v4.1-flash` | 不接入 | 502 / 从未调用 |
+
+### 7.2 运维开关
+
+| 环境变量 | 默认 | 作用 |
+|---|---|---|
+| `LLM_TIER_ROUTING_ENABLED` | `1` | **唯一线上回滚开关**。置 `0` → 所有档位退化为全链，且预算退回 `LLM_TOTAL_TIMEOUT`，一条命令恢复历史行为 |
+| `LLM_TIER_TIMEOUT_DEEP` / `_STANDARD` / `_LIGHT` | `60` / 空(=25) / `15` | 覆盖该档总预算。只改"多久"，不改"发给谁" |
+| `AGNES_MODEL` | `agnes-3.0-flash` | 若仍配成**已下线**的 `agnes-2.0-flash`，加载期自动纠正为 `agnes-3.0-flash` 并 WARN（`KNOWN_MODEL_REPLACEMENTS`，D11）。纠正表**只收"平台已下线"的 ID**：`agnes-2.5-flash`（未下线，只是慢/判题错，已从所有 tier 链排除）与 `agnes-2.5-pro-*`（403 是额度问题）**不入表**，用户显式设置视为用户意图 |
+
+### 7.3 可观测
+
+- `GET /api/health/llm` 的 `routing` 段：`tiers`（各档有序 provider 名数组）、`routes`
+  （逐跳 provider/model/label/available/`same_upstream_as`）、`budgets_seconds`、
+  `last_routing`（tier/provider/model/latency_ms/fallback_count/cached/budget_exhausted）、
+  `counters`。**响应体不含任何 api_key**。
+- `POST /api/health/llm/probe?tier=deep`（需 `ADMIN_TOKEN`）：按该档链逐跳探活，`agnes`
+  会用 `agnes-3.0-flash` 而不是 Provider 默认模型。
+- 单跳超时的**唯一实现**是 `llm_task_tier.resolve_hop_timeout(tier, route, provider_timeout, caller_timeout, remaining)`，
+  `LLMRouter._hop_timeout()` 只是它的委托；`chat()` 内禁止手写 `min(...)`（设计 §6.1 规则 5）。
+  **本期不提供 `LLM_TIER_HOP_TIMEOUT_<TIER>` 旋钮**（主理人裁定②：无需求方且会增加配置面；B5 结论即"standard 不设单跳 cap"）。
+- 日志字段：`[llm-routing] tier=<tier> provider=<name> model=<model> fallback=<n> latency_ms=<f> budget=<f>s cached=<bool>`。
+

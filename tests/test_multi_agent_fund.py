@@ -239,3 +239,34 @@ class TestAnalyzeFundWithAgents:
         # 数据快照应该是默认值
         assert result["data_snapshot"]["current_nav"] == 0
         assert result["data_snapshot"]["holdings_count"] == 0
+
+
+class TestTaskTierWiring:
+    """T03（2026-11-07）：7 智能体深度决策必须走 deep 档。"""
+
+    @pytest.mark.asyncio
+    async def test_chat_called_with_deep_tier(self):
+        """router.chat 必须带 task_tier="deep"（且保留 timeout=120 作为上限提示）。"""
+        mock_router = MagicMock()
+        mock_llm_response = MagicMock()
+        mock_llm_response.content = '{"opinions": [], "final_recommendation": {"action": "持有"}}'
+        mock_router.chat.return_value = mock_llm_response
+
+        with patch.object(multi_agent_fund.ds2, "get_fund_history_tencent", return_value=[]):
+            with patch.object(multi_agent_fund.ds2, "get_fund_realtime_tencent", return_value=[]):
+                with patch.object(multi_agent_fund.ds2, "get_realtime_quote_tencent", return_value=[]):
+                    with patch("src.analysis.fund_holdings.analyze_fund_holdings", return_value={}):
+                        with patch("src.analysis.news_aggregator.get_news_feed", return_value={}):
+                            with patch("src.analysis.market_assessment.get_market_thermometer", return_value={}):
+                                with patch("src.analysis.fund_advisor_v2.analyze_fund_five_signals", return_value={}):
+                                    with patch("src.core.llm_router.get_llm_router", return_value=mock_router):
+                                        await analyze_fund_with_agents(
+                                            fund_code="110022",
+                                            fund_name="测试基金",
+                                            mode="deep",
+                                        )
+
+        kwargs = mock_router.chat.call_args.kwargs
+        assert kwargs["task_tier"] == "deep"
+        assert kwargs["timeout"] == 120
+        assert kwargs["json_mode"] is True

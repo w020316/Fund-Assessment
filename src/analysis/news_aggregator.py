@@ -362,6 +362,8 @@ async def ai_search(query: str) -> dict:
             ],
             temperature=0.3,
             timeout=30,
+            # 100 字以内新闻摘要 = 最低难度档（无 schema 约束、失败降级为简单聚合）
+            task_tier="light",
         )
         summary = resp.content
     except Exception as e:

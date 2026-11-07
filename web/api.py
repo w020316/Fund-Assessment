@@ -331,7 +331,17 @@ async def health_check():
 
 @app.get("/api/health/llm")
 async def llm_health_check():
-    """LLM Provider 健康检查 - 返回各 Provider 的状态、优先级、限流配置"""
+    """LLM Provider 健康检查 - 返回各 Provider 的状态、优先级、限流配置
+
+    2026-11-07 增量：新增 `routing` 段（难度分层路由可观测面）：
+    - `routing.tiers`：deep/standard/light 三档的有序 provider 名数组
+    - `routing.routes`：每档逐跳的 provider/model/label/available/same_upstream_as
+    - `routing.budgets_seconds`：各档当前生效的总预算（秒）
+    - `routing.last_routing`：最近一次路由决策（tier/provider/model/latency/fallback）
+    - `routing.same_upstream_groups`：同源 Provider 分组（zhipu_glm_45 与 zhipu_glm 共享配额）
+
+    匿名可读，且**绝不含 api_key / Authorization / key 片段**（AC9/AC10）。
+    """
     from src.core.llm_router import get_llm_router, _llm_cache
     router = get_llm_router()
     providers = router.health_check()
@@ -341,18 +351,30 @@ async def llm_health_check():
         "available_providers": [name for name, info in providers.items() if info["available"]],
         "free_providers": [name for name, info in providers.items() if info["free_tier"]],
         "providers": providers,
+        # 难度分层路由矩阵（tier → 有序链 / 预算 / 最近一次决策）
+        "routing": router.routing_health(),
         # P0:LLM 响应缓存统计(节省免费额度)
         "response_cache": _llm_cache.stats(),
     }
 
 
 @app.post("/api/health/llm/probe")
-def llm_probe(provider: str | None = None, _: None = Depends(require_admin)):
-    """LLM 连通性自检:对单个或全部 Provider 发一条 ping,返回延迟与失败原因"""
+def llm_probe(
+    provider: str | None = None,
+    tier: str | None = None,
+    _: None = Depends(require_admin),
+):
+    """LLM 连通性自检:对单个/全部 Provider 或某个难度档位的链发一条 ping
+
+    Args:
+        provider: 指定 Provider 名（如 `agnes`）；与 `tier` 同时给出时 `provider` 优先。
+        tier: 按难度档位探活（deep/standard/light）。会用该档的 model 覆盖逐跳打一次，
+            例如 `?tier=deep` 会真实探测 zhipu_glm → ly77625 → agnes(agnes-3.0-flash)。
+    """
     from fastapi import HTTPException
     from src.core.llm_router import get_llm_router
 
-    result = get_llm_router().probe(name=provider)
+    result = get_llm_router().probe(name=provider, tier=tier)
     if result.get("status") == "error":
         raise HTTPException(status_code=404, detail=result.get("message"))
     return result

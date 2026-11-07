@@ -22,6 +22,31 @@ from typing import Any
 import requests
 from loguru import logger
 
+# ===== 任务难度分层路由（增量 2026-11-07）=====
+# llm_task_tier 是纯数据/纯函数模块，**不得**反向 import 本模块（否则循环依赖）。
+from src.core.llm_task_tier import (
+    DEFAULT_TIER,
+    KNOWN_MODEL_REPLACEMENTS,
+    SAME_UPSTREAM,
+    TIER_NAMES,
+    TIER_SPECS,
+    RoutingRecorder,
+    TierRoute,
+    correct_model_id,
+    match_routes,
+    normalize_tier,
+    resolve_budget_seconds,
+    resolve_hop_timeout,
+    routing_enabled,
+    tier_budget_env_key,
+)
+
+# 兼容别名（旧名，保留给外部脚本/测试；数据本体在 llm_task_tier.KNOWN_MODEL_REPLACEMENTS）。
+# 键从 "provider:model" 拆成扁平 model → 当前 ID，仅供诊断展示，**不参与运行时判定**。
+RETIRED_MODEL_IDS: dict[str, str] = {
+    key.split(":", 1)[1]: target for key, target in KNOWN_MODEL_REPLACEMENTS.items()
+}
+
 
 class ProviderType(str, Enum):
     OPENAI = "openai"
@@ -178,8 +203,15 @@ class _LLMResponseCache:
         model: str | None,
         temperature: float,
         json_mode: bool,
+        tier: str = "",
     ) -> str:
-        """构造缓存 key(基于 messages 内容 + 模型 + 温度)"""
+        """构造缓存 key(基于 messages 内容 + 模型 + 温度 + 难度档位)
+
+        2026-11-07（设计 §1.1 矛盾 3 / F3）：key 必须包含 tier。
+        三个档位的**首跳是同一个** (zhipu_glm, glm-4.7-flash)，若 key 只靠 model 区分，
+        则三档 key 完全相同 —— light 的低质答案会 100% 命中给 deep。因此 tier 进 key
+        提供的隔离度远大于 model。
+        """
         import hashlib
         import json as _json
         # 排除 role=system 的可变时间戳(如"当前时间:2026-07-29 15:30")
@@ -189,11 +221,12 @@ class _LLMResponseCache:
             "model": model or "",
             "temp": round(temperature, 2),
             "json_mode": json_mode,
+            "tier": tier,  # 恒为规范化后的档名(由 chat() 保证)，不会是 None/""
         }, sort_keys=True, ensure_ascii=False)
         return hashlib.md5(payload.encode("utf-8")).hexdigest()
 
-    def get(self, messages, model, temperature, json_mode) -> "LLMResponse | None":
-        key = self._make_key(messages, model, temperature, json_mode)
+    def get(self, messages, model, temperature, json_mode, tier: str = "") -> "LLMResponse | None":
+        key = self._make_key(messages, model, temperature, json_mode, tier)
         with self._lock:
             entry = self._store.get(key)
             if entry is None:
@@ -215,8 +248,14 @@ class _LLMResponseCache:
                 cached=True,
             )
 
-    def set(self, messages, model, temperature, json_mode, response: "LLMResponse") -> None:
-        key = self._make_key(messages, model, temperature, json_mode)
+    def set(self, messages, model, temperature, json_mode, response: "LLMResponse", tier: str = "") -> None:
+        """写入缓存。
+
+        注意(设计 §6.4)：这里存的是**请求级** ``model`` 入参，不是 resolved model。
+        ``get()`` 发生时还不知道会路由到哪个 Provider，若改存 resolved model，
+        deep 将永远查不到自己写过的缓存。这是有意的不对称，不要"优化"。
+        """
+        key = self._make_key(messages, model, temperature, json_mode, tier)
         with self._lock:
             if key in self._store:
                 # 已存在,更新时间戳
@@ -250,6 +289,9 @@ class _LLMResponseCache:
 # 全局 LLM 响应缓存(单例,LLMRouter 共享)
 _llm_cache = _LLMResponseCache(maxsize=100, ttl=300.0)
 
+# 全局路由决策记录器(单例)：只存非敏感字段,供 /api/health/llm 的 routing.last_routing
+_recorder = RoutingRecorder()
+
 
 class LLMRouter:
     """多LLM Provider路由器
@@ -269,6 +311,10 @@ class LLMRouter:
     def _load_from_env(self):
         """从环境变量加载Provider配置"""
         # TTAPI (OpenAI兼容)
+        # 2026-11-07（D4）：ttapi.io 已失效（HTTP 404 返回 HTML），线上也未再配置 Key。
+        # 保留配置（不删代码、不动 priority），只置 enabled=False → chat() 通过
+        # is_available 跳过它，而 probe()/health_check() 仍能看到它（probe 不按
+        # enabled 过滤），便于诊断"为什么它不参与调度"。
         ttapi_key = os.getenv("TTAPI_API_KEY", "")
         if ttapi_key:
             self.add_provider(LLMProvider(
@@ -278,9 +324,15 @@ class LLMRouter:
                 api_key=ttapi_key,
                 model=os.getenv("TTAPI_MODEL", "gpt-4o"),
                 priority=0,
+                enabled=False,
             ))
 
         # Agnes (OpenAI兼容, 全模态永久免费)
+        # D11（2026-11-07）：线上 AGNES_MODEL 仍写死 agnes-2.0-flash，而该模型 ID 已被平台
+        # 下架（实测 HTTP 500 "Model agnes-2.0-flash is temporarily unavailable"，
+        # /v1/models 也不再列出）→ standard 全链走到 agnes 时必然 500。
+        # deep/light 靠 TierRoute.model 覆盖能绕开，但 standard 不能，所以这里做配置纠偏：
+        # 命中 RETIRED_MODEL_IDS 即替换为当前 ID 并 WARN（环境变量可继续覆盖，只是值被纠正）。
         agnes_key = os.getenv("AGNES_API_KEY", "")
         if agnes_key:
             self.add_provider(LLMProvider(
@@ -288,7 +340,11 @@ class LLMRouter:
                 provider_type=ProviderType.OPENAI,
                 base_url=os.getenv("AGNES_BASE_URL", "https://apihub.agnes-ai.com/v1"),
                 api_key=agnes_key,
-                model=os.getenv("AGNES_MODEL", "agnes-2.0-flash"),
+                model=correct_model_id(
+                    "agnes",
+                    os.getenv("AGNES_MODEL", "agnes-3.0-flash"),
+                    warn=lambda msg: logger.warning(f"[llm-routing] {msg}"),
+                ),
                 priority=90,
                 timeout=30,
                 free_tier=True,
@@ -349,6 +405,11 @@ class LLMRouter:
             ))
             # GLM-4.5-Flash 同为免费(128K)。与 4.7-Flash 共用 Key 但模型独立,
             # 高峰期某个免费模型被平台限流(429/1305)时作为同平台兜底。
+            # D10（主理人 2026-11-07 裁定 A）：**enabled=False**。
+            # 理由：GLM-4.5-Flash 已于 2026-01-30 下线并自动路由到 4.7-Flash，与 zhipu_glm
+            # 同源（同 Key / 同 30 rpm），禁用避免标准链上的同源伪重试（F1 伪冗余）。
+            # 注意：`priority` 数值与 model 一个字都没动（AC3）；对象仍留在 _providers 里，
+            # 因此 probe()/health_check() 仍能看到它（probe 不按 enabled 过滤）。
             self.add_provider(LLMProvider(
                 name="zhipu_glm_45",
                 provider_type=ProviderType.OPENAI,
@@ -360,6 +421,7 @@ class LLMRouter:
                 rpm=30,
                 timeout=30,
                 free_tier=True,
+                enabled=False,
             ))
 
         # 硅基流动 SiliconFlow (Qwen2-7B 等 7 个模型免费,1000 RPM)
@@ -545,6 +607,74 @@ class LLMRouter:
         """返回可用的Provider名称列表"""
         return [p.name for p in self._providers if p.is_available]
 
+    # ===== 任务难度分层路由:只读派生视图（2026-11-07）=====
+    # 全部方法**不修改** self._providers（顺序/长度/字段），返回新列表但元素是原对象。
+    def _normalize_tier(self, task_tier: Any) -> str:
+        """把任意入参归一化为合法档名（D8：未知值回落 standard 且只 WARN 一次）。"""
+        return normalize_tier(task_tier, warn=lambda msg: logger.warning(f"[llm-routing] {msg}"))
+
+    def _routes_for_tier(self, task_tier: Any) -> list[tuple[LLMProvider, TierRoute | None]]:
+        """解析档位 → [(provider, route_or_None)] 有序链（契约 C-1 ~ C-10）。"""
+        tier = self._normalize_tier(task_tier)
+
+        # C-8 全局旁路：LLM_TIER_ROUTING_ENABLED=0 → 任何档位退化为全链
+        if not routing_enabled():
+            return [(p, None) for p in self._providers]
+
+        spec = TIER_SPECS[tier]  # normalize_tier 保证 key 合法
+
+        # C-1/C-2/C-3 standard：动态全链，新列表 + 原对象
+        if spec.is_dynamic:
+            return [(p, None) for p in self._providers]
+
+        # C-6 逐条精确匹配（大小写敏感），未加载的跳过
+        pairs = match_routes(spec, self._providers)
+
+        # C-7 fail-open：一条都没命中（配置与部署环境不匹配）→ 回落全链 + WARN
+        # 注意 self._providers 为空时不报警（此时"回落全链"只是空链，报警会误导且刷屏）
+        if self._providers and all(route is None for _, route in pairs):
+            logger.warning(
+                f"[llm-routing] tier={tier} 的候选 Provider 均未加载 "
+                f"(需要 {[r.provider for r in spec.routes or ()]}，"
+                f"实际 {[p.name for p in self._providers]})，回落全链"
+            )
+            return pairs
+
+        # C-6 部分缺失：逐条 DEBUG，不刷 WARN（每次 chat 都会走到这里）
+        loaded = {p.name for p, r in pairs if r is not None}
+        for route in spec.routes or ():
+            if route.provider not in loaded:
+                logger.debug(f"[llm-routing] tier={tier} 跳过未加载的 Provider: {route.provider}")
+        return pairs
+
+    def _providers_for_tier(self, task_tier: str | None = None) -> list[LLMProvider]:
+        """返回某档位的有序 Provider 视图（独立列表，元素为 _providers 中的原对象）。"""
+        return [provider for provider, _route in self._routes_for_tier(task_tier)]
+
+    def _resolve_budget(self, tier: str, total_timeout: float | None) -> float:
+        """预算优先级：显式 total_timeout > LLM_TIER_TIMEOUT_<TIER> > 档位常量 > LLM_TOTAL_TIMEOUT。
+
+        全局旁路（``LLM_TIER_ROUTING_ENABLED=0``）时**同时**退回"预算 = LLM_TOTAL_TIMEOUT"，
+        这样一条环境变量即可真正恢复今日行为（链 + 单跳公式 + 预算三处全部回退），
+        而不是只回退链却留下 60s 长尾。
+        """
+        if not routing_enabled():
+            if total_timeout is not None:
+                return max(float(total_timeout), 0.0)
+            return max(float(os.getenv("LLM_TOTAL_TIMEOUT", "25")), 0.0)
+        return resolve_budget_seconds(tier, total_timeout)
+
+    def _hop_timeout(
+        self,
+        tier: str,
+        route: TierRoute | None,
+        provider: LLMProvider,
+        caller_timeout: int | None,
+        remaining: float,
+    ) -> int:
+        """单跳超时（秒），委托给唯一实现 ``resolve_hop_timeout``（设计 §6.1 规则 5）。"""
+        return resolve_hop_timeout(tier, route, provider.timeout, caller_timeout, remaining)
+
     @staticmethod
     def _is_rate_limited(exc: Exception) -> bool:
         """请求被上游限流(HTTP 429)时返回 True。"""
@@ -564,16 +694,21 @@ class LLMRouter:
         json_mode: bool = False,
         timeout: int | None = None,
         total_timeout: float | None = None,
+        task_tier: str = "standard",
     ) -> LLMResponse:
         """发送聊天请求，自动故障切换 + 令牌桶限流 + 指数退避重试
 
         Args:
             messages: 消息列表
-            model: 指定模型（覆盖Provider默认模型）
+            model: 指定模型（覆盖 Provider 默认模型与档位路由的 model 覆盖，最高优先级）
             temperature: 温度参数
             json_mode: 是否启用JSON输出模式
             timeout: 单 Provider 超时时间（秒），会被总预算进一步收紧
-            total_timeout: 本次调用的总预算（秒）；缺省读 LLM_TOTAL_TIMEOUT，默认 25s
+            total_timeout: 本次调用的总预算（秒）；缺省按档位解析（standard 档继承
+                ``LLM_TOTAL_TIMEOUT``，默认 25s）
+            task_tier: 任务难度档位（deep / standard / light，大小写与空白归一化）。
+                **默认 standard，其链恒等于 self._providers 全链原序 → 不传此参数时
+                行为与今日完全一致（零回归）**。未知值回落 standard 并 WARN 一次。
 
         Returns:
             LLMResponse
@@ -581,31 +716,44 @@ class LLMRouter:
         Raises:
             RuntimeError: 所有Provider均不可用，或总预算耗尽
         """
-        # P0:LLM 结果缓存(命中直接返回,不消耗免费额度)
-        cached = _llm_cache.get(messages, model, temperature, json_mode)
+        # ① 归一化档位（D8：绝不抛异常）
+        tier = self._normalize_tier(task_tier)
+
+        # ② P0:LLM 结果缓存(命中直接返回,不消耗免费额度)。key 含 tier（F3）
+        cached = _llm_cache.get(messages, model, temperature, json_mode, tier)
         if cached is not None:
-            logger.debug(f"LLM 缓存命中(provider={cached.provider}, model={cached.model})")
+            logger.debug(
+                f"[llm-routing] tier={tier} 缓存命中 provider={cached.provider} model={cached.model}"
+            )
+            # 缓存命中也要写 last_routing，否则 AC12 会误判"没走 deep"
+            _recorder.record(
+                tier=tier, provider=cached.provider, model=cached.model,
+                latency_ms=0.0, fallback_count=0, cached=True,
+                budget_seconds=self._resolve_budget(tier, total_timeout),
+            )
             return cached
 
-        # 阶段二 R-09(2026-11-06):单次 chat 的端到端总预算。
+        # ③ 预算：阶段二 R-09(2026-11-06)单次 chat 的端到端总预算；本增量把来源换成
+        # 档位预算（standard 档仍继承 LLM_TOTAL_TIMEOUT，与今日逐字节一致）。
         # 原实现逐个 Provider 串行等待,3~4 个 30s Provider 会让前端空等 90s+;
         # 现在剩余预算会实时收紧每个 Provider 的超时,预算耗尽立即失败。
-        budget = (
-            float(total_timeout)
-            if total_timeout is not None
-            else float(os.getenv("LLM_TOTAL_TIMEOUT", "25"))
-        )
+        budget = self._resolve_budget(tier, total_timeout)
         budget = max(budget, 0.0)
         deadline = time.monotonic() + budget
+
+        # ④ 取链（已含归一化）。standard / 旁路开关 → route 全为 None
+        routes = self._routes_for_tier(tier)
 
         last_error = None
         last_error_provider: LLMProvider | None = None
         budget_exhausted = False
-        for provider in self._providers:
+        fallback_count = 0  # ⑤ 本次调用在链上放弃的跳数（仅用于可观测，不改变行为）
+        for provider, route in routes:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 budget_exhausted = True
                 break
+            # 与原实现一致：disabled/熔断静默跳过，不计入 fallback
             if not provider.is_available:
                 continue
 
@@ -613,7 +761,12 @@ class LLMRouter:
             bucket = self._token_buckets.get(provider.name)
             if bucket and not bucket.acquire(timeout=min(10.0, max(remaining, 0.1))):
                 logger.warning(f"LLM Provider [{provider.name}] 令牌桶限流超时,跳过")
+                fallback_count += 1
                 continue
+
+            # ⑥ 逐跳模型解析（矛盾 2）：显式 model > route.model > provider.model
+            # 降级到下一跳时按下一跳自己的 route.model 重新计算，不存在"沿链继承"。
+            hop_model = model if model is not None else (route.model if route is not None else None)
 
             # 指数退避重试(1s → 2s → 4s)
             max_attempts = min(provider.max_retries + 1, 3)
@@ -622,18 +775,31 @@ class LLMRouter:
                 if remaining <= 0:
                     budget_exhausted = True
                     break
-                # 单次请求超时 = min(Provider 配置, 剩余总预算),至少 1s
-                call_timeout = max(1, int(min(timeout or provider.timeout, remaining)))
+                # ⑦ 单跳超时（设计 §4.2/§6.1 规则 5）：一律经 resolve_hop_timeout，
+                # 禁止在此手写 min(...)。B5 的 LLM_TIER_HOP_TIMEOUT_<TIER> 也由它消费。
+                call_timeout = self._hop_timeout(tier, route, provider, timeout, remaining)
                 try:
-                    logger.debug(f"尝试 LLM Provider: {provider.name} (第{attempt+1}次)")
+                    logger.debug(
+                        f"尝试 LLM Provider: {provider.name} (第{attempt+1}次) tier={tier}"
+                    )
                     response = self._call_provider(
                         provider, messages,
-                        model=model, temperature=temperature,
+                        model=hop_model, temperature=temperature,
                         json_mode=json_mode, timeout=call_timeout,
                     )
                     provider.record_success()
-                    # P0:写入 LLM 结果缓存(下次相同 prompt 直接命中)
-                    _llm_cache.set(messages, model, temperature, json_mode, response)
+                    # P0:写入 LLM 结果缓存(下次相同 prompt 直接命中);key 含 tier
+                    _llm_cache.set(messages, model, temperature, json_mode, response, tier)
+                    _recorder.record(
+                        tier=tier, provider=provider.name, model=response.model,
+                        latency_ms=response.latency_ms, fallback_count=fallback_count,
+                        cached=False, budget_seconds=budget,
+                    )
+                    logger.info(
+                        f"[llm-routing] tier={tier} provider={provider.name} "
+                        f"model={response.model} fallback={fallback_count} "
+                        f"latency_ms={response.latency_ms:.1f} budget={budget:.0f}s cached=False"
+                    )
                     return response
                 except Exception as e:
                     last_error = e
@@ -651,6 +817,7 @@ class LLMRouter:
                         switch_reason = None
                     if switch_reason:
                         provider.record_failure()
+                        fallback_count += 1
                         logger.warning(f"LLM Provider [{provider.name}] {switch_reason},跳过重试切换下一个: {safe_error}")
                         break
                     if attempt < max_attempts - 1:
@@ -662,6 +829,7 @@ class LLMRouter:
                             time.sleep(delay)
                     else:
                         provider.record_failure()
+                        fallback_count += 1
                         logger.warning(f"LLM Provider [{provider.name}] 全部{max_attempts}次重试失败: {safe_error}")
             if budget_exhausted:
                 break
@@ -669,6 +837,13 @@ class LLMRouter:
         # 修复(2026-07-31): 所有 Provider 不可用时返回明确错误。
         # 当所有 Provider 被熔断或未配置时,循环不执行,last_error 仍为 None,
         # 原"最后错误: None"信息含糊。区分"有 Provider 调用失败"和"无可用 Provider"两种情况。
+        # 注意:三条文案模板保持不变（既有用例 match 子串依赖）。
+        _recorder.record(
+            tier=tier, provider=None, model=None, latency_ms=0.0,
+            fallback_count=fallback_count, cached=False, budget_seconds=budget,
+            budget_exhausted=budget_exhausted,
+            error="budget_exhausted" if budget_exhausted else "all_failed",
+        )
         if last_error is not None:
             safe_last = (
                 self._sanitize_error(last_error, last_error_provider)
@@ -901,23 +1076,48 @@ class LLMRouter:
                 text = text.replace(key, "***")
         return text[:200]
 
-    def probe(self, name: str | None = None, timeout: int = 20) -> dict:
-        """对指定(或全部)Provider 发一条最小请求,验证 Key/网络/模型是否可用
+    def probe(
+        self,
+        name: str | None = None,
+        timeout: int = 20,
+        tier: str | None = None,
+    ) -> dict:
+        """对指定(或全部/某档位)Provider 发一条最小请求,验证 Key/网络/模型是否可用
 
         与 chat() 的区别:不做故障切换、不读不写响应缓存、不重试,
         每个 Provider 只打一次并原样返回失败原因,用于定位"哪个 Key 没配好"。
+
+        Args:
+            name: 指定 Provider 名；与 ``tier`` 同时给出时 ``name`` 优先。
+            timeout: 单次探活超时（秒）。
+            tier: 按难度档位探活（deep/standard/light），按该档的有序链逐跳打一次。
+                逐跳会使用该档的 ``route.model`` 覆盖（例如 deep 的 agnes 用
+                ``agnes-3.0-flash``），从而真实验证"档位链是否可用"。
         """
+        resolved_tier: str | None = None
         if name:
-            targets = [p for p in self._providers if p.name == name]
-            if not targets:
+            pairs: list[tuple[LLMProvider, TierRoute | None]] = [
+                (p, None) for p in self._providers if p.name == name
+            ]
+            if not pairs:
                 return {"status": "error", "message": f"未配置 Provider: {name}", "results": []}
+        elif tier is not None:
+            resolved_tier = self._normalize_tier(tier)
+            pairs = self._routes_for_tier(resolved_tier)
+            if not pairs:
+                return {
+                    "status": "error",
+                    "message": f"档位 {resolved_tier} 无可用 Provider",
+                    "tier": resolved_tier,
+                    "results": [],
+                }
         else:
-            targets = list(self._providers)
-            if not targets:
+            pairs = [(p, None) for p in self._providers]
+            if not pairs:
                 return {"status": "error", "message": "未配置任何 Provider", "results": []}
 
         results = []
-        for provider in targets:
+        for provider, route in pairs:
             bucket = self._token_buckets.get(provider.name)
             if bucket and not bucket.acquire(timeout=3):
                 results.append({
@@ -925,11 +1125,14 @@ class LLMRouter:
                     "latency_ms": 0, "error": "令牌桶限流中,请稍后重试",
                 })
                 continue
+            # 档位探活需要按 route.model 覆盖（显式 name 探活保持 provider.model）
+            hop_model = route.model if route is not None else None
             start = time.monotonic()
             try:
                 resp = self._call_provider(
                     provider,
                     [{"role": "user", "content": "ping"}],
+                    model=hop_model,
                     temperature=0.0,
                     timeout=timeout,
                 )
@@ -945,24 +1148,31 @@ class LLMRouter:
                 provider.record_failure()
                 results.append({
                     "provider": provider.name,
-                    "model": provider.model,
+                    "model": hop_model or provider.model,
                     "ok": False,
                     "latency_ms": round((time.monotonic() - start) * 1000, 1),
                     "error": self._sanitize_error(e, provider),
                 })
 
-        return {
+        payload = {
             "status": "ok",
             "total": len(results),
             "ok_count": sum(1 for r in results if r["ok"]),
             "results": results,
         }
+        if resolved_tier is not None:
+            payload["tier"] = resolved_tier
+        return payload
 
     def health_check(self) -> dict:
         """检查所有Provider的健康状态
 
         Returns:
             {provider_name: {"available": bool, "model": str, "priority": int, ...}}
+
+        2026-11-07 增量：新增 ``same_upstream_as``（F1/L2）。``zhipu_glm_45`` 与
+        ``zhipu_glm`` 共享同一上游与同一 30 rpm 配额，二者相邻出现**不构成冗余**，
+        显式标注避免运维误判。值为 None 表示该 Provider 无同源关系。
         """
         result = {}
         for provider in self._providers:
@@ -977,8 +1187,58 @@ class LLMRouter:
                 "has_multi_keys": len(provider.api_keys) > 1,
                 "provider_type": provider.provider_type.value,
                 "free_tier": provider.free_tier,
+                "same_upstream_as": SAME_UPSTREAM.get(provider.name),
             }
         return result
+
+    def routing_health(self) -> dict:
+        """难度分层路由的可观测快照（**绝不含 api_key / headers / query**）。
+
+        Returns:
+            {
+              "enabled": bool,                     # LLM_TIER_ROUTING_ENABLED 旁路开关
+              "tiers": {tier: [provider_name, ...]},        # 各档有序链（AC9/AC11）
+              "routes": {tier: [{provider, model, label, available, same_upstream_as}]},
+              "budgets_seconds": {tier: float},   # 该档当前生效的总预算（含 env 覆盖）
+              "same_upstream_groups": {provider: [同源 provider...]},
+              "last_routing": dict,               # 最近一次决策
+              "counters": {tier: {calls, success, budget_exhausted, fallback_total}},
+            }
+        """
+        tiers: dict[str, list[str]] = {}
+        routes_detail: dict[str, list[dict]] = {}
+        budgets: dict[str, float] = {}
+        for tier_name in TIER_NAMES:
+            pairs = self._routes_for_tier(tier_name)
+            tiers[tier_name] = [provider.name for provider, _route in pairs]
+            detail: list[dict] = []
+            for provider, route in pairs:
+                detail.append({
+                    "provider": provider.name,
+                    "model": (route.model if route is not None else None) or provider.model,
+                    "label": route.display if route is not None else provider.name,
+                    "available": provider.is_available,
+                    "same_upstream_as": SAME_UPSTREAM.get(provider.name),
+                })
+            routes_detail[tier_name] = detail
+            budgets[tier_name] = round(self._resolve_budget(tier_name, None), 1)
+
+        same_upstream_groups: dict[str, list[str]] = {}
+        for provider_name, upstream in SAME_UPSTREAM.items():
+            same_upstream_groups.setdefault(upstream, []).append(provider_name)
+
+        return {
+            "enabled": routing_enabled(),
+            "tiers": tiers,
+            "routes": routes_detail,
+            "budgets_seconds": budgets,
+            "budget_env_keys": {tier_name: tier_budget_env_key(tier_name) for tier_name in TIER_NAMES},
+            "same_upstream_groups": same_upstream_groups,
+            "last_routing": _recorder.last(),
+            "counters": _recorder.snapshot(),
+            "cache": _llm_cache.stats(),
+            "default_tier": DEFAULT_TIER,
+        }
 
 
 # 全局单例
