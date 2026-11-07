@@ -37,7 +37,7 @@
       '  border:2px solid var(--border-light,#333b4d);color:var(--text-muted,#8b92a8);}',
       '.sigp-step.running .sigp-dot{border-color:var(--accent-blue,#3b82f6);color:var(--accent-blue,#3b82f6);}',
       '.sigp-step.done .sigp-dot{border-color:var(--hud-down,#34D399);color:var(--hud-down,#34D399);}',
-      '.sigp-step.error .sigp-dot{border-color:#F87171;color:#F87171;}', /* STAGE5 R1: 统一 Aurora 语义红 */
+      '.sigp-step.error .sigp-dot{border-color:var(--color-up,#F87171);color:var(--color-up,#F87171);}', /* STAGE5 R2: 引用语义 token(R1 定值) */
       '.sigp-step .sigp-title{font-size:13px;color:var(--text-secondary,#c9d1d9);}',
       '.sigp-step.running .sigp-title{color:var(--text-primary,#e6edf3);}',
       '.sigp-step .sigp-info{font-size:11px;color:var(--text-muted,#8b92a8);margin-left:auto;text-align:right;}',

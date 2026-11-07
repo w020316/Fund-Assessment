@@ -58,7 +58,7 @@
       '  font-size:13px;font-weight:500;border:1px solid var(--border-light,#333b4d);',
       '  background:transparent;color:var(--text-secondary,#c9d1d9);}',
       '.fw-btn:disabled{opacity:0.45;cursor:not-allowed;}',
-      '.fw-btn-primary{background:var(--accent,#f59e0b);color:#0d1117;border-color:transparent;}',
+      '.fw-btn-primary{background:var(--accent,#f59e0b);color:var(--qf-ink,#04070E);border-color:transparent;}',
       '.fw-btn-danger{background:var(--color-up,#F87171);color:#fff;border-color:transparent;}', /* STAGE5 R1: 语义红统一 Aurora #F87171 */
       '.fw-input{min-height:44px;padding:8px 10px;border-radius:8px;width:100%;',
       '  border:1px solid var(--border-light,#333b4d);background:rgba(255,255,255,0.03);',
@@ -69,8 +69,8 @@
       '.fw-table th,.fw-table td{padding:8px 6px;text-align:left;border-bottom:1px solid var(--border,#2a3142);}',
       '.fw-row-del td{opacity:0.55;text-decoration:line-through;background:rgba(239,68,68,0.08);}',
       '.fw-badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;}',
-      '.fw-badge-low{color:#f59e0b;border:1px dashed #f59e0b;}',
-      '.fw-badge-high{color:#34d399;border:1px solid rgba(52,211,153,0.4);}',
+      '.fw-badge-low{color:var(--color-warning,#f59e0b);border:1px dashed var(--color-warning,#f59e0b);}',
+      '.fw-badge-high{color:var(--color-down,#34d399);border:1px solid rgba(52,211,153,0.4);}',
       '.fw-check{appearance:none;width:24px;height:24px;border:2px solid var(--border-light,#555);',
       '  border-radius:6px;cursor:pointer;position:relative;vertical-align:middle;flex-shrink:0;}',
       '.fw-check:checked{background:var(--color-up,#F87171);border-color:var(--color-up,#F87171);}',
@@ -78,7 +78,7 @@
       '  align-items:center;justify-content:center;color:#fff;font-size:15px;}',
       '.fw-del-banner{display:flex;align-items:center;gap:10px;padding:10px 12px;margin:10px 0;',
       '  border:1px solid var(--color-up,#F87171);border-radius:8px;background:rgba(248,113,113,0.12);', /* STAGE5 R1: 旧红硬编码统一为语义红 */
-      '  color:#f87171;font-weight:600;font-size:13px;}',
+      '  color:var(--color-up,#f87171);font-weight:600;font-size:13px;}',
       '.fw-del-item{display:flex;align-items:center;gap:10px;min-height:44px;padding:6px 8px;',
       '  border-bottom:1px solid var(--border,#2a3142);cursor:pointer;}',
       '.fw-section-title{font-size:13px;font-weight:600;margin:14px 0 6px;}',
@@ -260,7 +260,7 @@
     }).join('');
     const delCount = state.draft.filter(function (r) { return r._deleted; }).length;
     renderBody(
-      (state.dirty ? '<div class="fw-del-banner" style="border-color:#f59e0b;background:rgba(245,158,11,0.10);color:#f59e0b;">草稿已修改,尚未写入持仓。完成"diff 预览 → 确认提交"后才会保存。</div>' : '') +
+      (state.dirty ? '<div class="fw-del-banner" style="border-color:var(--color-warning,#f59e0b);background:rgba(245,158,11,0.10);color:var(--color-warning,#f59e0b);">草稿已修改,尚未写入持仓。完成"diff 预览 → 确认提交"后才会保存。</div>' : '') +
       (delCount ? '<div class="fw-del-banner">已标记删除 ' + delCount + ' 条(预览步将逐项确认)</div>' : '') +
       '<div style="overflow-x:auto;"><table class="fw-table">' +
       '<thead><tr><th>代码</th><th>名称</th><th>份额</th><th class="fw-hide-sm">成本净值</th><th>净值/置信度</th><th>操作</th></tr></thead>' +
@@ -446,7 +446,7 @@
 
     // 置信度警告
     if (warnings.length) {
-      html += '<div class="fw-section-title" style="color:#f59e0b;">置信度提示</div>';
+      html += '<div class="fw-section-title" style="color:var(--color-warning,#f59e0b);">置信度提示</div>';
       html += warnings.map(function (w) {
         return '<div class="fw-change">⚠ ' + esc(w.fund_code) + ':' + esc(w.message) + '</div>';
       }).join('');
@@ -494,7 +494,7 @@
     renderBody(
       '<div class="fw-section-title" style="font-size:15px;">二次确认</div>' +
       '<div style="font-size:13px;line-height:1.8;">' +
-      '保存方式为<b style="color:#f87171;">全量覆盖</b>,请确认影响范围:<br>' +
+      '保存方式为<b style="color:var(--color-up,#f87171);">全量覆盖</b>,请确认影响范围:<br>' +
       '· 新增 ' + diff.added.length + ' 条<br>' +
       '· 更新 ' + diff.updated.length + ' 条<br>' +
       '· 删除 ' + diff.deleted.length + ' 条(代码:' + esc(deletedCodes) + ')<br>' +
@@ -533,7 +533,7 @@
       '  <div class="fw-receipt-num" style="color:var(--color-up,#34d399);">+' + s.added + '</div>' +
       '  <div class="fw-change">新增 ' + s.added + ' 条 · 更新 ' + s.updated + ' 条 · 删除 ' + s.deleted + ' 条</div>' +
       (s.deleted_codes && s.deleted_codes.length
-        ? '<div class="fw-change" style="color:#f87171;">已删除:' + esc(s.deleted_codes.join('、')) + '</div>' : '') +
+        ? '<div class="fw-change" style="color:var(--color-up,#f87171);">已删除:' + esc(s.deleted_codes.join('、')) + '</div>' : '') +
       '</div>' +
       '<div class="fw-footer"><button class="fw-btn fw-btn-primary" onclick="FundWizard.close()">关闭向导</button></div>'
     );

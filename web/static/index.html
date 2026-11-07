@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#04070E">
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2322d3ee'/%3E%3Ctext x='16' y='21.5' font-family='Arial,sans-serif' font-size='13' font-weight='700' fill='%230d1117' text-anchor='middle'%3EQF%3C/text%3E%3C/svg%3E">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2322e3ff'/%3E%3Ctext x='16' y='21.5' font-family='Arial,sans-serif' font-size='13' font-weight='700' fill='%2304070e' text-anchor='middle'%3EQF%3C/text%3E%3C/svg%3E">
 <title>QuantFlow Pro 基金投资决策辅助</title>
 <style>
 /* ========== 全局变量与重置 ========== */
@@ -38,7 +38,9 @@
   --radius: 8px;
   --radius-lg: 12px;
   --shadow: 0 4px 24px rgba(0,0,0,0.3);
-  --transition: all 0.2s ease;
+  /* STAGE5 R2(P1-12): transition 显式化——原 all 会把 layout 属性(padding/width)
+     也纳入过渡，改为只过渡视觉合成属性；var(--transition) 的全部引用点随之生效 */
+  --transition: color 0.2s ease, background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease, opacity 0.2s ease;
 }
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html, body { height:100%; overflow:hidden; }
@@ -87,7 +89,7 @@ body {
   background: var(--accent);
   border-radius:8px;
   display:flex; align-items:center; justify-content:center;
-  font-size:15px; font-weight:700; color:#04070E; /* STAGE5 R1: ink 深字对亮底 8.8:1 */
+  font-size:15px; font-weight:700; color:var(--qf-ink); /* STAGE5 R2: 引用 token */
   letter-spacing:0.5px;
 }
 .index-bar { display:flex; gap:16px; flex:1; justify-content:center; }
@@ -250,7 +252,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
   transition:var(--transition);
 }
 .tab:hover { color:var(--text-primary); }
-.tab.active { background:var(--accent-blue); color:#04070E; } /* STAGE5 R1: 白字对琥珀 2.15:1 → ink 深字 8.8:1 */
+.tab.active { background:var(--accent-blue); color:var(--qf-ink); } /* STAGE5 R2: 琥珀底 ink 深字(8.8:1) */
 
 /* 按钮 */
 .btn {
@@ -259,7 +261,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
   transition:var(--transition); display:inline-flex;
   align-items:center; gap:8px;
 }
-.btn-primary { background:var(--accent); color:#0d1117; }
+.btn-primary { background:var(--accent); color:var(--qf-ink); }
 .btn-primary:hover { background:#d97706; }
 /* (2026-11-05) 阶段三 P1-01：hud 主题把 --color-up/--color-down 重映射为浅色板
    (#F87171/#34D399)，白色文字实测仅 2.76:1 与 1.92:1（AA 要求 4.5:1）。底色按约束保留，
@@ -354,14 +356,14 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 .input:focus, .select:focus { border-color:var(--accent-blue); }
 /* (2026-11-05) 阶段三 P2-04：原本 .input 的 outline:none + .input:focus 只换边框色，
    键盘用户在 config 页看不到焦点；position 页行内链接又沿用 UA 默认
-   outline(1px #101010)，在 #0d1117 底上几乎不可见。统一改为 focus-visible 高对比
-   焦点环（#22d3ee 对 #0d1117 约 10:1，远超 3:1）。放在 .input:focus 之后以保证
-   同特异度下后者生效。 */
+   outline(1px #101010)，在深底上几乎不可见。统一改为 focus-visible 高对比
+   焦点环（STAGE5 R2: 引用 token --qf-neon-cyan，对深底约 10:1，远超 3:1）。
+   放在 .input:focus 之后以保证同特异度下后者生效。 */
 .input:focus-visible, .select:focus-visible, textarea:focus-visible,
 a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 [tabindex]:focus-visible,
 .btn:focus-visible, .tab:focus-visible, .hud-subtab:focus-visible, .bottom-tab-item:focus-visible {
-  outline: 2px solid #22d3ee; outline-offset: 2px;
+  outline: 2px solid var(--qf-neon-cyan); outline-offset: 2px;
 }
 .select { cursor:pointer; }
 .form-group { margin-bottom:14px; }
@@ -389,6 +391,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
   animation: toast-in 0.3s ease;
   min-width:240px;
 }
+/* 状态色板(toast/api-error-panel 成对调校 bg/border/text，语义独立暂不入 token；暗色由 aurora-theme 覆写) */
 .toast-success { background:#065f46; color:#6ee7b7; border:1px solid #059669; }
 .toast-error { background:#7f1d1d; color:#fca5a5; border:1px solid #dc2626; }
 .toast-info { background:#1e3a5f; color:#93c5fd; border:1px solid #2563eb; }
@@ -641,6 +644,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
   font-size:11px; font-weight:600;
   letter-spacing:0.5px;
 }
+/* 状态徽章色板(成对调校 dot/glow，语义独立暂不入 token；#f87171 与 --color-up 同值) */
 .badge-realtime { background:rgba(34,197,94,0.15); color:#4ade80; }
 .badge-delayed { background:rgba(245,158,11,0.15); color:#fbbf24; }
 .badge-mock { background:rgba(239,68,68,0.15); color:#f87171; }
@@ -891,7 +895,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
   transition: var(--transition);
 }
 .hud-subtab:hover { color: var(--text-primary); }
-.hud-subtab.active { background: var(--accent-blue); color: #04070E; } /* STAGE5 R1: 同 .tab.active 对比度修正 */
+.hud-subtab.active { background: var(--accent-blue); color: var(--qf-ink); } /* STAGE5 R2: 同 .tab.active */
 
 /* ===== STAGE5: touch-target ===== K2 整改:全部交互元素 ≥44×44px(T05,与主题无关故不作用域化) */
 .btn { min-height: 44px; }
@@ -2722,7 +2726,7 @@ const DECISION_LABELS = {BUY:'买入', SELL:'卖出', HOLD:'持有'};
 function signalLabel(s) { return SIGNAL_LABELS[s] || s; }
 function decisionLabel(d) { return DECISION_LABELS[d] || d; }
 
-// 预警严重程度小圆点(SVG)
+// 预警严重程度小圆点(SVG)——SVG presentation attribute 不支持 var()，字面量与语义 token 同值
 const ALERT_ICON_MAP = {
   critical: '<svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="3" fill="#F87171"/></svg>',
   warning:  '<svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="3" fill="#f59e0b"/></svg>',
@@ -4559,6 +4563,7 @@ async function loadKline() {
   svg.innerHTML = `
     ${yAxisHtml}
     ${candlesHtml}
+    <!-- 图表专用色（SVG attribute 不支持 var()，暂不入 token）：MA5=#f59e0b MA10=#3b82f6 MA20=#8b5cf6 -->
     <path d="${maPath(ma5)}" fill="none" stroke="#f59e0b" stroke-width="1" opacity="0.8"/>
     <path d="${maPath(ma10)}" fill="none" stroke="#3b82f6" stroke-width="1" opacity="0.8"/>
     <path d="${maPath(ma20)}" fill="none" stroke="#8b5cf6" stroke-width="1" opacity="0.8"/>
@@ -5229,6 +5234,7 @@ async function toggleFundChart(fundCode) {
       }));
       // 销毁旧图表
       if (_fundCharts[fundCode]) { _fundCharts[fundCode].remove(); delete _fundCharts[fundCode]; }
+      // 图表专用色（canvas 渲染不接受 CSS var()，暂不入 token）：轴/网格=#8B92A8/#2A3142，主线=#00D9FF
       const chart = LightweightCharts.createChart(container, {
         layout: { background: { type: 'solid', color: 'transparent' }, textColor: '#8B92A8', fontSize: 11 },
         grid: { vertLines: { color: 'rgba(28,35,51,0.5)' }, horzLines: { color: 'rgba(28,35,51,0.5)' } },
@@ -6803,7 +6809,7 @@ async function loadPortfolioRisk() {
     if (sharpe >= 1.5 && dd < 10) { riskLevel = '优秀'; riskColor = 'var(--accent-cyan)'; riskDesc = '组合风险调整后收益优秀,回撤可控'; }
     else if (sharpe >= 1.0 && dd < 20) { riskLevel = '良好'; riskColor = 'var(--accent-cyan)'; riskDesc = '组合表现良好,风险适中'; }
     else if (sharpe >= 0.5) { riskLevel = '一般'; riskColor = 'var(--accent-blue)'; riskDesc = '收益波动较大,建议关注'; }
-    else { riskLevel = '较差'; riskColor = '#F87171'; riskDesc = '风险调整后收益偏低,需优化持仓结构'; }
+    else { riskLevel = '较差'; riskColor = 'var(--color-up)'; riskDesc = '风险调整后收益偏低,需优化持仓结构'; }
 
     // 各持仓权重表格
     const weightsHtml = (d.weights || []).map(w => {
@@ -6861,7 +6867,7 @@ async function loadPortfolioRisk() {
         </div>
         <div class="card" style="text-align:center;padding:12px;">
           <div style="color:var(--text-muted);font-size:11px;margin-bottom:4px;">最大回撤</div>
-          <div style="font-size:18px;font-weight:700;color:#F87171;">-${fmtNum(d.max_drawdown)}%</div>
+          <div style="font-size:18px;font-weight:700;color:var(--color-up);">-${fmtNum(d.max_drawdown)}%</div>
         </div>
       </div>
       <div class="grid-2" style="margin-top:12px;gap:8px;">
@@ -7087,7 +7093,7 @@ async function loadPositions() {
       <td style="color:${color}">${fmtNum(price)}</td>
       <td style="color:${color}">${changeSign(profit)}${fmtMoney(profit)}</td>
       <td style="color:${color}">${changeSign(profitPct)}${fmtNum(profitPct)}%</td>
-      <td><button class="btn btn-sm" style="padding:2px 8px;font-size:11px;color:#F87171;" data-code="${escapeHtml(code)}" onclick="onDeleteStockPositionClick(this)">删除</button></td>
+      <td><button class="btn btn-sm" style="padding:2px 8px;font-size:11px;color:var(--color-up);" data-code="${escapeHtml(code)}" onclick="onDeleteStockPositionClick(this)">删除</button></td>
     </tr>`;
   }).join('');
 
@@ -7120,6 +7126,7 @@ function drawPieChart(positions) {
     svg.innerHTML = '<text x="150" y="135" text-anchor="middle" fill="var(--text-muted)" font-size="13">暂无持仓数据</text>';
     return;
   }
+  // 图表专用色（SVG 扇形/图例序列色，语义独立暂不入 token，集中维护于此）
   const colors = ['#3b82f6','#8b5cf6','#06b6d4','#f59e0b','#F87171','#22c55e','#ec4899','#6366f1'];
 
   let html = '';

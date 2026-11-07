@@ -138,7 +138,7 @@
         '<span>持仓 ' + (summary.count || 0) + ' 只</span>' +
         '<span>置信度高 ' + (counts.high || 0) + ' / 中 ' + (counts.medium || 0) + ' / 低 ' + (counts.low || 0) + '</span>' +
         freshness +
-        '<span style="color:#f59e0b;">估算≠净值,以官方净值为准</span>';
+        '<span style="color:var(--color-warning,#f59e0b);">估算≠净值,以官方净值为准</span>';
     }
     const body = document.getElementById('st6WbBody');
     if (!body) return;
@@ -193,7 +193,7 @@
               '<input class="input" type="number" id="st6PushThreshold" min="0.1" max="100" step="0.5" value="' + esc(cfg.thresholds && cfg.thresholds.est_pct_abs != null ? cfg.thresholds.est_pct_abs : 2.0) + '" style="width:80px;">%' +
             '</label>' +
             '<span style="font-size:12px;color:var(--text-muted,#8b92a8);">渠道: ' + esc(cfg.channel) +
-              (cfg.sendkey_configured ? ' · 凭据已配置' : ' · <span style="color:#f59e0b;">凭据未配置(env PUSH_SERVERCHAN_SENDKEY)</span>') + '</span>' +
+              (cfg.sendkey_configured ? ' · 凭据已配置' : ' · <span style="color:var(--color-warning,#f59e0b);">凭据未配置(env PUSH_SERVERCHAN_SENDKEY)</span>') + '</span>' +
           '</div>' +
           '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">' +
             '<button class="btn btn-sm btn-primary" id="st6PushSaveBtn" onclick="St6Portfolio.savePushConfig()">保存配置</button>' +
@@ -362,7 +362,7 @@
       '<thead><tr><th>代码</th><th>名称</th><th>最大回撤</th><th>年化波动</th><th>夏普</th><th>Sortino</th><th>卡玛</th><th>样本</th></tr></thead>' +
       '<tbody>' + rows + '</tbody></table></div>' +
       '<div class="st6-note">' + esc(data.note || '') +
-      (data.degraded ? ' · <span style="color:#f59e0b;">部分基金历史数据缺失,已标注降级</span>' : '') +
+      (data.degraded ? ' · <span style="color:var(--color-warning,#f59e0b);">部分基金历史数据缺失,已标注降级</span>' : '') +
       ' · 口径: rf=2.0%、年化 244 交易日、当前份额静态合成</div>';
   }
 
@@ -403,7 +403,7 @@
     // 桌面矩阵;移动端 CSS 横向滚动兜底
     let html = '';
     if (data.degraded && (data.missing_funds || []).length) {
-      html += '<div class="st6-note" style="color:#f59e0b;">以下基金披露持仓缺失(已从矩阵剔除): ' +
+      html += '<div class="st6-note" style="color:var(--color-warning,#f59e0b);">以下基金披露持仓缺失(已从矩阵剔除): ' +
         esc((data.missing_funds || []).join(', ')) + '</div>';
     }
     (data.concentration_warnings || []).forEach(function (w) {
@@ -1214,7 +1214,7 @@
         ' 以内,无需调仓。</div>';
     }
     if (data.degraded) {
-      html += '<div class="st6-note" style="color:#f59e0b;">部分基金缺少最新净值,已从参与口径剔除</div>';
+      html += '<div class="st6-note" style="color:var(--color-warning,#f59e0b);">部分基金缺少最新净值,已从参与口径剔除</div>';
     }
     html += '<div class="st6-note">' + esc(data.note || '') + '</div>';
     body.innerHTML = html;
