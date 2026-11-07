@@ -11,6 +11,7 @@ CI 红线(见 conftest): 不触碰 web/user_fund_positions.json(只读不写);
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import sys
 import threading
@@ -43,6 +44,15 @@ def evolution_store(tmp_path, monkeypatch):
     monkeypatch.setattr(evolution, "GENERATIONS_DIR", data_dir / "generations")
     monkeypatch.setattr(evolution, "LINEAGE_FILE", data_dir / "lineage.json")
     monkeypatch.setattr(evolution, "ACTIVE_FILE", data_dir / "active.json")
+    # 2026-11-10 CI greening: POSITIONS_FILE 一并重定向。原实现缺省读
+    # web/user_fund_positions.json(用户真实数据, gitignore, CI 上不存在),
+    # 导致本用例"本地 200 / CI 503"的环境依赖假绿; 改为受控持仓文件。
+    positions_file = tmp_path / "positions.json"
+    positions_file.write_text(
+        json.dumps({"positions": [{"fund_code": "000001"}, {"fund_code": "000002"}]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(evolution, "POSITIONS_FILE", positions_file)
     return data_dir
 
 

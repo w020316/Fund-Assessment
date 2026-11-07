@@ -153,7 +153,7 @@ class TestAnalyzeFundamental:
         """正常抓取应返回 PE/PB/ROE/营收增长/利润增长"""
         indicator_df = _make_indicator_df(pe=28.5, pb=9.2)
         fin_df = _make_financial_df(roe=31.2, revenue_yoy=15.8, profit_yoy=18.2)
-        with patch.object(fundamental.ak, "stock_a_indicator_lg", return_value=indicator_df):
+        with patch.object(fundamental.ak, "stock_a_indicator_lg", create=True, return_value=indicator_df):
             with patch.object(fundamental.ak, "stock_financial_analysis_indicator", return_value=fin_df):
                 result = analyze_fundamental("600519")
         assert result["PE"] == pytest.approx(28.5)
@@ -166,7 +166,7 @@ class TestAnalyzeFundamental:
         """列同时含 pe 和 pe_ttm 时,优先取 pe(实现:pe 在前)"""
         indicator_df = _make_indicator_df(pe=20.0, pb=3.0)
         indicator_df["pe_ttm"] = 25.0
-        with patch.object(fundamental.ak, "stock_a_indicator_lg", return_value=indicator_df):
+        with patch.object(fundamental.ak, "stock_a_indicator_lg", create=True, return_value=indicator_df):
             with patch.object(fundamental.ak, "stock_financial_analysis_indicator", return_value=pd.DataFrame()):
                 result = analyze_fundamental("600519")
         # 实现按 ["pe", "pe_ttm", "市盈率"] 顺序,pe 命中即停
@@ -174,7 +174,7 @@ class TestAnalyzeFundamental:
 
     def test_indicator_fetch_exception_returns_default(self):
         """估值抓取异常 → PE/PB 保持默认 0,不抛出"""
-        with patch.object(fundamental.ak, "stock_a_indicator_lg", side_effect=Exception("net error")):
+        with patch.object(fundamental.ak, "stock_a_indicator_lg", create=True, side_effect=Exception("net error")):
             with patch.object(fundamental.ak, "stock_financial_analysis_indicator", return_value=pd.DataFrame()):
                 result = analyze_fundamental("600519")
         assert result["PE"] == 0.0
@@ -183,7 +183,7 @@ class TestAnalyzeFundamental:
     def test_financial_fetch_exception_returns_default(self):
         """财务抓取异常 → ROE/营收增长/利润增长保持默认 0"""
         indicator_df = _make_indicator_df(pe=28.5, pb=9.2)
-        with patch.object(fundamental.ak, "stock_a_indicator_lg", return_value=indicator_df):
+        with patch.object(fundamental.ak, "stock_a_indicator_lg", create=True, return_value=indicator_df):
             with patch.object(fundamental.ak, "stock_financial_analysis_indicator", side_effect=Exception("net error")):
                 result = analyze_fundamental("600519")
         assert result["PE"] == pytest.approx(28.5)
@@ -192,7 +192,7 @@ class TestAnalyzeFundamental:
 
     def test_empty_dataframes_return_default(self):
         """空 DataFrame → 全部字段默认 0"""
-        with patch.object(fundamental.ak, "stock_a_indicator_lg", return_value=pd.DataFrame()):
+        with patch.object(fundamental.ak, "stock_a_indicator_lg", create=True, return_value=pd.DataFrame()):
             with patch.object(fundamental.ak, "stock_financial_analysis_indicator", return_value=pd.DataFrame()):
                 result = analyze_fundamental("600519")
         assert result == {
@@ -203,7 +203,7 @@ class TestAnalyzeFundamental:
     def test_nan_value_skipped(self):
         """值为 NaN 时该字段保持默认 0"""
         indicator_df = _make_indicator_df(pe=float("nan"), pb=9.2)
-        with patch.object(fundamental.ak, "stock_a_indicator_lg", return_value=indicator_df):
+        with patch.object(fundamental.ak, "stock_a_indicator_lg", create=True, return_value=indicator_df):
             with patch.object(fundamental.ak, "stock_financial_analysis_indicator", return_value=pd.DataFrame()):
                 result = analyze_fundamental("600519")
         assert result["PE"] == 0.0
@@ -217,7 +217,7 @@ class TestScoreFundamental:
         """综合评分应在 [0, 100] 范围内"""
         indicator_df = _make_indicator_df(pe=28.5, pb=9.2)
         fin_df = _make_financial_df(roe=31.2, revenue_yoy=15.8, profit_yoy=18.2)
-        with patch.object(fundamental.ak, "stock_a_indicator_lg", return_value=indicator_df):
+        with patch.object(fundamental.ak, "stock_a_indicator_lg", create=True, return_value=indicator_df):
             with patch.object(fundamental.ak, "stock_financial_analysis_indicator", return_value=fin_df):
                 score = score_fundamental("600519")
         assert isinstance(score, float)
@@ -225,7 +225,7 @@ class TestScoreFundamental:
 
     def test_score_all_zero_data(self):
         """全部数据为 0 → 估值(20+0+0=20) + 盈利(2) + 成长(2+2=4) = 26"""
-        with patch.object(fundamental.ak, "stock_a_indicator_lg", return_value=pd.DataFrame()):
+        with patch.object(fundamental.ak, "stock_a_indicator_lg", create=True, return_value=pd.DataFrame()):
             with patch.object(fundamental.ak, "stock_financial_analysis_indicator", return_value=pd.DataFrame()):
                 score = score_fundamental("600519")
         assert score == pytest.approx(26.0)
@@ -234,7 +234,7 @@ class TestScoreFundamental:
         """高质量股票(低估值+高ROE+高增长) → 高分"""
         indicator_df = _make_indicator_df(pe=10.0, pb=0.8)
         fin_df = _make_financial_df(roe=25.0, revenue_yoy=40.0, profit_yoy=35.0)
-        with patch.object(fundamental.ak, "stock_a_indicator_lg", return_value=indicator_df):
+        with patch.object(fundamental.ak, "stock_a_indicator_lg", create=True, return_value=indicator_df):
             with patch.object(fundamental.ak, "stock_financial_analysis_indicator", return_value=fin_df):
                 score = score_fundamental("600519")
         # 估值(40) + 盈利(30) + 成长(30) = 100
