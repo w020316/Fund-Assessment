@@ -227,17 +227,40 @@ def rng_from_seed(seed: str) -> np.random.Generator:
     return np.random.default_rng(entropy)
 
 
+def _normalize_with_bounds(w: np.ndarray, lo: float, hi: float) -> np.ndarray:
+    """归一化到 sum=1 且逐维落在 [lo, hi]（投影迭代: 归一→截断交替至不动点）。
+
+    设计文档的"clip 后除以总和"在除法把已截断值拉回界外时无解
+    （如 4 维贴上界时第 5 维会被压破下界）, 本函数以交替投影保证
+    两个约束**同时**成立, 语义与设计一致（clip 语义保留）。
+    """
+    w = np.clip(w, lo, hi)
+    for _ in range(64):
+        total = float(w.sum())
+        if total <= 0:
+            return np.full_like(w, 1.0 / len(w))
+        w = np.clip(w / total, lo, hi)
+        if abs(float(w.sum()) - 1.0) < 1e-12:
+            break
+    # 终修: 把 <1e-12 量级的残差并入一个内部维(5 维下必有内部维:
+    # 全部贴 0.05/0.5 边界的组合无法恰和为 1)
+    residual = 1.0 - float(w.sum())
+    interior = [i for i in range(len(w)) if lo + 1e-6 < w[i] < hi - 1e-6]
+    w[interior[0] if interior else int(np.argmax(w))] += residual
+    return w
+
+
 def mutate_params(parent_params: dict[str, Any], rng: np.random.Generator) -> dict[str, Any]:
     """由父代参数变异出一个候选（P0-3）。
 
-    - weights: 每维 +N(0,0.05) → clip [0.05,0.5] → 除以总和归一（和=1±1e-12）;
+    - weights: 每维 +N(0,0.05) → clip [0.05,0.5] → 除以总和归一（和=1±1e-9）;
     - signals: 各阈值 +N(0,3) → 按键限幅 → 强制严格递降修复;
       strong_buy/watch/hold 参与变异改变 sig 分布, 但 P0 模拟仅用 buy/sell
       两执行阈值择时（设计文档 §1.2 已注明, 分级仓位留 P2 接口）。
     """
     w = np.array([float(parent_params["weights"][k]) for k in DIM_KEYS], dtype=float)
     w = np.clip(w + rng.normal(0.0, WEIGHT_MUTATION_SIGMA, size=len(DIM_KEYS)), *WEIGHT_CLIP)
-    w = w / w.sum()
+    w = _normalize_with_bounds(w, *WEIGHT_CLIP)
     weights = {k: float(x) for k, x in zip(DIM_KEYS, w)}
 
     raw = {}
