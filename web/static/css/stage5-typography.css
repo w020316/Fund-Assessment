@@ -1,0 +1,25 @@
+/* ===== STAGE5: typography ===== ============================================================
+   阶段5 R2 · 字阶工具类（P1-6）
+   ------------------------------------------------------------
+   职责：把 tokens.css 的字阶 token（--qf-t-*，11/12/13/14/16/18/20/24/32/40/56）
+   与存量页面实际在用的档位（15/22/28/30）统一映射为 .qf-fs-* 尺寸工具类。
+   约定：
+   - 工具类只管 font-size（字重/行高仍由组件各自控制），不强制存量替换（R3/重构期事项）；
+   - .qf-fs-11 为「微型标签」档：按 R2 规则附带 letter-spacing:.05em（大写微标签例外档）；
+   - 正文硬下限 12px：低于 12px 的正文不允许使用本清单之外的字号。
+   ============================================================ */
+.qf-fs-11 { font-size: 11px; letter-spacing: 0.05em; } /* micro 微标签档 */
+.qf-fs-12 { font-size: 12px; }                          /* caption / 正文下限 */
+.qf-fs-13 { font-size: 13px; }                          /* body-s */
+.qf-fs-14 { font-size: 14px; }                          /* body / data */
+.qf-fs-15 { font-size: 15px; }                          /* 存量档 */
+.qf-fs-16 { font-size: 16px; }                          /* body-l */
+.qf-fs-18 { font-size: 18px; }                          /* h4 */
+.qf-fs-20 { font-size: 20px; }                          /* h3 */
+.qf-fs-22 { font-size: 22px; }                          /* 存量档 */
+.qf-fs-24 { font-size: 24px; }                          /* h2 */
+.qf-fs-28 { font-size: 28px; }                          /* 存量档 */
+.qf-fs-30 { font-size: 30px; }                          /* 存量档 */
+.qf-fs-32 { font-size: 32px; }                          /* h1 / data-xl */
+.qf-fs-40 { font-size: 40px; }                          /* display-2 */
+.qf-fs-56 { font-size: 56px; }                          /* display-1 */

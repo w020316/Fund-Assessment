@@ -594,7 +594,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 
   /* 底部 tab 小屏适配 */
   .bottom-tab-bar .tab-items { padding:1px 2px 0; }
-  .bottom-tab-item { padding:4px 2px 5px; font-size:10px; }
+  .bottom-tab-item { padding:4px 2px 4px; font-size:11px; letter-spacing:0.05em; }
   .bottom-tab-item .tab-icon svg { width:16px; height:16px; }
   .bottom-tab-item.active::after { inset:1px -1px; border-radius:8px; }
 
@@ -609,7 +609,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 
 /* ===== 超小屏优化(<=360px):进一步压缩 ===== */
 @media (max-width:360px) {
-  .bottom-tab-item { padding:3px 1px 4px; font-size:10px; }
+  .bottom-tab-item { padding:4px 2px 4px; font-size:11px; letter-spacing:0.05em; }
   .bottom-tab-item .tab-icon svg { width:14px; height:14px; }
   .bottom-tab-item.active::after { inset:0; border-radius:6px; }
   .card { padding:10px; }
@@ -619,7 +619,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
   .btn { padding:5px 10px; font-size:11px; }
   .logo-icon { width:24px; height:24px; font-size:11px; }
   .topbar { padding:0 8px; }
-  #sysTime { font-size:10px; }
+  #sysTime { font-size:11px; letter-spacing:0.05em; }
   .modal-body { padding:10px; }
   /* 超小屏表格优化(2026-07-30):数字列不换行 + 等宽数字,
      配合 .table-wrap overflow-x:auto 横向滚动,避免 7 列挤压导致数字换行难读。
@@ -698,7 +698,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
   padding:5px 3px 6px;
   cursor:pointer;
   color:var(--text-muted);
-  font-size:10px;
+  font-size:11px; letter-spacing:0.05em; /* STAGE5 R2: 微标签 10→11px + 字距 */
   font-weight:500;
   min-width:0; flex:1 0 auto;
   position:relative;
@@ -975,6 +975,8 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 <!-- ===== STAGE5: token 真源 ===== Aurora 视觉 token 唯一真源(:root 全局注入，
      与 design-system/tokens.css 同源；hud/aurora 层仅引用不再重复定义) -->
 <link rel="stylesheet" href="/static/css/tokens.css">
+<!-- ===== STAGE5: typography ===== 字阶工具类(.qf-fs-*)，R2 P1-6 -->
+<link rel="stylesheet" href="/static/css/stage5-typography.css">
 <!-- ===== STAGE5: hud-theme ===== HUD 深空指挥舱主题(T05;移除 body 的 hud-theme 类即整体回退) -->
 <link rel="stylesheet" href="/static/css/hud.css">
 <!-- ===== STAGE6: 基础 ===== 阶段六批次A 样式(盯盘/风险/X-Ray/账本;独立文件净增)
@@ -5908,7 +5910,7 @@ function _renderFundAnalyzeProgress(currentStep, elapsedSec) {
       <div style="width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;color:${color};border:1px solid ${color};flex-shrink:0;">${icon}</div>
       <div style="flex:1;min-width:0;">
         <div style="font-size:12px;color:${idx <= currentStep ? 'var(--text-primary)' : 'var(--text-tertiary)'};font-weight:${idx === currentStep ? '600' : '400'};">${s.name}</div>
-        <div style="font-size:10px;color:var(--text-tertiary);margin-top:1px;">${s.desc}</div>
+        <div style="font-size:11px;letter-spacing:0.05em;color:var(--text-tertiary);margin-top:1px;">${s.desc}</div>
       </div>
     </div>`;
   }).join('');

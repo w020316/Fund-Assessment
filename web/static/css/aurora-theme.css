@@ -304,7 +304,7 @@ body.hud-theme .bottom-tab-bar{
 }
 body.hud-theme .bottom-tab-item{
   min-height:56px;color:var(--qf-text-muted);
-  font:500 10px/1 var(--qf-font-body);
+  font:500 11px/1 var(--qf-font-body);letter-spacing:.05em; /* STAGE5 R2: 与存量同步 10→11px 微标签档 */
   transition:color .2s var(--qf-ease-standard),background .2s var(--qf-ease-standard);
 }
 body.hud-theme .bottom-tab-item.active{
