@@ -316,7 +316,10 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 .thermo-pointer {
   position:absolute; top:-4px; width:4px; height:20px;
   background:#fff; border-radius:2px; box-shadow:0 0 6px rgba(255,255,255,0.8);
-  transition:left 0.6s ease;
+  /* QA 复核观察项: 移除对 left 属性的 layout 过渡(违反 motion 铁律)。
+     温度计整卡经 innerHTML 重渲染更新, 过渡在重建元素上从不生效(零视觉变化);
+     translateX 百分比相对元素自身宽度而非容器, 纯 CSS 无法等价替换 left:% 定位,
+     按风险最小原则移除动画而非改写布局。 */
 }
 .thermo-score {
   font-size:32px; font-weight:700; min-width:60px; text-align:right;
@@ -380,7 +383,9 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 
 /* 进度条 */
 .progress-bar { height:6px; background:var(--border); border-radius:3px; overflow:hidden; }
-.progress-fill { height:100%; border-radius:3px; transition:width 0.6s ease; }
+/* QA 复核观察项: 移除 transition:width(同 thermo-pointer 裁定——innerHTML 重渲染
+   使 transition 从不生效, 移除为零视觉变化且符合 motion 铁律) */
+.progress-fill { height:100%; border-radius:3px; }
 
 /* Toast */
 .toast-container { position:fixed; top:60px; right:20px; z-index:var(--qf-z-toast); display:flex; flex-direction:column; gap:8px; }
@@ -5970,7 +5975,7 @@ function _renderFundAnalyzeProgress(currentStep, elapsedSec) {
       <span style="font-size:11px;color:var(--text-tertiary);">${elapsedSec}s / ~90s</span>
     </div>
     <div style="height:4px;background:var(--bg-card);border-radius:2px;overflow:hidden;margin-bottom:14px;">
-      <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,var(--accent),var(--color-up));transition:width 0.5s ease;border-radius:2px;"></div>
+      <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,var(--accent),var(--color-up));border-radius:2px;"></div><!-- QA: 移除 transition:width(重渲染重建元素, 从不生效; motion 铁律) -->
     </div>
     <div>${stepsHtml}</div>
     <div style="margin-top:12px;font-size:11px;color:var(--text-tertiary);text-align:center;">分析中(请勿关闭窗口)</div>

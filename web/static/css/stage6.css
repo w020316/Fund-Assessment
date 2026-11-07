@@ -250,12 +250,17 @@
   height: 10px; border-radius: 5px; background: rgba(255, 255, 255, 0.06);
   margin-top: 6px; overflow: hidden;
 }
-.st6-attr-bar { height: 100%; border-radius: 5px; transition: width 0.3s ease; }
+/* QA 复核观察项: 移除 transition:width(layout 属性动效违反 motion 铁律)。
+   该进度条随父卡 innerHTML 重渲染整体重建, transition 在重建元素上从不生效,
+   移除为零视觉变化(与 index.html progress-fill/thermo-pointer 同一裁定)。 */
+.st6-attr-bar { height: 100%; border-radius: 5px; }
 .st6-attr-bar-up { background: var(--hud-up, #F87171); }
 .st6-attr-bar-down { background: var(--hud-down, #34D399); }
 .st6-attr-meta { font-size: 11px; color: var(--text-muted, #8b92a8); margin-top: 4px; }
 .st6-attr-partial {
-  font-size: 10px; color: #f59e0b; border: 1px dashed #f59e0b;
+  /* QA 复核观察项: 微标签 10→11px+字距(R2 字阶铁律); 硬编码琥珀改语义 token */
+  font-size: 11px; letter-spacing: 0.05em;
+  color: var(--color-warning, #f59e0b); border: 1px dashed var(--color-warning, #f59e0b);
   border-radius: 4px; padding: 0 4px; margin-left: 4px;
 }
 .st6-attr-missing { opacity: 0.7; }

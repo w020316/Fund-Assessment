@@ -46,7 +46,9 @@ body.hud-theme{
   --radius:var(--qf-radius-sm);
   --radius-lg:var(--qf-radius-md);
   --shadow:var(--qf-shadow-1);
-  --transition:all .2s cubic-bezier(.2,.8,.2,1);
+  /* QA 复核观察项: transition 显式化同步到暗色主题(与 index.html :root 亮色回退
+     R2 修复对齐)——保留原 cubic-bezier 曲线, 仅属性列表改为六视觉属性 */
+  --transition:color .2s cubic-bezier(.2,.8,.2,1),background-color .2s cubic-bezier(.2,.8,.2,1),border-color .2s cubic-bezier(.2,.8,.2,1),box-shadow .2s cubic-bezier(.2,.8,.2,1),transform .2s cubic-bezier(.2,.8,.2,1),opacity .2s cubic-bezier(.2,.8,.2,1);
 
   /* hud.css 的组件直接引用 --hud-*：--hud-* 真源在 hud.css（值引用 --qf-*），
      此处不再同步覆盖。 */
