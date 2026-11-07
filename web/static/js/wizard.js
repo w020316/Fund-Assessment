@@ -410,7 +410,7 @@
     let html = '';
 
     // 新增
-    html += '<div class="fw-section-title">新增(<span style="color:var(--color-up,#34d399);">' + added.length + '</span> 条)</div>';
+    html += '<div class="fw-section-title">新增(<span style="color:var(--color-down,#34d399);">' + added.length + '</span> 条)</div>';
     html += added.length
       ? added.map(function (a) {
         return '<div class="fw-del-item" style="cursor:default;">+ ' + esc(a.fund_code) + ' ' + esc(a.fund_name || '') + '</div>';
@@ -530,7 +530,7 @@
     renderBody(
       '<div class="fw-receipt">' +
       '  <div style="font-size:15px;">✅ 保存成功</div>' +
-      '  <div class="fw-receipt-num" style="color:var(--color-up,#34d399);">+' + s.added + '</div>' +
+      '  <div class="fw-receipt-num" style="color:var(--color-down,#34d399);">+' + s.added + '</div>' +
       '  <div class="fw-change">新增 ' + s.added + ' 条 · 更新 ' + s.updated + ' 条 · 删除 ' + s.deleted + ' 条</div>' +
       (s.deleted_codes && s.deleted_codes.length
         ? '<div class="fw-change" style="color:var(--color-up,#f87171);">已删除:' + esc(s.deleted_codes.join('、')) + '</div>' : '') +

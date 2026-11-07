@@ -74,15 +74,15 @@
     const signals = fs.signals || {};
     const advice = a.advice || {};
     const act = advice.action || fs.action || '—';
-    const actColor = act === '买入' ? 'var(--color-up,#34d399)' :
-      act === '卖出' ? 'var(--color-down,#f87171)' : 'var(--text-secondary,#c9d1d9)';
+    const actColor = act === '买入' ? 'var(--color-up,#F87171)' :
+      act === '卖出' ? 'var(--color-down,#22c55e)' : 'var(--text-secondary,#c9d1d9)';
     const score = fs.final_score || 50;
     const rows = Object.keys(SIGNAL_NAMES).map(function (key) {
       const s = signals[key] || {};
       const sc = s.score || 50;
       const sig = String(s.signal || 'neutral');
-      const c = sig.indexOf('bull') >= 0 ? 'var(--color-up,#34d399)' :
-        sig.indexOf('bear') >= 0 ? 'var(--color-down,#f87171)' : 'var(--text-muted,#8b92a8)';
+      const c = sig.indexOf('bull') >= 0 ? 'var(--color-up,#F87171)' :
+        sig.indexOf('bear') >= 0 ? 'var(--color-down,#22c55e)' : 'var(--text-muted,#8b92a8)';
       return '<div class="signal-row" style="font-size:12px;padding:2px 0;">' +
         '<span class="signal-label" style="display:inline-block;width:110px;color:var(--text-muted,#8b92a8);">' + SIGNAL_NAMES[key] + '</span>' +
         '<span style="color:' + c + ';font-weight:600;">' + Number(sc).toFixed(1) + '</span>' +
