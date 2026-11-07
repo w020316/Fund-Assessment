@@ -54,6 +54,10 @@ TRADE_GUARD_FUND = "018957"
 
 _DEFAULT_OUT_DIR = os.path.join(_ROOT, "daily_reports")
 
+# 财经快讯区块参数: 最多展示条数 / 摘要截断长度
+_NEWS_MAX_ITEMS = 8
+_NEWS_SUMMARY_LEN = 80
+
 # 北京时间 UTC+8(Render/CI 为 UTC, 一律显式换算, 不依赖系统 TZ)
 _CST = timezone(timedelta(hours=8))
 
@@ -157,6 +161,31 @@ def collect_sectors() -> dict | None:
     return None
 
 
+def collect_news() -> list[dict] | None:
+    """财经快讯(复用 ds2.get_global_news 的东财→新浪双上游); 失败返回 None。
+
+    - 目标取前 _NEWS_MAX_ITEMS(8)条;
+    - title 为空的条目跳过; 单条数据结构异常(None/非 dict)直接跳过, 不致命;
+    - 清洗后为空或上游抛异常 → 返回 None(渲染为"数据源未覆盖"占位)。
+    """
+    try:
+        rows = ds2.get_global_news()
+        cleaned: list[dict] = []
+        for item in rows or []:
+            if not isinstance(item, dict):
+                continue
+            if not str(item.get("title", "") or "").strip():
+                continue
+            cleaned.append(item)
+            if len(cleaned) >= _NEWS_MAX_ITEMS:
+                break
+        if cleaned:
+            return cleaned
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"财经快讯数据获取失败: {exc}")
+    return None
+
+
 def collect_funds() -> list[dict] | None:
     """持仓基金公开净值(双上游); 失败返回 None。"""
     try:
@@ -254,6 +283,9 @@ th { color:var(--muted); font-weight:500; font-size:13px; background:#fafbfc; }
 .tables { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
 @media (max-width:720px) { .tables { grid-template-columns:1fr; } }
 .tables td:last-child { font-weight:600; }
+.news-sum { font-size:12px; color:var(--muted); margin-top:2px; line-height:1.5; }
+td a { color:#2f6fed; text-decoration:none; }
+td a:hover { text-decoration:underline; }
 .placeholder { color:var(--muted); font-size:14px; padding:18px; text-align:center;
   background:#fff; border:1px dashed var(--line); border-radius:10px; }
 .note { font-size:13px; color:var(--muted); line-height:1.9; }
@@ -340,6 +372,46 @@ def _render_sectors(sectors: dict | None) -> str:
     )
 
 
+def _render_news(news: list[dict] | None) -> str:
+    """财经快讯表: 时间 | 来源 | 标题(url 非空则可点击, 标题下灰色小字摘要)。"""
+    if not news:
+        return _placeholder()
+    trs = []
+    for n in news:
+        # 单条结构异常(None/非 dict)直接跳过, 不让整块渲染失败
+        if not isinstance(n, dict):
+            continue
+        title = str(n.get("title", "") or "").strip()
+        if not title:
+            continue
+        url = str(n.get("url", "") or "").strip()
+        source = html.escape(str(n.get("source", "") or ""))
+        # 时间缺失或为空串 → 显示占位符 "—"(该条目本身仍展示)
+        pub = html.escape(str(n.get("publish_time", "") or "").strip()) or "—"
+        esc_title = html.escape(title)
+        if url:
+            title_html = (
+                f'<a href="{html.escape(url, quote=True)}" target="_blank" rel="noopener">'
+                f"{esc_title}</a>"
+            )
+        else:
+            title_html = esc_title
+        # 摘要不强制展示: content 为空则不渲染, 非空截断到 _NEWS_SUMMARY_LEN
+        summary = str(n.get("content", "") or "").strip()
+        summary_html = (
+            f'<div class="news-sum">{html.escape(summary[:_NEWS_SUMMARY_LEN])}</div>'
+            if summary
+            else ""
+        )
+        trs.append(
+            f"<tr><td>{pub}</td><td>{source}</td><td>{title_html}{summary_html}</td></tr>"
+        )
+    if not trs:
+        return _placeholder()
+    head = "<tr><th>时间</th><th>来源</th><th>标题</th></tr>"
+    return f'<table><thead>{head}</thead><tbody>{"".join(trs)}</tbody></table>'
+
+
 def _render_funds(funds: list[dict] | None) -> str:
     if not funds:
         return _placeholder()
@@ -375,6 +447,7 @@ def render_html(data: dict, now: datetime | None = None) -> str:
         "<h2>主要指数</h2>" + _render_indices(data.get("indices"))
         + "<h2>市场广度</h2>" + _render_breadth(data.get("sentiment"))
         + "<h2>板块涨跌 TOP10</h2>" + _render_sectors(data.get("sectors"))
+        + "<h2>财经快讯</h2>" + _render_news(data.get("news"))
         + "<h2>基金净值</h2>" + _render_funds(data.get("funds"))
         + "<footer><h2>数据说明与风险提示</h2>"
         '<div class="note">'
@@ -400,12 +473,14 @@ def collect_data(now: datetime) -> dict:
     indices = collect_indices()
     sentiment = collect_sentiment()
     sectors = collect_sectors()
+    news = collect_news()
     funds = collect_funds()
     return {
         "now": now,
         "indices": indices,
         "sentiment": sentiment,
         "sectors": sectors,
+        "news": news,
         "funds": funds,
         "summary": build_summary(indices, sentiment),
     }

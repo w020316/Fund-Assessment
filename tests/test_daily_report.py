@@ -154,3 +154,79 @@ class TestRender:
         monkeypatch.setattr(gdr.ds2, "get_sector_ranking", lambda: [
             {"code": "BK0001", "name": "半导体", "change_pct": 2.0},
         ])
+
+
+class TestNews:
+    """财经快讯区块: 端到端渲染 + 数据源失败占位。"""
+
+    def _mock_funds_today(self, monkeypatch):
+        today = gdr.beijing_now().strftime("%Y-%m-%d")
+        monkeypatch.setattr(gdr.ds2, "get_fund_realtime_tencent", lambda codes: [
+            {"code": c, "name": f"基金{c}", "nav": 1.5, "estimated_nav": 1.51,
+             "change": 0.0, "change_pct": 0.0,
+             "update_time": f"{today} 15:00:00", "source": "tencent"}
+            for c in codes
+        ])
+
+    def _mock_indices(self, monkeypatch):
+        monkeypatch.setattr(gdr.ds2, "get_index_realtime", lambda: [
+            {"code": "000001", "name": "上证指数", "price": 3250.12,
+             "change": 0.0, "change_pct": 0.0, "volume": 1000, "amount": 2000},
+        ])
+        monkeypatch.setattr(gdr.ds2, "get_market_sentiment", lambda: {
+            "rise_count": 100, "fall_count": 100, "flat_count": 10,
+            "sentiment": "中性", "ratio": 0.5,
+        })
+        monkeypatch.setattr(gdr.ds2, "get_sector_ranking", lambda: [
+            {"code": "BK0001", "name": "半导体", "change_pct": 1.0},
+        ])
+
+    def test_news_rendered_in_report(self, monkeypatch, tmp_path):
+        """mock get_global_news 返回构造数据 → HTML 含新闻标题与来源(含可点击链接)。"""
+        self._mock_funds_today(monkeypatch)
+        self._mock_indices(monkeypatch)
+        monkeypatch.setattr(gdr.ds2, "get_global_news", lambda: [
+            None,  # 单条结构异常: 应被跳过, 不影响整体
+            {"title": "", "content": "无标题条目应跳过", "source": "X",
+             "publish_time": "2026-01-01 10:00", "url": "https://x.com/1"},
+            {"title": "央行开展逆回购操作", "content": "流动性维持合理充裕，规模超上期。",
+             "source": "东方财富", "publish_time": "2026-01-01 09:30",
+             "url": "https://finance.example.com/news/1"},
+            {"title": "某指数尾盘拉升", "content": "c" * 200,  # 摘要超长应被截断
+             "source": "", "publish_time": "", "url": ""},
+        ])
+
+        out = tmp_path / "report.html"
+        assert gdr.main(["--out", str(out)]) == 0
+        html_text = out.read_text(encoding="utf-8")
+        # 区块标题与新闻标题、来源必须出现
+        assert "财经快讯" in html_text
+        assert "央行开展逆回购操作" in html_text
+        assert "东方财富" in html_text
+        # url 非空 → <a href target=_blank> 可点击
+        assert 'href="https://finance.example.com/news/1" target="_blank"' in html_text
+        # publish_time 为空 → 时间列显示占位 "—"
+        assert "<td>—</td>" in html_text
+        # 摘要截断到 80 字
+        assert "c" * 80 in html_text
+        assert "c" * 81 not in html_text
+        # 结构异常与空标题条目被跳过
+        assert "无标题条目应跳过" not in html_text
+
+    def test_news_source_failure_shows_placeholder(self, monkeypatch, tmp_path):
+        """mock get_global_news 抛异常 → 报告仍生成且快讯区块显示占位。"""
+        self._mock_funds_today(monkeypatch)
+        self._mock_indices(monkeypatch)
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("news upstream down")
+
+        monkeypatch.setattr(gdr.ds2, "get_global_news", _boom)
+
+        out = tmp_path / "report.html"
+        assert gdr.main(["--out", str(out)]) == 0
+        html_text = out.read_text(encoding="utf-8")
+        assert "财经快讯" in html_text
+        assert "数据源未覆盖" in html_text
+        # 其余正常区块仍应渲染
+        assert "002891" in html_text
