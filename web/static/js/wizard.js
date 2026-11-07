@@ -59,7 +59,7 @@
       '  background:transparent;color:var(--text-secondary,#c9d1d9);}',
       '.fw-btn:disabled{opacity:0.45;cursor:not-allowed;}',
       '.fw-btn-primary{background:var(--accent,#f59e0b);color:#0d1117;border-color:transparent;}',
-      '.fw-btn-danger{background:var(--color-up,#ef4444);color:#fff;border-color:transparent;}',
+      '.fw-btn-danger{background:var(--color-up,#F87171);color:#fff;border-color:transparent;}', /* STAGE5 R1: 语义红统一 Aurora #F87171 */
       '.fw-input{min-height:44px;padding:8px 10px;border-radius:8px;width:100%;',
       '  border:1px solid var(--border-light,#333b4d);background:rgba(255,255,255,0.03);',
       '  color:var(--text-primary,#e6edf3);font-size:14px;box-sizing:border-box;}',
@@ -73,11 +73,11 @@
       '.fw-badge-high{color:#34d399;border:1px solid rgba(52,211,153,0.4);}',
       '.fw-check{appearance:none;width:24px;height:24px;border:2px solid var(--border-light,#555);',
       '  border-radius:6px;cursor:pointer;position:relative;vertical-align:middle;flex-shrink:0;}',
-      '.fw-check:checked{background:var(--color-up,#ef4444);border-color:var(--color-up,#ef4444);}',
+      '.fw-check:checked{background:var(--color-up,#F87171);border-color:var(--color-up,#F87171);}',
       '.fw-check:checked::after{content:"✓";position:absolute;inset:0;display:flex;',
       '  align-items:center;justify-content:center;color:#fff;font-size:15px;}',
       '.fw-del-banner{display:flex;align-items:center;gap:10px;padding:10px 12px;margin:10px 0;',
-      '  border:1px solid #ef4444;border-radius:8px;background:rgba(239,68,68,0.12);',
+      '  border:1px solid var(--color-up,#F87171);border-radius:8px;background:rgba(248,113,113,0.12);', /* STAGE5 R1: 旧红硬编码统一为语义红 */
       '  color:#f87171;font-weight:600;font-size:13px;}',
       '.fw-del-item{display:flex;align-items:center;gap:10px;min-height:44px;padding:6px 8px;',
       '  border-bottom:1px solid var(--border,#2a3142);cursor:pointer;}',
