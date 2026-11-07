@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
+import yaml
 from src.analysis.technical import rsi as ta_rsi, macd as ta_macd
 import akshare as ak
 from loguru import logger
@@ -38,10 +41,53 @@ WEIGHTS = {
     "sentiment": 0.15,
 }
 
+# ===== STAGE: evolution B2 ===== 信号阈值常量（接线前 _signal_from_score 的硬编码值真源）
+SIGNAL_THRESHOLDS: dict[str, float] = {
+    "strong_buy": 80.0,
+    "buy": 65.0,
+    "watch": 50.0,
+    "hold": 35.0,
+    "sell": 20.0,
+}
+
+# strategies.yaml 路径（模块级常量, 测试可 monkeypatch 指向临时文件）
+STRATEGIES_YAML_PATH = Path(__file__).resolve().parents[2] / "config" / "strategies.yaml"
+
+
+def _read_active_params() -> tuple[dict[str, float], dict[str, float]]:
+    """策略自进化 B2: 读取 config/strategies.yaml 的 trading_quant 参数段。
+
+    激活生效链（设计文档 §1.3）: evolution/activate 写 yaml → 下一次实例化
+    TradingQuant 时经本函数读到新参数, analyze/scan 链路即用新参数。
+
+    Returns:
+        (weights, signals); 文件缺失/损坏/段缺失/字段不全时**整体回退**模块常量
+        WEIGHTS/SIGNAL_THRESHOLDS —— 行为与接线前逐位一致（快照测试保障）。
+    """
+    try:
+        with open(STRATEGIES_YAML_PATH, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        section = data.get("trading_quant") or {}
+        w_raw = section.get("weights") or {}
+        s_raw = section.get("signals") or {}
+        weights = {k: float(w_raw[k]) for k in WEIGHTS if k in w_raw}
+        signals = {k: float(s_raw[k]) for k in SIGNAL_THRESHOLDS if k in s_raw}
+        if len(weights) != len(WEIGHTS) or len(signals) != len(SIGNAL_THRESHOLDS):
+            raise ValueError("trading_quant section incomplete")
+        return weights, signals
+    except Exception as e:
+        logger.warning(f"read trading_quant params from strategies.yaml failed, fallback to defaults: {e}")
+        return dict(WEIGHTS), dict(SIGNAL_THRESHOLDS)
+
 
 class TradingQuant:
     def __init__(self) -> None:
         self._cache: dict[str, pd.DataFrame] = {}
+        # ===== STAGE: evolution B2 ===== 实例参数: 激活后下一次实例化即生效;
+        # 未配置/异常时与模块常量一致, 输出与旧实现逐位相同
+        self.weights: dict[str, float]
+        self.signals: dict[str, float]
+        self.weights, self.signals = _read_active_params()
 
     def _get_kline(self, stock_code: str, period: str = "daily", days: int = 120) -> pd.DataFrame:
         key = f"{stock_code}_{period}_{days}"
@@ -200,16 +246,23 @@ class TradingQuant:
         return max(0.0, min(100.0, score))
 
     @staticmethod
-    def _signal_from_score(score: float) -> Signal:
-        if score >= 80:
+    def _signal_from_score(score: float, thresholds: dict[str, float] | None = None) -> Signal:
+        """评分→信号映射（B2 参数化: thresholds 缺省=原硬编码阈值, 静态调用行为不变）。
+
+        保持 staticmethod 兼容既有静态调用（tests/test_trading_quant.py）; 实例链路
+        经 stock_analysis 传入 self.signals 使激活参数生效。score 低于 sell 阈值
+        一律 STRONG_SELL（与原实现一致, STRONG_SELL 无独立阈值）。
+        """
+        t = thresholds if thresholds is not None else SIGNAL_THRESHOLDS
+        if score >= t["strong_buy"]:
             return Signal.STRONG_BUY
-        if score >= 65:
+        if score >= t["buy"]:
             return Signal.BUY
-        if score >= 50:
+        if score >= t["watch"]:
             return Signal.WATCH
-        if score >= 35:
+        if score >= t["hold"]:
             return Signal.HOLD
-        if score >= 20:
+        if score >= t["sell"]:
             return Signal.SELL
         return Signal.STRONG_SELL
 
@@ -232,13 +285,14 @@ class TradingQuant:
         news = self._score_news(stock_code)
         sentiment = self._score_sentiment(stock_code)
         composite = (
-            technical * WEIGHTS["technical"]
-            + capital * WEIGHTS["capital"]
-            + fundamental * WEIGHTS["fundamental"]
-            + news * WEIGHTS["news"]
-            + sentiment * WEIGHTS["sentiment"]
+            technical * self.weights["technical"]
+            + capital * self.weights["capital"]
+            + fundamental * self.weights["fundamental"]
+            + news * self.weights["news"]
+            + sentiment * self.weights["sentiment"]
         )
-        signal = self._signal_from_score(composite)
+        # B2 参数化: 传入实例阈值表（激活参数生效点）; 缺省时与旧实现逐位一致
+        signal = self._signal_from_score(composite, self.signals)
         suggestion = self._suggestion_from_signal(signal)
         return {
             "stock_code": stock_code,
