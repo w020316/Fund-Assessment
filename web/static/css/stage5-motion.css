@@ -1,0 +1,67 @@
+/* ===== STAGE5: motion ===== ============================================================
+   阶段5 R3 · 冲奖动效（P1-10 / P2-13 / P2-14 / P2-16 / signature 微交互）
+   ------------------------------------------------------------
+   铁律：全部动效仅 transform/opacity；时长 200-500ms；曲线引用 tokens.css
+   的 --qf-ease-enter / --qf-ease-emphasis；prefers-reduced-motion 全量关闭。
+   ============================================================ */
+
+/* ---------- 1. ticker 可控（P1-10）----------
+   新闻滚动条 hover / 键盘聚焦(内含链接 focus-within)时暂停；
+   声明减少动态的用户看到静态前几条(动画关闭即静态显示)。 */
+.news-ticker:hover .news-ticker-inner,
+.news-ticker:focus-within .news-ticker-inner {
+  animation-play-state: paused;
+}
+
+/* ---------- 3. 页面转场（P2-14）----------
+   switchPage 给目标页容器挂 .qf-page-in，animationend 后由 JS 移除；
+   对齐 design-system/components.css 原型实现(240ms ease-enter)。 */
+.page.qf-page-in {
+  animation: qf-page-in 240ms var(--qf-ease-enter, cubic-bezier(.16, 1, .3, 1));
+}
+@keyframes qf-page-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ---------- 4. 首屏 stagger 入场（P2-16）----------
+   总览页(page-market)直接子块 40ms 逐个入场，仅 transform/opacity，
+   backwards 填充避免延迟期间闪现。JS 播完后移除 .qf-stagger。 */
+.qf-stagger > * {
+  animation: qf-rise 320ms var(--qf-ease-enter, cubic-bezier(.16, 1, .3, 1)) backwards;
+}
+.qf-stagger > :nth-child(1) { animation-delay: 0ms; }
+.qf-stagger > :nth-child(2) { animation-delay: 40ms; }
+.qf-stagger > :nth-child(3) { animation-delay: 80ms; }
+.qf-stagger > :nth-child(4) { animation-delay: 120ms; }
+.qf-stagger > :nth-child(5) { animation-delay: 160ms; }
+.qf-stagger > :nth-child(6) { animation-delay: 200ms; }
+.qf-stagger > :nth-child(7) { animation-delay: 240ms; }
+.qf-stagger > :nth-child(8) { animation-delay: 280ms; }
+@keyframes qf-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ---------- 5. signature 微交互 ----------
+   主操作按钮(经 withLoading 的「分析/回测/校验」类 btn-primary)成功回调时
+   播一次 1.0→1.02→1.0 强调；类由 JS 在 animationend 移除，不常驻。 */
+.btn-primary.qf-emphasis {
+  animation: qf-emphasis 250ms var(--qf-ease-emphasis, cubic-bezier(.34, 1.4, .64, 1));
+}
+@keyframes qf-emphasis {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.02); }
+}
+
+/* ---------- 6. 动效降级：新增动画全量覆盖 ----------
+   ticker 静态显示(不滚动)、转场/stagger/强调/一次性脉冲全部关闭。 */
+@media (prefers-reduced-motion: reduce) {
+  .news-ticker-inner,
+  .page.qf-page-in,
+  .qf-stagger > *,
+  .btn-primary.qf-emphasis,
+  .bottom-tab-item.active::after {
+    animation: none !important;
+  }
+}

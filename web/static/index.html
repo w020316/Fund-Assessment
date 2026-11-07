@@ -745,7 +745,12 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
   background:linear-gradient(135deg, rgba(245,158,11,0.12), rgba(245,158,11,0.06));
   border-radius:10px;
   z-index:var(--qf-z-base);
-  animation:tabActivePulse 2s ease-in-out infinite;
+  /* STAGE5 R3(P2-13): 纯装饰无限脉冲整改为激活瞬间播一次(250ms emphasis 曲线)，
+     循环态删除；reduced-motion 下由 stage5-motion.css 全量关闭 */
+  animation-name:tabActivePulse;
+  animation-duration:250ms;
+  animation-timing-function:var(--qf-ease-emphasis, cubic-bezier(.34,1.4,.64,1));
+  animation-iteration-count:1;
 }
 .bottom-tab-item.active .tab-icon {
   transform:translateY(-1px) scale(1.1);
@@ -988,6 +993,8 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 <link rel="stylesheet" href="/static/css/stage6.css">
 <!-- ===== STAGE5: responsive ===== 大屏正面设计(R3/P1-11;1366 双列分区/1920 居中) -->
 <link rel="stylesheet" href="/static/css/stage5-responsive.css">
+<!-- ===== STAGE5: motion ===== 冲奖动效(R3;ticker可控/转场/stagger/微交互;reduced-motion全关) -->
+<link rel="stylesheet" href="/static/css/stage5-motion.css">
 <!-- ===== Design System v1.0 ===== Aurora Terminal 接入层。
      必须排在 hud.css / stage6.css 之后：只覆盖视觉 token 与组件状态，
      不改布局结构；移除 body 的 hud-theme 类即整体回退。 -->
@@ -2878,7 +2885,14 @@ function withLoading(btn, asyncFn) {
   btn.style.cursor = 'not-allowed';
   // 加载指示器(文字+脉冲圆点)
   btn.innerHTML = '<span style="display:inline-flex;align-items:center;gap:8px;"><span style="width:6px;height:6px;border-radius:50%;background:currentColor;animation:pulse-dot 1.2s infinite;"></span>处理中...</span>';
-  return Promise.resolve(asyncFn()).finally(() => {
+  return Promise.resolve(asyncFn()).then(() => {
+    /* ===== STAGE5: motion (R3) ===== signature 微交互：主操作成功时刻
+       播一次 1.0→1.02→1.0 强调(250ms emphasis)；类由 animationend 移除 */
+    if (btn.classList.contains('btn-primary')) {
+      btn.classList.add('qf-emphasis');
+      btn.addEventListener('animationend', () => btn.classList.remove('qf-emphasis'), { once: true });
+    }
+  }).finally(() => {
     btn.innerHTML = orig;
     btn.disabled = origDisabled;
     btn.style.opacity = '';
@@ -2917,6 +2931,29 @@ function renderStatus(container, state='empty', msg='暂无数据', hint='') {
     <div class="hud-status-msg">${msg}</div>
     ${hint ? `<div class="hud-status-hint">${hint}</div>` : ''}
   </div>`;
+}
+
+/* ===== STAGE5: motion (R3) ===== 动效辅助(仅 transform/opacity;reduced-motion 由 CSS 全量关闭) */
+function qfPlayPageIn(pageEl) {
+  /* P2-14 页面转场：目标页一次性入场，animationend(仅容器自身动画)后移除类 */
+  if (!pageEl || pageEl.classList.contains('qf-page-in')) return;
+  pageEl.classList.add('qf-page-in');
+  pageEl.addEventListener('animationend', function h(e) {
+    if (e.target !== pageEl) return;
+    pageEl.classList.remove('qf-page-in');
+    pageEl.removeEventListener('animationend', h);
+  });
+  /* 兜底：reduced-motion 下动画被禁用、animationend 不触发，定时移除 */
+  setTimeout(() => pageEl.classList.remove('qf-page-in'), 300);
+}
+function qfPlayStagger(pageEl) {
+  /* P2-16 总览页首屏 stagger：直接子块 40ms 逐个入场；
+     8 块×40ms 间隔 + 320ms 时长，760ms 后统一移除类(含 reduced-motion 情形) */
+  if (!pageEl) return;
+  pageEl.classList.remove('qf-stagger');
+  void pageEl.offsetWidth; /* 强制 reflow 以支持重播 */
+  pageEl.classList.add('qf-stagger');
+  setTimeout(() => pageEl.classList.remove('qf-stagger'), 760);
 }
 
 /* ========== 页面切换 ========== */
@@ -2976,7 +3013,12 @@ function switchPage(name) {
   const page = document.getElementById('page-' + name);
   const nav = document.querySelector(`.nav-item[data-page="${name}"]`);
   const bottomTab = document.querySelector(`.bottom-tab-item[data-page="${name}"]`);
-  if (page) page.classList.add('active');
+  if (page) {
+    page.classList.add('active');
+    /* ===== STAGE5: motion (R3) ===== 目标页转场入场；总览页叠加首屏 stagger */
+    qfPlayPageIn(page);
+    if (name === 'market') qfPlayStagger(page);
+  }
   if (nav) nav.classList.add('active');
   if (bottomTab) bottomTab.classList.add('active');
   // 切换时加载数据
@@ -8148,6 +8190,8 @@ const Onboarding = {
 
 document.addEventListener('DOMContentLoaded', () => {
   _renderSkeletons(); // 立即填充骨架屏(0ms)
+  /* ===== STAGE5: motion (R3) ===== 首屏即总览页：播放首屏卡片 stagger 入场 */
+  qfPlayStagger(document.getElementById('page-market'));
   refreshTokenBanner(); // 阶段四 U2：未配置管理员 Token 时主动提示，不等用户点按钮
   Onboarding.init();   // 首次使用指引(仅首次显示,状态存本机)
   loadMarketData();   // 后台加载数据(覆盖骨架屏)
