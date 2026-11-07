@@ -78,7 +78,7 @@ body {
 
 /* ========== 顶部栏 ========== */
 .logo {
-  display:flex; align-items:center; gap:10px;
+  display:flex; align-items:center; gap:12px;
   font-size:18px; font-weight:700;
   white-space:nowrap;
 }
@@ -225,7 +225,7 @@ body {
 .table-wrap { overflow-x:auto; }
 table { width:100%; border-collapse:collapse; font-size:13px; }
 th {
-  text-align:left; padding:10px 12px;
+  text-align:left; padding:12px 12px;
   background:rgba(255,255,255,0.03);
   color:var(--text-secondary);
   font-weight:500; font-size:12px;
@@ -234,7 +234,7 @@ th {
   position:sticky; top:0;
 }
 td {
-  padding:10px 12px;
+  padding:12px 12px;
   border-bottom:1px solid var(--border);
   transition:var(--transition);
 }
@@ -257,7 +257,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
   padding:8px 20px; border:none; border-radius:6px;
   font-size:13px; font-weight:500; cursor:pointer;
   transition:var(--transition); display:inline-flex;
-  align-items:center; gap:6px;
+  align-items:center; gap:8px;
 }
 .btn-primary { background:var(--accent); color:#0d1117; }
 .btn-primary:hover { background:#d97706; }
@@ -280,7 +280,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
   border:1px solid var(--border-light);
 }
 .btn-outline:hover { border-color:var(--accent-blue); color:var(--accent-blue); }
-.btn-sm { padding:6px 12px; font-size:12px; }
+.btn-sm { padding:8px 12px; font-size:12px; }
 
 /* 弹窗 */
 .modal-mask {
@@ -295,7 +295,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 }
 .modal-header {
   display:flex; justify-content:space-between; align-items:center;
-  padding:14px 20px; border-bottom:1px solid var(--border);
+  padding:16px 20px; border-bottom:1px solid var(--border);
   font-size:15px; font-weight:600;
 }
 .modal-close { cursor:pointer; font-size:22px; color:var(--text-muted); line-height:1; padding:0 4px; }
@@ -321,9 +321,9 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 }
 
 /* 分析师角色卡片 */
-.analyst-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; margin:10px 0; }
+.analyst-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; margin:10px 0; }
 .analyst-card {
-  padding:10px 12px; border:1px solid var(--border); border-radius:8px;
+  padding:12px 12px; border:1px solid var(--border); border-radius:8px;
   background:rgba(255,255,255,0.02);
 }
 .analyst-name { font-size:13px; font-weight:600; color:var(--accent); margin-bottom:4px; }
@@ -338,7 +338,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 .debate-bear { border-left-color:var(--color-down); }
 
 /* 信号强度条 */
-.signal-row { display:flex; align-items:center; gap:8px; padding:6px 0; font-size:12px; }
+.signal-row { display:flex; align-items:center; gap:8px; padding:8px 0; font-size:12px; }
 .signal-label { min-width:90px; color:var(--text-secondary); }
 .signal-bar { flex:1; height:6px; background:var(--border); border-radius:3px; overflow:hidden; }
 .signal-bar-fill { height:100%; border-radius:3px; }
@@ -368,7 +368,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 .form-label { display:block; font-size:12px; color:var(--text-secondary); margin-bottom:6px; font-weight:500; }
 
 /* 信号标签 */
-.signal { padding:3px 10px; border-radius:4px; font-size:12px; font-weight:600; display:inline-block; }
+.signal { padding:4px 12px; border-radius:4px; font-size:12px; font-weight:600; display:inline-block; }
 .signal-bullish { background:rgba(239,68,68,0.15); color:var(--color-up); }
 .signal-bearish { background:rgba(34,197,94,0.15); color:var(--color-down); }
 .signal-neutral { background:rgba(148,163,184,0.15); color:var(--color-flat); }
@@ -397,7 +397,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
   /* --token-banner-bottom 由 refreshTokenBanner() 写入：未配置 Token 时顶部多一条横幅，
      错误卡必须从横幅下沿开始，否则会盖住横幅上的"去设置"按钮。 */
   position:fixed; top:var(--token-banner-bottom, 60px); right:20px; z-index:var(--qf-z-toast); display:none;
-  align-items:flex-start; gap:10px; max-width:380px; padding:12px 14px;
+  align-items:flex-start; gap:12px; max-width:380px; padding:12px 16px;
   border-radius:10px; background:#7f1d1d; color:#fca5a5; border:1px solid #dc2626;
   box-shadow:0 8px 24px rgba(0,0,0,0.35); font-size:13px;
 }
@@ -407,7 +407,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 .api-error-panel .aep-msg { line-height:1.5; word-break:break-word; }
 .api-error-panel .aep-retry {
   background:#dc2626; color:#fff; border:0; border-radius:6px;
-  padding:5px 10px; cursor:pointer; font-size:12px; flex-shrink:0;
+  padding:4px 12px; cursor:pointer; font-size:12px; flex-shrink:0;
 }
 .api-error-panel .aep-close {
   background:transparent; border:0; color:#fca5a5; font-size:16px;
@@ -439,7 +439,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 .news-ticker {
   overflow:hidden; white-space:nowrap;
   background:rgba(255,255,255,0.02);
-  border-radius:8px; padding:10px 16px;
+  border-radius:8px; padding:12px 16px;
   position:relative;
 }
 .news-ticker-inner {
@@ -521,14 +521,14 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
   .bottom-tab-bar { display:flex !important; }
   .data-quality-badge { display:none; }
   .data-freshness { display:none; }
-  .llm-provider-bar { font-size:11px; padding:6px 10px; }
+  .llm-provider-bar { font-size:11px; padding:8px 12px; }
 
   /* ===== 移动端深度优化(2026-07-30) ===== */
   /* 顶栏瘦身:logo 文字隐藏,只保留 logo 图标 + 时间 */
   .logo span { display:none; }
   .logo-icon { width:28px; height:28px; font-size:13px; }
   /* 刘海屏顶部安全区(iPhone X+ status bar) */
-  .topbar { height:46px; min-height:46px; padding:0 12px; padding-top:max(8px, env(safe-area-inset-top)); gap:10px; }
+  .topbar { height:46px; min-height:46px; padding:0 12px; padding-top:max(8px, env(safe-area-inset-top)); gap:12px; }
   .topbar-right { gap:8px; font-size:11px; }
   #sysTime { font-size:11px; }
 
@@ -540,20 +540,20 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 
   /* 表格字号缩小,行高紧凑,横向滚动更友好 */
   table { font-size:12px; }
-  th { padding:6px 8px; font-size:11px; }
-  td { padding:6px 8px; }
+  th { padding:8px 8px; font-size:11px; }
+  td { padding:8px 8px; }
   .table-wrap { -webkit-overflow-scrolling:touch; }
 
   /* 按钮组在移动端强制换行,避免溢出 */
-  .btn { padding:6px 12px; font-size:12px; }
-  .btn-sm { padding:5px 10px; font-size:11px; }
+  .btn { padding:8px 12px; font-size:12px; }
+  .btn-sm { padding:4px 12px; font-size:11px; }
 
   /* 模态框更窄,padding 减小,避免撑满屏幕 */
   .modal-mask { padding:0; }
   .modal-box { border-radius:0; min-height:100vh; max-height:100vh; overflow-y:auto; }
-  .modal-header { padding:10px 14px; font-size:14px; position:sticky; top:0; background:var(--bg-card); z-index:var(--qf-z-sticky); }
+  .modal-header { padding:12px 16px; font-size:14px; position:sticky; top:0; background:var(--bg-card); z-index:var(--qf-z-sticky); }
   .modal-close { font-size:24px; }
-  .modal-body { padding:14px; max-height:none !important; }
+  .modal-body { padding:16px; max-height:none !important; }
 
   /* 内联 grid 1fr 1fr 在移动端强制单列(覆盖内联 style) */
   .modal-body [style*="grid-template-columns:1fr 1fr"] { grid-template-columns:1fr !important; }
@@ -575,11 +575,11 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
   svg[viewBox] { max-width:100%; }
 
   /* 辩论面板:多空双方纵向排列(已在 1024px 处理,768px 进一步紧凑) */
-  .debate-side { padding:10px; }
+  .debate-side { padding:12px; }
   .debate-center { padding:8px; min-width:0; }
 
   /* 决策卡片:字号缩小 */
-  .decision-card { padding:14px; }
+  .decision-card { padding:16px; }
   .decision-label { font-size:18px; }
 
   /* 温度计:缩小分数 */
@@ -588,23 +588,23 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 
   /* 分析师卡片:最小宽度降为 160px,避免过窄 */
   .analyst-grid { grid-template-columns:1fr; gap:8px; }
-  .analyst-card { padding:8px 10px; }
+  .analyst-card { padding:8px 12px; }
   .analyst-name { font-size:12px; }
   .analyst-opinion { font-size:11px; }
 
   /* 底部 tab 小屏适配 */
-  .bottom-tab-bar .tab-items { padding:1px 2px 0; }
+  .bottom-tab-bar .tab-items { padding:2px 2px 0; }
   .bottom-tab-item { padding:4px 2px 4px; font-size:11px; letter-spacing:0.05em; }
   .bottom-tab-item .tab-icon svg { width:16px; height:16px; }
   .bottom-tab-item.active::after { inset:1px -1px; border-radius:8px; }
 
   /* LLM provider bar 内边距更紧凑 */
-  .llm-provider-bar { font-size:11px; padding:6px 10px; margin-bottom:10px; }
+  .llm-provider-bar { font-size:11px; padding:8px 12px; margin-bottom:10px; }
 
   /* 上传模态框:文件大小提示更紧凑 */
   #uploadModal .modal-box { max-width:100% !important; }
   #uploadResult table { font-size:11px; }
-  #uploadResult th, #uploadResult td { padding:3px 4px; }
+  #uploadResult th, #uploadResult td { padding:4px 4px; }
 }
 
 /* ===== 超小屏优化(<=360px):进一步压缩 ===== */
@@ -612,15 +612,15 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
   .bottom-tab-item { padding:4px 2px 4px; font-size:11px; letter-spacing:0.05em; }
   .bottom-tab-item .tab-icon svg { width:14px; height:14px; }
   .bottom-tab-item.active::after { inset:0; border-radius:6px; }
-  .card { padding:10px; }
+  .card { padding:12px; }
   .card-title { font-size:13px; }
   table { font-size:11px; }
-  th, td { padding:4px 6px; }
-  .btn { padding:5px 10px; font-size:11px; }
+  th, td { padding:4px 8px; }
+  .btn { padding:4px 12px; font-size:11px; }
   .logo-icon { width:24px; height:24px; font-size:11px; }
   .topbar { padding:0 8px; }
   #sysTime { font-size:11px; letter-spacing:0.05em; }
-  .modal-body { padding:10px; }
+  .modal-body { padding:12px; }
   /* 超小屏表格优化(2026-07-30):数字列不换行 + 等宽数字,
      配合 .table-wrap overflow-x:auto 横向滚动,避免 7 列挤压导致数字换行难读。
      pure CSS,不改 HTML 结构/配色/字体。 */
@@ -654,7 +654,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 /* ========== LLM Provider 状态 ========== */
 .llm-provider-bar {
   display:flex; align-items:center; gap:8px;
-  padding:8px 14px; border-radius:8px;
+  padding:8px 16px; border-radius:8px;
   background:rgba(245,158,11,0.08);
   border:1px solid rgba(245,158,11,0.2);
   font-size:12px; margin-bottom:16px;
@@ -695,7 +695,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 .bottom-tab-item {
   display:flex; flex-direction:column; align-items:center;
   justify-content:center;
-  padding:5px 3px 6px;
+  padding:4px 4px 8px;
   cursor:pointer;
   color:var(--text-muted);
   font-size:11px; letter-spacing:0.05em; /* STAGE5 R2: 微标签 10→11px + 字距 */
@@ -805,7 +805,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 
 /* ========== 数据更新时间戳 ========== */
 .data-freshness {
-  display:inline-flex; align-items:center; gap:6px;
+  display:inline-flex; align-items:center; gap:8px;
   font-size:11px; color:var(--text-muted);
   padding:2px 0;
 }
@@ -821,7 +821,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 
 /* ========== 键盘快捷键提示 ========== */
 .kbd {
-  display:inline-block; padding:1px 6px;
+  display:inline-block; padding:2px 8px;
   background:rgba(255,255,255,0.08);
   border:1px solid var(--border-light);
   border-radius:4px; font-size:11px;
@@ -878,7 +878,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 /* ===== STAGE5: ia-merge ===== 聚合容器二级 tab 栏(T03) */
 .hud-group-header {
   display: flex; align-items: center; justify-content: space-between;
-  gap: 10px; margin-bottom: 14px; flex-wrap: wrap;
+  gap: 12px; margin-bottom: 14px; flex-wrap: wrap;
 }
 .hud-subtabs {
   display: flex; gap: 4px; flex-wrap: wrap;
@@ -927,7 +927,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 .fund-card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
 .fund-card-grid {
   display: grid; grid-template-columns: 1fr 1fr;
-  gap: 6px 16px; margin-top: 10px;
+  gap: 8px 16px; margin-top: 10px;
 }
 .fund-card .fc-item {
   display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
@@ -1076,7 +1076,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
       <!-- ===== STAGE6: watchboard ===== 盯盘二级页(阶段六批次A;内容由 stage6-portfolio.js 渲染) -->
       <div class="page" id="page-watchboard">
         <div class="st6-summary-card">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
             <div>
               <div style="font-size:12px;color:var(--text-muted);">组合估算当日盈亏(元)</div>
               <div class="st6-summary-big st6-flat" id="st6WbSummaryBig">—</div>
@@ -1333,7 +1333,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
         <div class="card mb-16" id="marketAssessmentCard" role="region" aria-labelledby="marketAssessmentTitle">
           <div class="card-title" id="marketAssessmentTitle" style="display:flex;justify-content:space-between;align-items:center;">
             <span>大盘研判</span>
-            <button class="btn btn-outline" style="padding:4px 10px;font-size:12px;" onclick="loadMarketAssessment()">刷新</button>
+            <button class="btn btn-outline" style="padding:4px 12px;font-size:12px;" onclick="loadMarketAssessment()">刷新</button>
           </div>
           <div id="marketAssessmentBody">
             <div style="color:var(--text-muted);font-size:12px;padding:8px 0;">加载中...</div>
@@ -1462,7 +1462,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
         <div class="card mb-16" id="marketOutlookCard">
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
             <span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18"/><path d="M12 3a15 15 0 0 0 0 18"/></svg> 市场展望（大盘研判）</span>
-            <button class="btn btn-outline" style="padding:4px 10px;font-size:12px;" onclick="loadMarketOutlook()">刷新</button>
+            <button class="btn btn-outline" style="padding:4px 12px;font-size:12px;" onclick="loadMarketOutlook()">刷新</button>
           </div>
           <div id="marketOutlookBody" style="padding:8px 0;">
             <div style="color:var(--text-muted);text-align:center;padding:20px 0;">点击"刷新"获取市场展望</div>
@@ -1522,7 +1522,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
           <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:6px;"><path d="M12 3v18"/><path d="M5 7h14"/><path d="M7 7l-3 5a3 3 0 0 0 6 0L7 7z"/><path d="M17 7l-3 5a3 3 0 0 0 6 0l-3-5z"/></svg>多空辩论</div>
           <div class="debate-panel" id="debatePanel">
             <div class="debate-side debate-bull" id="debateBull">
-              <div style="font-weight:600;color:var(--color-up);margin-bottom:10px;display:flex;align-items:center;gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg> 看多论点</div>
+              <div style="font-weight:600;color:var(--color-up);margin-bottom:10px;display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg> 看多论点</div>
               <div id="bullPoints" style="color:var(--text-secondary);">等待分析...</div>
             </div>
             <div class="debate-center">
@@ -1530,7 +1530,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
               <div id="debateConsensus" style="margin-top:12px;font-size:13px;color:var(--text-muted);">—</div>
             </div>
             <div class="debate-side debate-bear" id="debateBear">
-              <div style="font-weight:600;color:var(--color-down);margin-bottom:10px;display:flex;align-items:center;gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/></svg> 看空论点</div>
+              <div style="font-weight:600;color:var(--color-down);margin-bottom:10px;display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/></svg> 看空论点</div>
               <div id="bearPoints" style="color:var(--text-secondary);">等待分析...</div>
             </div>
           </div>
@@ -1910,12 +1910,12 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
             <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
               <span>持仓列表</span>
               <span style="display:flex;gap:8px;flex-wrap:wrap;">
-                <button class="btn btn-outline" style="padding:4px 10px;font-size:12px;" onclick="toggleAddStockForm()">+ 添加股票</button>
-                <button class="btn btn-outline" style="padding:4px 10px;font-size:12px;" onclick="loadPortfolioAdvice()">组合 AI 建议</button>
+                <button class="btn btn-outline" style="padding:4px 12px;font-size:12px;" onclick="toggleAddStockForm()">+ 添加股票</button>
+                <button class="btn btn-outline" style="padding:4px 12px;font-size:12px;" onclick="loadPortfolioAdvice()">组合 AI 建议</button>
               </span>
             </div>
             <!-- 添加股票表单(2026-07-30):inline 展开,调用 /api/config/user_positions,先读后合并避免覆盖 -->
-            <div id="addStockForm" style="display:none;padding:10px;margin-bottom:8px;background:rgba(255,255,255,0.02);border-radius:6px;">
+            <div id="addStockForm" style="display:none;padding:12px;margin-bottom:8px;background:rgba(255,255,255,0.02);border-radius:6px;">
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
                 <div>
                   <label style="font-size:11px;color:var(--text-muted);">股票代码</label>
@@ -1957,7 +1957,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
         <div class="card mb-16" id="portfolioAdviceCard" style="display:none;" role="region" aria-labelledby="portfolioAdviceTitle">
           <div class="card-title" id="portfolioAdviceTitle" style="display:flex;justify-content:space-between;align-items:center;">
             <span>组合 AI 建议</span>
-            <button class="btn btn-outline" style="padding:4px 10px;font-size:12px;" onclick="loadPortfolioAdvice()">重新生成</button>
+            <button class="btn btn-outline" style="padding:4px 12px;font-size:12px;" onclick="loadPortfolioAdvice()">重新生成</button>
           </div>
           <div id="portfolioAdviceBody"></div>
         </div>
@@ -1966,7 +1966,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
         <div class="card mb-16" id="sectorRotationCard">
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
             <span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg> 板块轮动总览</span>
-            <button class="btn btn-outline" style="padding:4px 10px;font-size:12px;" onclick="loadSectorRotation()">刷新</button>
+            <button class="btn btn-outline" style="padding:4px 12px;font-size:12px;" onclick="loadSectorRotation()">刷新</button>
           </div>
           <div id="sectorRotationBody" style="padding:8px 0;">
             <div style="color:var(--text-muted);text-align:center;padding:20px 0;">点击"刷新"获取板块轮动数据</div>
@@ -1977,7 +1977,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
         <div class="card mb-16">
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
             <span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 16l4-8 4 4 6-9"/></svg> 组合风险分析</span>
-            <button class="btn btn-outline" style="padding:4px 10px;font-size:12px;" onclick="loadPortfolioRisk()">分析</button>
+            <button class="btn btn-outline" style="padding:4px 12px;font-size:12px;" onclick="loadPortfolioRisk()">分析</button>
           </div>
           <div id="portfolioRiskBody" style="padding:8px 0;">
             <div style="color:var(--text-muted);text-align:center;padding:20px 0;">点击"分析"基于持仓权重计算夏普/最大回撤等风险指标</div>
@@ -1995,7 +1995,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
       <div class="page" id="page-fund">
         <!-- 基金概览 -->
         <div class="flex-between mb-12 fund-head">
-          <div style="font-size:15px;font-weight:600;display:flex;align-items:center;gap:6px;white-space:nowrap;flex-shrink:0;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg> 我的基金</div>
+          <div style="font-size:15px;font-weight:600;display:flex;align-items:center;gap:8px;white-space:nowrap;flex-shrink:0;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg> 我的基金</div>
           <div class="fund-head-actions" style="display:flex;gap:8px;flex-wrap:wrap;">
             <button class="btn btn-sm btn-primary" onclick="loadFundData()">刷新持仓</button>
             <button class="btn btn-sm" onclick="loadMarketThermometer()">大盘温度</button>
@@ -2217,7 +2217,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
         <div class="card mb-16" id="globalOverviewCard">
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
             <span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15 15 0 0 1 0 20"/><path d="M12 2a15 15 0 0 0 0 20"/></svg> 全球市场总览</span>
-            <button class="btn btn-outline" style="padding:4px 10px;font-size:12px;" onclick="loadGlobalOverview()">刷新</button>
+            <button class="btn btn-outline" style="padding:4px 12px;font-size:12px;" onclick="loadGlobalOverview()">刷新</button>
           </div>
           <div id="globalOverviewBody" style="padding:8px 0;">
             <div style="color:var(--text-muted);text-align:center;padding:20px 0;">点击"刷新"获取全球市场总览</div>
@@ -2226,7 +2226,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 
         <!-- 国际指数卡片 -->
         <div class="flex-between mb-12">
-          <div style="font-size:15px;font-weight:600;display:flex;align-items:center;gap:6px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18"/><path d="M12 3a15 15 0 0 0 0 18"/></svg> 国际指数</div>
+          <div style="font-size:15px;font-weight:600;display:flex;align-items:center;gap:8px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18"/><path d="M12 3a15 15 0 0 0 0 18"/></svg> 国际指数</div>
           <button class="btn btn-sm btn-primary" onclick="loadGlobalData()">刷新</button>
         </div>
         <div class="grid-3 mb-16" id="globalIndexCards">
@@ -2236,7 +2236,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
         <!-- 美股 + 港股热门 -->
         <div class="grid-2 mb-16">
           <div class="card">
-            <div class="card-title">美股热门 <span style="font-size:11px;color:var(--text-muted);font-weight:500;border:1px solid var(--border-light);padding:1px 5px;border-radius:3px;margin-left:2px;">US</span></div>
+            <div class="card-title">美股热门 <span style="font-size:11px;color:var(--text-muted);font-weight:500;border:1px solid var(--border-light);padding:2px 4px;border-radius:3px;margin-left:2px;">US</span></div>
             <div class="table-wrap" tabindex="0" style="max-height:420px;overflow-y:auto;">
               <table>
                 <thead><tr><th>代码</th><th>名称</th><th>价格</th><th>涨跌幅</th><th>币种</th></tr></thead>
@@ -2245,7 +2245,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
             </div>
           </div>
           <div class="card">
-            <div class="card-title">港股热门 <span style="font-size:11px;color:var(--text-muted);font-weight:500;border:1px solid var(--border-light);padding:1px 5px;border-radius:3px;margin-left:2px;">HK</span></div>
+            <div class="card-title">港股热门 <span style="font-size:11px;color:var(--text-muted);font-weight:500;border:1px solid var(--border-light);padding:2px 4px;border-radius:3px;margin-left:2px;">HK</span></div>
             <div class="table-wrap" tabindex="0" style="max-height:420px;overflow-y:auto;">
               <table>
                 <thead><tr><th>代码</th><th>名称</th><th>价格</th><th>涨跌幅</th><th>币种</th></tr></thead>
@@ -2363,7 +2363,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
         <div class="card mt-16" id="strategyParamsCard" role="region" aria-labelledby="strategyParamsTitle">
           <div class="card-title" id="strategyParamsTitle" style="display:flex;justify-content:space-between;align-items:center;">
             <span>策略参数</span>
-            <button class="btn btn-outline" style="padding:4px 10px;font-size:12px;" onclick="loadStrategyParams()">重新加载</button>
+            <button class="btn btn-outline" style="padding:4px 12px;font-size:12px;" onclick="loadStrategyParams()">重新加载</button>
           </div>
           <div id="strategyParamsForm" style="font-size:12px;color:var(--text-muted);">加载中...</div>
           <button class="btn btn-primary mt-16" onclick="saveStrategyParams()" style="width:100%;">保存策略参数</button>
@@ -2500,7 +2500,7 @@ function tokenGateHTML(what, opts) {
   const o = opts || {};
   const feature = what || '该功能';
   const wrap = o.tag || (o.compact ? 'div' : 'div');
-  const align = o.compact ? 'padding:10px 0;' : 'padding:20px 0;';
+  const align = o.compact ? 'padding:12px 0;' : 'padding:20px 0;';
   return `<${wrap} class="token-gate" style="text-align:center;${align}">
       <div style="color:var(--color-warning);font-size:13px;font-weight:600;">未配置管理员 Token</div>
       <div style="color:var(--text-muted);font-size:12px;line-height:1.6;margin-top:4px;">
@@ -2871,7 +2871,7 @@ function withLoading(btn, asyncFn) {
   btn.style.opacity = '0.6';
   btn.style.cursor = 'not-allowed';
   // 加载指示器(文字+脉冲圆点)
-  btn.innerHTML = '<span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:6px;height:6px;border-radius:50%;background:currentColor;animation:pulse-dot 1.2s infinite;"></span>处理中...</span>';
+  btn.innerHTML = '<span style="display:inline-flex;align-items:center;gap:8px;"><span style="width:6px;height:6px;border-radius:50%;background:currentColor;animation:pulse-dot 1.2s infinite;"></span>处理中...</span>';
   return Promise.resolve(asyncFn()).finally(() => {
     btn.innerHTML = orig;
     btn.disabled = origDisabled;
@@ -3042,17 +3042,17 @@ async function loadMarketAssessment() {
 
   body.innerHTML = `
     <div class="grid-4" style="gap:8px;margin-bottom:10px;">
-      <div class="card" style="text-align:center;padding:10px;"><div style="font-size:11px;color:var(--text-muted);">温度计</div><div style="font-size:16px;font-weight:600;color:${scoreColor};">${score}</div></div>
-      <div class="card" style="text-align:center;padding:10px;"><div style="font-size:11px;color:var(--text-muted);">市场状态</div><div style="font-size:16px;font-weight:600;">${escapeHtml(level)}</div></div>
-      <div class="card" style="text-align:center;padding:10px;"><div style="font-size:11px;color:var(--text-muted);">涨跌比</div><div style="font-size:16px;font-weight:600;">${ratio}</div></div>
-      <div class="card" style="text-align:center;padding:10px;"><div style="font-size:11px;color:var(--text-muted);">情绪</div><div style="font-size:16px;font-weight:600;">${escapeHtml(sentimentLabel)}</div></div>
+      <div class="card" style="text-align:center;padding:12px;"><div style="font-size:11px;color:var(--text-muted);">温度计</div><div style="font-size:16px;font-weight:600;color:${scoreColor};">${score}</div></div>
+      <div class="card" style="text-align:center;padding:12px;"><div style="font-size:11px;color:var(--text-muted);">市场状态</div><div style="font-size:16px;font-weight:600;">${escapeHtml(level)}</div></div>
+      <div class="card" style="text-align:center;padding:12px;"><div style="font-size:11px;color:var(--text-muted);">涨跌比</div><div style="font-size:16px;font-weight:600;">${ratio}</div></div>
+      <div class="card" style="text-align:center;padding:12px;"><div style="font-size:11px;color:var(--text-muted);">情绪</div><div style="font-size:16px;font-weight:600;">${escapeHtml(sentimentLabel)}</div></div>
     </div>
     <div class="grid-3" style="gap:8px;margin-bottom:10px;">
-      <div class="card" style="text-align:center;padding:10px;"><div style="font-size:11px;color:var(--text-muted);">融资余额</div><div style="font-size:16px;font-weight:600;">${margin}</div></div>
-      <div class="card" style="text-align:center;padding:10px;"><div style="font-size:11px;color:var(--text-muted);">大宗交易</div><div style="font-size:16px;font-weight:600;">${blockCount}</div></div>
-      <div class="card" style="text-align:center;padding:10px;"><div style="font-size:11px;color:var(--text-muted);">股东户数变化</div><div style="font-size:16px;font-weight:600;">${holderChange}</div></div>
+      <div class="card" style="text-align:center;padding:12px;"><div style="font-size:11px;color:var(--text-muted);">融资余额</div><div style="font-size:16px;font-weight:600;">${margin}</div></div>
+      <div class="card" style="text-align:center;padding:12px;"><div style="font-size:11px;color:var(--text-muted);">大宗交易</div><div style="font-size:16px;font-weight:600;">${blockCount}</div></div>
+      <div class="card" style="text-align:center;padding:12px;"><div style="font-size:11px;color:var(--text-muted);">股东户数变化</div><div style="font-size:16px;font-weight:600;">${holderChange}</div></div>
     </div>
-    <div class="card" style="padding:10px;font-size:12px;color:var(--text-secondary);">
+    <div class="card" style="padding:12px;font-size:12px;color:var(--text-secondary);">
       <div style="margin-bottom:6px;"><b>综合研判：</b>${escapeHtml(a.assessment || '数据缺失')}</div>
       <div><b>板块信号：</b>${escapeHtml(a.sector_signal || '—')} · <b>资金信号：</b>${escapeHtml(a.capital_signal || '—')}</div>
       ${note}
@@ -3175,7 +3175,7 @@ const ReviewDesk = {
           <span style="font-size:13px;color:var(--text-secondary);">${escapeHtml(t.summary || '')}</span>
         </div>
         <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">关注方向</div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">${(t.focus || []).map(x => `<span class="signal" style="background:rgba(6,182,212,0.12);color:var(--accent-cyan);">${escapeHtml(x)}</span>`).join('')}</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">${(t.focus || []).map(x => `<span class="signal" style="background:rgba(6,182,212,0.12);color:var(--accent-cyan);">${escapeHtml(x)}</span>`).join('')}</div>
         <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">风险提示</div>
         <ul style="margin:0;padding-left:18px;font-size:12px;color:var(--color-warning);line-height:1.8;">${(t.risk || []).map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>`;
     }
@@ -3429,7 +3429,7 @@ const ReviewDesk = {
         </div>
         ${(d.questions || []).map(q => {
           const qc = q.passed ? 'var(--color-up)' : 'var(--color-down)';
-          return `<div style="padding:10px 12px;margin-bottom:8px;border-left:3px solid ${qc};background:rgba(148,163,184,0.06);border-radius:4px;">
+          return `<div style="padding:12px 12px;margin-bottom:8px;border-left:3px solid ${qc};background:rgba(148,163,184,0.06);border-radius:4px;">
             <div class="flex-between"><span style="font-weight:600;font-size:13px;">${escapeHtml(q.title)}</span>
               <span class="signal" style="background:${this._tint(qc)};color:${qc};">${q.passed ? '通过' : '不通过'}</span></div>
             <div style="font-size:12px;color:var(--text-secondary);margin-top:6px;">${escapeHtml(q.detail || '')}</div>
@@ -3485,7 +3485,7 @@ const ReviewDesk = {
       }).join('');
       return `<div style="margin-bottom:12px;">
         <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">${escapeHtml(cat.category)} (${cat.count})</div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;">${chips}</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">${chips}</div>
       </div>`;
     }).join('');
   },
@@ -3520,7 +3520,7 @@ const ReviewDesk = {
           const rc = step.read_only ? 'var(--accent-cyan)' : 'var(--color-warning)';
           const params = Object.keys(step.params_hint || {}).length
             ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">参数建议:${escapeHtml(JSON.stringify(step.params_hint))}</div>` : '';
-          return `<div style="padding:10px 12px;margin-bottom:8px;border-left:3px solid ${rc};background:rgba(148,163,184,0.06);border-radius:4px;">
+          return `<div style="padding:12px 12px;margin-bottom:8px;border-left:3px solid ${rc};background:rgba(148,163,184,0.06);border-radius:4px;">
             <div class="flex-between"><span style="font-weight:600;font-size:13px;">${step.step}. ${escapeHtml(step.skill)}</span>
               <span class="signal" style="background:${this._tint(rc)};color:${rc};">${step.read_only ? '只读' : '写操作'}</span></div>
             <div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">${escapeHtml(step.description || '')}</div>
@@ -3756,7 +3756,7 @@ async function searchStocks() {
   if (!input || !body) return;
   const q = input.value.trim();
   if (!q) { showToast('请输入股票代码或名称', 'error'); return; }
-  body.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:6px 0;">搜索中...</div>';
+  body.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0;">搜索中...</div>';
   let resp;
   try {
     resp = await api('/api/market/search?q=' + encodeURIComponent(q));
@@ -3765,7 +3765,7 @@ async function searchStocks() {
     // 否则用户会把上游故障误判成"系统没有这只标的"。
     const msg = (e && e.message) ? e.message : '搜索失败，请稍后重试';
     const code = (e && e.code) ? e.code : 'SEARCH_FAILED';
-    body.innerHTML = `<div class="hud-status hud-status-error" style="padding:14px 0;">
+    body.innerHTML = `<div class="hud-status hud-status-error" style="padding:16px 0;">
       <div class="hud-status-icon">⚠</div>
       <div class="hud-status-msg">${escapeHtml(msg)}</div>
       <div class="hud-status-hint">错误码 ${escapeHtml(code)} · 这不代表"没有该标的"</div>
@@ -3777,7 +3777,7 @@ async function searchStocks() {
   }
   const items = (resp && resp.data) || [];
   if (!items.length) {
-    body.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:6px 0;">没有匹配的标的（数据源已正常响应），可尝试输入 6 位代码</div>';
+    body.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0;">没有匹配的标的（数据源已正常响应），可尝试输入 6 位代码</div>';
     return;
   }
   body.innerHTML = items.map(it => {
@@ -3831,7 +3831,7 @@ function renderStockDetail(d, meta) {
   const SECTION_LABEL = { quote: '行情', financial: '财务', capital_flow: '资金流' };
   const missing = sections ? Object.keys(SECTION_LABEL).filter(key => sections[key] === false) : [];
   const missingText = missing.map(key => SECTION_LABEL[key]).join('、');
-  const metric = (label, value, extra = '') => `<div class="card" style="text-align:center;padding:10px;">
+  const metric = (label, value, extra = '') => `<div class="card" style="text-align:center;padding:12px;">
       <div style="font-size:11px;color:var(--text-muted);">${label}</div>
       <div style="font-size:16px;font-weight:600;${extra}">${value}</div>
     </div>`;
@@ -3844,8 +3844,8 @@ function renderStockDetail(d, meta) {
       </div>
       <button class="btn btn-sm btn-outline" onclick="openKlineFromLastStock()">查看K线</button>
     </div>
-    ${degraded ? '<div style="margin-bottom:8px;padding:6px 10px;border:1px dashed var(--color-warning);border-radius:6px;font-size:12px;color:var(--color-warning);">行情/财务数据缺失，以下显示“—”而非 0</div>'
-      : (missing.length ? `<div style="margin-bottom:8px;padding:6px 10px;border:1px dashed var(--border-subtle, rgba(148,163,184,.35));border-radius:6px;font-size:12px;color:var(--text-muted);">该标的暂无 <b style="color:var(--text-secondary);">${escapeHtml(missingText)}</b> 数据，对应字段显示“—”（不是 0）</div>` : '')}
+    ${degraded ? '<div style="margin-bottom:8px;padding:8px 12px;border:1px dashed var(--color-warning);border-radius:6px;font-size:12px;color:var(--color-warning);">行情/财务数据缺失，以下显示“—”而非 0</div>'
+      : (missing.length ? `<div style="margin-bottom:8px;padding:8px 12px;border:1px dashed var(--border-subtle, rgba(148,163,184,.35));border-radius:6px;font-size:12px;color:var(--text-muted);">该标的暂无 <b style="color:var(--text-secondary);">${escapeHtml(missingText)}</b> 数据，对应字段显示“—”（不是 0）</div>` : '')}
     <div class="grid-4" style="gap:8px;margin-bottom:10px;">
       ${metric('现价', _numOrDash(q.price))}
       ${metric('涨跌幅', _pctOrDash(q.change_pct), 'color:' + changeColor(q.change_pct) + ';')}
@@ -3860,14 +3860,14 @@ function renderStockDetail(d, meta) {
       ? '<div style="margin:-4px 0 8px;font-size:12px;color:var(--text-secondary);">该标的为 ETF/指数等非股票品种，本身没有 PE / PB / ROE 口径，故显示“—”。</div>'
       : ''}
     <div class="grid-2" style="gap:8px;">
-      <div class="card" style="padding:10px;font-size:12px;color:var(--text-secondary);">
+      <div class="card" style="padding:12px;font-size:12px;color:var(--text-secondary);">
         <div style="font-weight:600;margin-bottom:6px;">资金流</div>
         <div>主力净流入：${_numOrDash(c.main_net_inflow)}</div>
         <div>主力占比：${_pctOrDash(c.main_inflow_pct)}</div>
         <div>超大单：${_numOrDash(c.super_large_net_inflow)} / 大单：${_numOrDash(c.large_net_inflow)}</div>
         <div>中单：${_numOrDash(c.medium_net_inflow)} / 小单：${_numOrDash(c.small_net_inflow)}</div>
       </div>
-      <div class="card" style="padding:10px;font-size:12px;color:var(--text-secondary);" id="stockRangeCard">
+      <div class="card" style="padding:12px;font-size:12px;color:var(--text-secondary);" id="stockRangeCard">
         <div style="font-weight:600;margin-bottom:6px;">近期区间</div>
         ${_stockRangeHTML(k)}
       </div>
@@ -3954,22 +3954,22 @@ async function loadMarketCapitalFlow() {
     metaEl.textContent = '更新 ' + (d.update_time || '—') + ' · 质量 ' + (quality == null ? '—' : quality);
   }
   const top = (arr) => (Array.isArray(arr) ? arr : []).map(s =>
-    `<div style="display:flex;justify-content:space-between;padding:3px 0;">
+    `<div style="display:flex;justify-content:space-between;padding:4px 0;">
       <span>${escapeHtml(s.name || '—')}</span>
       <span style="color:${(s.main_net_inflow || 0) >= 0 ? 'var(--color-up)' : 'var(--color-down)'};">${_numOrDash(s.main_net_inflow)} 亿</span>
     </div>`).join('') || '<div style="color:var(--text-muted);">数据缺失</div>';
 
   body.innerHTML = `
     <div class="grid-3" style="gap:8px;margin-bottom:10px;">
-      <div class="card" style="text-align:center;padding:10px;"><div style="font-size:11px;color:var(--text-muted);">北向合计(亿)</div><div style="font-size:16px;font-weight:600;">${_numOrDash(nb.total_net_inflow)}</div></div>
-      <div class="card" style="text-align:center;padding:10px;"><div style="font-size:11px;color:var(--text-muted);">沪股通(亿)</div><div style="font-size:16px;font-weight:600;">${_numOrDash(nb.sh_net_inflow)}</div></div>
-      <div class="card" style="text-align:center;padding:10px;"><div style="font-size:11px;color:var(--text-muted);">深股通(亿)</div><div style="font-size:16px;font-weight:600;">${_numOrDash(nb.sz_net_inflow)}</div></div>
+      <div class="card" style="text-align:center;padding:12px;"><div style="font-size:11px;color:var(--text-muted);">北向合计(亿)</div><div style="font-size:16px;font-weight:600;">${_numOrDash(nb.total_net_inflow)}</div></div>
+      <div class="card" style="text-align:center;padding:12px;"><div style="font-size:11px;color:var(--text-muted);">沪股通(亿)</div><div style="font-size:16px;font-weight:600;">${_numOrDash(nb.sh_net_inflow)}</div></div>
+      <div class="card" style="text-align:center;padding:12px;"><div style="font-size:11px;color:var(--text-muted);">深股通(亿)</div><div style="font-size:16px;font-weight:600;">${_numOrDash(nb.sz_net_inflow)}</div></div>
     </div>
     <div class="grid-2" style="gap:8px;">
-      <div class="card" style="padding:10px;font-size:12px;color:var(--text-secondary);">
+      <div class="card" style="padding:12px;font-size:12px;color:var(--text-secondary);">
         <div style="font-weight:600;margin-bottom:6px;">板块主力净流入 Top5</div>${top(sf.top_inflow)}
       </div>
-      <div class="card" style="padding:10px;font-size:12px;color:var(--text-secondary);">
+      <div class="card" style="padding:12px;font-size:12px;color:var(--text-secondary);">
         <div style="font-weight:600;margin-bottom:6px;">板块主力净流出 Top5</div>${top(sf.top_outflow)}
       </div>
     </div>`;
@@ -4673,7 +4673,7 @@ function _strategyLabCode() {
 function _renderStrategyLab(title, rows, note) {
   const box = document.getElementById('strategyLabResult');
   const body = rows.map(([k, v]) =>
-    `<div style="display:flex;justify-content:space-between;gap:12px;padding:3px 0;border-bottom:1px solid var(--border);">
+    `<div style="display:flex;justify-content:space-between;gap:12px;padding:4px 0;border-bottom:1px solid var(--border);">
       <span style="color:var(--text-muted);">${escapeHtml(k)}</span>
       <span style="font-weight:600;">${escapeHtml(String(v))}</span>
     </div>`).join('');
@@ -5007,7 +5007,7 @@ async function loadSectorRotation() {
   if (hotSectors.length) {
     html += '<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">';
     html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">热门板块（成交额Top5）</div>';
-    html += '<div style="display:flex;flex-wrap:wrap;gap:6px;">';
+    html += '<div style="display:flex;flex-wrap:wrap;gap:8px;">';
     hotSectors.slice(0,5).forEach(s => {
       const amount = Number(s.amount || 0);
       const amountStr = amount >= 1e8 ? (amount / 1e8).toFixed(2) + '亿' : amount >= 1e4 ? (amount / 1e4).toFixed(0) + '万' : amount.toFixed(0);
@@ -5067,7 +5067,7 @@ function _fundCardHtml(p) {
     note: low ? (p.confidence_reason || '') : '',
   });
   const lowBadge = low
-    ? ` <span style="color:var(--color-warning);border:1px dashed var(--color-warning);padding:1px 6px;border-radius:10px;font-size:11px;">⚠ 置信度低</span>`
+    ? ` <span style="color:var(--color-warning);border:1px dashed var(--color-warning);padding:2px 8px;border-radius:10px;font-size:11px;">⚠ 置信度低</span>`
       + ` <button class="btn btn-sm" style="padding:2px 8px;color:var(--color-warning);" title="进入补录向导复核该基金" data-code="${safeCode}" onclick="onFundWizardReviewClick(this)">复核</button>`
     : '';
   return `<div class="fund-card" data-fund-code="${safeCode}">
@@ -5166,10 +5166,10 @@ async function loadFundData() {
         ? '数据缺失'
         : ((p.pnl_amount > 0 ? '+' : '') + p.pnl_amount.toFixed(2) + '<br><span style="font-size:11px;">(' + (p.pnl_pct >= 0 ? '+' : '') + p.pnl_pct.toFixed(2) + '%)</span>')}</td>
       <td style="white-space:nowrap;">
-        <button class="btn btn-sm" style="color:var(--accent-cyan);padding:3px 8px;" title="重仓股板块分析" aria-label="分析 ${escapeHtml(p.fund_code)} 的重仓板块" data-code="${escapeHtml(p.fund_code)}" data-name="${safeNameAttr}" onclick="onViewHoldingsClick(this)">分析</button>
-        <button class="btn btn-sm" style="color:var(--accent);padding:3px 8px;" title="多智能体深度分析" aria-label="深度分析 ${escapeHtml(p.fund_code)}" data-code="${escapeHtml(p.fund_code)}" data-name="${safeNameAttr}" data-cost="${p.cost_nav || 0}" data-shares="${p.shares || 0}" onclick="onMultiAgentAnalyzeClick(this)">深度</button>
-        <button class="btn btn-sm" style="color:var(--text-muted);padding:3px 8px;" title="净值走势图" aria-label="查看 ${escapeHtml(p.fund_code)} 的净值走势" data-code="${escapeHtml(p.fund_code)}" onclick="onToggleFundChartClick(this)">走势</button>
-        <button class="btn btn-sm" style="color:var(--color-up);padding:3px 8px;" title="删除该持仓" aria-label="删除 ${escapeHtml(p.fund_code)} 持仓" data-code="${escapeHtml(p.fund_code)}" onclick="onDeleteFundPositionClick(this)">删</button>
+        <button class="btn btn-sm" style="color:var(--accent-cyan);padding:4px 8px;" title="重仓股板块分析" aria-label="分析 ${escapeHtml(p.fund_code)} 的重仓板块" data-code="${escapeHtml(p.fund_code)}" data-name="${safeNameAttr}" onclick="onViewHoldingsClick(this)">分析</button>
+        <button class="btn btn-sm" style="color:var(--accent);padding:4px 8px;" title="多智能体深度分析" aria-label="深度分析 ${escapeHtml(p.fund_code)}" data-code="${escapeHtml(p.fund_code)}" data-name="${safeNameAttr}" data-cost="${p.cost_nav || 0}" data-shares="${p.shares || 0}" onclick="onMultiAgentAnalyzeClick(this)">深度</button>
+        <button class="btn btn-sm" style="color:var(--text-muted);padding:4px 8px;" title="净值走势图" aria-label="查看 ${escapeHtml(p.fund_code)} 的净值走势" data-code="${escapeHtml(p.fund_code)}" onclick="onToggleFundChartClick(this)">走势</button>
+        <button class="btn btn-sm" style="color:var(--color-up);padding:4px 8px;" title="删除该持仓" aria-label="删除 ${escapeHtml(p.fund_code)} 持仓" data-code="${escapeHtml(p.fund_code)}" onclick="onDeleteFundPositionClick(this)">删</button>
       </td>
     </tr>
     <tr id="chart-row-${p.fund_code}" data-chart-for="${escapeHtml(p.fund_code)}" style="display:none;">
@@ -5365,10 +5365,10 @@ async function loadNewsFeed() {
                      'var(--color-flat)';
     const source = n.source || '';
     const time = n.publish_time || n.published_at || n.time || '';
-    return `<div style="padding:6px 0;border-bottom:1px solid var(--border);">
+    return `<div style="padding:8px 0;border-bottom:1px solid var(--border);">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
         <span style="font-size:13px;flex:1;">${title}</span>
-        ${sentimentTag ? `<span style="font-size:11px;color:${tagColor};border:1px solid ${tagColor};padding:1px 5px;border-radius:3px;white-space:nowrap;">${sentimentTag}</span>` : ''}
+        ${sentimentTag ? `<span style="font-size:11px;color:${tagColor};border:1px solid ${tagColor};padding:2px 4px;border-radius:3px;white-space:nowrap;">${sentimentTag}</span>` : ''}
       </div>
       <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${source} ${time}</div>
     </div>`;
@@ -5417,7 +5417,7 @@ async function newsAiSearch() {
   }
   const btn = event.currentTarget;
   await withLoading(btn, async () => {
-    body.innerHTML = '<div style="color:var(--text-muted);padding:8px 0;font-size:12px;display:flex;align-items:center;gap:6px;"><span style="width:6px;height:6px;border-radius:50%;background:var(--accent);animation:pulse-dot 1.2s infinite;"></span>智能检索中(Tavily+LLM总结,约 10-20 秒)...</div>';
+    body.innerHTML = '<div style="color:var(--text-muted);padding:8px 0;font-size:12px;display:flex;align-items:center;gap:8px;"><span style="width:6px;height:6px;border-radius:50%;background:var(--accent);animation:pulse-dot 1.2s infinite;"></span>智能检索中(Tavily+LLM总结,约 10-20 秒)...</div>';
     try {
       // P0 修复(2026-07-30):原裸 fetch 未携带 Authorization 头,后端 require_admin 必返回 401
       // 改用 api() 封装,自动注入 admin_token;失败返回 null(已弹 toast)
@@ -5435,7 +5435,7 @@ async function newsAiSearch() {
       const sentiment = sr.sentiment || '中性';
       const sentimentColor = (sentiment === '利好' || sentiment === 'positive') ? 'var(--color-up)' :
                               (sentiment === '利空' || sentiment === 'negative') ? 'var(--color-down)' : 'var(--color-flat)';
-      let html = `<div style="padding:8px 10px;background:var(--bg-card);border-radius:6px;margin-bottom:8px;">
+      let html = `<div style="padding:8px 12px;background:var(--bg-card);border-radius:6px;margin-bottom:8px;">
         <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">检索关键词: <strong style="color:var(--accent);">${sr.query || query}</strong> · 情绪: <span style="color:${sentimentColor};">${sentiment}</span></div>
         <div style="font-size:13px;color:var(--text-secondary);line-height:1.6;">${summary}</div>
       </div>`;
@@ -5448,7 +5448,7 @@ async function newsAiSearch() {
           const sentimentTag = n.sentiment || '';
           const tagColor = (sentimentTag === '利好' || sentimentTag === 'positive') ? 'var(--color-up)' :
                            (sentimentTag === '利空' || sentimentTag === 'negative') ? 'var(--color-down)' : 'var(--color-flat)';
-          html += `<div style="padding:6px 0;border-bottom:1px solid var(--border);">
+          html += `<div style="padding:8px 0;border-bottom:1px solid var(--border);">
             <div style="font-size:13px;">${title}</div>
             <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
               ${sentimentTag ? `<span style="color:${tagColor};margin-right:6px;">[${sentimentTag}]</span>` : ''}
@@ -5552,14 +5552,14 @@ async function loadFundAdviceV2() {
       </div>`;
     }).join('');
 
-    return `<div style="padding:10px 0;border-bottom:1px solid var(--border);">
-      <div style="display:flex;justify-content:space-between;align-items:center;padding-bottom:6px;">
+    return `<div style="padding:12px 0;border-bottom:1px solid var(--border);">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding-bottom:8px;">
         <div>
           <strong style="font-size:14px;">${a.fund_name || a.fund_code}</strong>
           <span style="font-size:12px;color:var(--text-muted);margin-left:8px;">评分 ${fundScore.toFixed(1)}</span>
         </div>
         <span style="color:${actColor};font-weight:600;font-size:12px;padding:2px 8px;border:1px solid ${actColor};border-radius:3px;">${act}</span>
-        ${a.data_quality === 'unavailable' ? '<span style="margin-left:6px;font-size:11px;color:var(--color-warning);border:1px dashed var(--color-warning);padding:1px 6px;border-radius:10px;">净值缺失</span>' : ''}
+        ${a.data_quality === 'unavailable' ? '<span style="margin-left:6px;font-size:11px;color:var(--color-warning);border:1px dashed var(--color-warning);padding:2px 8px;border-radius:10px;">净值缺失</span>' : ''}
       </div>
       ${signalRows}
     </div>`;
@@ -5906,7 +5906,7 @@ function _renderFundAnalyzeProgress(currentStep, elapsedSec) {
     if (idx < currentStep) { icon = '✓'; color = 'var(--color-up)'; bg = 'rgba(0,200,83,0.12)'; }
     else if (idx === currentStep) { icon = '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);animation:pulse-dot 1.2s infinite;"></span>'; color = 'var(--accent)'; bg = 'rgba(0,217,255,0.08)'; }
     else { icon = idx; color = 'var(--text-tertiary)'; bg = 'transparent'; }
-    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:6px;background:${bg};margin-bottom:4px;transition:background 0.3s;">
+    return `<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:6px;background:${bg};margin-bottom:4px;transition:background 0.3s;">
       <div style="width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;color:${color};border:1px solid ${color};flex-shrink:0;">${icon}</div>
       <div style="flex:1;min-width:0;">
         <div style="font-size:12px;color:${idx <= currentStep ? 'var(--text-primary)' : 'var(--text-tertiary)'};font-weight:${idx === currentStep ? '600' : '400'};">${s.name}</div>
@@ -6144,7 +6144,7 @@ async function loadScriptLibrary() {
     const sceneLabels = {buy:'买入',sell:'卖出',hold:'持有',wait:'观望',stop_loss:'止损',dca:'定投',add:'加仓',take_profit:'止盈'};
     const sceneLabel = sceneLabels[s.scene] || s.scene;
     const categoryLabel = s.category === 'stock' ? '股市' : '基金';
-    return `<div style="padding:10px;border-bottom:1px solid var(--border);">
+    return `<div style="padding:12px;border-bottom:1px solid var(--border);">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
         <strong style="color:var(--accent-cyan);">${escapeHtml(s.title || '—')}</strong>
         <span style="font-size:11px;color:var(--text-muted);">${escapeHtml(categoryLabel)} · ${escapeHtml(String(sceneLabel))} · ${escapeHtml(s.dimension || '')}</span>
@@ -6190,7 +6190,7 @@ async function generateScriptPreview(scriptId) {
     });
     const content = (resp && resp.data && resp.data.content) || '';
     out.innerHTML = content
-      ? `<div class="card" style="padding:10px;font-size:12px;color:var(--text-secondary);"><b style="color:var(--accent-cyan);">预览</b><div style="margin-top:6px;line-height:1.7;">${escapeHtml(content)}</div></div>`
+      ? `<div class="card" style="padding:12px;font-size:12px;color:var(--text-secondary);"><b style="color:var(--accent-cyan);">预览</b><div style="margin-top:6px;line-height:1.7;">${escapeHtml(content)}</div></div>`
       : '<div style="color:var(--color-warning);font-size:12px;">该模板暂未生成内容</div>';
   } catch (e) {
     out.innerHTML = '<div style="color:var(--color-warning);font-size:12px;">话术生成失败，请稍后重试</div>';
@@ -6231,7 +6231,7 @@ async function matchStockScripts() {
       return;
     }
     body.innerHTML = _lastStockScripts.map((s, i) => `
-      <div class="card" style="padding:10px;margin-bottom:8px;font-size:12px;color:var(--text-secondary);">
+      <div class="card" style="padding:12px;margin-bottom:8px;font-size:12px;color:var(--text-secondary);">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
           <b style="color:var(--accent-cyan);">${escapeHtml(s.title || '—')}</b>
           <button class="btn btn-sm btn-outline" data-copy-idx="${i}">复制</button>
@@ -6302,8 +6302,8 @@ function customConfirm(title, message) {
       <div style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">${title}</div>
       <div style="font-size:13px;color:var(--text-secondary);margin-bottom:20px;">${message}</div>
       <div style="display:flex;gap:8px;justify-content:flex-end;">
-        <button id="_cancelBtn" class="btn btn-sm" style="background:transparent;border:1px solid var(--border);color:var(--text-secondary);padding:6px 16px;border-radius:6px;cursor:pointer;">取消</button>
-        <button id="_okBtn" class="btn btn-sm" style="background:var(--color-up);color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:500;">确认</button>
+        <button id="_cancelBtn" class="btn btn-sm" style="background:transparent;border:1px solid var(--border);color:var(--text-secondary);padding:8px 16px;border-radius:6px;cursor:pointer;">取消</button>
+        <button id="_okBtn" class="btn btn-sm" style="background:var(--color-up);color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:500;">确认</button>
       </div>
     </div>`;
     document.body.appendChild(modal);
@@ -6433,10 +6433,10 @@ async function loadGlobalOverview() {
   // 国际指数
   // (2026-07-31) P2-20 修复: 空数组时显示"暂无数据", 不再展示 0 个指数 +0.00%
   if (idxStats.empty) {
-    html += `<div style="padding:10px;background:var(--bg-card);border-radius:6px;border-left:3px solid var(--border);"><div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">国际指数</div><div style="font-size:13px;color:var(--text-muted);text-align:center;padding:10px 0;">暂无数据</div></div>`;
+    html += `<div style="padding:12px;background:var(--bg-card);border-radius:6px;border-left:3px solid var(--border);"><div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">国际指数</div><div style="font-size:13px;color:var(--text-muted);text-align:center;padding:12px 0;">暂无数据</div></div>`;
   } else {
   const idxAvgColor = idxStats.avg >= 0 ? 'var(--color-down)' : 'var(--color-up)';
-  html += `<div style="padding:10px;background:var(--bg-card);border-radius:6px;border-left:3px solid ${idxAvgColor};">
+  html += `<div style="padding:12px;background:var(--bg-card);border-radius:6px;border-left:3px solid ${idxAvgColor};">
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">国际指数</div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
       <span style="font-size:14px;font-weight:600;">${indices.length} 个指数</span>
@@ -6456,10 +6456,10 @@ async function loadGlobalOverview() {
   // 美股热门
   // (2026-07-31) P2-20 修复: 空数组时显示"暂无数据", 不再展示 0 只 +0.00%
   if (usStats.empty) {
-    html += `<div style="padding:10px;background:var(--bg-card);border-radius:6px;border-left:3px solid var(--border);"><div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">美股热门</div><div style="font-size:13px;color:var(--text-muted);text-align:center;padding:10px 0;">暂无数据</div></div>`;
+    html += `<div style="padding:12px;background:var(--bg-card);border-radius:6px;border-left:3px solid var(--border);"><div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">美股热门</div><div style="font-size:13px;color:var(--text-muted);text-align:center;padding:12px 0;">暂无数据</div></div>`;
   } else {
   const usAvgColor = usStats.avg >= 0 ? 'var(--color-down)' : 'var(--color-up)';
-  html += `<div style="padding:10px;background:var(--bg-card);border-radius:6px;border-left:3px solid ${usAvgColor};">
+  html += `<div style="padding:12px;background:var(--bg-card);border-radius:6px;border-left:3px solid ${usAvgColor};">
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">美股热门</div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
       <span style="font-size:14px;font-weight:600;">${usHot.length} 只</span>
@@ -6479,10 +6479,10 @@ async function loadGlobalOverview() {
   // 港股热门
   // (2026-07-31) P2-20 修复: 空数组时显示"暂无数据", 不再展示 0 只 +0.00%
   if (hkStats.empty) {
-    html += `<div style="padding:10px;background:var(--bg-card);border-radius:6px;border-left:3px solid var(--border);"><div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">港股热门</div><div style="font-size:13px;color:var(--text-muted);text-align:center;padding:10px 0;">暂无数据</div></div>`;
+    html += `<div style="padding:12px;background:var(--bg-card);border-radius:6px;border-left:3px solid var(--border);"><div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">港股热门</div><div style="font-size:13px;color:var(--text-muted);text-align:center;padding:12px 0;">暂无数据</div></div>`;
   } else {
   const hkAvgColor = hkStats.avg >= 0 ? 'var(--color-down)' : 'var(--color-up)';
-  html += `<div style="padding:10px;background:var(--bg-card);border-radius:6px;border-left:3px solid ${hkAvgColor};">
+  html += `<div style="padding:12px;background:var(--bg-card);border-radius:6px;border-left:3px solid ${hkAvgColor};">
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">港股热门</div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
       <span style="font-size:14px;font-weight:600;">${hkHot.length} 只</span>
@@ -6732,7 +6732,7 @@ function renderPortfolioAdvice(d) {
     ['集中度风险', escapeHtml(conc.level || (d && d.concentration_risk_level) || '—')],
     ['最大权重', conc.max_weight != null ? (Number(conc.max_weight) * 100).toFixed(1) + '%' : '—'],
     ['整体风险', escapeHtml(riskText || '—')],
-  ].map(([k, v]) => `<div class="card" style="text-align:center;padding:10px;">
+  ].map(([k, v]) => `<div class="card" style="text-align:center;padding:12px;">
       <div style="font-size:11px;color:var(--text-muted);">${k}</div>
       <div style="font-size:16px;font-weight:600;">${v}</div>
     </div>`).join('');
@@ -6759,7 +6759,7 @@ function renderPortfolioAdvice(d) {
 
   body.innerHTML = `
     <div class="grid-4" style="gap:8px;margin-bottom:10px;">${summary}</div>
-    <div class="card" style="padding:10px;font-size:12px;color:var(--text-secondary);margin-bottom:10px;">${suggestions}</div>
+    <div class="card" style="padding:12px;font-size:12px;color:var(--text-secondary);margin-bottom:10px;">${suggestions}</div>
     ${rebalRows ? `<div class="table-wrap" style="max-height:240px;overflow-y:auto;margin-bottom:10px;">
       <table><thead><tr><th>代码</th><th>动作</th><th>原因</th><th>目标权重</th></tr></thead><tbody>${rebalRows}</tbody></table>
     </div>` : ''}
@@ -6847,19 +6847,19 @@ async function loadPortfolioRisk() {
         <div style="font-size:11px;color:var(--text-muted);margin-left:auto;">${riskDesc}</div>
       </div>
       <div class="grid-4" style="gap:8px;">
-        <div class="card" style="text-align:center;padding:10px;">
+        <div class="card" style="text-align:center;padding:12px;">
           <div style="color:var(--text-muted);font-size:11px;margin-bottom:4px;">年化波动率</div>
           <div style="font-size:18px;font-weight:700;">${fmtNum(d.annual_volatility)}%</div>
         </div>
-        <div class="card" style="text-align:center;padding:10px;">
+        <div class="card" style="text-align:center;padding:12px;">
           <div style="color:var(--text-muted);font-size:11px;margin-bottom:4px;">夏普比率</div>
           <div style="font-size:18px;font-weight:700;color:${changeColor(d.sharpe_ratio)};">${fmtNum(d.sharpe_ratio, 3)}</div>
         </div>
-        <div class="card" style="text-align:center;padding:10px;">
+        <div class="card" style="text-align:center;padding:12px;">
           <div style="color:var(--text-muted);font-size:11px;margin-bottom:4px;">Sortino 比率</div>
           <div style="font-size:18px;font-weight:700;color:${changeColor(d.sortino_ratio)};">${fmtNum(d.sortino_ratio, 3)}</div>
         </div>
-        <div class="card" style="text-align:center;padding:10px;">
+        <div class="card" style="text-align:center;padding:12px;">
           <div style="color:var(--text-muted);font-size:11px;margin-bottom:4px;">最大回撤</div>
           <div style="font-size:18px;font-weight:700;color:#F87171;">-${fmtNum(d.max_drawdown)}%</div>
         </div>
@@ -6939,7 +6939,7 @@ async function loadAccountOverview() {
     if (!badge) {
       badge = document.createElement('span');
       badge.id = 'todayPnlBadge';
-      badge.style.cssText = 'margin-left:8px;font-size:11px;color:var(--accent-blue);border:1px solid var(--accent-blue);padding:1px 6px;border-radius:3px;';
+      badge.style.cssText = 'margin-left:8px;font-size:11px;color:var(--accent-blue);border:1px solid var(--accent-blue);padding:2px 8px;border-radius:3px;';
       pnlEl.parentNode.insertBefore(badge, pnlEl.nextSibling);
     }
     badge.textContent = '行情降级';
@@ -7484,7 +7484,7 @@ async function loadNorthbound() {
   // 北向资金数据源不可达,前端在面板顶部显示提示条,避免用户误以为"北向无流入"。
   const nbDq = (data && data.data && data.data.data_quality) || 'normal';
   const nbBanner = nbDq === 'degraded'
-    ? `<div style="margin-bottom:12px;padding:6px 10px;font-size:11px;color:var(--accent-blue);border:1px solid var(--accent-blue);border-radius:4px;background:rgba(245,158,11,0.06);">⚠ 北向资金数据源不可达,当前数值为兜底 0,请稍后重试</div>`
+    ? `<div style="margin-bottom:12px;padding:8px 12px;font-size:11px;color:var(--accent-blue);border:1px solid var(--accent-blue);border-radius:4px;background:rgba(245,158,11,0.06);">⚠ 北向资金数据源不可达,当前数值为兜底 0,请稍后重试</div>`
     : '';
   container.innerHTML = `
     ${nbBanner}
@@ -7885,7 +7885,7 @@ function loadHealthStatus() {
 
     let html = checks.map(c => {
       const dotClass = c.status === 'ok' ? 'health-ok' : c.status === 'warn' ? 'health-warn' : 'health-err';
-      return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
+      return `<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);">
         <span class="health-dot ${dotClass}"></span>
         <span style="flex:1;font-weight:500;">${c.name}</span>
         <span style="color:var(--text-muted);font-size:12px;">${c.detail}</span>
@@ -7895,13 +7895,13 @@ function loadHealthStatus() {
     if (dh && Array.isArray(dh.sources) && dh.sources.length) {
       const dotMap = {ok:'health-ok', degraded:'health-warn', down:'health-err', unknown:'health-warn'};
       const textMap = {ok:'正常', degraded:'降级', down:'中断', unknown:'未探测'};
-      html += '<div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border);font-size:12px;font-weight:600;color:var(--text-muted);">数据源健康度</div>';
+      html += '<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;font-weight:600;color:var(--text-muted);">数据源健康度</div>';
       html += dh.sources.map(s => {
         let detail;
         if (s.status === 'down') detail = `连续失败 ${s.consecutive_failures} 次`;
         else if (s.status === 'unknown') detail = '本进程尚未抓取';
         else detail = `${s.last_success_age_s}s 前 · ${s.last_count} 条`;
-        return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);" title="${escapeHtml(s.last_error || '')}">
+        return `<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);" title="${escapeHtml(s.last_error || '')}">
           <span class="health-dot ${dotMap[s.status] || 'health-warn'}"></span>
           <span style="flex:1;font-weight:500;">${escapeHtml(s.label)}</span>
           <span style="color:var(--text-muted);font-size:12px;">${textMap[s.status] || ''} · ${detail}</span>
