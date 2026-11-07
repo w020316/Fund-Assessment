@@ -1834,77 +1834,166 @@ def get_hot_stocks_signal_fallback() -> list[dict]:
         return []
 
 
-def get_fund_realtime_tencent(codes: list[str]) -> list[dict]:
+# 2026-11-10 双上游改造: fundgz 响应为 `jsonpgz({...});` 形式, 用正则抽出花括号内的 JSON 体
+_FUNDGZ_JSON_RE = re.compile(r"\{.*\}", re.S)
+
+
+def _fetch_fund_realtime_fundgz(codes: list[str]) -> list[dict]:
+    """天天基金 fundgz 备源: 逐 code 拉取估值/净值, 返回结构与腾讯主源完全同构。
+
+    - 仅作为 get_fund_realtime_tencent 的缺失 code 补齐通道, 单个 code 失败
+      (网络/解析/字段缺失)只记 warning 并继续下一个, 整体永不抛出。
+    - R-06 延续: dwjz<=0 视为无有效净值, 该条直接丢弃, 不返回 nav=0 假行情。
+    """
     if not codes:
         return []
+    import json
+    result: list[dict] = []
+    for code in codes:
+        try:
+            url = f"https://fundgz.1234567.com.cn/js/{code}.js?rt={int(time.time() * 1000)}"
+            resp = _EM_SESSION.get(url, timeout=5, headers={
+                "Referer": "https://fund.eastmoney.com/",
+            })
+            m = _FUNDGZ_JSON_RE.search(resp.text or "")
+            if not m:
+                logger.warning(f"fundgz: {code} 响应中未找到 JSON, 跳过")
+                continue
+            data = json.loads(m.group(0))
+            nav = _safe_float(data.get("dwjz"))
+            if nav <= 0:
+                # R-06: 与主源一致, 无有效净值时丢弃该条
+                logger.warning(f"fundgz: {code} 无有效净值, 丢弃该条")
+                continue
+            change_pct_raw = _safe_float(data.get("gszzl"))
+            if abs(change_pct_raw) <= 20:
+                change_pct = change_pct_raw
+            else:
+                # 异常值(>20%): 与腾讯路径的合理性防御一致, 直接置 0
+                change_pct = 0.0
+            estimated = _safe_float(data.get("gsz"))
+            change = round(nav * change_pct / 100, 4)
+            result.append({
+                "code": _safe_str(data.get("fundcode"), code),
+                "name": _safe_str(data.get("name")),
+                "nav": nav,
+                "estimated_nav": estimated if estimated > 0 else nav,
+                "change": change,
+                "change_pct": round(change_pct, 2),
+                "update_time": _safe_str(data.get("gztime")),
+                "source": "fundgz",
+            })
+        except Exception as e:
+            logger.warning(f"fundgz: {code} 获取失败: {e}")
+            continue
+    return result
+
+
+def _fetch_fund_realtime_tencent_inner(codes: list[str]) -> list[dict]:
+    """腾讯 qt.gtimg.cn 主源: 请求+解析, 返回原始条目(不含 source 字段)。
+
+    网络异常向上抛出, 由 get_fund_realtime_tencent 统一捕获后走备源合并。
+    """
     prefixed = ",".join("jj" + c for c in codes)
     url = f"https://qt.gtimg.cn/q={prefixed}"
-    try:
-        resp = requests.get(url, timeout=5, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://gu.qq.com/",
-        })
-        resp.encoding = "gbk"
-        text = resp.text
-        result: list[dict] = []
-        for segment in text.split(";"):
-            segment = segment.strip()
-            if not segment or "~" not in segment:
-                continue
-            parts = segment.split("~")
-            if len(parts) < 9:
-                continue
-            raw_code = _safe_str(parts[0]).split("=")[-1].strip('"').strip()
-            name = _safe_str(parts[1])
-            estimated_nav = _safe_float(parts[2])
-            nav = _safe_float(parts[5])
-            acc_nav = _safe_float(parts[6])
-            if nav <= 0:
-                # 2026-11-05 R-06: 字段缺失/全零时不再返回 nav=0.00 的"假行情"。
-                # 0 净值与"真实净值缺失"无法区分, 下游会把盈亏静默算成 0,
-                # 因此该条直接丢弃, 由调用方按"无行情"分支处理。
-                logger.warning(f"fund_realtime: {raw_code} 无有效净值, 丢弃该条")
-                continue
-            # Tencent 基金接口 parts[7] 是涨跌幅百分比(如 1.566 表示 1.566%),
-            # 不是绝对涨跌额。原代码误将其当作绝对值再除以 (nav-change) 反推百分比,
-            # 导致出现 135% 这种荒谬结果。
-            change_pct_raw = _safe_float(parts[7])
-            if abs(change_pct_raw) <= 20:
-                # 合理范围(基金单日涨跌幅不会超过 20%),parts[7] 即百分比
-                change_pct = change_pct_raw
-                # 反推绝对涨跌额: change = nav - nav/(1+pct/100)
-                if change_pct != 0:
-                    prev_nav = nav / (1 + change_pct / 100)
-                    change = round(nav - prev_nav, 4)
-                else:
-                    change = 0.0
+    resp = requests.get(url, timeout=5, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://gu.qq.com/",
+    })
+    resp.encoding = "gbk"
+    text = resp.text
+    result: list[dict] = []
+    for segment in text.split(";"):
+        segment = segment.strip()
+        if not segment or "~" not in segment:
+            continue
+        parts = segment.split("~")
+        if len(parts) < 9:
+            continue
+        raw_code = _safe_str(parts[0]).split("=")[-1].strip('"').strip()
+        name = _safe_str(parts[1])
+        estimated_nav = _safe_float(parts[2])
+        nav = _safe_float(parts[5])
+        acc_nav = _safe_float(parts[6])
+        if nav <= 0:
+            # 2026-11-05 R-06: 字段缺失/全零时不再返回 nav=0.00 的"假行情"。
+            # 0 净值与"真实净值缺失"无法区分, 下游会把盈亏静默算成 0,
+            # 因此该条直接丢弃, 由调用方按"无行情"分支处理。
+            logger.warning(f"fund_realtime: {raw_code} 无有效净值, 丢弃该条")
+            continue
+        # Tencent 基金接口 parts[7] 是涨跌幅百分比(如 1.566 表示 1.566%),
+        # 不是绝对涨跌额。原代码误将其当作绝对值再除以 (nav-change) 反推百分比,
+        # 导致出现 135% 这种荒谬结果。
+        change_pct_raw = _safe_float(parts[7])
+        if abs(change_pct_raw) <= 20:
+            # 合理范围(基金单日涨跌幅不会超过 20%),parts[7] 即百分比
+            change_pct = change_pct_raw
+            # 反推绝对涨跌额: change = nav - nav/(1+pct/100)
+            if change_pct != 0:
+                prev_nav = nav / (1 + change_pct / 100)
+                change = round(nav - prev_nav, 4)
             else:
-                # 异常值(>20%): 可能字段格式变更,降级为绝对值再算百分比
-                change = change_pct_raw
-                prev_nav = nav - change
-                if prev_nav > 0:
-                    change_pct = change / prev_nav * 100
-                else:
-                    change_pct = 0.0
-            update_time = _safe_str(parts[8])
-            result.append({
-                "code": raw_code,
-                "name": name,
-                "nav": nav,
-                "estimated_nav": estimated_nav if estimated_nav > 0 else nav,
-                "change": round(change, 4),
-                "change_pct": round(change_pct, 2),
-                "update_time": update_time,
-            })
-        if result:
-            data_health.record_success("fund_realtime", len(result))
+                change = 0.0
         else:
-            data_health.record_failure("fund_realtime", "empty result")
-        return result
-    except Exception as e:
-        logger.warning(f"get_fund_realtime_tencent failed: {e}")
-        data_health.record_failure("fund_realtime", str(e))
+            # 异常值(>20%): 可能字段格式变更,降级为绝对值再算百分比
+            change = change_pct_raw
+            prev_nav = nav - change
+            if prev_nav > 0:
+                change_pct = change / prev_nav * 100
+            else:
+                change_pct = 0.0
+        update_time = _safe_str(parts[8])
+        result.append({
+            "code": raw_code,
+            "name": name,
+            "nav": nav,
+            "estimated_nav": estimated_nav if estimated_nav > 0 else nav,
+            "change": round(change, 4),
+            "change_pct": round(change_pct, 2),
+            "update_time": update_time,
+        })
+    return result
+
+
+def get_fund_realtime_tencent(codes: list[str]) -> list[dict]:
+    """基金实时行情(双上游): 主源腾讯 qt.gtimg.cn + 备源天天基金 fundgz。
+
+    - 主源一次性请求全部 code; 解析后若仍有缺失 code, 才逐个调备源 fundgz 补齐。
+    - 合并结果统一携带 source 字段("tencent"/"fundgz")便于溯源。
+    - 健康度按合并后口径记录: merged 非空记 success, 全空记 failure(两条上游
+      的失败原因拼接); 空入参在任何健康度记录之前直接返回 [](不污染健康度)。
+    - 沿用 R-06: 两路解析中 nav<=0 的条目均直接丢弃。
+    """
+    if not codes:
         return []
+    tencent_err = ""
+    try:
+        result = _fetch_fund_realtime_tencent_inner(codes)
+    except Exception as e:
+        tencent_err = str(e)
+        logger.warning(f"get_fund_realtime_tencent 主源请求失败: {e}")
+        result = []
+    for row in result:
+        row["source"] = "tencent"
+    merged: list[dict] = list(result)
+    got = {r["code"] for r in result}
+    missing = [c for c in codes if c not in got]
+    fundgz_err = ""
+    if missing:
+        fallback = _fetch_fund_realtime_fundgz(missing)
+        if fallback:
+            merged.extend(fallback)
+        else:
+            fundgz_err = "fundgz no data"
+    if merged:
+        data_health.record_success("fund_realtime", len(merged))
+    else:
+        # 双上游全空的失败原因拼接, 尽量简短(优先携带主源异常原文)
+        reason = "; ".join(
+            part for part in (tencent_err or "empty result", fundgz_err) if part
+        )
+        data_health.record_failure("fund_realtime", reason)
+    return merged
 
 
 # ===== 基金历史净值(风险指标 / 走势图) =====

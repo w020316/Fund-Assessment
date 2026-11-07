@@ -174,7 +174,11 @@ class TestFundChangePctDivideByZero:
                  "0.0000", "0.0000", "0.0000", "2026-07-03"]
         segment = "~".join(parts) + "~;"
         mock_text = f'v_jj110022="{segment}'
-        with patch.object(ds2.requests, "get") as mock_get:
+        # 2026-11-10 双上游改造: 腾讯丢弃 zero-nav 条目后会尝试 fundgz 备源补齐,
+        # 必须一并 mock 掉备源, 否则该用例会发真实网络请求, 在 fundgz 可用的
+        # 环境下会用真实行情"补齐"导致断言失败(测试隔离问题)。
+        with patch.object(ds2.requests, "get") as mock_get, \
+                patch.object(ds2._EM_SESSION, "get", side_effect=RuntimeError("no network in test")):
             mock_resp = mock_get.return_value
             mock_resp.text = mock_text
             mock_resp.encoding = "gbk"
