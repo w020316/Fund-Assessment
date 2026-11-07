@@ -15,78 +15,44 @@
    加载顺序：必须排在 hud.css 之后（index.html 中其后）。
    ============================================================ */
 
-/* ---------- 1. Token 覆盖（最高杠杆：存量规则自动继承新色板） ---------- */
+/* ---------- 1. Token 覆盖（最高杠杆：存量规则自动继承新色板） ----------
+   STAGE5 R1 真源统一：--qf-* 全部定义已上收至 tokens.css（:root 唯一真源），
+   本文件不再重复定义任何 token，只做存量变量的重映射（引用 --qf-*）。 */
 body.hud-theme{
-  /* Aurora 专属 token */
-  --qf-bg-void:#04070E;
-  --qf-bg-deep:#070C15;
-  --qf-bg-surface:#0C131F;
-  --qf-bg-elev:#121C2B;
-  --qf-bg-elev2:#182335;
-  --qf-neon-cyan:#22E3FF;
-  --qf-neon-azure:#3D7BFF;
-  --qf-neon-violet:#9B6BFF;
-  --qf-neon-magenta:#FF4FD8;
-  --qf-grad-cyan:linear-gradient(135deg,#22E3FF 0%,#3D7BFF 100%);
-  --qf-grad-aurora:linear-gradient(100deg,#22E3FF 0%,#3D7BFF 34%,#9B6BFF 66%,#FF4FD8 100%);
-  --qf-line-1:#1C2A3D;
-  --qf-line-2:#2A3D55;
-  --qf-text-primary:#EAF3FF;
-  --qf-text-secondary:#A7BAD2;
-  --qf-text-muted:#8B9DB4;
-  --qf-ink:#04070E;
-  --qf-font-display:'Chakra Petch','Bahnschrift','DIN Alternate','Rajdhani',ui-sans-serif,sans-serif;
-  --qf-font-body:'HarmonyOS Sans SC','PingFang SC','Source Han Sans SC','Noto Sans SC','Microsoft YaHei UI','Microsoft YaHei',sans-serif;
-  --qf-font-mono:'JetBrains Mono','Cascadia Mono','SF Mono','Consolas',monospace;
-  --qf-focus-ring:0 0 0 2px #0C131F,0 0 0 4px #22E3FF;
-  --qf-dur-1:200ms;
-  --qf-dur-2:240ms;
-  --qf-dur-3:320ms;
-  --qf-ease-standard:cubic-bezier(.2,.8,.2,1);
-  --qf-ease-enter:cubic-bezier(.16,1,.3,1);
-
   /* 存量变量重映射（所有 var(--bg-card) 等自动生效） */
-  --bg-primary:#04070E;
-  --bg-card:#0C131F;
-  --bg-card-hover:#182335;
+  --bg-primary:var(--qf-bg-void);
+  --bg-card:var(--qf-bg-surface);
+  --bg-card-hover:var(--qf-bg-elev2);
   --bg-hover:rgba(255,255,255,.05);
-  --border:#1C2A3D;
-  --border-light:#2A3D55;
-  --text-primary:#EAF3FF;
-  --text-secondary:#A7BAD2;
-  --text-muted:#8B9DB4;
-  --text-tertiary:#5C6E85;
-  --text-warning:#F5A524;
-  --accent:#22E3FF;
-  --accent-blue:#22E3FF;
-  --accent-cyan:#22E3FF;
-  --accent-purple:#9B6BFF;
-  --color-up:#F87171;
-  --color-down:#34D399;
-  --color-flat:#8B9DB4;
-  --color-info:#5AC8FA;
-  --color-warning:#F5A524;
-  --color-critical:#FF5A5F;
-  --radius:8px;
-  --radius-lg:12px;
-  --shadow:0 2px 8px rgba(0,0,0,.32);
+  --border:var(--qf-line-1);
+  --border-light:var(--qf-line-2);
+  --text-primary:var(--qf-text-primary);
+  --text-secondary:var(--qf-text-secondary);
+  --text-muted:var(--qf-text-muted);
+  --text-tertiary:var(--qf-text-disabled);
+  --text-warning:var(--qf-sem-warn);
+  --accent:var(--qf-neon-cyan);
+  --accent-blue:var(--qf-neon-cyan);
+  --accent-cyan:var(--qf-neon-cyan);
+  --accent-purple:var(--qf-neon-violet);
+  --color-up:var(--qf-sem-up);
+  --color-down:var(--qf-sem-down);
+  --color-up-strong:#FCA5A5;   /* hud.css --hud-up-strong 同源（无 --qf token，字面量） */
+  --color-down-strong:#6EE7B7; /* hud.css --hud-down-strong 同源 */
+  --color-flat:var(--qf-text-muted);
+  --color-info:var(--qf-sem-info);
+  --color-warning:var(--qf-sem-warn);
+  --color-critical:var(--qf-sem-critical);
+  --radius:var(--qf-radius-sm);
+  --radius-lg:var(--qf-radius-md);
+  --shadow:var(--qf-shadow-1);
   --transition:all .2s cubic-bezier(.2,.8,.2,1);
 
-  /* hud.css 的组件直接引用 --hud-*，必须同步覆盖，否则主按钮仍是旧青色 */
-  --hud-bg:#04070E;
-  --hud-panel:#0C131F;
-  --hud-panel-border:#1C2A3D;
-  --hud-accent:#22E3FF;
-  --hud-warn:#F5A524;
-  --hud-up:#F87171;
-  --hud-down:#34D399;
-  --hud-up-strong:#FCA5A5;
-  --hud-down-strong:#6EE7B7;
-  --hud-text:#EAF3FF;
-  --hud-text-dim:#8B9DB4;
+  /* hud.css 的组件直接引用 --hud-*：--hud-* 真源在 hud.css（值引用 --qf-*），
+     此处不再同步覆盖。 */
 
-  background:#04070E;
-  color:#EAF3FF;
+  background:var(--qf-bg-void);
+  color:var(--qf-text-primary);
   font-family:var(--qf-font-body);
 }
 

@@ -51,7 +51,7 @@
       '.fw-steps .fw-step{padding:4px 10px;border-radius:12px;color:var(--text-muted,#8b92a8);',
       '  border:1px solid transparent;}',
       '.fw-steps .fw-step.on{color:var(--accent,#f59e0b);border-color:var(--accent,#f59e0b);}',
-      '.fw-steps .fw-step.done{color:var(--color-up,#34d399);}',
+      '.fw-steps .fw-step.done{color:var(--color-down,#34d399);}', /* STAGE5 R1: done=完成语义用绿(红涨绿跌) */
       '.fw-body{padding:16px;overflow-y:auto;}',
       /* 44px 触摸目标硬指标 */
       '.fw-btn{min-height:44px;min-width:44px;padding:8px 16px;border-radius:8px;cursor:pointer;',

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#0d1117">
+<meta name="theme-color" content="#04070E">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2322d3ee'/%3E%3Ctext x='16' y='21.5' font-family='Arial,sans-serif' font-size='13' font-weight='700' fill='%230d1117' text-anchor='middle'%3EQF%3C/text%3E%3C/svg%3E">
 <title>QuantFlow Pro 基金投资决策辅助</title>
 <style>
@@ -18,20 +18,23 @@
   --border-light: #484f58;
   --text-primary: #e6edf3;
   --text-secondary: #8b949e;
-  --text-muted: #6e7681;
-  --text-tertiary: #586069;
+  /* STAGE5 R1: 亮色回退对比度过 AA(对卡片 #161b22):
+     muted #8B9DB4 = 6.2:1(原 #6e7681 仅 3.8:1);
+     tertiary #758AA0 = 4.9:1(原 #586069 仅 2.7:1)。 */
+  --text-muted: #8B9DB4;
+  --text-tertiary: #758AA0;
   --text-warning: #f59e0b;
   --bg-hover: rgba(255,255,255,0.06);
   --accent: #f59e0b;
   --accent-blue: #f59e0b;
   --accent-cyan: #06b6d4;
   --accent-purple: #f59e0b;
-  --color-up: #ef4444;
+  --color-up: #F87171;
   --color-down: #22c55e;
   --color-flat: #94a3b8;
   --color-info: #3b82f6;
   --color-warning: #f59e0b;
-  --color-critical: #ef4444;
+  --color-critical: #F87171;
   --radius: 8px;
   --radius-lg: 12px;
   --shadow: 0 4px 24px rgba(0,0,0,0.3);
@@ -60,7 +63,7 @@ body {
   display:flex; align-items:center;
   padding: 0 20px;
   gap: 20px;
-  z-index: 100;
+  z-index: var(--qf-z-nav); /* STAGE5 R1: z-index 收敛至 tokens 六档 */
 }
 .main-layout { display:flex; flex:1; overflow:hidden; }
 .sidebar {
@@ -84,7 +87,7 @@ body {
   background: var(--accent);
   border-radius:8px;
   display:flex; align-items:center; justify-content:center;
-  font-size:15px; font-weight:700; color:#0d1117;
+  font-size:15px; font-weight:700; color:#04070E; /* STAGE5 R1: ink 深字对亮底 8.8:1 */
   letter-spacing:0.5px;
 }
 .index-bar { display:flex; gap:16px; flex:1; justify-content:center; }
@@ -247,7 +250,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
   transition:var(--transition);
 }
 .tab:hover { color:var(--text-primary); }
-.tab.active { background:var(--accent-blue); color:#fff; }
+.tab.active { background:var(--accent-blue); color:#04070E; } /* STAGE5 R1: 白字对琥珀 2.15:1 → ink 深字 8.8:1 */
 
 /* 按钮 */
 .btn {
@@ -282,7 +285,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 /* 弹窗 */
 .modal-mask {
   position:fixed; top:0; left:0; right:0; bottom:0;
-  background:rgba(0,0,0,0.6); z-index:9998;
+  background:rgba(0,0,0,0.6); z-index:var(--qf-z-modal);
   display:flex; align-items:center; justify-content:center;
   padding:20px;
 }
@@ -305,7 +308,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 }
 .thermo-bar {
   flex:1; height:12px; border-radius:6px;
-  background:linear-gradient(to right, #22c55e 0%, #94a3b8 40%, #f59e0b 70%, #ef4444 100%);
+  background:linear-gradient(to right, #22c55e 0%, #94a3b8 40%, #f59e0b 70%, #F87171 100%);
   position:relative; box-shadow:inset 0 1px 3px rgba(0,0,0,0.3);
 }
 .thermo-pointer {
@@ -378,7 +381,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 .progress-fill { height:100%; border-radius:3px; transition:width 0.6s ease; }
 
 /* Toast */
-.toast-container { position:fixed; top:60px; right:20px; z-index:9999; display:flex; flex-direction:column; gap:8px; }
+.toast-container { position:fixed; top:60px; right:20px; z-index:var(--qf-z-toast); display:flex; flex-direction:column; gap:8px; }
 .toast {
   padding:12px 20px; border-radius:8px;
   font-size:13px; font-weight:500;
@@ -393,7 +396,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 .api-error-panel {
   /* --token-banner-bottom 由 refreshTokenBanner() 写入：未配置 Token 时顶部多一条横幅，
      错误卡必须从横幅下沿开始，否则会盖住横幅上的"去设置"按钮。 */
-  position:fixed; top:var(--token-banner-bottom, 60px); right:20px; z-index:10000; display:none;
+  position:fixed; top:var(--token-banner-bottom, 60px); right:20px; z-index:var(--qf-z-toast); display:none;
   align-items:flex-start; gap:10px; max-width:380px; padding:12px 14px;
   border-radius:10px; background:#7f1d1d; color:#fca5a5; border:1px solid #dc2626;
   box-shadow:0 8px 24px rgba(0,0,0,0.35); font-size:13px;
@@ -548,7 +551,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
   /* 模态框更窄,padding 减小,避免撑满屏幕 */
   .modal-mask { padding:0; }
   .modal-box { border-radius:0; min-height:100vh; max-height:100vh; overflow-y:auto; }
-  .modal-header { padding:10px 14px; font-size:14px; position:sticky; top:0; background:var(--bg-card); z-index:1; }
+  .modal-header { padding:10px 14px; font-size:14px; position:sticky; top:0; background:var(--bg-card); z-index:var(--qf-z-sticky); }
   .modal-close { font-size:24px; }
   .modal-body { padding:14px; max-height:none !important; }
 
@@ -664,7 +667,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 .bottom-tab-bar {
   display:none;
   position:fixed; bottom:0; left:0; right:0;
-  z-index:200;
+  z-index:var(--qf-z-nav); /* STAGE5 R1: 移动端底部导航与顶栏同档 */
   padding:0;
   padding-bottom:env(safe-area-inset-bottom, 0px);
   /* 玻璃态效果 */
@@ -711,7 +714,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
   align-items:center;
   justify-content:center;
   position:relative;
-  z-index:1;
+  z-index:var(--qf-z-sticky); /* STAGE5 R1: 需压过 .active::after(base 档) */
   transition:transform 0.3s cubic-bezier(0.34,1.56,0.64,1), color 0.25s ease;
 }
 .bottom-tab-item .tab-icon svg {
@@ -737,7 +740,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
   position:absolute; inset:2px -2px;
   background:linear-gradient(135deg, rgba(245,158,11,0.12), rgba(245,158,11,0.06));
   border-radius:10px;
-  z-index:0;
+  z-index:var(--qf-z-base);
   animation:tabActivePulse 2s ease-in-out infinite;
 }
 .bottom-tab-item.active .tab-icon {
@@ -779,11 +782,14 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
   border-radius:4px;
 }
 .skeleton::after {
-  content:''; position:absolute; top:0; left:-100%; width:100%; height:100%;
+  content:''; position:absolute; inset:0;
+  /* STAGE5 R1: 原动画位移 left 属性(每帧触发 layout 掉帧)，
+     改为 background-position 渐变位移(仅 paint，与 aurora qf-shimmer 同法) */
   background:linear-gradient(90deg, transparent, rgba(255,255,255,0.03), transparent);
-  animation:skeleton-shimmer 2.4s infinite;
+  background-size:220% 100%; background-position:130% 0;
+  animation:skeleton-shimmer 2.4s linear infinite;
 }
-@keyframes skeleton-shimmer { to { left:100%; } }
+@keyframes skeleton-shimmer { 0% { background-position:130% 0; } 100% { background-position:-30% 0; } }
 .skeleton-card {
   padding:20px; border-radius:var(--radius-lg);
   background:var(--bg-card); border:1px solid var(--border);
@@ -826,7 +832,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
   position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
   background:var(--bg-card); border:1px solid var(--border-light);
   border-radius:10px; padding:12px 20px;
-  box-shadow:var(--shadow); z-index:300;
+  box-shadow:var(--shadow); z-index:var(--qf-z-overlay);
   font-size:12px; color:var(--text-secondary);
   display:none; gap:16px; align-items:center;
 }
@@ -885,7 +891,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
   transition: var(--transition);
 }
 .hud-subtab:hover { color: var(--text-primary); }
-.hud-subtab.active { background: var(--accent-blue); color: #fff; }
+.hud-subtab.active { background: var(--accent-blue); color: #04070E; } /* STAGE5 R1: 同 .tab.active 对比度修正 */
 
 /* ===== STAGE5: touch-target ===== K2 整改:全部交互元素 ≥44×44px(T05,与主题无关故不作用域化) */
 .btn { min-height: 44px; }
@@ -966,6 +972,9 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 
 
 </style>
+<!-- ===== STAGE5: token 真源 ===== Aurora 视觉 token 唯一真源(:root 全局注入，
+     与 design-system/tokens.css 同源；hud/aurora 层仅引用不再重复定义) -->
+<link rel="stylesheet" href="/static/css/tokens.css">
 <!-- ===== STAGE5: hud-theme ===== HUD 深空指挥舱主题(T05;移除 body 的 hud-theme 类即整体回退) -->
 <link rel="stylesheet" href="/static/css/hud.css">
 <!-- ===== STAGE6: 基础 ===== 阶段六批次A 样式(盯盘/风险/X-Ray/账本;独立文件净增)
@@ -2713,7 +2722,7 @@ function decisionLabel(d) { return DECISION_LABELS[d] || d; }
 
 // 预警严重程度小圆点(SVG)
 const ALERT_ICON_MAP = {
-  critical: '<svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="3" fill="#ef4444"/></svg>',
+  critical: '<svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="3" fill="#F87171"/></svg>',
   warning:  '<svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="3" fill="#f59e0b"/></svg>',
   info:     '<svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="3" fill="#3b82f6"/></svg>'
 };
@@ -6286,7 +6295,7 @@ async function deleteFundPosition(code) {
 function customConfirm(title, message) {
   return new Promise(resolve => {
     const modal = document.createElement('div');
-    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center;';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:var(--qf-z-modal);display:flex;align-items:center;justify-content:center;';
     modal.innerHTML = `<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:24px;min-width:320px;max-width:90vw;box-shadow:var(--shadow);">
       <div style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">${title}</div>
       <div style="font-size:13px;color:var(--text-secondary);margin-bottom:20px;">${message}</div>
@@ -6792,11 +6801,11 @@ async function loadPortfolioRisk() {
     if (sharpe >= 1.5 && dd < 10) { riskLevel = '优秀'; riskColor = 'var(--accent-cyan)'; riskDesc = '组合风险调整后收益优秀,回撤可控'; }
     else if (sharpe >= 1.0 && dd < 20) { riskLevel = '良好'; riskColor = 'var(--accent-cyan)'; riskDesc = '组合表现良好,风险适中'; }
     else if (sharpe >= 0.5) { riskLevel = '一般'; riskColor = 'var(--accent-blue)'; riskDesc = '收益波动较大,建议关注'; }
-    else { riskLevel = '较差'; riskColor = '#ef4444'; riskDesc = '风险调整后收益偏低,需优化持仓结构'; }
+    else { riskLevel = '较差'; riskColor = '#F87171'; riskDesc = '风险调整后收益偏低,需优化持仓结构'; }
 
     // 各持仓权重表格
     const weightsHtml = (d.weights || []).map(w => {
-      const wColor = w.weight > 40 ? '#ef4444' : (w.weight > 25 ? 'var(--accent-blue)' : 'var(--text-secondary)');
+      const wColor = w.weight > 40 ? '#F87171' : (w.weight > 25 ? 'var(--accent-blue)' : 'var(--text-secondary)');
       return `<tr>
         <td style="color:var(--accent-cyan);">${escapeHtml(w.symbol)}</td>
         <td>${escapeHtml(w.name)}</td>
@@ -6850,7 +6859,7 @@ async function loadPortfolioRisk() {
         </div>
         <div class="card" style="text-align:center;padding:10px;">
           <div style="color:var(--text-muted);font-size:11px;margin-bottom:4px;">最大回撤</div>
-          <div style="font-size:18px;font-weight:700;color:#ef4444;">-${fmtNum(d.max_drawdown)}%</div>
+          <div style="font-size:18px;font-weight:700;color:#F87171;">-${fmtNum(d.max_drawdown)}%</div>
         </div>
       </div>
       <div class="grid-2" style="margin-top:12px;gap:8px;">
@@ -7076,7 +7085,7 @@ async function loadPositions() {
       <td style="color:${color}">${fmtNum(price)}</td>
       <td style="color:${color}">${changeSign(profit)}${fmtMoney(profit)}</td>
       <td style="color:${color}">${changeSign(profitPct)}${fmtNum(profitPct)}%</td>
-      <td><button class="btn btn-sm" style="padding:2px 8px;font-size:11px;color:#ef4444;" data-code="${escapeHtml(code)}" onclick="onDeleteStockPositionClick(this)">删除</button></td>
+      <td><button class="btn btn-sm" style="padding:2px 8px;font-size:11px;color:#F87171;" data-code="${escapeHtml(code)}" onclick="onDeleteStockPositionClick(this)">删除</button></td>
     </tr>`;
   }).join('');
 
@@ -7109,7 +7118,7 @@ function drawPieChart(positions) {
     svg.innerHTML = '<text x="150" y="135" text-anchor="middle" fill="var(--text-muted)" font-size="13">暂无持仓数据</text>';
     return;
   }
-  const colors = ['#3b82f6','#8b5cf6','#06b6d4','#f59e0b','#ef4444','#22c55e','#ec4899','#6366f1'];
+  const colors = ['#3b82f6','#8b5cf6','#06b6d4','#f59e0b','#F87171','#22c55e','#ec4899','#6366f1'];
 
   let html = '';
   let startAngle = -Math.PI / 2;
