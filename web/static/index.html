@@ -1192,7 +1192,31 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
             <span class="hud-subtab" data-page="ai" role="button" tabindex="0" onclick="switchPage('ai')">智能分析</span>
             <span class="hud-subtab" data-page="gate" role="button" tabindex="0" onclick="switchPage('gate')">出手三问</span>
             <span class="hud-subtab" data-page="dispatch" role="button" tabindex="0" onclick="switchPage('dispatch')">一句话调度</span>
+            <!-- ===== STAGE5: evolution ===== 策略自进化子页入口(仅新增节点, 不动 10→5 IA;父子联动由 evolution.js 包装 switchPage 接入) -->
+            <span class="hud-subtab" data-page="evolution" role="button" tabindex="0" onclick="switchPage('evolution')">策略进化</span>
           </div>
+        </div>
+      </div>
+
+      <!-- ===== STAGE5: evolution ===== 策略自进化页面容器(B6 六端点前端;仅新增节点) -->
+      <div class="page" id="page-evolution">
+        <div class="card mb-16" role="region" aria-label="策略进化">
+          <div class="flex-between" style="flex-wrap:wrap;gap:8px;">
+            <div class="card-title">策略进化</div>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <button type="button" class="btn btn-sm btn-primary" id="evoRunBtn" style="min-height:48px;" onclick="Evolution.run()">开始进化</button>
+              <button type="button" class="btn btn-sm" id="evoRefreshBtn" style="min-height:48px;" onclick="Evolution.loadAll()">刷新谱系</button>
+            </div>
+          </div>
+          <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px;">
+            基于历史净值的假设性模拟, 非真实五维数据; 单次预算 25s, 与回测互斥; 不产生真实交易信号。
+          </div>
+          <div id="evoStatusLine" style="display:none;font-size:12px;margin-top:8px;"></div>
+          <div id="evoBody" style="margin-top:8px;"></div>
+        </div>
+        <div class="card mb-16" role="region" aria-label="策略进化代际对比">
+          <div class="card-title">代际对比</div>
+          <div id="evoCompareBody"></div>
         </div>
       </div>
 
@@ -8237,5 +8261,7 @@ document.addEventListener('DOMContentLoaded', () => {
 <script src="/static/js/sectors.js"></script>
 <!-- ===== STAGE6: watchboard ===== 阶段六批次A(盯盘/风险/X-Ray/账本;含 switchPage 二级 Tab 包装) -->
 <script src="/static/js/stage6-portfolio.js"></script>
+<!-- ===== STAGE5: evolution ===== 策略自进化前端(B6 六端点;谱系/详情/对比/操作流) -->
+<script src="/static/js/evolution.js"></script>
 </body>
 </html>
