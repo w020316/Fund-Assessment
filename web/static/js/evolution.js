@@ -223,6 +223,213 @@
       });
   }
 
+  // ===== F3: 对比面板(指标对照 + 参数 diff 行内高亮) =====
+
+  function renderCompare(data) {
+    const box = $('evoCompareBody');
+    if (!box) return;
+    const a = data.active || {};
+    const c = data.candidate || {};
+    const md = data.metric_diff || {};
+    const pd = data.param_diff || {};
+
+    const metricRow = function (label, key, cls) {
+      const av = (md[key] || {}).active;
+      const cv = (md[key] || {}).candidate;
+      const fmt = (v) => (v == null ? '—' : (key === 'sharpe' || key === 'fitness' ? num(v, 4) : pct(v)));
+      const kls = (v) => (cls === 'updown' ? upDownCls(v) : 'st6-flat');
+      return `<tr>
+        <td style="padding:6px 8px;color:var(--text-muted);">${esc(label)}</td>
+        <td style="padding:6px 8px;text-align:right;" class="${kls(av)}">${fmt(av)}</td>
+        <td style="padding:6px 8px;text-align:right;" class="${kls(cv)}">${fmt(cv)}</td>
+      </tr>`;
+    };
+
+    const diffRow = function (section, key, av, cv) {
+      const changed = String(av) !== String(cv);
+      const style = changed
+        ? 'background:rgba(34,227,255,.06);box-shadow:inset 2px 0 0 var(--accent-blue);'
+        : '';
+      return `<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 8px;font-size:12px;${style}">
+        <span style="color:var(--text-muted);">${esc(key)}</span>
+        <span>${esc(av == null ? '—' : av)} <span style="color:var(--text-muted);">→</span>
+              <b style="color:${changed ? 'var(--accent-blue)' : 'inherit'};">${esc(cv == null ? '—' : cv)}</b></span>
+      </div>`;
+    };
+
+    const paramBlock = function (section, label) {
+      const rows = (pd[section] || {});
+      const keys = Object.keys(rows);
+      if (!keys.length) return '';
+      return `<div style="margin-top:8px;">
+        <div style="font-size:12px;color:var(--text-secondary);font-weight:600;">${esc(label)}</div>
+        ${keys.map(function (k) {
+          const item = rows[k] || {};
+          return diffRow(section, k, item.active, item.candidate);
+        }).join('')}
+      </div>`;
+    };
+
+    box.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+        <div style="font-size:12px;color:var(--text-muted);">
+          激活代 <b>第 ${a.generation_id == null ? '—' : a.generation_id} 代</b>(fitness ${num(a.fitness, 4)})
+          vs 候选代 <b>第 ${c.generation_id == null ? '—' : c.generation_id} 代</b>(fitness ${num(c.fitness, 4)})
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+          <input type="number" min="1" class="input" id="evoCompareGenInput" placeholder="代号(缺省最新)"
+                 style="min-height:48px;width:140px;font-size:13px;" aria-label="对比代代号">
+          <button type="button" class="btn btn-sm" style="min-height:48px;" onclick="Evolution.showCompare()">对比</button>
+        </div>
+      </div>
+      <div class="table-wrap" tabindex="0" aria-label="指标对照表">
+        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+          <thead><tr>
+            <th style="text-align:left;padding:6px 8px;">指标</th>
+            <th style="text-align:right;padding:6px 8px;">激活代</th>
+            <th style="text-align:right;padding:6px 8px;">候选代</th>
+          </tr></thead>
+          <tbody>
+            ${metricRow('年化收益率', 'annual_return', 'updown')}
+            ${metricRow('最大回撤', 'max_drawdown')}
+            ${metricRow('夏普比率', 'sharpe')}
+            ${metricRow('胜率', 'win_rate')}
+            ${metricRow('适应度 fitness', 'fitness')}
+          </tbody>
+        </table>
+      </div>
+      ${paramBlock('weights', '权重 diff(高亮=有变化)')}
+      ${paramBlock('signals', '信号阈值 diff(高亮=有变化)')}`;
+  }
+
+  function showCompare(genId) {
+    const box = $('evoCompareBody');
+    if (!box) return;
+    if (!hasToken()) { box.innerHTML = tokenGateHTML('代际对比'); return; }
+    const input = $('evoCompareGenInput');
+    if (!genId && input && input.value) genId = parseInt(input.value, 10);
+    renderStatus(box, 'loading');
+    callApi(`${BASE}/compare` + (genId ? `?gen=${parseInt(genId, 10)}` : ''))
+      .then(function (data) { renderCompare(data); })
+      .catch(function (e) {
+        if (e && e.status === 401) { box.innerHTML = tokenGateHTML('代际对比'); return; }
+        renderStatus(box, 'error', '对比加载失败', errText(e));
+      });
+  }
+
+  // ===== F4: 操作流(run 轮询 / activate 二次确认 / 回滚快捷) =====
+
+  function setRunBtn(disabled, label) {
+    const btn = $('evoRunBtn');
+    if (!btn) return;
+    btn.disabled = disabled;
+    btn.textContent = label || (disabled ? '进化进行中…' : '开始进化');
+  }
+
+  function startStatusPoll() {
+    stopStatusPoll();
+    state.pollTimer = setInterval(function () {
+      callApi(`${BASE}/status`).then(function (s) {
+        // 兜底: run 请求丢失(如页面刷新)时按共享锁空闲态恢复按钮
+        if (!s.running && !state.runInFlight) {
+          stopStatusPoll();
+          setRunBtn(false);
+        }
+      }).catch(function () { /* 状态轮询静默失败 */ });
+    }, RUN_POLL_INTERVAL_MS);
+  }
+
+  function stopStatusPoll() {
+    if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
+  }
+
+  function run() {
+    if (state.runInFlight) return;
+    if (!gateOr('evoBody', '策略进化')) return;
+    state.runInFlight = true;
+    setRunBtn(true);
+    showStatusLine('已提交进化请求(预算 25s, 与回测互斥)…', false);
+    startStatusPoll();
+    callApi(`${BASE}/run`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
+      .then(function (res) {
+        showStatusLine(res.message || (res.improved ? `第 ${res.generation_id} 代已写入谱系` : '无优于父代者, 未写盘'), false);
+        showToast(res.message || '进化完成', 'success');
+        state.detailId = null;
+        Evolution.loadAll();
+        showCompare();
+      })
+      .catch(function (e) {
+        if (e && e.status === 401) { $('evoBody').innerHTML = tokenGateHTML('策略进化'); return; }
+        // 503: 展示后端结构化 code+message, 不弹"未知错误"
+        showStatusLine(errText(e), true);
+      })
+      .finally(function () {
+        state.runInFlight = false;
+        stopStatusPoll();
+        setRunBtn(false);
+      });
+  }
+
+  /** 激活前先拉 diff 展示, 再二次确认(customConfirm 自带 ESC/遮罩关闭) */
+  function activate(genId) {
+    if (!hasToken()) { gateOr('evoBody', '策略进化'); return; }
+    callApi(`${BASE}/compare?gen=${parseInt(genId, 10)}`)
+      .then(function (data) {
+        renderCompare(data);
+        const c = data.candidate || {};
+        const changed = Object.keys(data.param_diff || {}).some(function (sec) {
+          return Object.keys((data.param_diff[sec]) || {}).some(function (k) {
+            const item = data.param_diff[sec][k] || {};
+            return String(item.active) !== String(item.candidate);
+          });
+        });
+        return customConfirm(
+          `激活第 ${c.generation_id} 代`,
+          `该代 fitness ${num((c.metrics || {}).fitness, 4)}。激活将把参数写入 strategies.yaml(参数真源)并立即生效于下一次分析。` +
+          (changed ? '存在与当前激活代的参数差异(已在下方对比面板高亮)。' : '与当前激活代参数无差异。') +
+          '确认激活?'
+        ).then(function (ok) {
+          if (!ok) return;
+          callApi(`${BASE}/activate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ generation_id: parseInt(genId, 10) }),
+          }).then(function (res) {
+            showToast(`已激活第 ${res.generation_id} 代, 参数写入 strategies.yaml`, 'success');
+            state.detailId = null;
+            Evolution.loadAll();
+            showCompare();
+          }).catch(function (e) {
+            if (e && e.status === 401) { gateOr('evoBody', '策略进化'); return; }
+            showStatusLine(errText(e), true);
+            showToast(errText(e), 'error');
+          });
+        });
+      })
+      .catch(function (e) {
+        if (e && e.status === 404) { showStatusLine(errText(e), true); return; }
+        showStatusLine(errText(e), true);
+      });
+  }
+
+  /** 详情渲染后注入操作按钮(F4 触摸目标 ≥48px) */
+  function onDetailLoaded(record) {
+    const box = $('evoDetailActions');
+    if (!box) return;
+    const isActive = record.generation_id === state.activeId;
+    const actions = [];
+    actions.push(`<button type="button" class="btn btn-sm" style="min-height:48px;" onclick="Evolution.showCompare(${record.generation_id})">对比当前激活</button>`);
+    if (isActive) {
+      actions.push('<span style="font-size:12px;color:var(--qf-neon-cyan,#22E3FF);align-self:center;">当前激活代</span>');
+    } else {
+      actions.push(`<button type="button" class="btn btn-sm btn-primary" style="min-height:48px;" onclick="Evolution.activate(${record.generation_id})">激活此代</button>`);
+      if (record.parent_id != null) {
+        actions.push(`<button type="button" class="btn btn-sm" style="min-height:48px;" onclick="Evolution.activate(${record.parent_id})" title="回滚到父代(第 ${record.parent_id} 代)">回滚到父代</button>`);
+      }
+    }
+    box.innerHTML = actions.join('');
+  }
+
   // ===== 对外 API =====
 
   const Evolution = {
@@ -236,6 +443,8 @@
           if (e && e.status === 401) { $('evoBody').innerHTML = tokenGateHTML('策略进化'); return; }
           renderStatus($('evoBody'), 'error', '谱系加载失败', errText(e));
         });
+      // 对比面板随页刷新(无激活代时显示结构化 404 提示)
+      showCompare();
     },
 
     showDetail: function (genId) {
@@ -246,8 +455,10 @@
       loadDetail(genId);
     },
 
-    /** 供后续 F3/F4 挂载: 对比面板与操作流在 detail 渲染后注入动作按钮 */
-    onDetailLoaded: null,
+    showCompare: showCompare,
+    run: run,
+    activate: activate,
+    onDetailLoaded: onDetailLoaded,
 
     _state: state,
   };
