@@ -391,7 +391,9 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 .toast-info { background:#1e3a5f; color:#93c5fd; border:1px solid #2563eb; }
 /* 阶段四:持久错误卡(不自动消失,带明确原因与重试) */
 .api-error-panel {
-  position:fixed; top:60px; right:20px; z-index:10000; display:none;
+  /* --token-banner-bottom 由 refreshTokenBanner() 写入：未配置 Token 时顶部多一条横幅，
+     错误卡必须从横幅下沿开始，否则会盖住横幅上的"去设置"按钮。 */
+  position:fixed; top:var(--token-banner-bottom, 60px); right:20px; z-index:10000; display:none;
   align-items:flex-start; gap:10px; max-width:380px; padding:12px 14px;
   border-radius:10px; background:#7f1d1d; color:#fca5a5; border:1px solid #dc2626;
   box-shadow:0 8px 24px rgba(0,0,0,0.35); font-size:13px;
@@ -409,7 +411,8 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
   line-height:1; cursor:pointer; flex-shrink:0;
 }
 @media (max-width:640px) {
-  .api-error-panel { left:12px; right:12px; top:56px; max-width:none; }
+  /* top 同样要避让 Token 横幅（移动端横幅会换行到 2~3 行） */
+  .api-error-panel { left:12px; right:12px; top:var(--token-banner-bottom, 56px); max-width:none; }
 }
 @keyframes toast-in { from { opacity:0; transform:translateX(40px); } to { opacity:1; transform:translateX(0); } }
 
@@ -2506,14 +2509,31 @@ function refreshTokenBanner() {
   if (_hasAdminToken()) {
     bar.hidden = true;
     bar.innerHTML = '';
+    _syncTokenBannerHeight(bar);
     return;
   }
   bar.hidden = false;
   bar.innerHTML = `<span class="token-banner-icon" aria-hidden="true">!</span>
     <span class="token-banner-text">未配置管理员 Token：持仓、交易、策略参数、组合建议等需要鉴权的功能会显示为不可用。</span>
     <button type="button" class="btn btn-sm btn-outline" onclick="gotoSettingsForToken()">去设置</button>
-    <button type="button" class="token-banner-close" aria-label="关闭提示" onclick="this.parentElement.hidden=true">×</button>`;
+    <button type="button" class="token-banner-close" aria-label="关闭提示" onclick="this.parentElement.hidden=true;_syncTokenBannerHeight(this.parentElement)">×</button>`;
+  _syncTokenBannerHeight(bar);
 }
+
+/** 把横幅下沿写进 CSS 变量，供固定定位的错误卡避让（移动端横幅会换行变高）。 */
+function _syncTokenBannerHeight(bar) {
+  // 放到下一帧量，避免 innerHTML 刚写完时拿到旧的布局高度
+  requestAnimationFrame(() => {
+    const rect = bar ? bar.getBoundingClientRect() : null;
+    const visible = !!rect && !bar.hidden && rect.height > 1;
+    const bottom = visible ? Math.ceil(rect.bottom) : 60;
+    document.documentElement.style.setProperty('--token-banner-bottom', bottom + 'px');
+  });
+}
+window.addEventListener('resize', () => {
+  const bar = document.getElementById('tokenBanner');
+  if (bar) _syncTokenBannerHeight(bar);
+});
 
 function showToast(msg, type='info') {
   const c = document.getElementById('toastContainer');

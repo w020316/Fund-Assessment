@@ -212,3 +212,12 @@ body.hud-theme .fw-header {
   body.hud-theme .token-gate .btn { min-height: 48px; }
   body.hud-theme .token-banner-close { width: 48px; height: 48px; }
 }
+
+/* ============================================================
+   移动端触摸目标：个股详情面板内的按钮统一 48px
+   - .btn-sm 在 aurora-theme 里是 44px，低于移动端 48px 标准
+   - 只作用于详情面板，避免影响表格内的紧凑按钮
+   ============================================================ */
+@media (max-width: 768px) {
+  body.hud-theme #stockDetailPanel .btn { min-height: 48px; padding-left: 18px; padding-right: 18px; }
+}
