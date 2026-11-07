@@ -2101,6 +2101,17 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
         <div class="card mb-16" id="fundScriptCard" style="display:none;">
           <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> 话术推荐</div>
           <div id="fundScriptBody" style="margin-top:8px;"></div>
+          <!-- STAGE5: AI 定制建议(light 档真实入口, 2026-11-07) -->
+          <div id="aiScriptBox" style="display:none;margin-top:12px;padding-top:12px;border-top:1px dashed var(--border);">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+              <button class="btn btn-secondary" id="aiScriptBtn" type="button">生成 AI 定制建议</button>
+              <span id="aiScriptHint" style="font-size:11px;color:var(--text-muted);">基于当前基金数据分析生成,约 5-15 秒</span>
+            </div>
+            <div id="aiScriptResult" style="display:none;margin-top:10px;padding:10px 12px;border-radius:8px;background:var(--bg-card);border:1px solid var(--border);">
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;" id="aiScriptMeta"></div>
+              <div id="aiScriptText" style="font-size:13px;color:var(--text-primary);line-height:1.7;"></div>
+            </div>
+          </div>
         </div>
 
         <!-- 定投计算器(纯前端,不依赖外部API,符合Render Free资源约束) -->
@@ -6174,6 +6185,9 @@ async function loadFundScripts(advices, market) {
   const first = advices[0];
   // 补充 market_signal 到 advice 供话术匹配使用
   first.market_signal = market;
+  // STAGE5: 把当前基金数据交给 AI 定制建议模块(light 档唯一真实入口, 2026-11-07)
+  // 放在模板话术请求之前,保证即使模板匹配失败/为空,AI 入口仍可用
+  if (window.__setAiScriptPayload) window.__setAiScriptPayload(first);
   try {
     // P0 修复(2026-07-30):原裸 fetch 未携带 Authorization 头,后端 require_admin 必返回 401
     // 改用 api() 封装,自动注入 admin_token
@@ -8263,5 +8277,7 @@ document.addEventListener('DOMContentLoaded', () => {
 <script src="/static/js/stage6-portfolio.js"></script>
 <!-- ===== STAGE5: evolution ===== 策略自进化前端(B6 六端点;谱系/详情/对比/操作流) -->
 <script src="/static/js/evolution.js"></script>
+<!-- ===== STAGE5: ai-script ===== AI 定制建议(light 档真实入口;点击才调用,不影响首屏) -->
+<script src="/static/js/ai-script.js"></script>
 </body>
 </html>
