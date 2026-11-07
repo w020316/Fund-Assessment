@@ -997,6 +997,9 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
     </div>
   </header>
 
+  <!-- ===== 阶段四 U2: 未配置管理员 Token 的页面级提示（由 refreshTokenBanner 控制） ===== -->
+  <div id="tokenBanner" class="token-banner" role="status" aria-live="polite" hidden></div>
+
   <div class="main-layout">
     <!-- ========== 左侧导航 ========== -->
     <!-- ===== STAGE5: ia-merge ===== 一级导航 10→5(旧 10 页经 STAGE5_PAGE_MAP 兼容映射,无死链) -->
@@ -2445,6 +2448,73 @@ const CONFIG = { TOAST_DURATION: 3000, MARKET_REFRESH_MS: 15000, TIME_UPDATE_MS:
 /* ========== 全局工具函数 ========== */
 
 // Toast提示
+/* ===== 阶段四 U2: 未配置管理员 Token 的统一空态 =====
+ * 修复前：13 处功能各自渲染一句纯文本"请先在设置页配置管理员 Token"，
+ * 没有按钮、没有链接、不解释 Token 是什么、不说明影响哪些功能。
+ * 用户看到这句话只能自己去左侧导航里找设置页，还要猜到"管理鉴权"卡片在哪。
+ * 现在统一为 tokenGateHTML()：一句原因 + "去设置"按钮 + 影响范围说明。 */
+function _hasAdminToken() {
+  try { return !!localStorage.getItem('admin_token'); } catch (e) { return false; }
+}
+
+/** 跳转设置页并聚焦令牌输入框（一步到位，不用用户自己找）。 */
+let _tokenReturnPage = null;
+function gotoSettingsForToken() {
+  // 记住来处：配好 Token 后自动回到原页面并重新加载，
+  // 否则用户还要自己再点一次导航，且原页面仍是"未配置"的旧渲染。
+  const active = document.querySelector('.page.active:not([id^="page-hud-"])');
+  _tokenReturnPage = active ? active.id.replace(/^page-/, '') : null;
+  switchPage('config');
+  // 设置页渲染是同步的，但二级 tab 与滚动需要一帧后再定位
+  const focus = () => {
+    const input = document.getElementById('cfg-admin-token');
+    if (!input) return false;
+    const card = input.closest('.card') || input;
+    if (card.scrollIntoView) card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    input.focus({ preventScroll: true });
+    return true;
+  };
+  if (!focus()) setTimeout(focus, 120);
+}
+
+/**
+ * 生成"需要管理员 Token"的空态 HTML。
+ * @param {string} what 受影响的功能名，如"组合建议"
+ * @param {{compact?: boolean, tag?: string}} opts compact=表格单元格内联样式；tag=覆盖外层标签
+ */
+function tokenGateHTML(what, opts) {
+  const o = opts || {};
+  const feature = what || '该功能';
+  const wrap = o.tag || (o.compact ? 'div' : 'div');
+  const align = o.compact ? 'padding:10px 0;' : 'padding:20px 0;';
+  return `<${wrap} class="token-gate" style="text-align:center;${align}">
+      <div style="color:var(--color-warning);font-size:13px;font-weight:600;">未配置管理员 Token</div>
+      <div style="color:var(--text-muted);font-size:12px;line-height:1.6;margin-top:4px;">
+        「${escapeHtml(feature)}」需要管理员 Token 才能调用。Token 由部署者在服务端环境变量
+        <code style="font-size:11px;opacity:.85;">ADMIN_TOKEN</code> 中设置，填到「设置 → 管理鉴权」即可，只保存在本机浏览器。
+      </div>
+      <div style="margin-top:10px;">
+        <button type="button" class="btn btn-sm btn-primary" onclick="gotoSettingsForToken()">去设置</button>
+      </div>
+    </${wrap}>`;
+}
+
+/** 页面级持久横幅：未配置 Token 时主动告知，不用等用户点按钮才发现。 */
+function refreshTokenBanner() {
+  const bar = document.getElementById('tokenBanner');
+  if (!bar) return;
+  if (_hasAdminToken()) {
+    bar.hidden = true;
+    bar.innerHTML = '';
+    return;
+  }
+  bar.hidden = false;
+  bar.innerHTML = `<span class="token-banner-icon" aria-hidden="true">!</span>
+    <span class="token-banner-text">未配置管理员 Token：持仓、交易、策略参数、组合建议等需要鉴权的功能会显示为不可用。</span>
+    <button type="button" class="btn btn-sm btn-outline" onclick="gotoSettingsForToken()">去设置</button>
+    <button type="button" class="token-banner-close" aria-label="关闭提示" onclick="this.parentElement.hidden=true">×</button>`;
+}
+
 function showToast(msg, type='info') {
   const c = document.getElementById('toastContainer');
   const t = document.createElement('div');
@@ -2903,6 +2973,7 @@ function switchPage(name) {
     const subtab = document.querySelector(`.hud-subtab[data-page="${name}"]`);
     if (subtab) subtab.classList.add('active');
   }
+  refreshTokenBanner();
 }
 
 /* ========== 短线复盘 / 出手三问 / 一句话调度 ========== */
@@ -4186,7 +4257,7 @@ async function loadMarketOutlook() {
   if (!body) return;
   // P2-4 修复(2026-07-30):需鉴权端点,未设置 token 时显示引导而非"分析引擎超时"
   if (!localStorage.getItem('admin_token')) {
-    body.innerHTML = '<div style="color:var(--color-warning);text-align:center;padding:20px 0;">请先在系统配置页设置管理员 Token 后使用此功能</div>';
+    body.innerHTML = tokenGateHTML('该功能');
     return;
   }
   body.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:20px 0;">分析中，请稍候（约30秒）...</div>';
@@ -4245,7 +4316,7 @@ async function loadAiHistory() {
   // 原代码会回退到下方 defaultHistory mock 数据(2025-01-15 等假记录),
   // 用户误以为是真实分析历史。改为显示登录引导,不调用 API 不显示 mock。
   if (!localStorage.getItem('admin_token')) {
-    if (body) body.innerHTML = '<tr><td colspan="5" style="color:var(--color-warning);text-align:center;padding:20px 0;">请先在系统配置页设置管理员 Token 后查看分析历史</td></tr>';
+    if (body) body.innerHTML = '<tr><td colspan="5">' + tokenGateHTML('分析历史') + '</td></tr>';
     return;
   }
   // P1 优化(2026-08-01):使用缓存减少重复请求,30秒内复用缓存数据
@@ -4583,8 +4654,16 @@ function _renderStrategyLab(title, rows, note) {
 
 function _strategyLabError(title, err) {
   const box = document.getElementById('strategyLabResult');
-  const hint = (String(err.message || err).includes('401') || String(err.message || err).includes('503'))
-    ? '<div style="margin-top:4px;color:var(--text-muted);">该接口需要管理员令牌: 请先在控制台 localStorage.setItem(\'admin_token\', \'<你的 ADMIN_TOKEN>\') 后重试。</div>'
+  const msg = String(err.message || err);
+  const needToken = msg.includes('401') || msg.includes('503');
+  if (needToken && !_hasAdminToken()) {
+    // U2 修复(2026-11-07)：原文案让用户"打开控制台执行 localStorage.setItem"，
+    // 等于把浏览器开发者工具当配置界面。改为可点击的"去设置"。
+    box.innerHTML = tokenGateHTML('策略实验室');
+    return;
+  }
+  const hint = needToken
+    ? '<div style="margin-top:4px;color:var(--text-muted);">令牌已配置但服务端仍拒绝，可能是 Token 不匹配，请到「设置 → 管理鉴权」重新保存。</div>'
     : '';
   box.innerHTML = `<div style="color:var(--color-up);font-weight:600;">${escapeHtml(title)}</div>${hint}`;
 }
@@ -4775,7 +4854,7 @@ async function loadTradeHistory() {
   // 未设置 token 时 API 返回 401,原代码会回退到下方 defaultTrades/defaultOrders mock
   // (2025-01-15 买入茅台等假交易记录),用户误以为是真实交易历史。改为显示登录引导。
   if (!localStorage.getItem('admin_token')) {
-    const hint = '<tr><td colspan="7" style="color:var(--color-warning);text-align:center;padding:20px 0;">请先在系统配置页设置管理员 Token 后查看交易记录</td></tr>';
+    const hint = '<tr><td colspan="7">' + tokenGateHTML('交易记录') + '</td></tr>';
     if (body) body.innerHTML = hint;
     if (orderBody) orderBody.innerHTML = hint;
     return;
@@ -5496,7 +5575,7 @@ async function handleUploadFile(file) {
   const adminToken = localStorage.getItem('admin_token');
   if (!adminToken) {
     resultEl.style.display = 'block';
-    resultEl.innerHTML = `<div style="padding:12px;color:var(--color-up);">未登录管理员,请先在"设置"页配置管理Token</div>`;
+    resultEl.innerHTML = tokenGateHTML('文件上传', { compact: true });
     return;
   }
   // 文件大小前置校验(避免上传后服务端413,节省带宽和用户等待)
@@ -6069,7 +6148,7 @@ async function generateScriptPreview(scriptId) {
   const out = document.getElementById('scriptPreviewBody');
   if (!out || !scriptId) return;
   if (!localStorage.getItem('admin_token')) {
-    out.innerHTML = '<div style="color:var(--color-warning);font-size:12px;">请先在「设置」页配置管理员 Token 后生成话术</div>';
+    out.innerHTML = tokenGateHTML('生成话术', { compact: true });
     return;
   }
   out.innerHTML = '<div style="color:var(--text-muted);font-size:12px;">生成中...</div>';
@@ -6095,7 +6174,7 @@ async function matchStockScripts() {
   const code = codeInput.value.trim();
   if (!/^\d{6}$/.test(code)) { showToast('股票代码需为 6 位数字', 'error'); return; }
   if (!localStorage.getItem('admin_token')) {
-    body.innerHTML = '<div style="color:var(--color-warning);font-size:12px;">请先在「设置」页配置管理员 Token 后匹配话术</div>';
+    body.innerHTML = tokenGateHTML('匹配话术', { compact: true });
     return;
   }
   body.innerHTML = '<div style="color:var(--text-muted);font-size:12px;">匹配中...</div>';
@@ -6566,7 +6645,7 @@ async function loadPortfolioAdvice() {
   if (!card || !body) return;
   card.style.display = 'block';
   if (!localStorage.getItem('admin_token')) {
-    body.innerHTML = '<div style="color:var(--color-warning);font-size:12px;padding:8px 0;">请先在「设置」页配置管理员 Token 后再使用组合建议</div>';
+    body.innerHTML = tokenGateHTML('组合 AI 建议', { compact: true });
     return;
   }
   body.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0;">正在读取持仓并生成组合建议（约 25 秒）...</div>';
@@ -6667,7 +6746,7 @@ async function loadPortfolioRisk() {
   // 未设置 token 时 API 返回 401,原代码会显示"分析失败: HTTP 401",体验差。
   // 改为显示登录引导,与 loadMarketOutlook 等其他需鉴权函数保持一致。
   if (!localStorage.getItem('admin_token')) {
-    if (body) body.innerHTML = '<div style="color:var(--color-warning);text-align:center;padding:20px 0;">请先在系统配置页设置管理员 Token 后使用组合风险分析功能</div>';
+    if (body) body.innerHTML = tokenGateHTML('组合风险分析');
     return;
   }
   body.innerHTML = '<div style="text-align:center;padding:20px 0;color:var(--text-muted);">分析中... 拉取近 120 日 K 线计算风险指标,约 5-15 秒</div>';
@@ -6933,7 +7012,9 @@ async function loadPositions() {
   // 原代码会回退到下方 defaultPositions mock(贵州茅台 100 股等假持仓),
   // 用户误以为是真实持仓。改为显示登录引导,不调用 API 不显示 mock。
   if (!localStorage.getItem('admin_token')) {
-    if (body) body.innerHTML = '<tr><td colspan="8" style="color:var(--color-warning);text-align:center;padding:20px 0;">请先在系统配置页设置管理员 Token 后查看持仓</td></tr>';
+    if (body) body.innerHTML = '<tr><td colspan="8">' + tokenGateHTML('持仓列表') + '</td></tr>';
+    // 饼图卡片也要有态：否则"持仓分布"下面留一块 280px 空白，看着像渲染失败
+    _setPiePlaceholder('未配置令牌，无法加载持仓分布');
     return;
   }
   const data = await api('/api/dashboard/positions');
@@ -6984,9 +7065,21 @@ async function loadPositions() {
 }
 
 // 盈亏饼图（纯SVG环形图）
+function _setPiePlaceholder(text) {
+  const svg = document.getElementById('pieChart');
+  if (!svg) return;
+  svg.innerHTML = `<text x="150" y="135" text-anchor="middle" fill="var(--text-muted)" font-size="13">${escapeHtml(text)}</text>`;
+}
+
 function drawPieChart(positions) {
   const svg = document.getElementById('pieChart');
-  if (!svg || !positions.length) return;
+  if (!svg) return;
+  // 空态修复(2026-11-07)：原实现在 positions 为空时直接 return，
+  // 卡片标题"持仓分布"下面留一块 280px 的空白 SVG，用户不知道是没数据还是加载失败。
+  if (!positions || !positions.length) {
+    _setPiePlaceholder('暂无持仓数据');
+    return;
+  }
 
   const cx = 150, cy = 130, R = 90, r = 55;
   const total = positions.reduce((s, p) => s + Math.abs((p.quantity || p.qty || 0) * (p.current_price || p.price || 0)), 0);
@@ -7048,7 +7141,7 @@ async function loadRiskStatus() {
   // 原代码会回退到下方 defaultRisk mock(仓位风险低/集中度风险中等假状态),
   // 用户误以为风控正常。改为显示登录引导,不调用 API 不显示 mock。
   if (!localStorage.getItem('admin_token')) {
-    if (container) container.innerHTML = '<div class="card" style="text-align:center;color:var(--color-warning);padding:20px;">请先在系统配置页设置管理员 Token 后查看风控状态</div>';
+    if (container) container.innerHTML = '<div class="card" style="padding:16px;">' + tokenGateHTML('风控状态') + '</div>';
     return;
   }
   const data = await api('/api/dashboard/risk');
@@ -7208,7 +7301,7 @@ async function loadAlerts() {
   // 原代码会回退到下方 defaultAlerts mock(6 条假告警,含"跌破止损线""资金不足"等),
   // 用户误以为发生真实告警。改为显示登录引导,不调用 API 不显示 mock。
   if (!localStorage.getItem('admin_token')) {
-    if (container) container.innerHTML = '<div style="color:var(--color-warning);text-align:center;padding:20px;font-size:13px;">请先在系统配置页设置管理员 Token 后查看告警</div>';
+    if (container) container.innerHTML = tokenGateHTML('告警列表', { compact: true });
     return;
   }
   const data = await api('/api/monitor/alerts');
@@ -7247,7 +7340,7 @@ async function loadWatchlist() {
   // 原代码会回退到下方 defaultWatchlist mock(贵州茅台/五粮液等假自选股),
   // 用户误以为是自己的自选股。改为显示登录引导,不调用 API 不显示 mock。
   if (!localStorage.getItem('admin_token')) {
-    if (body) body.innerHTML = '<tr><td colspan="5" style="color:var(--color-warning);text-align:center;padding:20px 0;">请先在系统配置页设置管理员 Token 后查看自选股</td></tr>';
+    if (body) body.innerHTML = '<tr><td colspan="5">' + tokenGateHTML('自选股') + '</td></tr>';
     return;
   }
   const data = await api('/api/monitor/watchlist');
@@ -7479,7 +7572,7 @@ async function loadStrategyParams() {
   const form = document.getElementById('strategyParamsForm');
   if (!form) return;
   if (!localStorage.getItem('admin_token')) {
-    form.innerHTML = '<div style="color:var(--color-warning);padding:8px 0;">请先在下方「管理鉴权」配置管理员 Token 后查看策略参数</div>';
+    form.innerHTML = tokenGateHTML('策略参数', { compact: true });
     return;
   }
   form.innerHTML = '<div style="color:var(--text-muted);padding:8px 0;">加载中...</div>';
@@ -7522,7 +7615,10 @@ async function loadStrategyParams() {
 
 async function saveStrategyParams() {
   if (!localStorage.getItem('admin_token')) {
-    showToast('请先配置管理员 Token', 'error');
+    // U2：点击保存时才提示"未配置"，等于让用户白填一遍表单。
+    // 这里直接把他带到设置页，表单内容保留，配好回来再保存。
+    showToast('未配置管理员 Token，已打开设置页', 'info');
+    gotoSettingsForToken();
     return;
   }
   const form = document.getElementById('strategyParamsForm');
@@ -7590,12 +7686,23 @@ function saveAdminToken() {
   localStorage.setItem('admin_token', token);
   showToast('管理令牌已保存', 'success');
   loadAuthStatus();
+  refreshTokenBanner();
+  // 回到用户来时页面并重新加载，让"去设置"形成闭环（否则原页仍是旧空态）
+  if (_tokenReturnPage) {
+    const back = _tokenReturnPage;
+    _tokenReturnPage = null;
+    switchPage(back);
+  }
 }
 
 function clearAdminToken() {
   localStorage.removeItem('admin_token');
   showToast('管理令牌已清除', 'success');
   loadAuthStatus();
+  refreshTokenBanner();
+  // 清除后当前页（若依赖 Token）应立即回到"未配置"状态，而不是继续显示旧数据
+  const active = document.querySelector('.page.active:not([id^="page-hud-"])');
+  if (active) switchPage(active.id.replace(/^page-/, ''));
 }
 
 async function loadSettings() {
@@ -7605,7 +7712,7 @@ async function loadSettings() {
   // 原代码会回退到下方 defaultSettings mock(模拟盘/通知邮箱 admin@example.com 等假配置),
   // 用户可能误以为是已保存配置并直接保存。改为显示登录引导,不渲染表单不调用 API。
   if (!localStorage.getItem('admin_token')) {
-    const hint = '<div style="color:var(--color-warning);text-align:center;padding:20px;font-size:13px;">请先在上方"管理令牌"区域设置管理员 Token 并保存后,即可加载和编辑系统配置</div>';
+    const hint = tokenGateHTML('系统配置', { compact: true });
     if (configForm) configForm.innerHTML = hint;
     if (riskParams) riskParams.innerHTML = hint;
     return;
@@ -8001,6 +8108,7 @@ const Onboarding = {
 
 document.addEventListener('DOMContentLoaded', () => {
   _renderSkeletons(); // 立即填充骨架屏(0ms)
+  refreshTokenBanner(); // 阶段四 U2：未配置管理员 Token 时主动提示，不等用户点按钮
   Onboarding.init();   // 首次使用指引(仅首次显示,状态存本机)
   loadMarketData();   // 后台加载数据(覆盖骨架屏)
   loadLlmProvider();
