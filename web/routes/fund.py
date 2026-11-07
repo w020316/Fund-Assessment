@@ -11,6 +11,8 @@ from __future__ import annotations
 import asyncio
 import datetime as _dt
 import json
+import math
+import os
 import re
 import time
 from pathlib import Path
@@ -19,13 +21,14 @@ from typing import Any
 import requests
 from fastapi import APIRouter, Depends, Query
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from src.core.cache import DataCache
 from src.core.data_source_v2 import (
     get_fund_history_tencent,
     get_fund_realtime_tencent,
 )
+from src.core.response import error as _error, success as _success
 from src.utils.auth import require_admin
 from src.utils.convert import safe_float as _safe_float, safe_str as _safe_str
 from src.utils.file_io import atomic_write_json, safe_read_json
@@ -199,6 +202,7 @@ async def get_positions():
     供前端新鲜度徽章与"⚠ 置信度低"标识消费;存量字段零改动(向后兼容铁律)。
     """
     positions = _load_positions()
+    estimated_codes = _estimated_share_codes()
     codes = [p["fund_code"] for p in positions if p.get("fund_code")]
     quotes = await asyncio.to_thread(get_fund_realtime_tencent, codes) if codes else []
     quote_map = {q.get("code", ""): q for q in quotes}
@@ -251,6 +255,8 @@ async def get_positions():
             # 阶段四新增:该条净值数据质量,供前端区分"缺失"与真实 0
             "data_quality": "degraded" if missing else "ok",
             "data_quality_reason": "实时净值缺失" if missing else "",
+            # R7.1: 份额近似(±5% 待复核)标识, 前端据此渲染"估算值待复核"角标与行内编辑
+            "shares_estimated": code in estimated_codes,
         })
 
     # 汇总只统计有净值的条目;缺失条目不参与求和,避免把"缺数据"算成 0 拉低总市值。
@@ -422,6 +428,58 @@ async def delete_position(fund_code: str):
     except Exception as e:
         logger.warning(f"delete_position {fund_code} failed: {e}")
         return {"success": False, "message": "删除失败,请稍后重试"}
+
+
+# ============ 份额行内编辑(A10, R7.1) ============
+
+# 份额近似(±5% 待复核)持仓代码清单: 可用环境变量覆盖(逗号分隔 6 位代码)。
+# 这些代码在 GET /positions 响应中带 shares_estimated=true, 前端显示
+# "份额为估算值,请复核"角标并提供行内编辑入口。
+_DEFAULT_ESTIMATED_SHARE_CODES = "002891,018957,017811,018816"
+
+
+def _estimated_share_codes() -> set[str]:
+    raw = os.getenv("FUND_ESTIMATED_SHARE_CODES", _DEFAULT_ESTIMATED_SHARE_CODES)
+    return {c.strip() for c in raw.split(",") if re.fullmatch(r"\d{6}", c.strip())}
+
+
+class UpdateSharesRequest(BaseModel):
+    """A10 请求体: 份额必须为正有限数(拒绝 0/负数/NaN/Inf)。"""
+
+    shares: float = Field(..., description="持有份额, 必须为正有限数")
+
+    @field_validator("shares")
+    @classmethod
+    def _validate_finite_positive(cls, v: float) -> float:
+        fv = float(v)
+        if not math.isfinite(fv) or fv <= 0:
+            raise ValueError("份额必须为正有限数")
+        return round(fv, 2)
+
+
+@router.put("/positions/{fund_code}/shares", dependencies=[Depends(require_admin)])
+async def update_position_shares(fund_code: str, req: UpdateSharesRequest):
+    """A10: 行内修正单只基金份额(R7.1 自助复核)。
+
+    只改 shares 字段, 其余字段原样保留; 写入既有 user_fund_positions.json。
+    响应为统一信封: 成功 {"code":0,"data":{fund_code, shares, estimated}}(estimated
+    恒为 False —— 修正后即为用户确认的真实份额); 未找到/保存失败 code=-1。
+    """
+    if not re.fullmatch(r"\d{6}", fund_code):
+        return _error(f"基金代码非法: {fund_code!r}")
+    try:
+        positions = _load_positions()
+        target = next((p for p in positions if p.get("fund_code") == fund_code), None)
+        if target is None:
+            return _error(f"未找到基金持仓: {fund_code}")
+        target["shares"] = req.shares
+        if not _save_positions(positions):
+            return _error("保存失败,请稍后重试")
+        logger.info(f"update_position_shares: {fund_code} shares -> {req.shares}")
+        return _success({"fund_code": fund_code, "shares": req.shares, "estimated": False})
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"update_position_shares {fund_code} failed: {e}")
+        return _error("份额更新失败,请稍后重试")
 
 
 # ============ 基金建议 ============

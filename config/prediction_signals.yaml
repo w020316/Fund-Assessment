@@ -1,0 +1,80 @@
+# ===== 盘面时段预测/推荐 信号阈值集中配置（R6.5 顺带落地）=====
+# 设计文档: docs/design-prediction-2026-11-07.md §1.3 / §五 T01
+# 维护口径: 改配置不改代码即可调整信号行为; 所有键均有代码内默认值兜底,
+# 本文件缺失/损坏时按默认值运行(load_signal_config fail-safe), 绝不抛异常。
+#
+# 字段说明:
+#   breadth.ratio_bull / ratio_bear : 上涨家数占比(涨/(涨+跌))偏多/偏空阈值
+#   sentiment.score_bull / score_bear : 市场情绪分(0~100)偏多/偏空阈值
+#   sector.momentum_threshold_pct : 板块动量进入推荐候选的涨跌幅阈值(%)
+#   sector.top_n : 参与合成的前 N 个板块
+#   confidence.weights : 各信号对置信度的贡献权重; base 为中性起点分
+#   confidence.min / max : 置信度输出夹取范围(0~100)
+#   direction.composite_threshold : 合成得分绝对值低于该值判"平"
+#   verify.flat_band_pct : 验证三分类判平带宽(±%, 与方向判定同一口径)
+#   recommend.max_items : 单日推荐条数上限
+#   recommend.min_confidence : 推荐入选最低置信度
+#   verify.final_after_cst : 北京时间该时刻后的 verify 视为"最终跑"
+#                            (数据仍取不到则写 missing=1 占位, 之前只跳过)
+#   sector_candidates : 板块 → 候选标的(股票/ETF, 代码为公开市场标识)。
+#       匹配规则: 板块名与 key 精确匹配, 或互相包含子串(如"酿酒行业"匹配"酿酒")。
+#       name 留空, 由服务层用实时行情回填(禁止配置层编造名称)。
+
+version: 1
+
+breadth:
+  ratio_bull: 0.60
+  ratio_bear: 0.40
+
+sentiment:
+  score_bull: 60
+  score_bear: 40
+
+sector:
+  momentum_threshold_pct: 1.0
+  top_n: 8
+
+confidence:
+  base: 50
+  weights:
+    breadth: 25
+    sentiment: 15
+    sector: 10
+  min: 5
+  max: 95
+
+direction:
+  composite_threshold: 8.0
+
+verify:
+  flat_band_pct: 0.3
+  final_after_cst: "16:10"
+
+recommend:
+  max_items: 5
+  min_confidence: 55
+
+# 板块 → 候选标的池(全部为公开市场代码; 按需增删, 未覆盖的板块自然无推荐)
+sector_candidates:
+  半导体:
+    - {symbol: "512480", kind: stock}
+  证券:
+    - {symbol: "512000", kind: stock}
+  酿酒:
+    - {symbol: "512690", kind: stock}
+  医药:
+    - {symbol: "512010", kind: stock}
+  电池:
+    - {symbol: "515030", kind: stock}
+  军工:
+    - {symbol: "512660", kind: stock}
+  软件:
+    - {symbol: "515050", kind: stock}
+  银行:
+    - {symbol: "512800", kind: stock}
+  光伏:
+    - {symbol: "515790", kind: stock}
+  汽车:
+    - {symbol: "516110", kind: stock}
+  沪深300:
+    - {symbol: "510300", kind: stock}

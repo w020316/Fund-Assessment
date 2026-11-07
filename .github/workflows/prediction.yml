@@ -1,0 +1,234 @@
+name: Prediction Cycle
+
+# 时段预测/推荐/验证 定时闭环(设计文档 §1.5)。
+# 4 个北京时间时点(UTC cron, 周一~周五):
+#   09:35 CST = 35  1 * * 1-5  → 采集早盘快照
+#   13:05 CST =  5  5 * * 1-5  → 采集午盘快照
+#   15:40 CST = 40  7 * * 1-5  → 盘后快照 + 次日预测 + 推荐 + 验证 + 库备份
+#   16:30 CST = 30  8 * * 1-5  → 验证重试(数据仍取不到则服务端写 missing=1 占位)
+# 非交易日: 服务端 018957 探针返回 {code:0, data.skipped=true} → Action 记 notice 后视为成功。
+# 备份契约(主理人补充): Render 免费层磁盘非持久 → 每日验证完成后
+# GET /api/prediction/export(挂 require_admin)拉取 SQLite 快照,
+# 追加推送到 daily-reports 分支 db_backup/prediction_YYYYMMDD.db(库内全是公开行情+基金代码)。
+# 人工恢复: 从 daily-reports 分支下载 db_backup/prediction_<日期>.db,
+# 覆盖到 Render data/prediction.db(或本地 data/prediction.db)后重启服务即可。
+on:
+  schedule:
+    - cron: '35 1 * * 1-5'
+    - cron: '5 5 * * 1-5'
+    - cron: '40 7 * * 1-5'
+    - cron: '30 8 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      task:
+        description: '要执行的环节(默认全链)'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - morning
+          - noon
+          - close
+          - verify_retry
+
+permissions:
+  contents: write
+
+concurrency:
+  group: prediction-cycle
+  cancel-in-progress: false
+
+env:
+  # Render 线上域名(新增 secret, 不 hardcode)
+  PREDICT_API_BASE: ${{ secrets.PREDICT_API_BASE }}
+  ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+
+jobs:
+  cycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Resolve task kind
+        id: kind
+        run: |
+          set -euo pipefail
+          HM=$(date -u +%H%M)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "kind=${{ github.event.inputs.task || 'all' }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          case "$HM" in
+            # 允许 GitHub Actions cron 数分钟抖动
+            0[12][0-9][0-9]) echo "kind=morning" >> "$GITHUB_OUTPUT" ;;
+            05[0-4][0-9])    echo "kind=noon" >> "$GITHUB_OUTPUT" ;;
+            07[3-9][0-9]|080[0-9]) echo "kind=close" >> "$GITHUB_OUTPUT" ;;
+            08[1-4][0-9])    echo "kind=verify_retry" >> "$GITHUB_OUTPUT" ;;
+            *)               echo "kind=skip" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Guard secrets
+        if: steps.kind.outputs.kind != 'skip'
+        run: |
+          set -euo pipefail
+          if [ -z "$PREDICT_API_BASE" ] || [ -z "$ADMIN_TOKEN" ]; then
+            echo "::warning::缺少 secret PREDICT_API_BASE / ADMIN_TOKEN, 无法调用线上 API"
+            echo 1 > /tmp/pred_failures
+          fi
+
+      # ---- 09:35 早盘快照 ----
+      - name: Collect morning snapshot
+        if: steps.kind.outputs.kind == 'morning' || steps.kind.outputs.kind == 'all'
+        run: |
+          set -euo pipefail
+          [ -z "$PREDICT_API_BASE" ] && exit 0
+          CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" --max-time 120 --retry 1 \
+            -X POST "$PREDICT_API_BASE/api/prediction/snapshots/collect" \
+            -H "Authorization: Bearer $ADMIN_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"session":"morning"}' || echo "000")
+          if [ "$CODE" = "200" ] && [ "$(jq -r '.code' /tmp/resp.json 2>/dev/null)" = "0" ]; then
+            echo "早盘快照: $(cat /tmp/resp.json)"
+          else
+            echo "::warning::早盘快照采集失败 http=$CODE $(cat /tmp/resp.json 2>/dev/null || true)"
+            echo 1 >> /tmp/pred_failures
+          fi
+
+      # ---- 13:05 午盘快照 ----
+      - name: Collect noon snapshot
+        if: steps.kind.outputs.kind == 'noon' || steps.kind.outputs.kind == 'all'
+        run: |
+          set -euo pipefail
+          [ -z "$PREDICT_API_BASE" ] && exit 0
+          CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" --max-time 120 --retry 1 \
+            -X POST "$PREDICT_API_BASE/api/prediction/snapshots/collect" \
+            -H "Authorization: Bearer $ADMIN_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"session":"noon"}' || echo "000")
+          if [ "$CODE" = "200" ] && [ "$(jq -r '.code' /tmp/resp.json 2>/dev/null)" = "0" ]; then
+            echo "午盘快照: $(cat /tmp/resp.json)"
+          else
+            echo "::warning::午盘快照采集失败 http=$CODE $(cat /tmp/resp.json 2>/dev/null || true)"
+            echo 1 >> /tmp/pred_failures
+          fi
+
+      # ---- 15:40 盘后快照 ----
+      - name: Collect close snapshot
+        if: steps.kind.outputs.kind == 'close' || steps.kind.outputs.kind == 'all'
+        run: |
+          set -euo pipefail
+          [ -z "$PREDICT_API_BASE" ] && exit 0
+          CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" --max-time 120 --retry 1 \
+            -X POST "$PREDICT_API_BASE/api/prediction/snapshots/collect" \
+            -H "Authorization: Bearer $ADMIN_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"session":"close"}' || echo "000")
+          if [ "$CODE" = "200" ] && [ "$(jq -r '.code' /tmp/resp.json 2>/dev/null)" = "0" ]; then
+            echo "盘后快照: $(cat /tmp/resp.json)"
+          else
+            echo "::warning::盘后快照采集失败 http=$CODE $(cat /tmp/resp.json 2>/dev/null || true)"
+            echo 1 >> /tmp/pred_failures
+          fi
+
+      # ---- 15:40 次日预测(服务端内含 LLM deep, 预算 ≤60s) ----
+      - name: Generate next-day prediction
+        if: steps.kind.outputs.kind == 'close' || steps.kind.outputs.kind == 'all'
+        run: |
+          set -euo pipefail
+          [ -z "$PREDICT_API_BASE" ] && exit 0
+          CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" --max-time 120 --retry 1 \
+            -X POST "$PREDICT_API_BASE/api/prediction/predictions/generate" \
+            -H "Authorization: Bearer $ADMIN_TOKEN" || echo "000")
+          if [ "$CODE" = "200" ] && [ "$(jq -r '.code' /tmp/resp.json 2>/dev/null)" = "0" ]; then
+            echo "次日预测: $(cat /tmp/resp.json)"
+          else
+            echo "::warning::次日预测生成失败 http=$CODE $(cat /tmp/resp.json 2>/dev/null || true)"
+            echo 1 >> /tmp/pred_failures
+          fi
+
+      # ---- 15:40 推荐 ----
+      - name: Generate recommendations
+        if: steps.kind.outputs.kind == 'close' || steps.kind.outputs.kind == 'all'
+        run: |
+          set -euo pipefail
+          [ -z "$PREDICT_API_BASE" ] && exit 0
+          CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" --max-time 120 --retry 1 \
+            -X POST "$PREDICT_API_BASE/api/prediction/recommendations/generate" \
+            -H "Authorization: Bearer $ADMIN_TOKEN" || echo "000")
+          if [ "$CODE" = "200" ] && [ "$(jq -r '.code' /tmp/resp.json 2>/dev/null)" = "0" ]; then
+            echo "推荐: $(cat /tmp/resp.json)"
+          else
+            echo "::warning::推荐生成失败 http=$CODE $(cat /tmp/resp.json 2>/dev/null || true)"
+            echo 1 >> /tmp/pred_failures
+          fi
+
+      # ---- 15:40 首跑验证 / 16:30 重试验证 ----
+      - name: Verify yesterday
+        if: steps.kind.outputs.kind != 'skip' && steps.kind.outputs.kind != 'morning' && steps.kind.outputs.kind != 'noon'
+        run: |
+          set -euo pipefail
+          [ -z "$PREDICT_API_BASE" ] && exit 0
+          CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" --max-time 120 --retry 1 \
+            -X POST "$PREDICT_API_BASE/api/prediction/verify" \
+            -H "Authorization: Bearer $ADMIN_TOKEN" || echo "000")
+          if [ "$CODE" = "200" ] && [ "$(jq -r '.code' /tmp/resp.json 2>/dev/null)" = "0" ]; then
+            echo "验证: $(cat /tmp/resp.json)"
+          else
+            echo "::warning::验证失败 http=$CODE $(cat /tmp/resp.json 2>/dev/null || true)"
+            echo 1 >> /tmp/pred_failures
+          fi
+
+      # ---- 库备份(Render 免费层磁盘非持久; 只推 daily-reports 分支, 绝不推 main) ----
+      - name: Checkout for backup
+        if: steps.kind.outputs.kind == 'close' || steps.kind.outputs.kind == 'all'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Backup prediction.db to daily-reports branch
+        if: steps.kind.outputs.kind == 'close' || steps.kind.outputs.kind == 'all'
+        run: |
+          set -euo pipefail
+          [ -z "$PREDICT_API_BASE" ] && exit 0
+          HTTP=$(curl -s -w "%{http_code}" --max-time 120 --retry 1 \
+            -H "Authorization: Bearer $ADMIN_TOKEN" \
+            "$PREDICT_API_BASE/api/prediction/export" -o /tmp/prediction_snapshot.db || echo "000")
+          SIZE=$(stat -c%s /tmp/prediction_snapshot.db 2>/dev/null || echo 0)
+          if [ "$HTTP" != "200" ] || [ "$SIZE" -lt 4096 ]; then
+            echo "::warning::prediction.db 导出失败 http=$HTTP size=$SIZE"
+            echo 1 >> /tmp/pred_failures
+            exit 0
+          fi
+          STAMP=$(TZ=Asia/Shanghai date +%Y%m%d)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin daily-reports || true
+          if git show-ref --verify --quiet refs/remotes/origin/daily-reports; then
+            git checkout -B daily-reports origin/daily-reports
+          else
+            git checkout --orphan daily-reports
+            git rm -r -q --ignore-unmatch .
+          fi
+          mkdir -p db_backup
+          cp /tmp/prediction_snapshot.db "db_backup/prediction_${STAMP}.db"
+          git add db_backup
+          if git diff --cached --quiet; then
+            echo "::notice::备份内容无变化, 跳过提交"
+          else
+            git commit -m "chore: prediction.db 快照备份 ${STAMP}"
+            git push --force-with-lease origin daily-reports
+            echo "已备份 db_backup/prediction_${STAMP}.db 到 daily-reports 分支"
+          fi
+
+      # ---- 汇总: 非全部失败则 job exit 0(契约要点) ----
+      - name: Summary
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ -f /tmp/pred_failures ] && [ -s /tmp/pred_failures ]; then
+            N=$(wc -l < /tmp/pred_failures)
+            echo "::error::共 ${N} 个环节失败(详见上方 warning)"
+            exit 1
+          fi
+          echo "::notice::prediction cycle 全部环节成功(或非交易日 skip)"

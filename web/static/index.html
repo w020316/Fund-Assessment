@@ -996,6 +996,8 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 <!-- ===== STAGE6: 基础 ===== 阶段六批次A 样式(盯盘/风险/X-Ray/账本;独立文件净增)
      第二轮阶段 5 增量样式已并入本文件末尾（避免第三个渲染阻塞请求） -->
 <link rel="stylesheet" href="/static/css/stage6.css">
+<!-- ===== STAGE6-PRED: 时段预测/推荐/准确率/板块二级页 新区块样式(引用 stage5 token, 红涨绿跌) ===== -->
+<link rel="stylesheet" href="/static/css/prediction.css">
 <!-- ===== STAGE5: responsive ===== 大屏正面设计(R3/P1-11;1366 双列分区/1920 居中) -->
 <link rel="stylesheet" href="/static/css/stage5-responsive.css">
 <!-- ===== STAGE5: motion ===== 冲奖动效(R3;ticker可控/转场/stagger/微交互;reduced-motion全关) -->
@@ -1069,6 +1071,24 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
             <span class="hud-subtab" data-page="review" role="button" tabindex="0" onclick="switchPage('review')">短线复盘</span>
             <span class="hud-subtab" data-page="global" role="button" tabindex="0" onclick="switchPage('global')">国际市场</span>
             <span class="hud-subtab" data-page="data" role="button" tabindex="0" onclick="switchPage('data')">深度数据</span>
+            <!-- ===== STAGE6-PRED: market-sector-board ===== R2.1 板块二级 tab(内容由 sector-board.js 渲染) -->
+            <span class="hud-subtab" data-page="sector-board" role="button" tabindex="0" onclick="switchPage('sector-board')">板块</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== STAGE6-PRED: market-sector-board ===== 板块二级页(R2.1;内容由 sector-board.js 渲染, 复用既有 /api/market/sector_flow) -->
+      <div class="page" id="page-sector-board">
+        <div class="card mb-16">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span>板块涨跌榜</span>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span id="predSectorFreshness"></span>
+              <button class="btn btn-sm btn-primary" style="min-height:36px;" onclick="SectorBoard.load(true)">刷新</button>
+            </div>
+          </div>
+          <div id="predSectorBoardBody">
+            <div class="pred-empty">切换到本页自动加载板块行情</div>
           </div>
         </div>
       </div>
@@ -1194,6 +1214,21 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
             <span class="hud-subtab" data-page="dispatch" role="button" tabindex="0" onclick="switchPage('dispatch')">一句话调度</span>
             <!-- ===== STAGE5: evolution ===== 策略自进化子页入口(仅新增节点, 不动 10→5 IA;父子联动由 evolution.js 包装 switchPage 接入) -->
             <span class="hud-subtab" data-page="evolution" role="button" tabindex="0" onclick="switchPage('evolution')">策略进化</span>
+            <!-- ===== STAGE6-PRED: strategy-recommend ===== R4.3 今日推荐二级 tab(内容由 recommendations.js 渲染) -->
+            <span class="hud-subtab" data-page="recommend" role="button" tabindex="0" onclick="switchPage('recommend')">今日推荐</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== STAGE6-PRED: strategy-recommend ===== 今日推荐页(R4.3/R4.2;内容由 recommendations.js 渲染, 每卡片必现免责声明) -->
+      <div class="page" id="page-recommend">
+        <div class="card mb-16">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span>今日推荐(信号驱动, 标的可追溯)</span>
+            <button class="btn btn-sm btn-primary" style="min-height:36px;" onclick="RecommendPage.load()">刷新</button>
+          </div>
+          <div id="predRecommendBody">
+            <div class="pred-empty">切换到本页自动加载今日推荐</div>
           </div>
         </div>
       </div>
@@ -2065,6 +2100,10 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
         </div>
         <!-- 阶段四:净值数据质量提示(仅在缺失时显示,不改变既有配色) -->
         <div id="fundDataQualityNote" style="display:none;margin:-6px 0 12px;padding:8px 12px;border:1px dashed var(--border);border-radius:8px;font-size:12px;color:var(--text-muted);"></div>
+        <!-- ===== STAGE6-PRED: holdings-share-edit ===== R7.1 份额估算角标与行内编辑挂载说明(角标经 recommendations.js 注入持仓表格行内) -->
+        <div class="pred-source-note" style="display:none;" id="predShareEditHint">
+          部分持仓份额为估算值(±5% 待复核), 表格中对应行有「份额为估算值,请复核」角标, 可点击「改」行内修正(数据即时落库)。
+        </div>
 
         <!-- 大盘温度计(P1-3) -->
         <div class="card mb-16" id="marketThermometerCard" style="display:none;">
@@ -2393,6 +2432,39 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
             </div>
           </div>
         </div>
+
+        <!-- ===== STAGE6-PRED: monitor-session ===== 三时段卡片横排 + 立即采集按钮(R1.3/R1.4;内容由 prediction.js 渲染) -->
+        <div class="pred-section" id="predSessionSection">
+          <div class="pred-section-title">
+            时段分析
+            <span class="pred-muted">每交易日 09:35 / 13:05 / 15:40 自动采集(非交易日跳过)</span>
+          </div>
+          <div id="predSessionCards" class="pred-cards">
+            <div class="pred-empty">切换或刷新后加载当日三时段快照</div>
+          </div>
+        </div>
+
+        <!-- ===== STAGE6-PRED: monitor-prediction ===== 次日预测卡片(R3.2;近 30 日可展开) -->
+        <div class="card mb-16" id="predNextDayCard">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span>次日趋势预测(沪深300 · 规则为主, AI 为辅)</span>
+            <button class="btn btn-sm" style="min-height:36px;" onclick="PredictionPage.loadPrediction()">刷新</button>
+          </div>
+          <div id="predNextDayBody">
+            <div class="pred-empty">加载中…</div>
+          </div>
+        </div>
+
+        <!-- ===== STAGE6-PRED: monitor-accuracy ===== AI 准确率看板(R6.3;三窗口 + 走势 + 样本量) -->
+        <div class="card mb-16" id="predAccuracyCard">
+          <div class="card-title">AI 准确率看板(预测 → 验证 → 统计闭环, 可测量可迭代)</div>
+          <div id="predAccuracyBody">
+            <div class="pred-empty">加载中…</div>
+          </div>
+        </div>
+
+        <!-- ===== STAGE6-PRED: freshness-coverage ===== R7.2/R7.3 北向与 QDII 口径说明挂载点(recommendations.js 注入) -->
+        <div id="predFreshnessCoverage"></div>
       </div>
 
       <!-- ==================== 8. 系统配置 ==================== -->
@@ -3007,6 +3079,9 @@ function switchPage(name) {
     review:   { parent: 'hud-market' },
     global:   { parent: 'hud-market' },
     data:     { parent: 'hud-market' },
+    // ===== STAGE6-PRED ===== 新增二级页(板块 / 今日推荐); 内容由独立 JS 渲染
+    'sector-board': { parent: 'hud-market' },
+    recommend: { parent: 'hud-strategy' },
     position: { parent: 'hud-holdings' },
     fund:     { parent: 'hud-holdings' },
     trade:    { parent: 'hud-holdings' },
@@ -8279,5 +8354,11 @@ document.addEventListener('DOMContentLoaded', () => {
 <script src="/static/js/evolution.js"></script>
 <!-- ===== STAGE5: ai-script ===== AI 定制建议(light 档真实入口;点击才调用,不影响首屏) -->
 <script src="/static/js/ai-script.js"></script>
+<!-- ===== STAGE6-PRED: 时段分析/次日预测/AI 准确率看板(监控容器;包装 switchPage 接入) ===== -->
+<script src="/static/js/prediction.js"></script>
+<!-- ===== STAGE6-PRED: 板块二级页(行情容器;复用既有 /api/market/sector_flow) ===== -->
+<script src="/static/js/sector-board.js"></script>
+<!-- ===== STAGE6-PRED: 今日推荐 + 持仓份额行内编辑 + 北向/QDII 口径说明 ===== -->
+<script src="/static/js/recommendations.js"></script>
 </body>
 </html>

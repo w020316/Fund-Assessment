@@ -80,9 +80,22 @@ async def lifespan(_app: FastAPI):
         app_state["executor"] = None
         app_state["config"] = None
 
+    # prediction.db 启动维护(建表 + 保留清理;失败仅告警)
+    _prediction_startup_maintenance()
+
     yield
 
     app_state.clear()
+
+
+def _prediction_startup_maintenance() -> None:
+    """prediction.db 启动维护(R5.2): 建表 + 保留策略清理(180/365 天), 失败不阻塞启动。"""
+    try:
+        from src.core.prediction_store import get_store
+        deleted = get_store().cleanup()
+        logger.info(f"prediction_store 启动清理完成: {deleted}")
+    except Exception as e:  # noqa: BLE001 — 启动维护绝不阻塞主服务
+        logger.warning(f"prediction_store 启动维护失败(不影响启动): {e}")
 
 
 app = FastAPI(
@@ -253,6 +266,7 @@ from web.routes import market as market_route
 from web.routes import monitor as monitor_route
 from web.routes import news as news_route
 from web.routes import portfolio as portfolio_route
+from web.routes import prediction as prediction_route
 from web.routes import review as review_route
 from web.routes import scripts as scripts_route
 from web.routes import skills as skills_route
@@ -282,6 +296,8 @@ app.include_router(review_route.router, prefix="/api/review", tags=["短线复�
 app.include_router(skills_route.router, prefix="/api/agent", tags=["技能调度"])
 # 阶段六批次A:组合盯盘/风险/X-Ray/Webhook/账本导入导出(全部挂 require_admin,scan 例外见路由内说明)
 app.include_router(portfolio_route.router, prefix="/api/portfolio", tags=["组合阶段六"])
+# 时段预测/推荐/准确率闭环(A1~A8 + export;写端点逐个 require_admin,公开读见路由内鉴权表)
+app.include_router(prediction_route.router, prefix="/api/prediction", tags=["时段预测"])
 
 _static_dir = Path(__file__).resolve().parent / "static"
 if _static_dir.is_dir():

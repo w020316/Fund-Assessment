@@ -1,0 +1,219 @@
+/* ===== STAGE6-PRED: prediction.css =====
+ * 时段分析 / 次日预测 / AI 准确率 / 板块二级页 / 今日推荐 区块样式。
+ * 引用既有 stage5 token(Var 带回退值, HUD 暗色主题自动适配)。
+ * 红涨绿跌: .pred-up 红(#F87171) / .pred-down 绿(#34D399), 与 hud 主题一致。
+ */
+
+.pred-section { margin-bottom: 16px; }
+
+.pred-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pred-muted {
+  color: var(--text-muted, #8b92a8);
+  font-size: 12px;
+}
+
+/* --- 三时段卡片横排 --- */
+.pred-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.pred-card {
+  background: var(--card-bg, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--border, #2a3142);
+  border-radius: 10px;
+  padding: 12px 14px;
+  min-height: 44px;
+}
+
+.pred-card .pred-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.pred-card .pred-card-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pred-card .pred-summary {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-secondary, #b8c0d0);
+  word-break: break-all;
+}
+
+.pred-card .pred-llm {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border, #2a3142);
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-muted, #8b92a8);
+}
+
+.pred-empty {
+  color: var(--text-muted, #8b92a8);
+  font-size: 12px;
+  text-align: center;
+  padding: 14px 0;
+  border: 1px dashed var(--border, #2a3142);
+  border-radius: 8px;
+}
+
+/* --- 红涨绿跌(§六 #5) --- */
+.pred-up { color: var(--color-up, #F87171); }
+.pred-down { color: var(--color-down, #34D399); }
+.pred-flat { color: var(--text-muted, #8b92a8); }
+
+.pred-dir-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 8px;
+  border-radius: 4px;
+  line-height: 1.8;
+}
+.pred-dir-badge.up { color: var(--color-up, #F87171); border: 1px solid var(--color-up, #F87171); }
+.pred-dir-badge.down { color: var(--color-down, #34D399); border: 1px solid var(--color-down, #34D399); }
+.pred-dir-badge.flat { color: var(--text-muted, #8b92a8); border: 1px solid var(--text-muted, #8b92a8); }
+
+/* --- 置信度标签 --- */
+.pred-conf {
+  font-size: 12px;
+  color: var(--accent-cyan, #00D9FF);
+  font-weight: 600;
+}
+
+/* --- 准确率看板 --- */
+.pred-acc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.pred-acc-cell {
+  border: 1px solid var(--border, #2a3142);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.pred-acc-cell .pred-acc-title { font-size: 12px; color: var(--text-muted, #8b92a8); }
+.pred-acc-cell .pred-acc-rate { font-size: 22px; font-weight: 700; margin: 2px 0; }
+.pred-acc-cell .pred-acc-meta { font-size: 11px; color: var(--text-muted, #8b92a8); }
+
+.pred-insufficient {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--color-warning, #f59e0b);
+  border: 1px dashed var(--color-warning, #f59e0b);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+/* 30 日走势条(纯 CSS div, 无 CDN) */
+.pred-trend {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 64px;
+  margin-top: 10px;
+  overflow-x: auto;
+}
+.pred-trend .pred-trend-bar {
+  width: 12px;
+  min-height: 4px;
+  background: var(--accent-cyan, #00D9FF);
+  border-radius: 2px 2px 0 0;
+  opacity: 0.85;
+  flex: 0 0 auto;
+}
+.pred-trend .pred-trend-bar.is-low { background: var(--color-warning, #f59e0b); }
+
+/* --- 板块二级页表格 --- */
+.pred-sector-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.pred-sector-table th, .pred-sector-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border, #2a3142);
+  text-align: right;
+  white-space: nowrap;
+}
+.pred-sector-table th:first-child, .pred-sector-table td:first-child { text-align: left; }
+.pred-sector-table th {
+  color: var(--text-muted, #8b92a8);
+  font-weight: 500;
+  font-size: 12px;
+}
+
+/* --- 推荐卡片 --- */
+.pred-recommend-item {
+  border: 1px solid var(--border, #2a3142);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+.pred-recommend-item .pred-rec-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.pred-recommend-item .pred-rec-name { font-size: 14px; font-weight: 600; }
+.pred-recommend-item .pred-rec-reason {
+  font-size: 12px;
+  color: var(--text-secondary, #b8c0d0);
+  margin-top: 6px;
+  line-height: 1.7;
+}
+.pred-disclaimer {
+  font-size: 11px;
+  color: var(--text-muted, #8b92a8);
+  border-top: 1px dashed var(--border, #2a3142);
+  margin-top: 8px;
+  padding-top: 6px;
+}
+
+/* --- 持仓份额行内编辑(R7.1) --- */
+.pred-share-estimated {
+  font-size: 11px;
+  color: var(--color-warning, #f59e0b);
+  border: 1px dashed var(--color-warning, #f59e0b);
+  border-radius: 4px;
+  padding: 0 5px;
+  margin-left: 6px;
+  white-space: nowrap;
+}
+.pred-share-edit-input {
+  width: 110px;
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid var(--border, #2a3142);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+}
+
+/* --- 北向/QDII 口径说明(R7.3/R7.4) --- */
+.pred-source-note {
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--text-muted, #8b92a8);
+  border: 1px dashed var(--border, #2a3142);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 8px 0;
+}
