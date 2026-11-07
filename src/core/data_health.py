@@ -103,15 +103,45 @@ def _status(entry: dict[str, Any]) -> str:
     return "down" if entry["consecutive_failures"] >= DOWN_THRESHOLD else "degraded"
 
 
+def _blank_source(name: str) -> dict[str, Any]:
+    """已登记但本进程从未上报过的源(重启后/未使用时的诚实状态)。"""
+    return {
+        "name": name,
+        "label": SOURCE_LABELS.get(name, name),
+        "status": "unknown",
+        "last_success_at": None,
+        "last_success_age_s": None,
+        "last_attempt_at": None,
+        "last_error": "",
+        "last_count": 0,
+        "consecutive_failures": 0,
+        "total_success": 0,
+        "total_failure": 0,
+    }
+
+
 def snapshot() -> dict[str, Any]:
-    """导出全部数据源状态(按登记顺序优先,未登记源按名称排序追加)。"""
+    """导出全部数据源状态。
+
+    2026-11-07 修复监控盲区:此前只输出 ``_state`` 里已有的源,而 ``_state`` 是在
+    源第一次被调用时才创建的。后果是——进程重启后,凡是本进程还没被调用过的源
+    (最典型的是 ``fund_realtime`` / ``fund_history``:没持仓就不会有人查基金)
+    **完全不出现在健康页**,``overall`` 仍报 ``ok``。即"基金数据源挂了也看不出来"。
+    现在改为:先按 ``SOURCE_LABELS`` 登记顺序铺满全部已知源,未上报的标记
+    ``unknown``(前端已渲染为"未探测/本进程尚未抓取"),再追加运行期新出现的源。
+    ``unknown`` 不计入故障判定,因此不影响 ``overall``;另返回 ``unverified``
+    列出这些源的名称,便于运维区分"没验过"与"验过且正常"。
+    """
     now = time.time()
     with _lock:
-        names = [n for n in SOURCE_LABELS if n in _state]
+        names = list(SOURCE_LABELS.keys())
         names += sorted(n for n in _state if n not in SOURCE_LABELS)
         sources: list[dict[str, Any]] = []
         for name in names:
-            entry = _state[name]
+            entry = _state.get(name)
+            if entry is None:
+                sources.append(_blank_source(name))
+                continue
             last_ok_ts = entry["last_success_ts"]
             sources.append({
                 "name": name,
@@ -140,6 +170,7 @@ def snapshot() -> dict[str, Any]:
     return {
         "generated_at": _now_iso(now),
         "overall": overall,
+        "unverified": [s["name"] for s in sources if s["status"] == "unknown"],
         "sources": sources,
     }
 

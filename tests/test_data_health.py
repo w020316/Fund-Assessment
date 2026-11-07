@@ -34,7 +34,10 @@ class TestStateMachine:
     def test_empty_state_is_unknown(self):
         snap = data_health.snapshot()
         assert snap["overall"] == "unknown"
-        assert snap["sources"] == []
+        # 2026-11-07: 改为预注册全部已知源(修监控盲区),未上报的标记 unknown
+        assert len(snap["sources"]) == len(data_health.SOURCE_LABELS)
+        assert all(s["status"] == "unknown" for s in snap["sources"])
+        assert sorted(snap["unverified"]) == sorted(data_health.SOURCE_LABELS)
         assert snap["generated_at"]
 
     def test_success_marks_ok(self):
@@ -171,7 +174,12 @@ class TestInstrumentation:
     def test_fund_realtime_empty_codes_not_counted(self):
         # 空入参不发请求,不应污染健康度
         assert ds2.get_fund_realtime_tencent([]) == []
-        assert data_health.snapshot()["sources"] == []
+        # 2026-11-07: 预注册后 sources 不再为空,改为断言该源仍是"未上报"状态
+        snap = data_health.snapshot()
+        fund_rt = next(s for s in snap["sources"] if s["name"] == "fund_realtime")
+        assert fund_rt["status"] == "unknown"
+        assert fund_rt["total_success"] == 0
+        assert fund_rt["total_failure"] == 0
 
 
 class TestRoute:
