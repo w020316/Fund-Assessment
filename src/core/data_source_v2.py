@@ -6,7 +6,8 @@ import random
 import re
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, wait
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -49,7 +50,11 @@ _cache_lock = threading.Lock()
 _CACHE_MAX_SIZE = 200
 # 修复(2026-07-29):Render Free CPU 仅 0.1 核,6 线程增加上下文切换开销
 # 降为 3 线程,足够并行抓取行情/K线/资金流,且内存占用减半
-_thread_pool = ThreadPoolExecutor(max_workers=3)
+_thread_pool = ThreadPoolExecutor(max_workers=8)
+# P2 修复(2026-11-07)：原 max_workers=3，而 _parallel_fetch 一次就提交 4 个任务
+# （行情/财务/资金/K线），第 4 个必然排队等前面的完成；一旦某个上游卡住，
+# 其余请求也会被同一批 worker 饿死。提到 8 后单次详情请求不再自排队，
+# 同时保留上限，避免无限创建线程。
 # P2 修复(2026-07-29):注册进程退出钩子,确保线程池优雅关闭
 # 原代码无 shutdown,Render Free 实例重启时可能残留线程导致资源泄漏
 atexit.register(_thread_pool.shutdown, wait=False)
@@ -79,19 +84,42 @@ def _cache_set(key: str, val: Any, ttl: float) -> None:
         _cache[key] = {"val": val, "ts": time.monotonic(), "ttl": ttl}
 
 
-def _parallel_fetch(funcs: list[tuple[str, Any]]) -> dict[str, Any]:
+def _parallel_fetch(funcs: list[tuple[str, Any]], deadline: float | None = None) -> dict[str, Any]:
+    """并发执行多个抓取函数，返回 {名称: 结果}。
+
+    P1 修复(2026-11-07)：原实现 `as_completed(futures)` **没有总超时**，
+    最慢的那个抓取决定整个请求的耗时。个股详情实测 5.19s，其中
+    get_kline_mootdx 单项 5.88s（mootdx 连不上 → 东财 → 新浪 三级串行回退），
+    用户点开详情要等 5 秒才看到内容。
+
+    现在支持 deadline（秒）：超时的任务被取消并记为 None，
+    调用方按"该维度数据暂不可用"处理，而不是让整页陪着等。
+    deadline=None 时保持原有"等全部完成"语义，兼容既有调用方。
+    """
     results: dict[str, Any] = {}
-    futures = {}
-    for name, fn in funcs:
-        f = _thread_pool.submit(fn)
-        futures[f] = name
-    for f in as_completed(futures):
+    futures = {_thread_pool.submit(fn): name for name, fn in funcs}
+    if deadline is None:
+        # 必须 wait 到全部完成：futures.keys() 不是"已完成集合"，
+        # 直接遍历会让还在跑的任务被 result(timeout=0) 判成超时（返回 None）。
+        done, pending = wait(set(futures))
+    else:
+        done, pending = wait(set(futures), timeout=deadline)
+
+    for f in done:
         name = futures[f]
         try:
-            results[name] = f.result(timeout=10)
+            results[name] = f.result(timeout=0)
         except Exception as e:
             logger.warning(f"parallel_fetch {name} failed: {e}")
             results[name] = None
+
+    for f in pending:
+        name = futures[f]
+        f.cancel()
+        logger.warning(
+            f"parallel_fetch {name} 超过预算 {deadline}s，本次跳过（返回 None，不阻塞响应）"
+        )
+        results[name] = None
     return results
 
 
@@ -150,6 +178,34 @@ def _safe_float(val: Any, default: float = 0.0) -> float:
         return default
 
 
+def _opt_float(val: Any) -> float | None:
+    """把"可能不存在"的数值字段转成 float | None。
+
+    与 _safe_float 的区别（P1 修复 2026-11-07）：
+    _safe_float 缺字段时返回 0.0，导致"数据缺失"和"真实值 0"无法区分。
+    个股详情页因此把缺失的 ROE 渲染成 `0.00%`、把缺失的 PB 渲染成 `0.00`，
+    与项目"缺失必须标注 —，不得填 0"的红线直接冲突。
+
+    本函数只在值确实存在且为有效数字时返回 float，其余一律返回 None，
+    前端 _numOrDash/_pctOrDash 对 None 已有 "—" 渲染，语义自然对齐。
+    """
+    if val is None:
+        return None
+    if isinstance(val, str):
+        val = val.strip()
+        if val in ("", "-", "--", "—", "None", "null", "nan"):
+            return None
+    if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+        return None
+    try:
+        result = float(val)
+    except (ValueError, TypeError):
+        return None
+    if math.isnan(result) or math.isinf(result):
+        return None
+    return result
+
+
 def _safe_str(val: Any, default: str = "") -> str:
     if val is None or (isinstance(val, float) and math.isnan(val)):
         return default
@@ -165,18 +221,58 @@ def _safe_int(val: Any, default: int = 0) -> int:
         return default
 
 
+def _market_of(code: str) -> str:
+    """按代码号段判定交易所前缀（sh / sz / bj）。
+
+    P0 修复(2026-11-07)：原实现只有"6/9 开头=沪、其余=深"一条规则，
+    把**沪市场内基金**整段判错——510300(沪深300ETF) 被拼成 sz510300，
+    腾讯行情返回 `v_pv_none_match="1"`（空），于是个股详情页 quote 全空、
+    前端只能显示"—"。实测 sh510300 有 88 个字段、价格 4.124，sz510300 为空。
+
+    号段规则（A股 + 场内基金 + 北交所）：
+      - 6xxxxx          沪市主板 / 科创板(688)
+      - 9xxxxx          沪市 B 股(900)；92xxxx 属北交所，需先判
+      - 5xxxxx          沪市场内基金(500/501/502/505/506/510~518/560~588)
+      - 0xxxxx/3xxxxx   深市主板 / 创业板
+      - 1xxxxx          深市场内基金(150/159/160/161/162/163/164/165/166/167/168/169/18x)
+      - 2xxxxx          深市 B 股(200)
+      - 4xxxxx/8xxxxx   北交所(43/83/87/88)
+    """
+    raw = code.strip()
+    lowered = raw.lower()
+    if lowered.startswith(("sh", "sz", "bj")):
+        return lowered[:2]
+    if raw.startswith("92"):          # 北交所新号段，必须在 9→沪 之前判断
+        return "bj"
+    if raw.startswith(("4", "8")):    # 北交所
+        return "bj"
+    if raw.startswith(("6", "9", "5")):  # 沪市：主板/科创、B股、场内基金
+        return "sh"
+    return "sz"                        # 0/1/2/3 及其余
+
+
 def _prefix_code(code: str) -> str:
-    if code.startswith(("sh", "sz", "SH", "SZ")):
-        return code.lower()
-    if code.startswith(("6", "9")):
-        return f"sh{code}"
-    return f"sz{code}"
+    """返回带交易所前缀的代码，如 510300 -> sh510300。"""
+    raw = code.strip()
+    if raw.lower().startswith(("sh", "sz", "bj")):
+        return raw.lower()
+    return f"{_market_of(raw)}{raw}"
 
 
 def _em_secid(code: str) -> str:
-    if code.startswith("6") or code.startswith("9"):
-        return f"1.{code}"
-    return f"0.{code}"
+    """东财 secid：沪市为 1.xxxxxx，深市/北交所为 0.xxxxxx。
+
+    场内基金同理：510300 -> 1.510300（原实现返回 0.510300，K线/财务全空）。
+    入参允许带 sh/sz/bj 前缀（K线等链路会传入带前缀代码），先剥掉再判市。
+    """
+    raw = code.strip().lower()
+    if raw.startswith(("sh", "sz", "bj")):
+        # 显式前缀优先：sh000001 是上证指数（secid 1.000001），
+        # 若按裸码 000001 判市会错判成深市平安银行。
+        market, raw = raw[:2], raw[2:]
+    else:
+        market = _market_of(raw)
+    return f"1.{raw}" if market == "sh" else f"0.{raw}"
 
 
 def em_get(url: str, params: dict[str, Any] | None = None, **kwargs: Any) -> requests.Response:
@@ -802,6 +898,41 @@ def _search_stock_tencent(keyword: str) -> list[dict]:
     return None
 
 
+def get_kline_summary(code: str, count: int = 30) -> dict:
+    """把最近 count 根日线压缩成区间摘要（最新收盘 / 30日高低 / 均量均额）。
+
+    独立成公开函数（2026-11-07）：详情接口的主响应只等它 1.2s，
+    超时后由前端调用 /api/market/stock_kline_summary 异步补齐，
+    避免 K 线回退链把"点开详情"拖成 5 秒。
+
+    注意：high/low 用 _opt_float 取值，全缺失时返回 None 而不是 0，
+    否则前端会显示"30日低 0.00"这种明显错误的价格。
+    """
+    if not code or not code.strip():
+        return {}
+    try:
+        klines = get_kline_mootdx(code.strip(), period="daily", count=count)
+    except Exception as e:
+        logger.warning(f"get_kline_summary failed: {e}")
+        return {}
+    if not klines:
+        return {}
+    highs = [h for h in (_opt_float(k.get("high")) for k in klines) if h is not None]
+    lows = [lo for lo in (_opt_float(k.get("low")) for k in klines) if lo is not None]
+    volumes = [v for v in (_opt_float(k.get("volume")) for k in klines) if v is not None]
+    amounts = [a for a in (_opt_float(k.get("amount")) for k in klines) if a is not None]
+    latest = klines[-1]
+    return {
+        "latest_date": _safe_str(latest.get("date")),
+        "latest_close": _opt_float(latest.get("close")),
+        "high_30d": max(highs) if highs else None,
+        "low_30d": min(lows) if lows else None,
+        "avg_volume_30d": round(sum(volumes) / len(volumes), 2) if volumes else None,
+        "avg_amount_30d": round(sum(amounts) / len(amounts), 2) if amounts else None,
+        "days": len(klines),
+    }
+
+
 def get_stock_detail(code: str) -> dict:
     if not code or not code.strip():
         return {}
@@ -861,39 +992,41 @@ def get_stock_detail(code: str) -> dict:
             return {}
 
     def _fetch_kline():
-        try:
-            klines = get_kline_mootdx(code, period="daily", count=30)
-            if klines:
-                latest = klines[-1]
-                high_30 = max(_safe_float(k.get("high", 0)) for k in klines)
-                low_30 = min(_safe_float(k.get("low", float("inf"))) for k in klines)
-                avg_volume = sum(_safe_float(k.get("volume", 0)) for k in klines) / len(klines)
-                avg_amount = sum(_safe_float(k.get("amount", 0)) for k in klines) / len(klines)
-                return {
-                    "latest_date": _safe_str(latest.get("date")),
-                    "latest_close": _safe_float(latest.get("close")),
-                    "high_30d": high_30,
-                    "low_30d": low_30 if low_30 != float("inf") else 0.0,
-                    "avg_volume_30d": round(avg_volume, 2),
-                    "avg_amount_30d": round(avg_amount, 2),
-                    "days": len(klines),
-                }
-        except Exception as e:
-            logger.warning(f"get_stock_detail kline_summary failed: {e}")
-        return {}
+        return get_kline_summary(code, count=30)
 
-    fetched = _parallel_fetch([
-        ("quote", _fetch_quote),
-        ("financial", _fetch_financial),
-        ("capital_flow", _fetch_capital),
-        ("kline_summary", _fetch_kline),
-    ])
-    quote_data = fetched.get("quote", {"quote": {}, "name": ""})
+    # P1 修复(2026-11-07)：K 线区间摘要单独给 1.2s 预算。
+    # 它只是详情面板的补充信息（30日高低/均量），而 mootdx 连不上时会按服务器
+    # 逐个重试，实测 4.7s。原来的做法是整页陪着等 → 用户点开详情 5.2s 才看到价格。
+    # 现在：核心三维（行情/财务/资金）先返回，区间摘要超时就留空，
+    # 由前端异步补拉 /api/market/stock_kline_summary，页面不再被它拖住。
+    kline_future = _thread_pool.submit(_fetch_kline)
+    _t0 = time.monotonic()
+    fetched = _parallel_fetch(
+        [
+            ("quote", _fetch_quote),
+            ("financial", _fetch_financial),
+            ("capital_flow", _fetch_capital),
+        ],
+        deadline=3.0,
+    )
+    # 预算按"从提交到现在已花掉的时间"扣减，否则总耗时 = 核心耗时 + 1.2s，
+    # 实测仍是 1.6s+，等于预算没生效。
+    _kline_budget = max(0.0, 1.0 - (time.monotonic() - _t0))
+    try:
+        result["kline_summary"] = kline_future.result(timeout=_kline_budget) or {}
+    except FuturesTimeoutError:
+        kline_future.cancel()
+        logger.info(f"get_stock_detail kline_summary 超过 1.0s 预算，留待前端异步补拉: {code}")
+        result["kline_summary"] = {}
+    except Exception as e:
+        logger.warning(f"get_stock_detail kline_summary failed: {e}")
+        result["kline_summary"] = {}
+
+    quote_data = fetched.get("quote") or {"quote": {}, "name": ""}
     result["quote"] = quote_data.get("quote", {})
     result["name"] = quote_data.get("name", "")
-    result["financial"] = fetched.get("financial", {})
-    result["capital_flow"] = fetched.get("capital_flow", {})
-    result["kline_summary"] = fetched.get("kline_summary", {})
+    result["financial"] = fetched.get("financial") or {}
+    result["capital_flow"] = fetched.get("capital_flow") or {}
     _cache_set(cache_key, result, 10)
     return result
 
@@ -1527,29 +1660,48 @@ def _get_global_news_sina() -> list[dict]:
         return []
 
 
+def _has_meaningful_value(snapshot: dict) -> bool:
+    """判断财务快照是否含有真实数据（用于决定是否继续回退下一数据源）。
+
+    P1 修复(2026-11-07)：mootdx 对 ETF/指数等无财报的标的会返回一行**全 None**，
+    旧实现用 _safe_float(...,0) 把它变成"一行全 0"，字典非空 → 直接 return，
+    于是详情页出现 `ROE 0.00%`、`PE 0.00`，而 report_date 为空。
+    现在只要没有任何非 None 数值，就视为"无数据"，继续回退。
+    """
+    return any(
+        isinstance(v, (int, float)) and not isinstance(v, bool)
+        for k, v in snapshot.items()
+        if k not in ("code",)
+    )
+
+
 def _financial_snapshot_mootdx(stock_code: str) -> dict:
     client = _mootdx_client()
     if client is None:
         return {}
     try:
-        market = 1 if stock_code.startswith("6") or stock_code.startswith("9") else 0
+        market = 1 if _market_of(stock_code) == "sh" else 0
         df = client.finance(symbol=stock_code, market=market)
         if df is None or df.empty:
             return {}
         row = df.iloc[0]
-        return {
+        snapshot = {
             "code": stock_code,
             "report_date": _safe_str(row.get("report_date", ""))[:10],
-            "eps": _safe_float(row.get("basic_eps", 0)),
-            "bvps": _safe_float(row.get("bvps", 0)),
-            "roe": _safe_float(row.get("roe", 0)),
-            "revenue": _safe_float(row.get("total_operating_revenue", 0)),
-            "revenue_yoy": _safe_float(row.get("yysr_yoy", 0)),
-            "profit": _safe_float(row.get("parent_net_profit", 0)),
-            "profit_yoy": _safe_float(row.get("jlr_yoy", 0)),
-            "gross_margin": _safe_float(row.get("gross_profit_ratio", 0)),
-            "net_margin": _safe_float(row.get("net_profit_ratio", 0)),
+            "eps": _opt_float(row.get("basic_eps")),
+            "bvps": _opt_float(row.get("bvps")),
+            "roe": _opt_float(row.get("roe")),
+            "revenue": _opt_float(row.get("total_operating_revenue")),
+            "revenue_yoy": _opt_float(row.get("yysr_yoy")),
+            "profit": _opt_float(row.get("parent_net_profit")),
+            "profit_yoy": _opt_float(row.get("jlr_yoy")),
+            "gross_margin": _opt_float(row.get("gross_profit_ratio")),
+            "net_margin": _opt_float(row.get("net_profit_ratio")),
         }
+        # 全 None 说明该标的无财报（ETF/指数/债券），交给下一数据源
+        if not _has_meaningful_value(snapshot):
+            return {}
+        return snapshot
     except Exception as e:
         logger.warning(f"_financial_snapshot_mootdx failed: {e}")
         return {}
@@ -1567,18 +1719,21 @@ def _financial_snapshot_em(stock_code: str) -> dict:
         data = resp.json().get("data", {})
         if not data:
             return {}
-        return {
+        snapshot = {
             "code": stock_code,
-            "pe_ttm": _safe_float(data.get("f9", 0)),
-            "pb": _safe_float(data.get("f23", 0)),
-            "total_mv": _safe_float(data.get("f20", 0)),
-            "circ_mv": _safe_float(data.get("f115", 0)),
-            "roe": _safe_float(data.get("f162", 0)),
-            "gross_margin": _safe_float(data.get("f186", 0)),
-            "net_margin": _safe_float(data.get("f187", 0)),
-            "revenue_yoy": _safe_float(data.get("f183", 0)),
-            "profit_yoy": _safe_float(data.get("f185", 0)),
+            "pe_ttm": _opt_float(data.get("f9")),
+            "pb": _opt_float(data.get("f23")),
+            "total_mv": _opt_float(data.get("f20")),
+            "circ_mv": _opt_float(data.get("f115")),
+            "roe": _opt_float(data.get("f162")),
+            "gross_margin": _opt_float(data.get("f186")),
+            "net_margin": _opt_float(data.get("f187")),
+            "revenue_yoy": _opt_float(data.get("f183")),
+            "profit_yoy": _opt_float(data.get("f185")),
         }
+        if not _has_meaningful_value(snapshot):
+            return {}
+        return snapshot
     except Exception as e:
         logger.warning(f"_financial_snapshot_em failed: {e}")
         return {}
@@ -1590,11 +1745,18 @@ def _financial_snapshot_tencent(stock_code: str) -> dict:
         if not quotes:
             return {}
         q = quotes[0]
-        pe_ttm = _safe_float(q.get("pe_ttm"))
-        pb = _safe_float(q.get("pb"))
-        total_mv = _safe_float(q.get("total_market_value"))
-        circ_mv = _safe_float(q.get("circ_market_value"))
-        if pe_ttm == 0 and pb == 0 and total_mv == 0:
+        pe_ttm = _opt_float(q.get("pe_ttm"))
+        pb = _opt_float(q.get("pb"))
+        total_mv = _opt_float(q.get("total_market_value"))
+        circ_mv = _opt_float(q.get("circ_market_value"))
+        # 腾讯对 ETF/指数把 PE/PB 直接给 0（不是"缺失"，是该品类没有 PE/PB）。
+        # 0 不是有效估值，一律转 None，前端显示"—"，避免"PE 0.00"误导。
+        if pe_ttm == 0:
+            pe_ttm = None
+        if pb == 0:
+            pb = None
+        # 三者全空/0 才认为无数据
+        if not any(v for v in (pe_ttm, pb, total_mv)):
             return {}
         return {
             "code": stock_code,

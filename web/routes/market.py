@@ -37,6 +37,7 @@ def _build_meta(
     cached: bool = False,
     quality_score: float | None = None,
     stale: bool = False,
+    extra: dict | None = None,
 ) -> dict:
     """构建响应元数据"""
     resolved_quality = quality_score if quality_score is not None else (100.0 if cached else 80.0)
@@ -53,6 +54,10 @@ def _build_meta(
     # 前端可据此显示"数据稍有延迟"，也便于线上排查命中路径。
     if stale:
         meta["stale"] = True
+    # 2026-11-07 U6：允许各接口补充结构化元信息（如个股详情的 sections/completeness），
+    # 前端据此区分"这一块真的没有数据"与"这一块是 0"。
+    if extra:
+        meta.update(extra)
     return meta
 
 
@@ -849,12 +854,52 @@ async def market_status():
     return {"data": result.model_dump(), "_meta": _build_meta("local", cached=False, quality_score=100.0)}
 
 
+# 个股详情的数据维度。
+# 前三个是**同步契约**（本次响应必须尽力拿到），kline_summary 是**异步补充**：
+# 详情主接口只等它 1 秒，超时后由 /api/market/stock_kline_summary 补齐。
+# 因此完整度只按前三个算，否则每个详情页都会显示"完整度 75%"，而用户实际
+# 只差一块正在后台加载的区间统计——那是误导，不是透明。
+_DETAIL_CORE_KEYS = ("quote", "financial", "capital_flow")
+_DETAIL_LAZY_KEYS = ("kline_summary",)
+
+
+def _detail_completeness(payload_data: dict) -> tuple[dict, float]:
+    """返回 (各维度是否有数据, 核心维度完整度百分比)。
+
+    P1 修复(2026-11-07)：原响应只有一个 quality_score，
+    且空数据时仍可能显示 100，用户无法判断"页面上一堆 —"是为什么。
+    """
+    sections = {
+        key: bool(payload_data.get(key))
+        for key in _DETAIL_CORE_KEYS + _DETAIL_LAZY_KEYS
+    }
+    present = sum(1 for key in _DETAIL_CORE_KEYS if sections[key])
+    return sections, round(present / len(_DETAIL_CORE_KEYS) * 100, 1)
+
+
 @router.get("/stock_detail")
 async def stock_detail(code: str = Query(..., description="股票代码")):
-    cache_key = f"market:stock_detail:{code}"
+    # 缓存键加 v2：旧键里存的是裸 data（无质量分），新键存"数据 + 评分依据"，
+    # 换版本可避免读到旧结构后把质量分算成 0。
+    cache_key = f"market:stock_detail:v2:{code}"
     cached = cache.get(cache_key)
-    if cached is not None:
-        return {"data": cached, "_meta": _build_meta("mixed", cached=True)}
+    if cached is not None and isinstance(cached, dict) and "data" in cached:
+        # P1 修复(2026-11-07)：原实现命中缓存时用 _build_meta(cached=True) 重建 meta，
+        # quality_score 缺省 100 → "第一次 30 分、刷新一下变 100 分"。
+        # 现在只缓存**事实**（数据 + 评分依据），meta 每次按同一口径重建，
+        # 时间戳与 cached 标记都保持真实。
+        return {
+            "data": cached["data"],
+            "_meta": _build_meta(
+                "mixed",
+                cached=True,
+                quality_score=cached.get("quality_score", 0.0),
+                extra={
+                    "sections": cached.get("sections") or {},
+                    "completeness": cached.get("completeness", 0.0),
+                },
+            ),
+        }
     try:
         data = await asyncio.to_thread(ds2.get_stock_detail, code)
         result = StockDetailResponse(
@@ -865,13 +910,77 @@ async def stock_detail(code: str = Query(..., description="股票代码")):
             capital_flow=data.get("capital_flow", {}),
             kline_summary=data.get("kline_summary", {}),
         )
-        cache.set(cache_key, result.model_dump(), ttl=120)
-        # 计算数据质量评分
+        payload_data = result.model_dump()
+        # 质量分口径（2026-11-07 U6 重定义）：
+        #   quality = min(行情字段合理性, 核心维度完整度)
+        # 不再复用 validate_analysis_data：它按"四维全有"打分，而详情接口的
+        # K 线是异步补拉项，硬算进去会让每个详情页都固定扣 10 分（90 分），
+        # 与页面实际内容不符。现在分数只反映"这次给你的数据有多全、多可信"。
         validator = get_data_validator()
-        vr = validator.validate_analysis_data(data)
-        return {"data": result.model_dump(), "_meta": _build_meta("mixed", cached=False, quality_score=vr.quality_score)}
+        quote = data.get("quote") or {}
+        quote_score = validator.validate_quote(quote).quality_score if quote else 0.0
+        sections, completeness = _detail_completeness(payload_data)
+        quality = min(quote_score, completeness)
+        cache.set(
+            cache_key,
+            {
+                "data": payload_data,
+                "quality_score": quality,
+                "sections": sections,
+                "completeness": completeness,
+            },
+            ttl=120,
+        )
+        return {
+            "data": payload_data,
+            "_meta": _build_meta(
+                "mixed",
+                cached=False,
+                quality_score=quality,
+                extra={"sections": sections, "completeness": completeness},
+            ),
+        }
     except Exception:
-        return {"data": StockDetailResponse(code=code, name="", quote={}, financial={}, capital_flow={}, kline_summary={}).model_dump(), "_meta": _build_meta("mixed", cached=False, quality_score=0.0)}
+        empty = StockDetailResponse(code=code, name="", quote={}, financial={}, capital_flow={}, kline_summary={}).model_dump()
+        sections, completeness = _detail_completeness(empty)
+        return {
+            "data": empty,
+            "_meta": _build_meta(
+                "mixed",
+                cached=False,
+                quality_score=0.0,
+                extra={"sections": sections, "completeness": completeness},
+            ),
+        }
+
+
+@router.get("/stock_kline_summary")
+async def stock_kline_summary(code: str = Query(..., description="股票代码")):
+    """个股区间摘要（最新收盘 / 30日高低 / 均量），供详情面板异步补拉。
+
+    背景（2026-11-07 U6）：个股详情主接口只等 K 线 1.2s，超时返回空区间；
+    前端先渲染价格与估值，再调本接口把"近期区间"补齐，
+    用户不必为了看一个现价而等 mootdx 逐个服务器重试（实测 4.7s）。
+
+    空结果不写缓存：与搜索接口同一条原则——上游恢复后不能还回旧空值。
+    """
+    cache_key = f"market:stock_kline_summary:{code}"
+    cached = cache.get(cache_key)
+    if cached:
+        # 只缓存数据本身，meta 每次重建：否则重启后从文件缓存读回的
+        # 信封会带着"cached:false"和旧时间戳，前端看到的时间是假的。
+        return {"data": cached, "_meta": _build_meta("mixed", cached=True, quality_score=100.0)}
+    try:
+        data = await asyncio.to_thread(ds2.get_kline_summary, code, 30)
+    except Exception as e:
+        logger.warning(f"stock_kline_summary failed: {e}")
+        data = {}
+    if data:
+        cache.set(cache_key, data, ttl=300)
+    return {
+        "data": data or {},
+        "_meta": _build_meta("mixed", cached=False, quality_score=100.0 if data else 0.0),
+    }
 
 
 class MarketWideStatsResponse(BaseModel):

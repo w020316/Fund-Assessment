@@ -273,7 +273,11 @@ class DataValidator:
 
         # 检查关键数据维度
         has_quote = bool(data.get("quote"))
-        has_kline = bool(data.get("kline_daily"))
+        # P2 修复(2026-11-07)：个股详情接口返回的键是 kline_summary（30 日区间摘要），
+        # 不是 kline_daily。原实现只认 kline_daily，导致详情接口明明带了区间数据，
+        # 仍被判"缺少K线数据"并扣 10 分——评分与实际数据不一致。
+        has_kline_daily = bool(data.get("kline_daily"))
+        has_kline = has_kline_daily or bool(data.get("kline_summary"))
         has_financial = bool(data.get("financial"))
         has_capital_flow = bool(data.get("capital_flow"))
 
@@ -313,7 +317,7 @@ class DataValidator:
             result.criticals.extend(sub.criticals)
             result.quality_score = max(0, result.quality_score - (100 - sub.quality_score))
 
-        if has_kline:
+        if has_kline_daily:
             sub = self.validate_kline(data["kline_daily"])
             result.issues.extend(sub.issues)
             result.warnings.extend(sub.warnings)

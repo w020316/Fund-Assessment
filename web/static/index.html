@@ -3636,6 +3636,18 @@ function _pctOrDash(v) {
   return changeSign(v) + fmtNum(v) + '%';
 }
 
+/** 不带正负号的百分比（换手率、占比等"无方向"指标，加 + 号会误导）。 */
+function _pctAbsOrDash(v) {
+  if (v == null || typeof v !== 'number' || !isFinite(v)) return '—';
+  return fmtNum(v) + '%';
+}
+
+/** 估值类指标：PE/PB 为 0 表示"不适用"（ETF/指数无此估值），必须显示 — 而不是 0.00。 */
+function _ratioOrDash(v) {
+  if (v == null || typeof v !== 'number' || !isFinite(v) || v === 0) return '—';
+  return v.toFixed(2);
+}
+
 async function searchStocks() {
   const input = document.getElementById('stockSearchInput');
   const body = document.getElementById('stockSearchResults');
@@ -3709,7 +3721,14 @@ function renderStockDetail(d, meta) {
   const k = d.kline_summary || {};
   const name = d.name || q.name || d.code;
   const quality = (meta && meta.quality_score != null) ? meta.quality_score : null;
+  const sections = (meta && meta.sections) || null;
+  const completeness = (meta && meta.completeness != null) ? meta.completeness : null;
   const degraded = quality !== null && Number(quality) <= 0;
+  // U6 修复(2026-11-07)：缺失维度必须点名，不能只给一个笼统的质量分。
+  // kline_summary 是异步补拉项（后端只等 1s），不算"缺失"，由区间卡片自己表达加载态。
+  const SECTION_LABEL = { quote: '行情', financial: '财务', capital_flow: '资金流' };
+  const missing = sections ? Object.keys(SECTION_LABEL).filter(key => sections[key] === false) : [];
+  const missingText = missing.map(key => SECTION_LABEL[key]).join('、');
   const metric = (label, value, extra = '') => `<div class="card" style="text-align:center;padding:10px;">
       <div style="font-size:11px;color:var(--text-muted);">${label}</div>
       <div style="font-size:16px;font-weight:600;${extra}">${value}</div>
@@ -3723,17 +3742,21 @@ function renderStockDetail(d, meta) {
       </div>
       <button class="btn btn-sm btn-outline" onclick="openKlineFromLastStock()">查看K线</button>
     </div>
-    ${degraded ? '<div style="margin-bottom:8px;padding:6px 10px;border:1px dashed var(--color-warning);border-radius:6px;font-size:12px;color:var(--color-warning);">行情/财务数据缺失，以下显示“—”而非 0</div>' : ''}
+    ${degraded ? '<div style="margin-bottom:8px;padding:6px 10px;border:1px dashed var(--color-warning);border-radius:6px;font-size:12px;color:var(--color-warning);">行情/财务数据缺失，以下显示“—”而非 0</div>'
+      : (missing.length ? `<div style="margin-bottom:8px;padding:6px 10px;border:1px dashed var(--border-subtle, rgba(148,163,184,.35));border-radius:6px;font-size:12px;color:var(--text-muted);">该标的暂无 <b style="color:var(--text-secondary);">${escapeHtml(missingText)}</b> 数据，对应字段显示“—”（不是 0）</div>` : '')}
     <div class="grid-4" style="gap:8px;margin-bottom:10px;">
       ${metric('现价', _numOrDash(q.price))}
       ${metric('涨跌幅', _pctOrDash(q.change_pct), 'color:' + changeColor(q.change_pct) + ';')}
-      ${metric('换手率', _pctOrDash(q.turnover))}
-      ${metric('PE(TTM)', _numOrDash(f.pe_ttm != null ? f.pe_ttm : q.pe_ttm))}
-      ${metric('PB', _numOrDash(f.pb != null ? f.pb : q.pb))}
+      ${metric('换手率', _pctAbsOrDash(q.turnover))}
+      ${metric('PE(TTM)', _ratioOrDash(f.pe_ttm != null ? f.pe_ttm : q.pe_ttm))}
+      ${metric('PB', _ratioOrDash(f.pb != null ? f.pb : q.pb))}
       ${metric('ROE', _pctOrDash(f.roe))}
-      ${metric('总市值', _numOrDash(q.total_market_value))}
-      ${metric('流通市值', _numOrDash(q.circ_market_value))}
+      ${metric('总市值', _numOrDash(q.total_market_value) + (q.total_market_value == null ? '' : ' 亿'))}
+      ${metric('流通市值', _numOrDash(q.circ_market_value) + (q.circ_market_value == null ? '' : ' 亿'))}
     </div>
+    ${(f.pe_ttm == null && f.pb == null && f.roe == null)
+      ? '<div style="margin:-4px 0 8px;font-size:12px;color:var(--text-secondary);">该标的为 ETF/指数等非股票品种，本身没有 PE / PB / ROE 口径，故显示“—”。</div>'
+      : ''}
     <div class="grid-2" style="gap:8px;">
       <div class="card" style="padding:10px;font-size:12px;color:var(--text-secondary);">
         <div style="font-weight:600;margin-bottom:6px;">资金流</div>
@@ -3742,16 +3765,64 @@ function renderStockDetail(d, meta) {
         <div>超大单：${_numOrDash(c.super_large_net_inflow)} / 大单：${_numOrDash(c.large_net_inflow)}</div>
         <div>中单：${_numOrDash(c.medium_net_inflow)} / 小单：${_numOrDash(c.small_net_inflow)}</div>
       </div>
-      <div class="card" style="padding:10px;font-size:12px;color:var(--text-secondary);">
+      <div class="card" style="padding:10px;font-size:12px;color:var(--text-secondary);" id="stockRangeCard">
         <div style="font-weight:600;margin-bottom:6px;">近期区间</div>
-        <div>最新收盘：${_numOrDash(k.latest_close)}（${escapeHtml(k.latest_date || '—')}）</div>
-        <div>30日高/低：${_numOrDash(k.high_30d)} / ${_numOrDash(k.low_30d)}</div>
-        <div>30日均量：${_numOrDash(k.avg_volume_30d, 0)}</div>
+        ${_stockRangeHTML(k)}
       </div>
     </div>
     <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">
-      数据源：${escapeHtml((meta && meta.data_source) || '—')} · 质量评分：${quality == null ? '—' : quality}
+      数据源：${escapeHtml((meta && meta.data_source) || '—')}
+      · 完整度：${completeness == null ? '—' : completeness + '%'}
+      · 质量评分：${quality == null ? '—' : quality}
+      ${(meta && meta.cached) ? ' · 缓存' : ''}
     </div>`;
+
+  // 区间摘要后端只等 1 秒，超时就不阻塞主响应；这里异步补拉一次。
+  if (!k || !Object.keys(k).length) loadStockRangeSummary(d.code);
+}
+
+function _stockRangeHTML(k) {
+  if (!k || !Object.keys(k).length) {
+    return '<div style="color:var(--text-muted);" id="stockRangeBody">区间数据加载中…</div>';
+  }
+  return `<div id="stockRangeBody">
+    <div>最新收盘：${_numOrDash(k.latest_close)}（${escapeHtml(k.latest_date || '—')}）</div>
+    <div>30日高/低：${_numOrDash(k.high_30d)} / ${_numOrDash(k.low_30d)}</div>
+    <div>30日均量：${_numOrDash(k.avg_volume_30d, 0)}</div>
+  </div>`;
+}
+
+let _rangeReqSeq = 0;
+async function loadStockRangeSummary(code) {
+  if (!code) return;
+  const seq = ++_rangeReqSeq;
+  const body = document.getElementById('stockRangeBody');
+  if (body) body.textContent = '区间数据加载中…';
+  let resp;
+  try {
+    resp = await api('/api/market/stock_kline_summary?code=' + encodeURIComponent(code));
+  } catch (e) {
+    _paintStockRange(code, seq, null);
+    return;
+  }
+  _paintStockRange(code, seq, (resp && resp.data) || null);
+}
+
+function _paintStockRange(code, seq, data) {
+  // 用户可能已经点了别的标的，旧请求回来不许覆盖新面板
+  if (seq !== _rangeReqSeq || _lastStockDetailCode !== code) return;
+  const card = document.getElementById('stockRangeCard');
+  if (!card) return;
+  if (!data || !Object.keys(data).length) {
+    // 不把 code 插进 onclick（项目红线：onclick 内禁止模板变量），改由事件监听绑定
+    card.innerHTML = `<div style="font-weight:600;margin-bottom:6px;">近期区间</div>
+      <div style="color:var(--text-muted);">区间数据暂不可用（K线上游超时）</div>
+      <button type="button" class="btn btn-sm btn-outline" id="stockRangeRetryBtn" style="margin-top:6px;">重试</button>`;
+    const retryBtn = document.getElementById('stockRangeRetryBtn');
+    if (retryBtn) retryBtn.addEventListener('click', () => loadStockRangeSummary(code));
+    return;
+  }
+  card.innerHTML = '<div style="font-weight:600;margin-bottom:6px;">近期区间</div>' + _stockRangeHTML(data);
 }
 
 function openKlineFromLastStock() {
