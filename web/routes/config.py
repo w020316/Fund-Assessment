@@ -147,6 +147,16 @@ def _save_yaml(filename: str, data: dict[str, Any]) -> None:
         raise
 
 
+# ===== STAGE: evolution B6 ===== strategies.yaml 公开薄封装(设计文档 §2):
+# evolution 激活链路写入参数真源用; 内部仍调用原私有函数, 端点行为零变化。
+def load_strategies_yaml() -> dict[str, Any]:
+    return _load_yaml("strategies.yaml")
+
+
+def save_strategies_yaml(data: dict[str, Any]) -> None:
+    _save_yaml("strategies.yaml", data)
+
+
 @router.get("/settings", response_model=SettingsResponse, dependencies=[Depends(require_admin)])
 async def get_settings():
     """读取系统配置（敏感字段整体掩码）。
@@ -187,7 +197,7 @@ async def get_strategies():
     注：/api/strategy/list（策略**目录**，硬编码常量）保持匿名——它不暴露任何用户状态。
     """
     try:
-        data = _load_yaml("strategies.yaml")
+        data = load_strategies_yaml()
         return StrategiesResponse(strategies=data)
     except Exception as e:
         logger.warning(f"get_strategies failed: {e}")
@@ -197,9 +207,9 @@ async def get_strategies():
 @router.put("/strategies", response_model=StrategiesResponse, dependencies=[Depends(require_admin)])
 async def update_strategies(req: StrategiesUpdateRequest):
     try:
-        existing = _load_yaml("strategies.yaml")
+        existing = load_strategies_yaml()
         _deep_merge(existing, req.strategies)
-        _save_yaml("strategies.yaml", existing)
+        save_strategies_yaml(existing)
         return StrategiesResponse(strategies=existing)
     except Exception as e:
         logger.warning(f"update_strategies failed: {e}")

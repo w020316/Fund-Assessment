@@ -35,6 +35,11 @@ def _single_backtest_guard():
         _BACKTEST_GUARD.release()
 
 
+# 策略自进化 B6(设计文档 §2): 公开别名——锁唯一真源仍是 _BACKTEST_GUARD,
+# evolution 等新重型任务复用同一把锁(进化与回测互斥), 禁止另开新锁。
+single_backtest_guard = _single_backtest_guard
+
+
 _HAS_STRATEGIES = False
 try:
     from src.strategies.a_stock_analyst import AStockAnalyst

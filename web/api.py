@@ -247,6 +247,8 @@ from web.routes import data_health as data_health_route
 from web.routes import fund as fund_route
 from web.routes import global_market as global_route
 from web.routes import holdings as holdings_route
+from web.routes import dashboard as dashboard_route
+from web.routes import evolution as evolution_route
 from web.routes import market as market_route
 from web.routes import monitor as monitor_route
 from web.routes import news as news_route
@@ -260,6 +262,8 @@ from src.utils.auth import require_admin
 
 app.include_router(dashboard_route.router, prefix="/api/dashboard", tags=["仪表盘"])
 app.include_router(strategy_route.router, prefix="/api/strategy", tags=["策略"])
+# 策略自进化 B6(设计文档 §2): 6 端点挂载, 全部 require_admin + 复用回测单飞锁
+app.include_router(evolution_route.router, prefix="/api/strategy/evolution", tags=["策略进化"])
 app.include_router(trade_route.router, prefix="/api/trade", tags=["交易"])
 app.include_router(monitor_route.router, prefix="/api/monitor", tags=["监控"])
 app.include_router(config_route.router, prefix="/api/config", tags=["配置"])
