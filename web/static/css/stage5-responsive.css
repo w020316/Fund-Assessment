@@ -18,6 +18,12 @@
   }
   /* 栅格化后行间距由 gap 承担，子元素的 mb-16/mb-12 不再叠加 */
   #page-market.active > * { margin-bottom: 0; }
+  /* 修复(2026-11-08): grid item 默认 min-width:auto——「全球资讯」卡内的
+     新闻 ticker(.news-ticker-inner, nowrap, 内在宽度可达 1.5 万 px)会把所在
+     列撑爆(实测 15691px), 同排 1fr 列(首次使用指引)被挤成 144px 竖排字。
+     min-width:0 让 1fr 回到正常等分; ticker 视觉由自身 overflow:hidden 裁剪,
+     不受影响。 */
+  #page-market.active > .card { min-width: 0; }
   /* 显式跨双列：标题行、指数卡组、内部已双列的热门+热力块 */
   #page-market.active > .flex-between,
   #page-market.active > #indexCards,
