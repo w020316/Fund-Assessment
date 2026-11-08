@@ -69,6 +69,39 @@ class TestRequireAdmin:
             )
             assert resp.status_code == 200
 
+    def test_multiple_tokens_accepted(self):
+        """ADMIN_TOKENS 支持逗号分隔的多个令牌（2026-11-08）
+
+        场景：浏览器 localStorage 按域名隔离，无法跨站点共享令牌，所以"通用令牌"
+        只能在服务端实现——各部署保留自己的 ADMIN_TOKEN，同时把同一个个人令牌
+        写进 ADMIN_TOKENS，用户只需记住一个值。
+        """
+        with patch.dict(os.environ, {
+            "APP_ENV": "production",
+            "ADMIN_TOKEN": "site-specific-token",
+            "ADMIN_TOKENS": "personal-token, another-token",
+        }):
+            client = TestClient(_build_app())
+            for tok in ("site-specific-token", "personal-token", "another-token"):
+                resp = client.get("/protected", headers={"Authorization": f"Bearer {tok}"})
+                assert resp.status_code == 200, f"令牌 {tok} 应被接受"
+            # 不在列表中的仍然拒绝
+            bad = client.get("/protected", headers={"Authorization": "Bearer nope"})
+            assert bad.status_code == 401
+
+    def test_admin_tokens_whitespace_and_duplicates(self):
+        """ADMIN_TOKENS 应忽略空白项与重复项，且不影响 ADMIN_TOKEN 优先级"""
+        from src.utils.auth import _get_admin_tokens
+        with patch.dict(os.environ, {
+            "ADMIN_TOKEN": "primary",
+            "ADMIN_TOKENS": " secondary ,, primary ",
+        }):
+            tokens = _get_admin_tokens()
+            assert tokens[0] == "primary"          # ADMIN_TOKEN 优先
+            assert "secondary" in tokens           # 空白被去掉
+            assert tokens.count("primary") == 1    # 去重
+            assert "" not in tokens                # 空项被丢弃
+
     def test_production_with_invalid_token_returns_401(self):
         """生产环境令牌不匹配仍返回 401(fail-closed 仅针对未配置场景)"""
         with patch.dict(os.environ, {

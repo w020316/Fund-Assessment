@@ -8126,7 +8126,11 @@ function loadAuthStatus() {
       <button class="btn btn-sm btn-outline" onclick="testAdminToken()" title="用当前令牌请求一个只读管理接口，验证是否真的能用">测试令牌</button>
       <span style="font-size:12px;opacity:0.7;">${token ? '当前: 已配置' : '当前: 未配置'}</span>
     </div>
-    <div style="margin-top:8px;font-size:12px;opacity:0.6;line-height:1.5;">写操作(添加/删除持仓、交易)需要管理令牌。令牌保存在浏览器本地,不会上传。</div>
+    <div style="margin-top:8px;font-size:12px;opacity:0.6;line-height:1.5;">
+      写操作(添加/删除持仓、交易)需要管理令牌。令牌保存在浏览器本地,不会上传。<br>
+      浏览器按域名隔离存储，<b>每个站点需各填一次</b>；若想让同一个令牌在多个部署通用，
+      可在服务端用 <code>ADMIN_TOKENS</code>（逗号分隔）同时配置多个。
+    </div>
   `;
 }
 

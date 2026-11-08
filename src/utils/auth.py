@@ -31,18 +31,34 @@ from loguru import logger
 from src.utils.config import settings
 
 
-def _get_admin_token() -> str:
-    """获取管理员令牌
+def _get_admin_tokens() -> list[str]:
+    """返回所有被接受的管理员令牌（按优先级去重）。
 
-    优先用 os.getenv 实时读取(确保测试 fixture patch.dict 生效),
-    settings 单例仅作为后备(模块加载时缓存,不适合测试场景)。
+    2026-11-08：新增 ``ADMIN_TOKENS``（逗号分隔）以支持"一个个人令牌在多个
+    部署上通用"。浏览器 localStorage 按域名隔离，无法跨站点共享，所以"通用"
+    只能在服务端实现：各部署保留自己的 ADMIN_TOKEN，同时把同一个个人令牌写进
+    ADMIN_TOKENS，这样用户只需记住一个值，不必为每个站点记不同的。
+
+    兼容性：ADMIN_TOKEN 仍然有效且优先；两者都没有时回退 settings 单例。
     """
-    # 实时读环境变量(确保 patch.dict 测试 fixture 生效)
-    token = os.getenv("ADMIN_TOKEN", "").strip()
-    if token:
-        return token
-    # 后备:settings 单例(生产环境)
-    return settings.admin_token
+    tokens: list[str] = []
+    for raw in (os.getenv("ADMIN_TOKEN", ""), os.getenv("ADMIN_TOKENS", "")):
+        if not raw:
+            continue
+        for part in raw.split(","):
+            part = part.strip()
+            if part and part not in tokens:
+                tokens.append(part)
+    if tokens:
+        return tokens
+    fallback = (settings.admin_token or "").strip()
+    return [fallback] if fallback else []
+
+
+def _get_admin_token() -> str:
+    """兼容旧调用：返回首个令牌（仅用于日志/提示，鉴权请用 _get_admin_tokens）。"""
+    tokens = _get_admin_tokens()
+    return tokens[0] if tokens else ""
 
 
 def _is_production() -> bool:
@@ -65,13 +81,14 @@ def require_admin(authorization: str | None = Header(default=None)) -> None:
     - 开发环境(APP_ENV == "dev")未配置 ADMIN_TOKEN → 放行但 warning
     - 已配置但请求未携带/不匹配 → 抛 401
     """
-    expected = _get_admin_token()
+    expected = _get_admin_tokens()
     if not expected:
         if _is_production():
             # P1 修复(2026-07-29):生产环境 fail-closed,避免裸奔
             logger.error(
                 "ADMIN_TOKEN 未配置, 生产环境拒绝敏感端点访问。"
                 "请在 Render Dashboard 设置 ADMIN_TOKEN=<随机长字符串>"
+                "（或用 ADMIN_TOKENS 配置多个，逗号分隔）"
             )
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -102,8 +119,8 @@ def require_admin(authorization: str | None = Header(default=None)) -> None:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # 使用 secrets.compare_digest 防止时序攻击
-    if not secrets.compare_digest(token, expected):
+    # 使用 secrets.compare_digest 防止时序攻击；多令牌时逐个比对，任一匹配即通过
+    if not any(secrets.compare_digest(token, exp) for exp in expected):
         # 安全修复(2026-10-26):原日志记录 `prefix={token[:4]}`，会把攻击者尝试的令牌
         # 前 4 位写进日志。日志常被转发到第三方平台、也常被截图贴到工单里，
         # 这等于给爆破提供了逐步逼近的反馈，且泄露了「用户可能输错的那个令牌」片段。
