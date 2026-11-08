@@ -88,8 +88,16 @@
     if (!el) return;
     el.innerHTML = '<div class="pred-empty">加载中…</div>';
     const r = await fetchJSON('/api/prediction/snapshots?days=2');
+    // QF3-27: 先判 ok 再判空。此前 `(r.ok && ...) || []` 把请求失败归一成空数组,
+    // 四张时段卡片会渲染成"未采集", 与"今天还没到采集时点"完全无法区分。
+    if (!r.ok) {
+      el.innerHTML = r.status
+        ? '<div class="pred-empty">数据加载失败（HTTP ' + r.status + '），请稍后重试</div>'
+        : '<div class="pred-empty">数据加载失败，请检查网络后重试</div>';
+      return;
+    }
     const today = cstDateStr();
-    const rows = (r.ok && r.body && r.body.data && r.body.data.snapshots) || [];
+    const rows = (r.body && r.body.data && r.body.data.snapshots) || [];
     const bySession = {};
     rows.forEach(function (row) { if (row.trade_date === today) bySession[row.session] = row; });
     el.innerHTML = SESSIONS.map(function (s) { return sessionCardHTML(s, bySession[s.key]); }).join('');
@@ -145,7 +153,15 @@
     if (!el) return;
     el.innerHTML = '<div class="pred-empty">加载中…</div>';
     const r = await fetchJSON('/api/prediction/predictions?days=30');
-    const rows = (r.ok && r.body && r.body.data && r.body.data.predictions) || [];
+    // QF3-27: 先判 ok 再判空。此前失败时提示"暂无预测(每交易日 15:40 自动生成)",
+    // 用户会等到 15:40 再来, 而实际是请求失败。
+    if (!r.ok) {
+      el.innerHTML = r.status
+        ? '<div class="pred-empty">数据加载失败（HTTP ' + r.status + '），请稍后重试</div>'
+        : '<div class="pred-empty">数据加载失败，请检查网络后重试</div>';
+      return;
+    }
+    const rows = (r.body && r.body.data && r.body.data.predictions) || [];
     if (!rows.length) {
       el.innerHTML = '<div class="pred-empty">暂无预测(每交易日 15:40 盘后自动生成, 也可由管理员手动触发)</div>';
       return;

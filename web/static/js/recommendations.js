@@ -59,7 +59,15 @@
     if (!el) return;
     el.innerHTML = '<div class="pred-empty">加载中…</div>';
     const r = await fetchJSON('/api/prediction/recommendations?days=2');
-    const rows = (r.ok && r.body && r.body.data && r.body.data.recommendations) || [];
+    // QF3-27: 先判 ok 再判空。此前失败时提示"今日无满足条件的推荐(信号未触发)",
+    // 把"取不到"解释成"没有", 用户会以为策略没触发而不再关注。
+    if (!r.ok) {
+      el.innerHTML = r.status
+        ? '<div class="pred-empty">数据加载失败（HTTP ' + r.status + '），请稍后重试</div>'
+        : '<div class="pred-empty">数据加载失败，请检查网络后重试</div>';
+      return;
+    }
+    const rows = (r.body && r.body.data && r.body.data.recommendations) || [];
     const today = cstDateStr();
     const todays = rows.filter(function (it) { return it.trade_date === today; });
     if (!todays.length) {
