@@ -4313,7 +4313,9 @@ async function loadStockAnomaly() {
   // 元信息: 数据时间 + 窗口 + 覆盖度, 让用户能判断"这份数据有多新"
   if (metaEl) {
     const bits = [];
-    if (meta.as_of) bits.push(`${meta.market_closed ? '收盘' : '数据'} ${escapeHtml(meta.as_of)}`);
+    // 文案注意: 收盘后 as_of 可能是上一交易日的盘中时刻(如 09:50),
+    // 此时写"收盘 09:50"自相矛盾, 应说"上一交易日 09:50"。
+    if (meta.as_of) bits.push(`${meta.market_closed ? '上一交易日' : '数据'} ${escapeHtml(meta.as_of)}`);
     if (meta.window_minutes) bits.push(`窗口 ${meta.window_minutes} 分钟`);
     if (typeof meta.scanned === 'number') bits.push(`扫描 ${meta.scanned} 只`);
     if (meta.unavailable) bits.push(`不可用 ${meta.unavailable} 只`);
