@@ -35,6 +35,27 @@ def no_admin_token():
         yield
 
 
+@pytest.fixture(autouse=True)
+def _clear_fund_cache():
+    """清空 fund 模块缓存,消除跨用例顺序依赖。
+
+    背景(阶段 0 发现): web/routes/fund.py 的 `_fund_cache` 是模块级 DataCache,
+    整个 pytest 会话共享。`/api/fund/realtime` 等端点**先查缓存再取数**,
+    命中即 return,从而绕过用例里 patch 的取数函数 —— 全量运行时只要前序用例
+    访问过同一 codes,断言就会失败;孤立运行时无污染故必过。表现为"随机红灯"。
+
+    为什么不用 DataCache.clear(): 该实例用默认 cache_dir='data/cache',此目录与
+    global_market/holdings/market/news/portfolio/review 等模块共用,clear() 会
+    删除整个目录下的 *.json,波及其他模块。改用公开的 invalidate_by_prefix,
+    只清本模块的 fund_search:/fund_realtime:/fund_history: 三类键(前缀 fund_)。
+    """
+    from web.routes.fund import _fund_cache
+
+    _fund_cache.invalidate_by_prefix("fund_")
+    yield
+    _fund_cache.invalidate_by_prefix("fund_")
+
+
 # 模拟持仓数据
 _MOCK_POSITIONS = [
     {"fund_code": "110022", "fund_name": "易方达消费", "shares": 1000.0,
