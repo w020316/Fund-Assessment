@@ -1112,3 +1112,63 @@ class TestRunLockLifetime:
         assert calls["n"] == 2
         # 两代文件都在（没有被并发写覆盖成一份）
         assert len(list(evolution.GENERATIONS_DIR.glob("gen_*.json"))) == 2
+
+
+# ===========================================================================
+# 16. QF3-22 · /activate 与 /rollback 纳入同一把单飞锁
+#
+# 缺陷事实: 两个写端点原先不取锁, 可与 /run、/backtest 并发写
+# strategies.yaml / active.json（读-改-写交错 → 参数与指针可能互相覆盖）。
+# ===========================================================================
+
+class TestWriteGuard:
+    def test_rollback_rejected_when_lock_held(self, client, evolution_store, strategies_yaml):
+        from web.routes import strategy as strategy_route
+
+        original = "trading_quant:\n  weights: {technical: 0.25}\n"
+        strategies_yaml.parent.mkdir(parents=True, exist_ok=True)
+        strategies_yaml.write_text(original, encoding="utf-8")
+        _seed_generation(1, fitness=0.42)
+        assert client.post("/api/strategy/evolution/activate", json={"generation_id": 1}).status_code == 200
+        yaml_before = strategies_yaml.read_bytes()
+        backup_before = evolution.load_active()["backup_path"]
+        assert backup_before
+
+        assert strategy_route._BACKTEST_GUARD.acquire(blocking=False)
+        try:
+            resp = client.post("/api/strategy/evolution/rollback")
+        finally:
+            strategy_route._BACKTEST_GUARD.release()
+        assert resp.status_code == 409
+        assert resp.json()["detail"]["code"] == "EVOLUTION_LOCKED"
+        # 409 的语义是"未做任何改动": 真源与指针都不许动
+        assert strategies_yaml.read_bytes() == yaml_before
+        assert evolution.load_active()["backup_path"] == backup_before
+        # 锁释放后回滚可用（409 路径没有把锁泄漏成永久占用）
+        assert client.post("/api/strategy/evolution/rollback").status_code == 200
+        assert strategies_yaml.read_text(encoding="utf-8") == original
+
+    def test_activate_rejected_when_lock_held(self, client, evolution_store, strategies_yaml):
+        import web.routes.evolution as evolution_route
+        from web.routes import strategy as strategy_route
+
+        original = "trading_quant:\n  weights: {technical: 0.25}\n"
+        strategies_yaml.parent.mkdir(parents=True, exist_ok=True)
+        strategies_yaml.write_text(original, encoding="utf-8")
+        _seed_generation(1, fitness=0.42)
+        active_before = _sha256(evolution.ACTIVE_FILE)
+
+        assert strategy_route._BACKTEST_GUARD.acquire(blocking=False)
+        try:
+            resp = client.post("/api/strategy/evolution/activate", json={"generation_id": 1})
+        finally:
+            strategy_route._BACKTEST_GUARD.release()
+        assert resp.status_code == 409
+        assert resp.json()["detail"]["code"] == "EVOLUTION_LOCKED"
+        # 被拒的激活连备份都不该产生（写前就退出了）
+        assert strategies_yaml.read_text(encoding="utf-8") == original
+        assert _sha256(evolution.ACTIVE_FILE) == active_before
+        assert not list(evolution_route._backup_dir().glob("strategies_*.yaml"))
+        # 锁释放后激活正常
+        assert client.post("/api/strategy/evolution/activate", json={"generation_id": 1}).status_code == 200
+        assert strategies_yaml.read_text(encoding="utf-8") != original

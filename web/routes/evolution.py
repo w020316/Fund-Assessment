@@ -20,6 +20,10 @@ QF3-10 修复:``wait_for`` + 线程池的组合**不保证**线程随超时结�
 释放在依赖的 finally 里（=响应返回时）, 超时后线程仍在写 lineage, 而锁已空 →
 下一个 /run 与在途线程并发读-改-写谱系（丢代）。现在锁由**工作线程自己**在真正
 结束时释放, 超时路径额外等待线程收尾（带上限）, 期间锁保持占用。
+
+QF3-22 修复:``/activate`` 与 ``/rollback`` 纳入同一把单飞锁（与 /run、/backtest
+互斥）; 锁被占用时非阻塞返回 409 ``EVOLUTION_LOCKED``（不排队等锁）, 保证不会
+有两条链路同时写 strategies.yaml / active.json。
 """
 from __future__ import annotations
 
@@ -132,7 +136,7 @@ def _restore_yaml_atomic(backup_path: Path, yaml_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 单飞锁生命周期（QF3-10）: 唯一真源仍是 strategy.py 的 _BACKTEST_GUARD
+# 单飞锁生命周期（QF3-10 / QF3-22）: 唯一真源仍是 strategy.py 的 _BACKTEST_GUARD
 # ---------------------------------------------------------------------------
 # 未复用 strategy.py 的 _single_backtest_guard 依赖函数: 其 503 detail 为纯文本
 # （兼容既有前端）, 而本路由契约要求结构化错误码; 两者获取/释放的是**同一个锁
@@ -185,6 +189,25 @@ def _acquire_lease(status_code: int, code: str, message: str) -> _LockLease:
     if not lock.acquire(blocking=False):
         raise _err(code, message, status_code=status_code, retryable=True)
     return _LockLease(lock)
+
+
+def _write_guard():
+    """写操作（/activate、/rollback）的单飞锁依赖（QF3-22）。
+
+    非阻塞: 锁被占用直接 409 ``EVOLUTION_LOCKED``, **不排队等锁**。理由: 回滚是
+    紧急止损操作, 而锁可能被 25s 的进化任务占着——等锁会把"现在改不了"变成请求
+    挂死到超时, 调用方还拿不到明确信号; 直接 409 让调用方知道参数未被改动、可重试。
+    两个写端点都是秒级文件操作, 请求内释放即可（不需要 QF3-10 的线程租约）。
+    """
+    lease = _acquire_lease(
+        409,
+        "EVOLUTION_LOCKED",
+        "进化/回测/激活/回滚正在进行, 本次写操作已拒绝(未做任何改动), 请稍后重试",
+    )
+    try:
+        yield lease
+    finally:
+        lease.release()
 
 
 async def _drain_worker(finished: threading.Event) -> bool:
@@ -370,7 +393,7 @@ async def compare(gen: int | None = None):
 # ---------------------------------------------------------------------------
 # 5. POST /activate —— 激活指定代（需管理员鉴权 + 单飞锁; 写序 备份 → yaml → active.json）
 # ---------------------------------------------------------------------------
-@router.post("/activate", dependencies=[Depends(require_admin)])
+@router.post("/activate", dependencies=[Depends(require_admin), Depends(_write_guard)])
 async def activate(req: EvolutionActivateRequest):
     gen_id = int(req.generation_id)
     record = evolution_core.load_generation(gen_id)
@@ -443,7 +466,7 @@ async def activate(req: EvolutionActivateRequest):
 # ---------------------------------------------------------------------------
 # 6. POST /rollback —— 用激活前快照还原参数真源（需管理员鉴权 + 单飞锁）
 # ---------------------------------------------------------------------------
-@router.post("/rollback", dependencies=[Depends(require_admin)])
+@router.post("/rollback", dependencies=[Depends(require_admin), Depends(_write_guard)])
 async def rollback():
     """把 strategies.yaml 还原到"上一次激活之前"的原文, 并把指针回指 restored_from。
 
