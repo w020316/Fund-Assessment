@@ -622,6 +622,17 @@ _HOLDINGS_VISION_PROMPT = """你是专业的基金/股票持仓截图识别助�
 _IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"}
 
 
+def vision_ocr_available() -> bool:
+    """视觉 OCR 是否具备调用条件（只查凭证，不发起请求）。
+
+    2026-11-08：供上传路由区分"功能未启用"与"识别失败"。此前
+    ``recognize_holdings_from_image`` 在两种情况下都返回空列表，路由统一提示
+    "请检查文件格式或截图清晰度"——服务端没配 key 或模型全挂时，用户被告知
+    是自己的图有问题，会反复重传。本函数让调用方能给出诚实的失败原因。
+    """
+    return bool(_get_agnes_api_key())
+
+
 def recognize_holdings_from_image(image_bytes: bytes, mime_type: str = "image/png") -> list[dict[str, Any]]:
     """通过 agnes-2.0-flash 多模态识别持仓截图
 

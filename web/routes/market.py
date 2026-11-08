@@ -61,6 +61,54 @@ def _build_meta(
     return meta
 
 
+def _flow_field_quality(rows, field: str) -> tuple[float | None, dict]:
+    """板块资金流字段完整度 → 需要覆盖的质量分与附加元信息。
+
+    2026-11-08 修复：上游在东财资金流接口失效时仍会返回 50 条板块，但
+    ``main_net_inflow`` 全为 0。此时若沿用默认质量分（新鲜 80 / 缓存 100），
+    前端会把"没拿到资金流"渲染成"资金流为 0"，用户看到 50 行数据会误以为
+    一切正常 —— 这比空容器更危险，因为空容器至少诚实。
+
+    返回 ``(quality_score 或 None, extra)``：``None`` 表示数据健康、维持原有
+    默认质量分，不改变既有行为；仅在全 0 或低完整度时才下调，使 ``degraded``
+    为真，前端据此显示"不可用"而不是 0。
+    """
+    total = len(rows) if rows else 0
+    if total == 0:
+        return 0.0, {"unavailable_fields": [field], "field_completeness": {field: 0.0}}
+
+    def _val(row):
+        if isinstance(row, dict):
+            return row.get(field)
+        return getattr(row, field, None)
+
+    non_zero = sum(1 for r in rows if _val(r) not in (None, 0, 0.0))
+    if non_zero == 0:
+        return 0.0, {"unavailable_fields": [field], "field_completeness": {field: 0.0}}
+    ratio = non_zero / total
+    extra = {"field_completeness": {field: round(ratio, 2)}}
+    if ratio < 0.6:
+        return 60.0, extra
+    return None, extra
+
+
+def _flow_fields_quality(rows, fields: tuple[str, ...]) -> tuple[float | None, dict]:
+    """多字段版本：任一字段全 0 都记入 unavailable_fields，质量分取最差值。"""
+    worst: float | None = None
+    completeness: dict[str, float] = {}
+    unavailable: list[str] = []
+    for f in fields:
+        q, extra = _flow_field_quality(rows, f)
+        completeness.update(extra.get("field_completeness", {}))
+        unavailable.extend(extra.get("unavailable_fields", []))
+        if q is not None and (worst is None or q < worst):
+            worst = q
+    out: dict = {"field_completeness": completeness}
+    if unavailable:
+        out["unavailable_fields"] = unavailable
+    return worst, out
+
+
 # ===== stale-while-revalidate（2026-10-26）=====
 # 背景：/api/market/hot_stocks 冷态实测 0.999s、/sector_ranking 0.586s，
 # 而 TTL 分别只有 60s —— 每逢过期的那一位用户就要等完整一轮外部请求，
@@ -419,7 +467,8 @@ async def sector_flow():
     cache_key = "market:sector_flow"
     cached = cache.get(cache_key)
     if cached is not None:
-        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
+        q, extra = _flow_fields_quality(cached, ("main_net_inflow", "large_order_ratio"))
+        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True, quality_score=q, extra=extra)}
     # P1 修复(2026-07-31):整个函数体包裹,确保模型构造/cache.set 异常也返回空数据而非 500
     try:
         data = await asyncio.to_thread(ds2.get_sector_ranking)
@@ -432,7 +481,8 @@ async def sector_flow():
                 large_order_ratio=_safe_float(item.get("main_inflow_pct")),
             ))
         cache.set(cache_key, result)
-        return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
+        q, extra = _flow_fields_quality(result, ("main_net_inflow", "large_order_ratio"))
+        return {"data": result, "_meta": _build_meta("eastmoney", cached=False, quality_score=q, extra=extra)}
     except Exception as e:
         logger.warning(f"sector_flow failed: {e}")
         return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
@@ -689,13 +739,15 @@ async def sector_ranking():
     cache_key = "market:sector_ranking"
     cached, is_stale = cache.get_with_stale(cache_key, max_stale=600)
     if cached is not None:
+        q, extra = _flow_field_quality(cached, "main_net_inflow")
         if is_stale:
             _schedule_refresh(cache_key, _fetch_sector_ranking, "sector_ranking")
-        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True, stale=is_stale)}
+        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True, quality_score=q, stale=is_stale, extra=extra)}
     try:
         result = await _fetch_sector_ranking()
         cache.set(cache_key, result)
-        return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
+        q, extra = _flow_field_quality(result, "main_net_inflow")
+        return {"data": result, "_meta": _build_meta("eastmoney", cached=False, quality_score=q, extra=extra)}
     except Exception as e:
         logger.warning(f"sector_ranking failed: {e}")
         return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}

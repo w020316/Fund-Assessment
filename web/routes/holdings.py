@@ -246,11 +246,24 @@ async def upload_holdings_file(request: Request, file: UploadFile = File(...)) -
         )
 
     if not holdings:
+        # 2026-11-08 修复：此前无论"未配置 OCR 凭证"还是"模型全部失败"，都返回
+        # 同一句"请检查文件格式或截图清晰度"，把服务端故障归因给用户，导致反复重传。
+        # 现按是否具备调用条件区分文案，并给出 reason 供前端/排障识别。
+        from src.core.ai_service import vision_ocr_available
+        if not vision_ocr_available():
+            return {
+                "holdings": [],
+                "source": source,
+                "count": 0,
+                "reason": "ocr_not_configured",
+                "message": "图像识别功能未启用（服务端未配置 OCR 凭证），请联系管理员；也可改用 CSV/Excel 导入。",
+            }
         return {
             "holdings": [],
             "source": source,
             "count": 0,
-            "message": "未能识别到持仓数据,请检查文件格式或截图清晰度",
+            "reason": "ocr_no_result",
+            "message": "未能识别到持仓数据。可能是截图不清晰，也可能是识别服务暂时不可用——请稍后重试，或改用 CSV/Excel 导入。",
         }
 
     return {"holdings": holdings, "source": source, "count": len(holdings)}

@@ -25,14 +25,21 @@
     return n > 0 ? 'pred-up' : 'pred-down';
   }
 
-  function rowHTML(item, idx) {
+  function rowHTML(item, idx, flowUnavailable, ratioUnavailable) {
     const pct = Number(item.change_pct);
     const sign = pct > 0 ? '+' : '';
+    // 2026-11-08：资金流字段不可用时渲染 '—'，不能渲染 0.00 —— 用户会把
+    // "没拿到资金流"读成"主力净流入为零"，这是两件完全不同的事。
+    const flowCell = flowUnavailable
+      ? '<td>—</td>'
+      : '<td class="' + pctCls(Number(item.main_net_inflow)) + '">' + esc(fmtYi(item.main_net_inflow)) + '</td>';
+    const ratioCell = ratioUnavailable
+      ? '<td>—</td>'
+      : '<td>' + esc(isFinite(Number(item.large_order_ratio)) ? Number(item.large_order_ratio).toFixed(2) : '—') + '</td>';
     return '<tr><td>' + esc(idx + 1) + '</td>'
       + '<td>' + esc(item.sector) + '</td>'
       + '<td class="' + pctCls(pct) + '">' + esc(sign + (isFinite(pct) ? pct.toFixed(2) : '—')) + '%</td>'
-      + '<td class="' + pctCls(Number(item.main_net_inflow)) + '">' + esc(fmtYi(item.main_net_inflow)) + '</td>'
-      + '<td>' + esc(isFinite(Number(item.large_order_ratio)) ? Number(item.large_order_ratio).toFixed(2) : '—') + '</td></tr>';
+      + flowCell + ratioCell + '</tr>';
   }
 
   async function fetchJSON(url) {
@@ -68,12 +75,24 @@
       return;
     }
     const sorted = items.slice().sort(function (a, b) { return Number(b.change_pct || 0) - Number(a.change_pct || 0); });
+    const meta = (r.body && r.body._meta) || {};
+    // 后端在资金流字段全 0 时会下发 degraded + unavailable_fields（2026-11-08 起），
+    // 据此把整列渲染成 '—' 并给出说明，而不是让 50 行数据一起"说谎"。
+    const unavailable = (meta.unavailable_fields || []);
+    const flowUnavailable = !!(meta.degraded && unavailable.indexOf('main_net_inflow') >= 0);
+    const ratioUnavailable = !!(meta.degraded && unavailable.indexOf('large_order_ratio') >= 0);
+    const flowBanner = (flowUnavailable || ratioUnavailable)
+      ? '<div class="pred-muted" style="margin-bottom:8px;padding:8px 12px;border:1px solid var(--color-warning);border-radius:6px;">⚠ 上游未返回板块资金流，'
+        + (flowUnavailable ? '主力净流入' : '') + (flowUnavailable && ratioUnavailable ? '、' : '')
+        + (ratioUnavailable ? '大单占比' : '') + '列暂不可用（不是 0）</div>'
+      : '';
     const asOf = (r.body && r.body._meta && r.body._meta.timestamp) ? String(r.body._meta.timestamp).slice(11, 19) : '';
     if (badge) {
       badge.innerHTML = Freshness.html({ asOf: asOf, note: '东财板块行情' });
     }
-    const rows = sorted.map(function (it, i) { return rowHTML(it, i); }).join('');
-    el.innerHTML = '<div class="table-wrap" style="max-height:520px;overflow-y:auto;">'
+    const rows = sorted.map(function (it, i) { return rowHTML(it, i, flowUnavailable, ratioUnavailable); }).join('');
+    el.innerHTML = flowBanner
+      + '<div class="table-wrap" style="max-height:520px;overflow-y:auto;">'
       + '<table class="pred-sector-table">'
       + '<thead><tr><th>#</th><th>板块名称</th><th>涨跌幅</th><th>主力净流入</th><th>大单占比</th></tr></thead>'
       + '<tbody>' + rows + '</tbody></table></div>'

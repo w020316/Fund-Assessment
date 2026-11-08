@@ -7703,24 +7703,31 @@ async function loadNorthbound() {
   const netColor = changeColor(nb.today_net);
   // P2-5 收尾(2026-07-30):后端 NorthboundResponse.data_quality=degraded 表示
   // 北向资金数据源不可达,前端在面板顶部显示提示条,避免用户误以为"北向无流入"。
-  const nbDq = (data && data.data && data.data.data_quality) || 'normal';
+  // 2026-11-08 修复:后端实际是通过 _meta.degraded 发信号的(quality_score=0.0),
+  // data 里从来没有 data_quality 字段,所以这个提示条此前**从未显示过**,
+  // 用户一直看到兜底的 0.00亿。现改为优先读 _meta.degraded。
+  const nbDegraded = !!(data && data._meta && data._meta.degraded);
+  const nbDq = nbDegraded ? 'degraded' : ((data && data.data && data.data.data_quality) || 'normal');
   const nbBanner = nbDq === 'degraded'
-    ? `<div style="margin-bottom:12px;padding:8px 12px;font-size:11px;color:var(--accent-blue);border:1px solid var(--accent-blue);border-radius:4px;background:rgba(245,158,11,0.06);">⚠ 北向资金数据源不可达,当前数值为兜底 0,请稍后重试</div>`
+    ? `<div style="margin-bottom:12px;padding:8px 12px;font-size:11px;color:var(--accent-blue);border:1px solid var(--accent-blue);border-radius:4px;background:rgba(245,158,11,0.06);">⚠ 北向资金数据源不可达,数值不可用,请稍后重试</div>`
     : '';
+  // 降级时不再渲染 0.00 —— 0 会被读成"今日无净流入",与"没拿到数据"是两件事。
+  const nbText = (v) => (nbDegraded ? '—' : `${changeSign(v)}${fmtNum(v)}亿`);
+  const nbColor = (v) => (nbDegraded ? 'var(--text-muted)' : changeColor(v));
   container.innerHTML = `
     ${nbBanner}
     <div style="display:flex;gap:24px;margin-bottom:16px;">
       <div style="text-align:center;">
         <div style="color:var(--text-muted);font-size:12px;">今日净流入</div>
-        <div style="font-size:28px;font-weight:700;color:${netColor};">${changeSign(nb.today_net)}${fmtNum(nb.today_net)}亿</div>
+        <div style="font-size:28px;font-weight:700;color:${nbColor(nb.today_net)};">${nbText(nb.today_net)}</div>
       </div>
       <div style="text-align:center;">
         <div style="color:var(--text-muted);font-size:12px;">沪股通</div>
-        <div style="font-size:18px;font-weight:600;color:${changeColor(nb.today_sh)};">${changeSign(nb.today_sh)}${fmtNum(nb.today_sh)}亿</div>
+        <div style="font-size:18px;font-weight:600;color:${nbColor(nb.today_sh)};">${nbText(nb.today_sh)}</div>
       </div>
       <div style="text-align:center;">
         <div style="color:var(--text-muted);font-size:12px;">深股通</div>
-        <div style="font-size:18px;font-weight:600;color:${changeColor(nb.today_sz)};">${changeSign(nb.today_sz)}${fmtNum(nb.today_sz)}亿</div>
+        <div style="font-size:18px;font-weight:600;color:${nbColor(nb.today_sz)};">${nbText(nb.today_sz)}</div>
       </div>
     </div>
     <svg width="100%" height="120" viewBox="0 0 400 120" id="northboundChart"></svg>
