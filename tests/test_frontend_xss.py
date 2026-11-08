@@ -76,3 +76,34 @@ def test_multi_agent_report_is_escaped():
     ):
         assert bare not in body, f"multiAgentAnalyze 仍存在裸插值: {bare}"
 
+
+def test_label_helpers_escape_unknown_values():
+    """F-01 残余回归(2026-11-08):字典未命中时 helper 必须转义。
+
+    signalLabel/decisionLabel 在 SIGNAL_LABELS/DECISION_LABELS 命中时返回中文
+    常量(安全), 未命中时原样返回 API/LLM 值。调用方(4375/4438/4544/5684)
+    全部把返回值拼进 innerHTML, 因此转义必须发生在 helper 内部 —— 只转义
+    调用方会漏掉 fallback 分支。
+    """
+    text = _text()
+    assert "function signalLabel(s) { return escapeHtml(SIGNAL_LABELS[s] || s); }" in text
+    assert "function decisionLabel(d) { return escapeHtml(DECISION_LABELS[d] || d); }" in text
+    # 旧的裸返回形式不得复现
+    assert "return SIGNAL_LABELS[s] || s; }" not in text
+    assert "return DECISION_LABELS[d] || d; }" not in text
+
+
+def test_analysis_history_and_summary_are_escaped():
+    """F-01 残余回归:分析历史表格与组合摘要字段来自 API, 必须转义。"""
+    text = _text()
+    for expr in (
+        "${escapeHtml(h.time)}",
+        "${escapeHtml(h.code)}",
+        "${escapeHtml(h.confidence)}",
+        "${escapeHtml(h.score)}",
+        "${escapeHtml(summary)}",
+    ):
+        assert expr in text, f"缺少转义: {expr}"
+    assert "<td>${h.time}</td>" not in text
+    assert "${summary}</span>" not in text
+

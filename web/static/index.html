@@ -2844,8 +2844,9 @@ function changeSign(val) {
 // 信号/决策中文标签映射(内部逻辑保留英文,仅展示层转中文)
 const SIGNAL_LABELS = {BULLISH:'看多', BEARISH:'看空', NEUTRAL:'中性'};
 const DECISION_LABELS = {BUY:'买入', SELL:'卖出', HOLD:'持有'};
-function signalLabel(s) { return SIGNAL_LABELS[s] || s; }
-function decisionLabel(d) { return DECISION_LABELS[d] || d; }
+// 未命中字典时原值可能来自 LLM/API, 必须在 helper 内转义, 否则调用方拼 innerHTML 即注入
+function signalLabel(s) { return escapeHtml(SIGNAL_LABELS[s] || s); }
+function decisionLabel(d) { return escapeHtml(DECISION_LABELS[d] || d); }
 
 // 预警严重程度小圆点(SVG)——SVG presentation attribute 不支持 var()，字面量与语义 token 同值
 const ALERT_ICON_MAP = {
@@ -4539,11 +4540,11 @@ async function loadAiHistory() {
   body.innerHTML = history.map(h => {
     const cls = h.decision === 'BUY' ? 'signal-buy' : h.decision === 'SELL' ? 'signal-sell' : 'signal-hold';
     return `<tr>
-      <td>${h.time}</td>
-      <td style="color:var(--accent-cyan);">${h.code}</td>
+      <td>${escapeHtml(h.time)}</td>
+      <td style="color:var(--accent-cyan);">${escapeHtml(h.code)}</td>
       <td><span class="signal ${cls}">${decisionLabel(h.decision)}</span></td>
-      <td>${h.confidence}%</td>
-      <td>${h.score}</td>
+      <td>${escapeHtml(h.confidence)}%</td>
+      <td>${escapeHtml(h.score)}</td>
     </tr>`;
   }).join('');
 }
@@ -5683,7 +5684,7 @@ async function loadFundAdviceV2() {
         <span style="font-size:22px;font-weight:700;color:${dirColor};margin-left:6px;">${avgScore.toFixed(1)}</span>
         <span style="font-size:13px;color:${dirColor};margin-left:6px;padding:2px 8px;border:1px solid ${dirColor};border-radius:4px;">${dirLabel}</span>
       </div>
-      <span style="font-size:13px;color:var(--text-secondary);">${summary}</span>
+      <span style="font-size:13px;color:var(--text-secondary);">${escapeHtml(summary)}</span>
     </div>
     <div style="font-size:12px;color:var(--text-muted);padding:4px 0;">权重: 技术面20% / 基本面20% / 消息面25% / 重仓股板块20% / 大盘环境15%</div>
   `;
