@@ -638,7 +638,7 @@ def verify_daily(now: _dt.datetime | None = None) -> dict[str, Any]:
             logger.warning(f"verify_daily: 实际行情取不到且已过最终时点, 写 missing 占位 {missing} 条")
         else:
             logger.info("verify_daily: 实际行情暂取不到, 等待 16:30 重试(不写占位)")
-        compute_accuracy(store=store)
+        compute_accuracy(store=store, persist=True)
         return {
             "verified": verified,
             "missing": missing,
@@ -679,7 +679,7 @@ def verify_daily(now: _dt.datetime | None = None) -> dict[str, Any]:
         verified += 1
         detail.append({"target_kind": "recommendation", "target_id": r["id"], "hit": hit})
 
-    compute_accuracy(store=store)
+    compute_accuracy(store=store, persist=True)
     # 验证成功后顺带跑保留策略清理(R5.2)
     try:
         store.cleanup()
@@ -703,8 +703,20 @@ def _window_start(today: str, window: str) -> str:
     return (d - _dt.timedelta(days=days - 1)).strftime("%Y-%m-%d")
 
 
-def compute_accuracy(store: Any | None = None, stat_date: str | None = None) -> dict[str, Any]:
-    """三窗口 × 两类型 × 来源命中率(样本 <5 → hit_rate=None), 并落 accuracy_stats。"""
+def compute_accuracy(
+    store: Any | None = None,
+    stat_date: str | None = None,
+    persist: bool = True,
+) -> dict[str, Any]:
+    """三窗口 × 两类型 × 来源命中率(样本 <5 → hit_rate=None)。
+
+    persist=True(默认): 计算结果落 accuracy_stats —— 供 verify_daily 在有鉴权的
+    写路径上落库(QF3-07: 落库只发生在 POST /verify 之后)。
+    persist=False: 纯内存计算, 不写库 —— 供公开只读的 GET /accuracy 使用。
+    GET 是匿名可达且前端每次切页都会调用的, 绝不能在读接口里产生写副作用。
+
+    返回体含 persisted 标识, 让调用方(与前端)能区分"本次是否落库"。
+    """
     store = store or get_store()
     today = stat_date or beijing_today_str()
     band = float(sig.load_signal_config().get("verify", {}).get("flat_band_pct", 0.3))
@@ -774,22 +786,31 @@ def compute_accuracy(store: Any | None = None, stat_date: str | None = None) -> 
         for d, v in sorted(by_date.items())
     ]
 
-    try:
-        store.upsert_accuracy_stats(stat_rows, stat_date=today)
-    except Exception as e:  # noqa: BLE001
-        logger.warning(f"compute_accuracy upsert stats failed: {e}")
+    persisted = False
+    if persist:
+        try:
+            store.upsert_accuracy_stats(stat_rows, stat_date=today)
+            persisted = True
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"compute_accuracy upsert stats failed: {e}")
 
     return {
         "windows": windows,
         "insufficient_sample": insufficient,
         "trend_30d": trend_30d,
         "stat_date": today,
+        "persisted": persisted,
     }
 
 
 def get_accuracy_dashboard() -> dict[str, Any]:
-    """看板口径(A7): 与 verify 后统计同一函数(双通道数字一致, 对账测试锚点)。"""
-    return compute_accuracy()
+    """看板口径(A7): 与 verify 后统计同一函数(双通道数字一致, 对账测试锚点)。
+
+    QF3-07: GET /accuracy 是公开匿名接口且会被前端反复调用, 必须纯只读 ——
+    统计值在内存算完直接返回, 不落库(persist=False), 响应带 persisted=False。
+    落库动作只发生在有鉴权的 POST /verify 之后的 verify_daily 里。
+    """
+    return compute_accuracy(persist=False)
 
 
 def get_predictions(days: int = 30) -> list[dict[str, Any]]:

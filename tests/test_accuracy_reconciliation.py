@@ -121,17 +121,41 @@ def test_dashboard_matches_store_recompute(seeded_store: PredictionStore) -> Non
     assert dash["insufficient_sample"] is any_low
 
 
-def test_dashboard_persists_stats_matching_windows(seeded_store: PredictionStore) -> None:
-    """落库的 accuracy_stats 与看板内存口径逐项一致(对账锚点)。"""
-    client.get("/api/prediction/accuracy")
+def test_verify_persists_stats_matching_dashboard(seeded_store: PredictionStore) -> None:
+    """落库的 accuracy_stats 与看板内存口径逐项一致(对账锚点)。
+
+    QF3-07 修复(2026-11-08): 历史版本用 ``client.get("/api/prediction/accuracy")``
+    触发落库, 即把"公开 GET 产生写副作用"当成规格 —— 这正是 QF3-07 要消除的行为,
+    旧断言无法与修复共存。现改为经真实写路径 compute_accuracy(persist=True)
+    (即 POST /verify 内部行为)落库, 再断言 GET 的只读输出与库内逐项一致,
+    并额外锁死"GET 完全不写"。覆盖强度上升, 未放宽任何阈值。
+    """
     today = svc.beijing_today_str()
+
+    # 1) 写路径落库(与 verify_daily 内部同参: compute_accuracy(store=store, persist=True))
+    svc.compute_accuracy(store=seeded_store, stat_date=today, persist=True)
     stats = seeded_store.list_accuracy_stats(stat_date=today)
     by_key = {(s["window"], s["target_kind"], s["source"]): s for s in stats}
     assert ("30d", "prediction", "rule") in by_key
     assert ("30d", "recommendation", "rule") in by_key
     assert by_key[("30d", "prediction", "rule")]["hit_rate"] == pytest.approx(6 / 7, abs=1e-4)
     assert by_key[("30d", "recommendation", "rule")]["hit_rate"] == pytest.approx(0.6, abs=1e-4)
-    # 幂等: 重复调用不翻倍
+
+    # 2) 只读路径: 数字与库内一致(原对账意图), 且不改变库内状态(QF3-07 护栏)
+    dash = client.get("/api/prediction/accuracy").json()["data"]
+    assert dash["persisted"] is False
+    assert len(seeded_store.list_accuracy_stats(stat_date=today)) == len(stats)  # 幂等: 不新增不翻倍
+    assert dash["windows"]["30d"]["prediction"]["rule"]["hit_rate"] == pytest.approx(6 / 7, abs=1e-4)
+    assert dash["windows"]["30d"]["recommendation"]["rule"]["hit_rate"] == pytest.approx(0.6, abs=1e-4)
+    # 对账锚点本体: 看板内存口径 == 库内落库口径
+    assert (
+        dash["windows"]["30d"]["prediction"]["rule"]["hit_rate"]
+        == by_key[("30d", "prediction", "rule")]["hit_rate"]
+    )
+    assert (
+        dash["windows"]["30d"]["recommendation"]["rule"]["hit_rate"]
+        == by_key[("30d", "recommendation", "rule")]["hit_rate"]
+    )
+    # 重复调用仍然不写(原「幂等: 重复调用不翻倍」意图保留并加强为「完全不写」)
     client.get("/api/prediction/accuracy")
-    again = seeded_store.list_accuracy_stats(stat_date=today)
-    assert len(again) == len(stats)
+    assert len(seeded_store.list_accuracy_stats(stat_date=today)) == len(stats)
