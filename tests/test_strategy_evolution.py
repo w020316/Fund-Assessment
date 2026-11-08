@@ -695,6 +695,52 @@ class TestOutOfSampleGate:
         assert resp.json()["detail"]["code"] == "EVOLUTION_DATA_UNAVAILABLE"
         assert not evolution.LINEAGE_FILE.exists()
 
+    def test_run_response_split_fields_contract(self, evolution_store, strategies_yaml, monkeypatch):
+        """QF3-29: /run 响应切分字段契约，**覆盖 improved=True 分支**。
+
+        缺口背景：res["split_index"] / train_days / val_days 三个字段前端零消费，
+        此前断言只覆盖 improved=False 分支（:644/:645），改进分支响应侧零断言。
+        而真实数据下父代 fitness 恒 0、几乎恒走 improved=False，故本用例是该分支
+        这三字段的**首次验证** —— 实现漂移时这里是唯一会红的地方。
+
+        ⚠️ 不要写 res["metrics"]["eval_window_days"]：该键在**任何分支都不存在**。
+        /run 响应的 metrics 是 evaluate_candidate 的原始 5 字段
+        （annual_return/max_drawdown/sharpe/win_rate/fitness），未经富化；
+        富化版（含 segment/split_index/eval_window_days）只进 record。
+        故：切分点只能取响应顶层，富化指标只能取 record（GET /generations/{id}）。
+
+        ⚠️ record 也没有 train_days / val_days（只有响应有），总天数只能取响应侧。
+        """
+        # 训练段与验证段同时改善 → 稳定产出 improved=True
+        proxy, rets, _ = _synthetic_proxy(train_ret=0.004, val_ret=0.002)
+        res = self._run_with(monkeypatch, proxy, rets)
+
+        # 前置守卫：必须真的进入改进分支，否则下面的 record 断言无意义
+        assert res["improved"] is True, "未进入 improved=True 分支, 本用例失去意义"
+        assert res["generation_id"] is not None
+
+        # ① 响应层自洽：train_days 与 split_index 同源
+        assert res["train_days"] == res["split_index"]
+        # ② 两段均非空
+        assert res["train_days"] >= 1 and res["val_days"] >= 1
+        total = res["train_days"] + res["val_days"]
+
+        record = evolution.load_generation(res["generation_id"])
+        assert record is not None
+
+        # ③ record 三处 split_index 镜像不漂移
+        assert (record["split_index"]
+                == record["metrics"]["split_index"]
+                == record["val_metrics"]["split_index"])
+
+        # ④ 跨 payload 守恒：两段可评估交易日 + 2 == 响应给出的总天数
+        #    （每段首日无 T-1 持仓不计, 故各少 1）
+        #    100 日 fixture: 79 + 19 + 2 == 80 + 20 == 100
+        #    写成恒等式而非硬编码 100 —— 恒等式才是防腐化的东西
+        assert (record["metrics"]["eval_window_days"]
+                + record["val_metrics"]["eval_window_days"] + 2
+                == total)
+
 
 # ===========================================================================
 # 12. evaluate_candidate 的 day_slice（样本外评估的唯一窗口入口）
