@@ -8,7 +8,10 @@
    - .qf-fs-11 为「微型标签」档：按 R2 规则附带 letter-spacing:.05em（大写微标签例外档）；
    - 正文硬下限 12px：低于 12px 的正文不允许使用本清单之外的字号。
    ============================================================ */
-.qf-fs-11 { font-size: 11px; letter-spacing: 0.05em; } /* micro 微标签档 */
+.qf-fs-11 { font-size: 11px; }                          /* micro 微标签档 */
+/* 微标签的字距是独立语义，不随字号捆绑：0.05em 只对"全大写短标签"成立，
+   对普通小字正文会明显变散。拆分后调用方按需组合 .qf-fs-11 .qf-track-wide。 */
+.qf-track-wide { letter-spacing: 0.05em; }
 .qf-fs-12 { font-size: 12px; }                          /* caption / 正文下限 */
 .qf-fs-13 { font-size: 13px; }                          /* body-s */
 .qf-fs-14 { font-size: 14px; }                          /* body / data */
