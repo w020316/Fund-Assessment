@@ -586,6 +586,25 @@ def _is_verify_final(now: _dt.datetime, cfg: dict[str, Any]) -> bool:
     return now >= final
 
 
+def _verify_earliest(now: _dt.datetime, cfg: dict[str, Any]) -> _dt.datetime:
+    """当日最早可验证时点(默认 15:00), 由 cfg["verify"]["earliest_hhmm"] 配置。
+
+    兼容 "1500" 与 "15:00" 两种写法; 配置非法时回退 15:00, 绝不抛异常。
+    """
+    raw = str(cfg.get("verify", {}).get("earliest_hhmm", "1500"))
+    try:
+        digits = raw.replace(":", "").strip()
+        if len(digits) != 4 or not digits.isdigit():
+            raise ValueError(f"earliest_hhmm 非法: {raw!r}")
+        hh, mm = int(digits[:2]), int(digits[2:])
+        if not (0 <= hh <= 23 and 0 <= mm <= 59):
+            raise ValueError(f"earliest_hhmm 越界: {raw!r}")
+        return now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    except (ValueError, TypeError):
+        logger.warning(f"verify earliest_hhmm 配置非法({raw!r}), 回退 15:00")
+        return now.replace(hour=15, minute=0, second=0, microsecond=0)
+
+
 def verify_daily(now: _dt.datetime | None = None) -> dict[str, Any]:
     """验证今日(target_date=今日, 由上一交易日 15:40 生成的次日)预测与推荐(R6.1)。
 
@@ -593,15 +612,29 @@ def verify_daily(now: _dt.datetime | None = None) -> dict[str, Any]:
     D+1(=target_date) 日 15:40 verify 时今日恰为该目标日, 且今日 15:40 的
     实时涨跌即该目标日的最终涨跌。周末自然衔接: 周五生成的预测 target=周一,
     周一验证。幂等 upsert, 16:30 重试覆盖。
+
+    时点守卫(QF3-04): 早于 earliest_hhmm(默认 15:00)直接跳过, 不读库不写库。
     """
     now = now or beijing_now()
     today = now.strftime("%Y-%m-%d")
+    cfg = sig.load_signal_config()
+
+    # QF3-04: 盘中(_hs300_change_pct 取的是实时涨跌)若被调用, 会把分钟级波动当作
+    # 目标日最终涨跌写入并 missing=0; 15:40 正式跑时 _pending() 已为 False, 不再覆盖,
+    # 错误结果被永久固化进准确率。故早于可验证时点一律不读不写直接返回。
+    earliest = _verify_earliest(now, cfg)
+    if now < earliest:
+        logger.info(
+            f"verify_daily: 时点过早({now.strftime('%H:%M')} < {earliest.strftime('%H:%M')}), "
+            f"盘中涨跌非最终收盘涨跌, 跳过且不写库"
+        )
+        return {"verified": 0, "missing": 0, "skipped": True, "reason": "too_early", "detail": []}
+
     store = get_store()
     if not check_trading_day(now):
         logger.info(f"verify_daily: 非交易日({today}), 跳过")
         return {"verified": 0, "missing": 0, "skipped": True, "reason": "non_trading_day", "detail": []}
 
-    cfg = sig.load_signal_config()
     band = float(cfg.get("verify", {}).get("flat_band_pct", 0.3))
     # 验证目标日 = 今日(check_trading_day 已保证是交易日)。今日即上一交易日
     # 生成预测的 target_date, 今日 15:40 的实时涨跌即该目标日的最终涨跌;

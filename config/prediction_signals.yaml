@@ -16,6 +16,12 @@
 #   recommend.min_confidence : 推荐入选最低置信度
 #   verify.final_after_cst : 北京时间该时刻后的 verify 视为"最终跑"
 #                            (数据仍取不到则写 missing=1 占位, 之前只跳过)
+#   verify.earliest_hhmm : 北京时间最早可验证时刻("1500" = 15:00)。
+#                          早于该时刻的 verify 直接跳过且不读不写库(QF3-04),
+#                          因为盘中实时涨跌不是目标日的最终收盘涨跌。
+#   verify.orphan_lookback_days : 孤儿目标日回溯窗口(天, QF3-05)。
+#                          target_date 已过期且无验证行的预测/推荐, 在窗口内
+#                          标记 missing=1; 超窗只告警不回填。
 #   sector_candidates : 板块 → 候选标的(股票/ETF, 代码为公开市场标识)。
 #       匹配规则: 板块名与 key 精确匹配, 或互相包含子串(如"酿酒行业"匹配"酿酒")。
 #       name 留空, 由服务层用实时行情回填(禁止配置层编造名称)。
@@ -49,6 +55,12 @@ direction:
 verify:
   flat_band_pct: 0.3
   final_after_cst: "16:10"
+  # 北京时间早于该时刻的 verify 一律跳过且不写库(QF3-04):
+  # 盘中取到的实时涨跌只是分钟级波动, 不是目标日的最终收盘涨跌。
+  earliest_hhmm: "1500"
+  # 孤儿目标日回溯窗口(天, QF3-05): target_date 已过期且无验证行的预测/推荐,
+  # 在窗口内标记为 missing=1; 超出窗口只告警不回填, 避免一次扫描把历史标脏。
+  orphan_lookback_days: 10
 
 recommend:
   max_items: 5

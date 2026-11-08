@@ -104,6 +104,10 @@ def test_verify_with_admin_token_persists_stats(
 ) -> None:
     """POST /verify(带 admin token)成功后, accuracy_stats 行数增加。"""
     monkeypatch.setenv("ADMIN_TOKEN", _ADMIN_TOKEN)
+    # QF3-04 起 verify 有 15:00 时点守卫, 本用例必须固定时钟, 否则在盘中运行时
+    # 会被判 too_early(与断言无关的环境依赖)。固定为交易日 15:40。
+    fixed_now = _dt.datetime(2026, 11, 9, 15, 40, tzinfo=_dt.timezone(_dt.timedelta(hours=8)))
+    monkeypatch.setattr(svc, "beijing_now", lambda: fixed_now)
     today = svc.beijing_today_str()
     _seed_predictions(store, today, n=5)  # 待验证, 尚无验证行
 

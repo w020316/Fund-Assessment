@@ -37,7 +37,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max": 95,
     },
     "direction": {"composite_threshold": 8.0},
-    "verify": {"flat_band_pct": 0.3, "final_after_cst": "16:10"},
+    "verify": {
+        "flat_band_pct": 0.3,
+        "final_after_cst": "16:10",
+        "earliest_hhmm": "1500",  # QF3-04: 早于此北京时间时刻的 verify 不读不写库
+        "orphan_lookback_days": 10,  # QF3-05: 孤儿目标日回溯窗口(天)
+    },
     "recommend": {"max_items": 5, "min_confidence": 55},
     "sector_candidates": {},
 }
