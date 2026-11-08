@@ -61,7 +61,9 @@
     if (!row) {
       return '<div class="pred-card"><div class="pred-card-head">'
         + '<span class="pred-card-title">' + esc(sess.label) + '</span></div>'
-        + '<div class="pred-empty">未采集</div>'
+        // 2026-11-08：'未采集' 太短，首次部署的用户会以为是坏了。
+        // 明确这是"还没到采集时点/尚未跑过"，并保留手动触发入口。
+        + '<div class="pred-empty">今日尚未采集<br><span style="font-size:11px;color:var(--text-muted);">每交易日 09:35 / 13:05 / 15:40 自动采集，也可立即触发</span></div>'
         + '<div style="margin-top:8px;text-align:center;">'
         + '<button class="btn btn-sm btn-outline" style="min-height:36px;" onclick="PredictionPage.collect(\'' + sess.key + '\')">立即采集</button>'
         + '</div></div>';
