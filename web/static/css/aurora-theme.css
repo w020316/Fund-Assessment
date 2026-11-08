@@ -344,6 +344,11 @@ body.hud-theme textarea:focus-visible{box-shadow:0 0 0 3px rgba(34,227,255,.14),
     min-height:48px;font-size:16px;   /* 16px 防 iOS 聚焦自动缩放 */
   }
   body.hud-theme .tabs,body.hud-theme .hud-subtabs{display:flex;width:100%;flex-wrap:nowrap}
+  /* 2026-11-08: 375px 下标签文字被压成两行（"行情总览"断成"行情/总览"）。
+     子项 nowrap 保持单行，超出部分由容器横向滚动承接，避免整页出现横向滚动条。 */
+  body.hud-theme .tabs > *,body.hud-theme .hud-subtabs > *{white-space:nowrap}
+  body.hud-theme .hud-subtabs{overflow-x:auto;scrollbar-width:none}
+  body.hud-theme .hud-subtabs::-webkit-scrollbar{display:none}
   body.hud-theme .tab,body.hud-theme .hud-subtab{flex:1;min-width:0;height:44px;padding:0 8px;font-size:14px}
   body.hud-theme .toast-container{top:64px;left:12px;right:12px}
   body.hud-theme .toast{width:100%}
