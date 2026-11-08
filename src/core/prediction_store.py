@@ -6,7 +6,14 @@
 
 铁律(设计文档 §六 #9):
 - 只写 data/prediction.db, 绝不触碰 trade.db / risk.db(测试有 hash 断言)
-- 写入失败由调用方容错, 本层方法不抛裸异常给路由层(统一返回 None/空列表 + logger)
+- 所有写方法一律在 ``with conn:`` 事务内执行: 成功自动 commit, 异常自动 rollback。
+  绝不允许留下半开事务 —— 否则后续任一写方法的 commit() 会把上一个方法里未完成的
+  DELETE/INSERT 一起提交, 造成静默数据丢失(QF3-08: replace_recommendations 先
+  DELETE 再 INSERT, 中途失败会让当日推荐被下一个 commit 顺带清空)。
+- 写失败记 logger.error 后向上抛出, 不再静默返回 None/0: 静默失败与"确实没有数据"
+  在返回值上不可区分, 会把数据丢失伪装成正常空结果(QF3-01 同类缺陷)。
+  唯一例外是 init_db: 它是启动期探针且签名为 -> bool, 失败返回 False 不抛,
+  避免瞬时磁盘/权限问题直接崩掉应用启动。
 - UNIQUE 约束承担幂等: snapshot(trade_date,session) / prediction(trade_date,benchmark) /
   verification(trade_date,target_kind,target_id) / accuracy(stat_date,window,kind,source)
 """
@@ -175,13 +182,17 @@ class PredictionStore:
         return self._conn
 
     def init_db(self) -> bool:
-        """建表 + 索引(幂等, 可重复调用; app 启动与 store 首次使用时都会跑)。"""
+        """建表 + 索引(幂等, 可重复调用; app 启动与 store 首次使用时都会跑)。
+
+        启动期探针: 失败返回 False 而不抛出, 避免瞬时磁盘/权限问题崩掉应用启动;
+        但仍包在 ``with conn:`` 内, 失败时回滚, 不留半开事务。
+        """
         try:
             with _LOCK:
                 conn = self._connection()
-                for ddl in _DDL_STATEMENTS:
-                    conn.execute(ddl)
-                conn.commit()
+                with conn:
+                    for ddl in _DDL_STATEMENTS:
+                        conn.execute(ddl)
             return True
         except Exception as e:  # noqa: BLE001 — 存储层不向调用方抛裸异常
             logger.error(f"prediction_store.init_db failed: {e}")
@@ -194,6 +205,20 @@ class PredictionStore:
                     self._conn.close()
                 finally:
                     self._conn = None
+
+    def _rollback_quietly(self) -> None:
+        """回滚当前连接上的未提交事务(无事务时为 no-op), 自身绝不抛异常。
+
+        写方法失败路径必调: 保证"成功 commit / 失败 rollback"二选一, 绝不留
+        半开事务被后续无关方法的 commit() 顺带提交(QF3-08 根因)。
+        """
+        conn = self._conn
+        if conn is None:
+            return
+        try:
+            conn.rollback()
+        except Exception as e:  # noqa: BLE001 — 回滚失败不应掩盖原始异常
+            logger.error(f"prediction_store rollback failed: {e}")
 
     # ===== 时段快照 =====
 
@@ -239,7 +264,8 @@ class PredictionStore:
             return self.get_snapshot(trade_date, session)
         except Exception as e:  # noqa: BLE001
             logger.error(f"prediction_store.upsert_snapshot failed: {e}")
-            return None
+            self._rollback_quietly()
+            raise
 
     def get_snapshot(self, trade_date: str, session: str) -> dict[str, Any] | None:
         try:
@@ -363,7 +389,8 @@ class PredictionStore:
             return self.get_prediction(trade_date, benchmark)
         except Exception as e:  # noqa: BLE001
             logger.error(f"prediction_store.upsert_prediction failed: {e}")
-            return None
+            self._rollback_quietly()
+            raise
 
     @staticmethod
     def _prediction_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
@@ -437,13 +464,53 @@ class PredictionStore:
     def replace_recommendations(
         self, trade_date: str, target_date: str, items: list[dict[str, Any]]
     ) -> int:
-        """整日推荐幂等覆盖: 先删当日旧行再整批插入(R4.1 同日重跑口径)。"""
+        """整日推荐幂等覆盖: 先删当日旧行再整批插入(R4.1 同日重跑口径)。
+
+        事务(QF3-08): DELETE 与 INSERT 必须原子。此前两者共处一个隐式事务且只在
+        末尾 commit, 中途 INSERT 抛异常时 DELETE 会挂在未提交事务里, 被后续任一
+        写方法的 commit() 顺带提交 → 当日推荐被静默清空。现在失败即回滚, 旧行原样保留。
+
+        入参校验(QF3-17): direction 非法/缺失、confidence 缺失/非数值的条目按
+        PRD R4.1「无法追溯的条目自动丢弃并记日志」处理, 不再用 up / 50.0 兜底伪造。
+        若全部条目被丢弃, 仍正常提交 DELETE(整日清空是合法语义), 但记 warning。
+        """
         created_at = _utc_now_iso()
+
+        valid: list[dict[str, Any]] = []
+        dropped: list[tuple[str, str]] = []
+        for it in items:
+            symbol = str(it.get("symbol", "") or "")
+            direction = it.get("direction")
+            confidence = it.get("confidence")
+            if direction not in ("up", "down"):
+                dropped.append((symbol, f"direction 非法或缺失({direction!r})"))
+                continue
+            if confidence is None:
+                dropped.append((symbol, "confidence 缺失"))
+                continue
+            try:
+                conf = float(confidence)
+            except (TypeError, ValueError):
+                dropped.append((symbol, f"confidence 非数值({confidence!r})"))
+                continue
+            valid.append({**it, "symbol": symbol, "direction": direction, "confidence": conf})
+
+        if dropped:
+            logger.warning(
+                f"replace_recommendations: 丢弃 {len(dropped)} 条不可追溯推荐"
+                f"(trade_date={trade_date}): {dropped}"
+            )
+        if items and not valid:
+            logger.warning(
+                f"replace_recommendations: trade_date={trade_date} 全部 "
+                f"{len(items)} 条推荐均不可追溯, 当日推荐将被清空"
+            )
+
         try:
             with _LOCK:
                 conn = self._connection()
                 conn.execute("DELETE FROM recommendations WHERE trade_date = ?", (trade_date,))
-                for it in items:
+                for it in valid:
                     conn.execute(
                         """
                         INSERT INTO recommendations
@@ -454,11 +521,11 @@ class PredictionStore:
                         (
                             trade_date,
                             target_date,
-                            str(it.get("symbol", "")),
+                            it["symbol"],
                             str(it.get("name", "")),
                             str(it.get("kind", "stock")),
-                            str(it.get("direction", "up")),
-                            float(it.get("confidence", 50.0)),
+                            it["direction"],
+                            it["confidence"],
                             str(it.get("reason", "")),
                             str(it.get("source_signal", "")),
                             it.get("realized_return"),
@@ -473,7 +540,8 @@ class PredictionStore:
                 return int(cur.fetchone()["n"])
         except Exception as e:  # noqa: BLE001
             logger.error(f"prediction_store.replace_recommendations failed: {e}")
-            return 0
+            self._rollback_quietly()
+            raise
 
     @staticmethod
     def _recommendation_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
@@ -579,7 +647,8 @@ class PredictionStore:
             return self.get_verification(trade_date, target_kind, target_id)
         except Exception as e:  # noqa: BLE001
             logger.error(f"prediction_store.upsert_verification failed: {e}")
-            return None
+            self._rollback_quietly()
+            raise
 
     @staticmethod
     def _verification_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
@@ -690,7 +759,8 @@ class PredictionStore:
             return written
         except Exception as e:  # noqa: BLE001
             logger.error(f"prediction_store.upsert_accuracy_stats failed: {e}")
-            return written
+            self._rollback_quietly()
+            raise
 
     def list_accuracy_stats(self, stat_date: str | None = None) -> list[dict[str, Any]]:
         try:
@@ -763,7 +833,8 @@ class PredictionStore:
             return deleted
         except Exception as e:  # noqa: BLE001
             logger.error(f"prediction_store.cleanup failed: {e}")
-            return deleted
+            self._rollback_quietly()
+            raise
 
     # ===== 导出(主理人补充: Render 免费层磁盘非持久 → Action 每日备份快照) =====
 
