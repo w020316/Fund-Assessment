@@ -1,4 +1,4 @@
-"""策略自进化 · 6 端点（策略自进化 B6, 设计文档 docs/strategy-evolution-design-2026-11-07.md §4）
+"""策略自进化 · 7 端点（策略自进化 B6, 设计文档 docs/strategy-evolution-design-2026-11-07.md §4）
 
 铁律:
 - 全部端点显式挂 ``Depends(require_admin)``（逐条注释, 接口契约表格第 4 节）;
@@ -6,20 +6,33 @@
   同一把锁对象, 防叠加打满 512MB 实例; 本文件**不新建锁**）;
 - 路由层不写业务算法: 只做参数校验 / asyncio 编排（to_thread + wait_for, 与
   strategy.py /analyze、/backtest 同款）/ 错误码映射;
-- 激活写序: 先 strategies.yaml（参数真源）→ 后 active.json（指针）;
+- 激活写序: 备份 → strategies.yaml（参数真源）→ active.json（指针）;
   yaml 写失败不更新指针, 读侧以 yaml 为准自愈。
+
+QF3-02 修复(2026-11-10):原 activate 把样本内最优参数直接写进参数真源, 且
+**无备份、无回退路径**——一次错误激活只能靠人工改 yaml 恢复。现在:
+1. 写前把当前 yaml **原文**快照到 ``config/backup/strategies_<ts>.yaml``,
+   并把 ``backup_path`` / ``restored_from`` 记入 active.json（可审计）;
+2. 新增 ``POST /rollback``: 按 active.json 的 backup_path 还原原文,
+   并把谱系指针回指 ``restored_from``。无备份 → 409 ``NO_BACKUP_AVAILABLE``。
 """
 from __future__ import annotations
 
 import asyncio
+import os
+import shutil
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
+import yaml
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 from pydantic import BaseModel, Field
 
 from src.strategies import evolution as evolution_core
 from src.utils.auth import require_admin
+from web.routes import config as config_route
 from web.routes import strategy as strategy_route
 from web.routes.config import load_strategies_yaml, save_strategies_yaml
 
@@ -29,6 +42,9 @@ router = APIRouter()
 # 兜底收割线程池内偶发的 I/O 阻塞。
 EVOLUTION_TIMEOUT_SECONDS = 25
 
+# 激活前 yaml 快照目录（相对 config 目录; 不存在则创建）
+BACKUP_SUBDIR = "backup"
+
 # 最近一次运行摘要(status 端点用; 仅内存态, 不落盘)
 _LAST_RUN: dict[str, Any] = {"at": None, "improved": None, "generation_id": None}
 
@@ -36,6 +52,76 @@ _LAST_RUN: dict[str, Any] = {"at": None, "improved": None, "generation_id": None
 def _err(code: str, message: str, status_code: int = 503, retryable: bool = True) -> HTTPException:
     """统一错误结构（与 strategy.py _scan_unavailable 同款 detail={"code","message","retryable"}）。"""
     return HTTPException(status_code=status_code, detail={"code": code, "message": message, "retryable": retryable})
+
+
+# ---------------------------------------------------------------------------
+# 备份 / 还原（QF3-02）: 全部同步函数, 由路由用 asyncio.to_thread 调用
+# ---------------------------------------------------------------------------
+def _strategies_yaml_path() -> Path:
+    """参数真源路径（调用时解析, 便于测试重定向到 tmp_path）。"""
+    return config_route.strategies_config_dir() / "strategies.yaml"
+
+
+def _backup_dir() -> Path:
+    return config_route.strategies_config_dir() / BACKUP_SUBDIR
+
+
+def _backup_stamp() -> str:
+    """备份文件名时间戳（YYYYmmdd_HHMMSS, 与任务口径一致）。"""
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
+def _backup_strategies_yaml(yaml_path: Path, backup_dir: Path) -> str:
+    """把当前 strategies.yaml **原文**备份为 ``backup/strategies_<ts>.yaml``。
+
+    用 shutil.copy2 逐字节复制（不经 yaml.dump 再序列化）, 保留注释、键序、
+    引号风格——回滚的语义是"回到激活前的那份文件", 不是"回到等价的 dict"。
+
+    Returns:
+        相对 config 目录的备份路径（posix 分隔符）, 即 active.json 的 backup_path。
+
+    Raises:
+        OSError: 目录/文件创建失败（调用方转 ACTIVATE_BACKUP_FAILED 并中止激活）。
+    """
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = _backup_stamp()
+    target = backup_dir / f"strategies_{stamp}.yaml"
+    seq = 1
+    while target.exists():
+        # 同一秒内二次激活: 追加序号, 绝不覆盖既有回滚点（覆盖=丢掉唯一退路）
+        target = backup_dir / f"strategies_{stamp}_{seq}.yaml"
+        seq += 1
+    if yaml_path.exists():
+        shutil.copy2(yaml_path, target)
+    else:
+        # 从未有过 strategies.yaml(出厂状态): 备份"无段"语义。回滚后 trading_quant
+        # 缺段, TradingQuant 自动回退模块常量 = 等价出厂参数, 仍是可用的回退点。
+        target.write_text("{}\n", encoding="utf-8")
+    logger.info(f"strategies.yaml backed up to {target}")
+    return target.relative_to(config_route.strategies_config_dir()).as_posix()
+
+
+def _resolve_backup_path(raw: str) -> Path:
+    """active.json 的 backup_path → 绝对路径。
+
+    兼容两种写法: 相对 config 目录（本实现写入的规范形态, 跨机器可搬）
+    与绝对路径（历史/手工写入）, 避免回滚因路径形态不同而失败。
+    """
+    path = Path(str(raw))
+    return path if path.is_absolute() else config_route.strategies_config_dir() / path
+
+
+def _read_backup_text(backup_path: Path) -> str:
+    """读备份原文（UTF-8）。文件缺失/不可读抛 OSError, 由调用方转 409。"""
+    return backup_path.read_text(encoding="utf-8")
+
+
+def _restore_yaml_atomic(backup_path: Path, yaml_path: Path) -> None:
+    """把备份原文原子还原到 strategies.yaml（先 copy 到 .tmp, 再 os.replace）。"""
+    yaml_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = yaml_path.with_suffix(yaml_path.suffix + ".tmp")
+    shutil.copy2(backup_path, tmp_path)
+    os.replace(tmp_path, yaml_path)
 
 
 def _evolution_guard():
@@ -198,7 +284,7 @@ async def compare(gen: int | None = None):
 
 
 # ---------------------------------------------------------------------------
-# 5. POST /activate —— 激活指定代（需管理员鉴权; 写序 yaml → active.json）
+# 5. POST /activate —— 激活指定代（需管理员鉴权; 写序 备份 → yaml → active.json）
 # ---------------------------------------------------------------------------
 @router.post("/activate", dependencies=[Depends(require_admin)])
 async def activate(req: EvolutionActivateRequest):
@@ -211,7 +297,18 @@ async def activate(req: EvolutionActivateRequest):
         raise _err("GEN_NOT_FOUND", f"第 {gen_id} 代不存在", status_code=404, retryable=False)
     params = record.get("params") or {}
 
-    # 写序铁律: 先写参数真源(strategies.yaml), 失败则不更新指针
+    # 先取"激活前指针", 供 active.json 的 restored_from 记录（回滚后应回指此处）
+    prev_generation_id = evolution_core.load_active().get("generation_id")
+
+    # ---- QF3-02 第 1 步: 写前快照。备份失败即中止, 绝不产生"无法回退的激活" ----
+    yaml_path = _strategies_yaml_path()
+    try:
+        backup_rel = await asyncio.to_thread(_backup_strategies_yaml, yaml_path, _backup_dir())
+    except Exception as e:
+        logger.exception(f"activate gen {gen_id}: backup strategies.yaml failed")
+        raise _err("ACTIVATE_BACKUP_FAILED", f"备份 strategies.yaml 失败, 激活中止(未改动真源): {e}")
+
+    # ---- QF3-02 第 2 步: 写序铁律 —— 先写参数真源, 失败则不更新指针 ----
     try:
         yaml_data = await asyncio.to_thread(load_strategies_yaml)
         yaml_data["trading_quant"] = {
@@ -223,13 +320,18 @@ async def activate(req: EvolutionActivateRequest):
         logger.exception(f"activate gen {gen_id}: write strategies.yaml failed")
         raise _err("ACTIVATE_WRITE_FAILED", f"写入 strategies.yaml 失败, 激活中止: {e}")
 
-    prev_generation_id = evolution_core.load_active().get("generation_id")
     active_record = {
         "generation_id": gen_id,
         "activated_at": evolution_core.now_iso(),
         "activated_by": "admin",
         "params_snapshot": params,
-        "note": "真源为 config/strategies.yaml 的 trading_quant 段;此文件是谱系指针与展示快照",
+        "backup_path": backup_rel,
+        "restored_from": prev_generation_id,
+        "note": (
+            "真源为 config/strategies.yaml 的 trading_quant 段;此文件是谱系指针与展示快照;"
+            "backup_path=本次激活前的 yaml 原文快照(供 POST /rollback 还原), "
+            "restored_from=回滚后应回指的代号(None=出厂参数)"
+        ),
     }
     try:
         await asyncio.to_thread(evolution_core.save_active, active_record)
@@ -238,9 +340,10 @@ async def activate(req: EvolutionActivateRequest):
         logger.exception(f"activate gen {gen_id}: write active.json failed (yaml already updated)")
         raise _err(
             "ACTIVATE_WRITE_FAILED",
-            f"参数真源(strategies.yaml)已更新, 但谱系指针写入失败({e}); 读侧以 yaml 为准, 请重试或检查磁盘",
+            f"参数真源(strategies.yaml)已更新, 但谱系指针写入失败({e}); 读侧以 yaml 为准, "
+            f"如需回退请用备份 {backup_rel}",
         )
-    logger.info(f"evolution gen {gen_id} activated (prev={prev_generation_id})")
+    logger.info(f"evolution gen {gen_id} activated (prev={prev_generation_id}, backup={backup_rel})")
     return {
         "activated": True,
         "generation_id": gen_id,
@@ -248,11 +351,106 @@ async def activate(req: EvolutionActivateRequest):
         "yaml_updated": True,
         "params_written": params,
         "prev_generation_id": prev_generation_id,
+        "backup_path": backup_rel,
+        "restored_from": prev_generation_id,
     }
 
 
 # ---------------------------------------------------------------------------
-# 6. GET /status —— 运行状态（需管理员鉴权）
+# 6. POST /rollback —— 用激活前快照还原参数真源（需管理员鉴权）
+# ---------------------------------------------------------------------------
+@router.post("/rollback", dependencies=[Depends(require_admin)])
+async def rollback():
+    """把 strategies.yaml 还原到"上一次激活之前"的原文, 并把指针回指 restored_from。
+
+    错误口径:
+    - 无 active.json / 无 backup_path / 备份文件缺失 / 备份非合法 YAML
+      → **409 NO_BACKUP_AVAILABLE**（不可用即不可用, 绝不返回 200 假装成功）;
+    - 还原写盘失败 → 503 ROLLBACK_WRITE_FAILED（此时 yaml 未变, 可重试）。
+    """
+    active = evolution_core.load_active()
+    raw_backup = active.get("backup_path")
+    if not raw_backup:
+        raise _err(
+            "NO_BACKUP_AVAILABLE",
+            "当前无激活备份(active.json 缺 backup_path): 未激活过, 或激活早于备份能力上线",
+            status_code=409,
+            retryable=False,
+        )
+    backup_path = _resolve_backup_path(str(raw_backup))
+    if not backup_path.is_file():
+        raise _err(
+            "NO_BACKUP_AVAILABLE",
+            f"备份文件不存在或不可读: {raw_backup}(可能已被清理)",
+            status_code=409,
+            retryable=False,
+        )
+    try:
+        backup_text = await asyncio.to_thread(_read_backup_text, backup_path)
+        parsed = yaml.safe_load(backup_text)
+    except Exception as e:
+        logger.warning(f"rollback: backup {raw_backup} unreadable/invalid: {e}")
+        raise _err("NO_BACKUP_AVAILABLE", f"备份文件不是合法 YAML, 拒绝还原: {e}", status_code=409, retryable=False)
+    if parsed is not None and not isinstance(parsed, dict):
+        raise _err("NO_BACKUP_AVAILABLE", "备份文件内容不是 YAML 映射, 拒绝还原", status_code=409, retryable=False)
+
+    restored_from = active.get("restored_from")
+    yaml_path = _strategies_yaml_path()
+    try:
+        await asyncio.to_thread(_restore_yaml_atomic, backup_path, yaml_path)
+    except Exception as e:
+        logger.exception(f"rollback: restore {yaml_path} from {raw_backup} failed")
+        raise _err("ROLLBACK_WRITE_FAILED", f"还原 strategies.yaml 失败, 真源未改动: {e}")
+
+    # 指针回指: 还原后"当前生效代"= 激活前那一代(None=出厂参数)
+    params_snapshot = None
+    if restored_from is not None:
+        try:
+            restored_record = evolution_core.load_generation(int(restored_from))
+        except Exception as e:  # 代号异常/文件损坏: 不影响 yaml 已还原的事实
+            logger.warning(f"rollback: load generation {restored_from} failed: {e}")
+            restored_record = None
+        params_snapshot = (restored_record or {}).get("params")
+        if params_snapshot is None:
+            logger.warning(f"rollback: gen {restored_from} params unavailable (pruned/corrupted)")
+
+    now = evolution_core.now_iso()
+    active_record = {
+        "generation_id": restored_from,
+        "activated_at": now,
+        "activated_by": "admin(rollback)",
+        "params_snapshot": params_snapshot,
+        "backup_path": None,
+        "restored_from": None,
+        "rolled_back_at": now,
+        "rolled_back_to_backup": str(raw_backup),
+        "note": (
+            "真源为 config/strategies.yaml 的 trading_quant 段;此文件是谱系指针与展示快照;"
+            "本次记录由 POST /rollback 写入(已消费一次回滚点)"
+        ),
+    }
+    try:
+        await asyncio.to_thread(evolution_core.save_active, active_record)
+    except Exception as e:
+        # yaml 已还原而指针未写: 读侧以 yaml 为准, 报错让调用方知晓指针滞后
+        logger.exception("rollback: write active.json failed (yaml already restored)")
+        raise _err(
+            "ROLLBACK_WRITE_FAILED",
+            f"参数真源已还原自 {raw_backup}, 但谱系指针写入失败({e}); 读侧以 yaml 为准",
+        )
+    logger.info(f"evolution rollback: yaml restored from {raw_backup}, pointer -> {restored_from}")
+    return {
+        "rolled_back": True,
+        "yaml_restored": True,
+        "backup_path": str(raw_backup),
+        "restored_from": restored_from,
+        "restored_at": now,
+        "generation_id": restored_from,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 7. GET /status —— 运行状态（需管理员鉴权）
 # ---------------------------------------------------------------------------
 @router.get("/status", dependencies=[Depends(require_admin)])
 async def status():

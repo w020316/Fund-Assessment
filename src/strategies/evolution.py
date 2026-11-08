@@ -13,6 +13,10 @@ data/strategy_evolution/ 下 generations/、lineage.json、active.json 是可再
 择时模拟口径说明: 代理分数矩阵基于**历史净值的假设性模拟, 非真实五维数据**
 （technical/capital/fundamental/news/sentiment 均为净值可观察量的代理映射,
 见设计文档 §1.2, 代码注释与前端详情页均需标注）。
+
+样本外验证口径（QF3-03 修复）: 评估窗按**时间顺序**切前 80% 训练段 / 后 20%
+验证段; 训练段只用于"选优", 验证段只用于"证伪"（不参与选择, 否则验证段自身
+被选择偏差污染）。候选必须两段**同时**优于父代才写盘。
 """
 from __future__ import annotations
 
@@ -39,12 +43,14 @@ BUDGET_SECONDS = 25.0       # 单次进化预算(time.monotonic 计时, 到点�
 MIN_FUNDS = 2               # 可用基金数量下限
 MIN_SAMPLE_DAYS = 30        # 单只基金净值样本下限
 DEFAULT_CANDIDATES = 5      # 每代候选数(1-10 由路由层校验)
+MIN_TOTAL_DAYS = 100        # 样本外验证下限: 总交易日 <100 → 20% 验证段不足 20 日
+TRAIN_RATIO = 0.8           # 时间顺序切分: 前 80% 训练段 / 后 20% 验证段
 NAV_PERIOD = "6m"           # 评估窗: 180 自然日 ≈ 120 交易日
 POSITIONS_FILE = Path(__file__).resolve().parents[2] / "web" / "user_fund_positions.json"
 
 
 class EvolutionDataUnavailable(RuntimeError):
-    """净值数据不可用（可用基金 <MIN_FUNDS 或样本 <MIN_SAMPLE_DAYS）。
+    """净值数据不可用（可用基金 <MIN_FUNDS 或样本 <MIN_SAMPLE_DAYS 或总交易日 <MIN_TOTAL_DAYS）。
 
     路由层转 503 EVOLUTION_DATA_UNAVAILABLE; 铁律: 失败路径零写盘。
     """
@@ -377,14 +383,62 @@ def build_proxy_matrix(navs: dict[str, np.ndarray]) -> tuple[np.ndarray, np.ndar
     return proxy, rets, codes
 
 
+def _slice_window(
+    proxy: np.ndarray,
+    rets: np.ndarray,
+    day_slice: tuple[int, int] | None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """按日轴切出评估窗（proxy 形状 (F, D, 5)、rets 形状 (F, D)）。
+
+    day_slice=None 时原样返回 → 既有 4 参数调用路径零行为变化。
+    lo/hi 越界由 Python 切片语义钳制, 不做隐式补零（宁可窗口变短也不造数据）。
+    该函数是**唯一**的窗口切分入口: evaluate_candidate 的 day_slice 分支与
+    run_evolution 的训练/验证段切分共用它, 保证两条路径结果逐位一致。
+    """
+    if day_slice is None:
+        return proxy, rets
+    lo, hi = int(day_slice[0]), int(day_slice[1])
+    return proxy[:, lo:hi, :], rets[:, lo:hi]
+
+
+def train_val_split_index(total_days: int) -> int:
+    """样本外切分点（**按时间顺序**, 严禁随机打乱）: 前 80% 训练段 / 后 20% 验证段。
+
+    时间序列的样本外验证必须保持时序: 打乱会把"未来"信息漏进训练段,
+    留出集就不再是留出集（这是 QF3-03 的结构性前提之一）。
+
+    Returns:
+        训练段右边界索引: 训练段 = [0, idx), 验证段 = [idx, total_days)。
+
+    Raises:
+        EvolutionDataUnavailable: 总交易日 < MIN_TOTAL_DAYS。
+            此处**必须**抛错而非静默降级成全样本评估——降级即回到
+            "父代 1 个样本 vs 候选 N 个取最大"的旧缺陷（无留出 = 无法证伪）。
+    """
+    total = int(total_days)
+    if total < MIN_TOTAL_DAYS:
+        min_val = int(round(MIN_TOTAL_DAYS * (1.0 - TRAIN_RATIO)))
+        raise EvolutionDataUnavailable(
+            f"交易日样本不足（{total}<{MIN_TOTAL_DAYS} 日）: "
+            f"20% 验证段不足 {min_val} 日, 无法做样本外验证"
+        )
+    idx = int(total * TRAIN_RATIO)
+    return max(1, min(total - 1, idx))
+
+
 def evaluate_candidate(
     proxy: np.ndarray,
     rets: np.ndarray,
     weights: dict[str, float],
     signals: dict[str, float],
+    day_slice: tuple[int, int] | None = None,
 ) -> dict[str, float]:
     """单候选评估: 合成 → buy/sell 两阈值状态机择时 → T+1 错位收益 → 指标/适应度。
 
+    - day_slice: 可选日轴窗口 (lo, hi)。给出时**只在窗口内**评估（样本外验证用）;
+      缺省 None → 与既有 4 参数调用逐位一致（纯新增可选参数, 不改默认语义）。
+      注意窗口内状态机从 lo 重新起算（position[0] 由 sig[lo] 判定）,
+      即"独立评估该窗口", 不继承窗口前的持仓——这是样本外评估的正确口径。
     - 持仓状态机: position[d]=1 若 sig[d]≥buy; =0 若 sig[d]≤sell; 否则保持前值
       （首日按 sig 判定, 无前值时默认空仓）。strong_buy/watch/hold 不直接参与
       P0 执行（设计注释: 通过变异改变 sig 分布间接影响结果）;
@@ -394,6 +448,7 @@ def evaluate_candidate(
     - fitness = 0.4·tanh(annual/0.30) + 0.25·tanh(sharpe/2.0) + 0.1·win_rate
                 − 0.25·min(1, |max_dd|/0.30)   （PRD 权重, tanh 归一）。
     """
+    proxy, rets = _slice_window(proxy, rets, day_slice)
     w = np.array([float(weights[k]) for k in DIM_KEYS], dtype=float)
     composite = np.tensordot(proxy, w, axes=([2], [0]))       # (F, D)
     sig = composite.mean(axis=0)                              # 等权组合信号 (D,)
@@ -503,9 +558,17 @@ def run_evolution(
 ) -> dict[str, Any]:
     """一次进化编排（线程池内同步执行, 路由层用 wait_for(…, 25) 包裹）。
 
-    流程（设计文档 §5）: 父代参数（active.json → 无则 yaml 现值/出厂常量）
-    → 读持仓基金码 → 取净值（共享）→ 代理矩阵 → 父代基线重评 → 逐候选
-    预算检查/变异/评估 → Top-1 vs 父代: 更优才写盘, 否则零写盘。
+    流程（设计文档 §5 + QF3-03 样本外闸门）: 父代参数（active.json → 无则
+    yaml 现值/出厂常量）→ 读持仓基金码 → 取净值（共享）→ 代理矩阵 →
+    **按时间顺序切 80/20 训练/验证段** → 父代训练段基线 → 逐候选（预算检查/
+    变异/训练段评估）→ Top-1 按训练段 fitness 选出 → 候选与父代**各在验证段
+    再评一次** → 训练段与验证段**同时**更优才写盘, 否则零写盘。
+
+    为什么必须两段同时更优（QF3-03 根因）:
+    旧实现父代只有 1 个样本、候选是 N 个里取最大、且父代与候选共用同一全样本
+    窗口——即便参数毫无真实改进, "N 个候选的最大值 > 1 个父代"也大概率成立
+    （多重比较/选择偏差）, 假阳性率随候选数单调上升。训练段选优 + 验证段独立
+    复评, 让"只是噪声上更好"的候选在验证段暴露出来。
 
     fund_codes 显式注入用于测试; 缺省读 web/user_fund_positions.json。
 
@@ -532,7 +595,18 @@ def run_evolution(
     navs = load_navs(codes, nav_loader)
     proxy, rets, used_codes = build_proxy_matrix(navs)
 
-    parent_metrics = evaluate_candidate(proxy, rets, parent_params["weights"], parent_params["signals"])
+    # ---- 样本外切分（时间顺序 80/20, 严禁打乱; 样本不足抛异常而非降级）----
+    total_days = int(rets.shape[1])
+    split_index = train_val_split_index(total_days)
+    # 注: 这里先切数组、再以 4 参数调用 evaluate_candidate（而非直接传 day_slice）,
+    # 是为了与既有测试替身（slow_eval(proxy, rets, w, s) 的 4 参数签名）保持兼容;
+    # 两条路径共用 _slice_window, 结果逐位一致（见 tests 的等价性用例）。
+    proxy_train, rets_train = _slice_window(proxy, rets, (0, split_index))
+    proxy_val, rets_val = _slice_window(proxy, rets, (split_index, total_days))
+
+    parent_train = evaluate_candidate(
+        proxy_train, rets_train, parent_params["weights"], parent_params["signals"]
+    )
 
     rng = rng_from_seed(f"gen{lineage.get('next_gen_id', 1)}-{now_stamp()}")
     best: dict[str, Any] | None = None
@@ -541,38 +615,79 @@ def run_evolution(
         if budget_seconds - (time.monotonic() - started) <= 0.0:
             break  # 预算到点收割已完成者
         cand_params = mutate_params(parent_params, rng)
-        cand_metrics = evaluate_candidate(proxy, rets, cand_params["weights"], cand_params["signals"])
+        cand_train = evaluate_candidate(
+            proxy_train, rets_train, cand_params["weights"], cand_params["signals"]
+        )
         evaluated += 1
-        if best is None or cand_metrics["fitness"] > best["metrics"]["fitness"]:
-            best = {"params": cand_params, "metrics": cand_metrics}
+        # 选优只看训练段: 验证段不参与选择, 否则验证段自身被选择偏差污染
+        if best is None or cand_train["fitness"] > best["metrics"]["fitness"]:
+            best = {"params": cand_params, "metrics": cand_train}
 
-    improved = bool(best and best["metrics"]["fitness"] > parent_metrics["fitness"])
+    # ---- 验证段闸门: 父代与 Top-1 候选在同一验证窗各评一次（不参与选优）----
+    parent_val = evaluate_candidate(
+        proxy_val, rets_val, parent_params["weights"], parent_params["signals"]
+    )
+    best_val = (
+        evaluate_candidate(proxy_val, rets_val, best["params"]["weights"], best["params"]["signals"])
+        if best is not None
+        else None
+    )
+
+    train_gain = bool(best is not None and best["metrics"]["fitness"] > parent_train["fitness"])
+    val_gain = bool(best_val is not None and best_val["fitness"] > parent_val["fitness"])
+    improved = bool(train_gain and val_gain)
+
     result: dict[str, Any] = {
         "generation_id": None,
         "improved": improved,
-        "parent_fitness": parent_metrics["fitness"],
-        "new_fitness": best["metrics"]["fitness"] if best else parent_metrics["fitness"],
-        "metrics": best["metrics"] if best else parent_metrics,
+        "parent_fitness": parent_train["fitness"],
+        "new_fitness": best["metrics"]["fitness"] if best else parent_train["fitness"],
+        "metrics": best["metrics"] if best else parent_train,
+        "parent_val_fitness": parent_val["fitness"],
+        "new_val_fitness": best_val["fitness"] if best_val else parent_val["fitness"],
+        "val_metrics": best_val if best_val else parent_val,
+        "split_index": split_index,
+        "train_days": split_index,
+        "val_days": total_days - split_index,
         "candidates_evaluated": evaluated,
         "elapsed_ms": elapsed_ms(),
         "message": "",
     }
     if not improved:
-        result["message"] = (
-            f"评估 {evaluated}/{candidates} 个候选, 无优于父代(基线 {parent_metrics['fitness']})者, 未写盘"
-            if evaluated else "预算到点, 未评估任何候选, 未写盘"
-        )
+        if not evaluated:
+            result["message"] = "预算到点, 未评估任何候选, 未写盘"
+        elif not train_gain:
+            result["message"] = (
+                f"评估 {evaluated}/{candidates} 个候选, 训练段无优于父代者"
+                f"(基线 {parent_train['fitness']}), 未写盘"
+            )
+        else:
+            result["message"] = (
+                f"评估 {evaluated}/{candidates} 个候选, 训练段 {parent_train['fitness']}"
+                f"→{best['metrics']['fitness']} 有改善, 但验证段未同步改善"
+                f"({parent_val['fitness']}→{best_val['fitness']}), 判定为样本内过拟合, 未写盘"
+            )
         return result
 
     # ---- 写盘路径: gen 文件 + lineage(含 50 代滚动清理) ----
     gen_id = int(lineage.get("next_gen_id", 1))
     metrics_full = {
         **best["metrics"],
-        "eval_window_days": int(rets.shape[1] - 1),
+        "segment": "train",
+        "split_index": split_index,
+        "eval_window_days": int(split_index - 1),
         "fund_count": len(used_codes),
         "fund_codes": used_codes,
         "evaluated_candidates": evaluated,
         "budget_used_ms": result["elapsed_ms"],
+    }
+    val_full = {
+        **(best_val or {}),
+        "segment": "validation",
+        "split_index": split_index,
+        "eval_window_days": int(total_days - split_index - 1),
+        "fund_count": len(used_codes),
+        "fund_codes": used_codes,
     }
     record = {
         "version": LINEAGE_VERSION,
@@ -582,7 +697,10 @@ def run_evolution(
         "origin": "evolution",
         "params": best["params"],
         "metrics": metrics_full,
-        "parent_fitness": parent_metrics["fitness"],
+        "val_metrics": val_full,
+        "split_index": split_index,
+        "parent_fitness": parent_train["fitness"],
+        "parent_val_fitness": parent_val["fitness"],
         "improved_over_parent": True,
     }
     filename = save_generation(record)
@@ -591,6 +709,7 @@ def run_evolution(
         "created_at": record["created_at"],
         "parent_id": record["parent_id"],
         "fitness": best["metrics"]["fitness"],
+        "val_fitness": val_full.get("fitness"),
         "improved": True,
         "origin": "evolution",
         "file": filename,
@@ -600,6 +719,7 @@ def run_evolution(
     result["generation_id"] = gen_id
     result["message"] = (
         f"第 {gen_id} 代: 评估 {evaluated}/{candidates} 个候选, "
-        f"fitness {parent_metrics['fitness']} → {best['metrics']['fitness']}, 已写入谱系"
+        f"训练段 {parent_train['fitness']} → {best['metrics']['fitness']}, "
+        f"验证段 {parent_val['fitness']} → {val_full['fitness']}, 已写入谱系"
     )
     return result

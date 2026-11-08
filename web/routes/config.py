@@ -149,6 +149,17 @@ def _save_yaml(filename: str, data: dict[str, Any]) -> None:
 
 # ===== STAGE: evolution B6 ===== strategies.yaml 公开薄封装(设计文档 §2):
 # evolution 激活链路写入参数真源用; 内部仍调用原私有函数, 端点行为零变化。
+def strategies_config_dir() -> Path:
+    """strategies.yaml 所在配置目录。
+
+    QF3-02 修复(2026-11-10):进化激活需在写前把 yaml **原文**备份到
+    <config>/backup/, 回滚时再还原。此处暴露"调用时解析"的目录访问器,
+    而不是把 _CONFIG_DIR 再 import 一遍——避免两处各存一份路径常量
+    (测试重定向 _CONFIG_DIR 时备份目录必须跟着走, 否则用例会写到真实 config/)。
+    """
+    return _CONFIG_DIR
+
+
 def load_strategies_yaml() -> dict[str, Any]:
     return _load_yaml("strategies.yaml")
 

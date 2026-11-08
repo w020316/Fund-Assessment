@@ -543,3 +543,451 @@ class TestStorage:
         # .bak 滞后一次写: 恢复出 gen1(写入序前一代), 主文件由 safe_read_json 自愈
         assert lineage["next_gen_id"] == 2
         assert {g["generation_id"] for g in lineage["generations"]} == {1}
+
+
+# ===========================================================================
+# 11. QF3-03 · 样本外验证闸门（训练段选优 + 验证段证伪）
+#
+# 缺陷事实: 旧实现父代只评 1 次、候选取 N 个里的最大、且两者共用同一全样本窗口
+# → "候选的最大值 > 父代单点"即便毫无真实改进也大概率成立（多重比较 + 无留出）,
+# 假阳性率随候选数单调上升。以下用例把"只样本内变好必须被拒"钉成回归锁。
+# ===========================================================================
+
+# 候选信号: 唯一区别是把 buy 从父代 65 降到 55(更容易入场), 其余阈值严格递降
+CAND_SIGNALS_BUY55 = {
+    "strong_buy": 80.0, "buy": 55.0, "watch": 50.0, "hold": 35.0, "sell": 20.0,
+}
+
+
+def _synthetic_proxy(train_ret: float, val_ret: float, split: int = 80, total: int = 100):
+    """构造可直接控制的代理矩阵/收益矩阵（绕过代理公式, 精确控制"市场走势"）。
+
+    proxy 全段恒为 60 分 → 组合信号 sig 恒为 60（权重和为 1）, 于是:
+    - 父代 buy=65 → sig<buy 且 sig>sell → 始终空仓 → 收益 0, fitness 0;
+    - 候选 buy=55 → 始终持仓 → 收益完全由段内日漂移符号决定。
+    这样"训练段变好 / 验证段变差"只取决于 train_ret 与 val_ret 的符号,
+    与代理公式的细节无关, 用例可读且确定。
+    """
+    import numpy as np
+
+    proxy = np.full((2, total, 5), 60.0, dtype=float)
+    rets = np.zeros((2, total), dtype=float)
+    rets[:, :split] = train_ret
+    rets[:, split:] = val_ret
+    return proxy, rets, ["a", "b"]
+
+
+class TestOutOfSampleGate:
+    def _run_with(self, monkeypatch, proxy, rets, candidates: int = 3):
+        """固定候选参数跑一次 run_evolution（数据装载与代理矩阵用受控替身）。"""
+        monkeypatch.setattr(evolution, "build_proxy_matrix", lambda navs: (proxy, rets, ["a", "b"]))
+        monkeypatch.setattr(
+            evolution, "mutate_params",
+            lambda parent, rng: {"weights": dict(parent["weights"]), "signals": dict(CAND_SIGNALS_BUY55)},
+        )
+        return evolution.run_evolution(
+            candidates=candidates,
+            budget_seconds=30.0,
+            nav_loader=_fake_loader_factory(days=100),
+            fund_codes=["a", "b"],
+        )
+
+    def test_train_only_gain_rejected_and_zero_write(self, evolution_store, strategies_yaml, monkeypatch):
+        """QF3-03 回归锁: 训练段变好但验证段变差 → improved=False 且零写盘。"""
+        # 训练段(前 80 日)上涨 / 验证段(后 20 日)下跌
+        proxy, rets, _ = _synthetic_proxy(train_ret=0.004, val_ret=-0.004)
+        res = self._run_with(monkeypatch, proxy, rets)
+
+        assert res["improved"] is False
+        assert res["generation_id"] is None
+        # 样本内确有"改善" —— 正是旧实现会误判为 improved=True 的那种情形
+        assert res["new_fitness"] > res["parent_fitness"]
+        # 样本外反向（验证段是**后 20 日**下跌段, 该不等式同时锁住"按时间顺序切分"）
+        assert res["new_val_fitness"] < res["parent_val_fitness"]
+        assert res["split_index"] == 80
+        assert res["train_days"] == 80 and res["val_days"] == 20
+        assert "过拟合" in res["message"]
+        # 零写盘: 谱系索引与代文件都不产生
+        assert not evolution.LINEAGE_FILE.exists()
+        assert not (evolution.GENERATIONS_DIR.exists() and list(evolution.GENERATIONS_DIR.glob("gen_*.json")))
+
+    def test_both_segments_gain_accepted_with_audit_fields(self, evolution_store, strategies_yaml, monkeypatch):
+        """两段同时变好 → improved=True, 且 gen 记录带 val_metrics/split_index 可审计。"""
+        proxy, rets, _ = _synthetic_proxy(train_ret=0.004, val_ret=0.002)
+        res = self._run_with(monkeypatch, proxy, rets)
+
+        assert res["improved"] is True
+        gen_id = res["generation_id"]
+        assert gen_id == 1
+        record = evolution.load_generation(gen_id)
+        assert record is not None
+        # 训练段指标在 metrics, 验证段指标在 val_metrics, 切分点单独落 split_index
+        assert record["split_index"] == 80
+        assert record["metrics"]["segment"] == "train"
+        assert record["val_metrics"]["segment"] == "validation"
+        assert record["metrics"]["fitness"] > record["parent_fitness"]
+        assert record["val_metrics"]["fitness"] > record["parent_val_fitness"]
+        assert record["metrics"]["eval_window_days"] == 79      # 80 日 - 首日无 T-1
+        assert record["val_metrics"]["eval_window_days"] == 19  # 20 日 - 首日无 T-1
+        assert record["val_metrics"]["fund_codes"] == ["a", "b"]
+        # 谱系摘要也带上验证段 fitness（列表页即可看出是否过了闸门）
+        entry = evolution.lineage_entry(evolution.load_lineage(), gen_id)
+        assert entry["val_fitness"] == record["val_metrics"]["fitness"]
+
+    def test_insufficient_days_raises_and_zero_write(self, evolution_store, strategies_yaml):
+        """总交易日 <100 → 抛 EvolutionDataUnavailable, 不静默降级为全样本评估。"""
+        with pytest.raises(evolution.EvolutionDataUnavailable) as ei:
+            evolution.run_evolution(
+                candidates=2, budget_seconds=30.0,
+                nav_loader=_fake_loader_factory(days=99), fund_codes=["a", "b"],
+            )
+        msg = str(ei.value)
+        assert "99" in msg and "验证段" in msg
+        assert not evolution.LINEAGE_FILE.exists()
+        assert not (evolution.GENERATIONS_DIR.exists() and list(evolution.GENERATIONS_DIR.glob("gen_*.json")))
+
+    def test_insufficient_days_503_via_route(self, client, evolution_store):
+        """路由层把样本不足映射为 503 EVOLUTION_DATA_UNAVAILABLE（不是 200 假成功）。"""
+        orig_loader = evolution._default_nav_loader
+        evolution._default_nav_loader = _fake_loader_factory(days=99)
+        try:
+            resp = client.post("/api/strategy/evolution/run", json={"candidates": 2})
+        finally:
+            evolution._default_nav_loader = orig_loader
+        assert resp.status_code == 503
+        assert resp.json()["detail"]["code"] == "EVOLUTION_DATA_UNAVAILABLE"
+        assert not evolution.LINEAGE_FILE.exists()
+
+
+# ===========================================================================
+# 12. evaluate_candidate 的 day_slice（样本外评估的唯一窗口入口）
+# ===========================================================================
+
+class TestDaySlice:
+    def test_day_slice_uses_only_window_data(self):
+        import numpy as np
+
+        # 前半段上涨 / 后半段下跌: 两段的指标必须符号相反, 才能证明切片真的生效
+        proxy = np.full((2, 100, 5), 60.0, dtype=float)
+        rets = np.zeros((2, 100), dtype=float)
+        rets[:, :50] = 0.004
+        rets[:, 50:] = -0.004
+        weights = PARENT_PARAMS["weights"]
+        signals = dict(CAND_SIGNALS_BUY55)  # sig=60 ≥ buy=55 → 始终持仓
+
+        full = evolution.evaluate_candidate(proxy, rets, weights, signals)
+        train = evolution.evaluate_candidate(proxy, rets, weights, signals, (0, 50))
+        val = evolution.evaluate_candidate(proxy, rets, weights, signals, (50, 100))
+
+        assert train["annual_return"] > 0 > val["annual_return"]
+        assert train["win_rate"] == 1.0 and val["win_rate"] == 0.0
+        # 与手工预切片逐位一致（两条路径共用 _slice_window）
+        assert train == evolution.evaluate_candidate(proxy[:, :50, :], rets[:, :50], weights, signals)
+        assert val == evolution.evaluate_candidate(proxy[:, 50:, :], rets[:, 50:], weights, signals)
+        # 向后兼容: day_slice=None 与既有 4 参数调用逐位相同
+        assert full == evolution.evaluate_candidate(proxy, rets, weights, signals, None)
+        assert full == evolution.evaluate_candidate(proxy, rets, weights, signals)
+        # 全样本指标不等于任一单段 → 切片未被忽略
+        assert full["annual_return"] != train["annual_return"]
+
+    def test_split_index_is_time_ordered(self):
+        # 80/20 且必须严格时序: 100 → 80/20, 250 → 200/50, 下限 100 恰好可用
+        assert evolution.train_val_split_index(100) == 80
+        assert evolution.train_val_split_index(250) == 200
+        for total in (99, 30, 0):
+            with pytest.raises(evolution.EvolutionDataUnavailable):
+                evolution.train_val_split_index(total)
+
+
+# ===========================================================================
+# 13. QF3-02 · 激活前备份与回滚
+# ===========================================================================
+
+class TestActivateBackupAndRollback:
+    def test_activate_snapshots_yaml_before_write(self, client, evolution_store, strategies_yaml):
+        import web.routes.evolution as evolution_route
+
+        # 带注释的原文: 只有逐字节复制才能保留, yaml.dump 会丢掉注释
+        original = (
+            "# 出厂参数（手工注释，回滚必须保留）\n"
+            "trading_quant:\n"
+            "  weights: {technical: 0.25, capital: 0.30, fundamental: 0.10, news: 0.20, sentiment: 0.15}\n"
+            "  signals: {strong_buy: 80, buy: 65, watch: 50, hold: 35, sell: 20}\n"
+        )
+        strategies_yaml.parent.mkdir(parents=True, exist_ok=True)
+        strategies_yaml.write_text(original, encoding="utf-8")
+        _seed_generation(1, fitness=0.42)
+
+        resp = client.post("/api/strategy/evolution/activate", json={"generation_id": 1})
+        assert resp.status_code == 200
+        body = resp.json()
+        backup_rel = body["backup_path"]
+        assert re.fullmatch(r"backup/strategies_\d{8}_\d{6}(_\d+)?\.yaml", backup_rel), backup_rel
+        backup_path = evolution_route._resolve_backup_path(backup_rel)
+        assert backup_path.is_file()
+        # 备份内容 == 激活前的 yaml 原文（逐字节, 含注释）
+        assert backup_path.read_text(encoding="utf-8") == original
+        # active.json 记录回滚点与"回滚后应回指的代号"
+        active = evolution.load_active()
+        assert active["backup_path"] == backup_rel
+        assert active["restored_from"] is None       # 首次激活: 激活前为出厂参数
+        assert body["restored_from"] is None
+        # 真源确实被改写（注释丢失 = 走了 yaml.dump 路径, 说明激活生效）
+        assert strategies_yaml.read_text(encoding="utf-8") != original
+        assert "手工注释" not in strategies_yaml.read_text(encoding="utf-8")
+
+    def test_rollback_restores_backup_and_pointer(self, client, evolution_store, strategies_yaml):
+        import web.routes.evolution as evolution_route
+
+        original = "trading_quant:\n  weights: {technical: 0.9}\n"
+        strategies_yaml.parent.mkdir(parents=True, exist_ok=True)
+        strategies_yaml.write_text(original, encoding="utf-8")
+        _seed_generation(1, fitness=0.30)
+        _seed_generation(2, fitness=0.50)
+
+        assert client.post("/api/strategy/evolution/activate", json={"generation_id": 1}).status_code == 200
+        backup_of_1 = evolution.load_active()["backup_path"]
+        assert client.post("/api/strategy/evolution/activate", json={"generation_id": 2}).status_code == 200
+        active2 = evolution.load_active()
+        assert active2["restored_from"] == 1
+        backup_of_2 = active2["backup_path"]
+        # 每次激活都新建一个回滚点（同秒激活也不能互相覆盖）
+        assert backup_of_2 != backup_of_1
+        assert evolution_route._resolve_backup_path(backup_of_1).is_file()
+
+        resp = client.post("/api/strategy/evolution/rollback")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["rolled_back"] is True and body["yaml_restored"] is True
+        assert body["restored_from"] == 1
+        assert body["generation_id"] == 1
+        # yaml 内容 == 备份原文
+        assert (
+            strategies_yaml.read_text(encoding="utf-8")
+            == evolution_route._resolve_backup_path(backup_of_2).read_text(encoding="utf-8")
+        )
+        # 指针回指 restored_from, 且回滚点被消费
+        active = evolution.load_active()
+        assert active["generation_id"] == 1
+        assert active["backup_path"] is None
+        assert active["params_snapshot"]["weights"] == PARENT_PARAMS["weights"]
+        assert active["rolled_back_to_backup"] == backup_of_2
+        # 回滚点已消费 → 再回滚必须 409（不允许 200 假装成功）
+        again = client.post("/api/strategy/evolution/rollback")
+        assert again.status_code == 409
+        assert again.json()["detail"]["code"] == "NO_BACKUP_AVAILABLE"
+
+    def test_rollback_without_backup_returns_409(self, client, evolution_store, strategies_yaml):
+        import web.routes.evolution as evolution_route
+
+        # 场景 1: 从未激活（active.json 不存在）→ 无 backup_path
+        resp = client.post("/api/strategy/evolution/rollback")
+        assert resp.status_code == 409
+        assert resp.json()["detail"]["code"] == "NO_BACKUP_AVAILABLE"
+        assert resp.json()["detail"]["retryable"] is False
+
+        # 场景 2: 备份文件被清理 → 同样 409, 且真源零改动
+        original = "trading_quant:\n  weights: {technical: 0.25}\n"
+        strategies_yaml.parent.mkdir(parents=True, exist_ok=True)
+        strategies_yaml.write_text(original, encoding="utf-8")
+        _seed_generation(1, fitness=0.42)
+        assert client.post("/api/strategy/evolution/activate", json={"generation_id": 1}).status_code == 200
+        backup_rel = evolution.load_active()["backup_path"]
+        evolution_route._resolve_backup_path(backup_rel).unlink()
+        before = strategies_yaml.read_bytes()
+        resp = client.post("/api/strategy/evolution/rollback")
+        assert resp.status_code == 409
+        assert resp.json()["detail"]["code"] == "NO_BACKUP_AVAILABLE"
+        assert strategies_yaml.read_bytes() == before
+
+    def test_backup_failure_aborts_before_touching_yaml(self, client, evolution_store, strategies_yaml, monkeypatch):
+        import web.routes.evolution as evolution_route
+
+        original = "trading_quant:\n  weights: {technical: 0.25}\n"
+        strategies_yaml.parent.mkdir(parents=True, exist_ok=True)
+        strategies_yaml.write_text(original, encoding="utf-8")
+        _seed_generation(1, fitness=0.42)
+
+        def boom(*args, **kwargs):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(evolution_route, "_backup_strategies_yaml", boom)
+        before_active = _sha256(evolution.ACTIVE_FILE)
+        resp = client.post("/api/strategy/evolution/activate", json={"generation_id": 1})
+        assert resp.status_code == 503
+        assert resp.json()["detail"]["code"] == "ACTIVATE_BACKUP_FAILED"
+        # 备份失败 → 真源与指针都零改动（绝不产生"无法回退的激活"）
+        assert strategies_yaml.read_text(encoding="utf-8") == original
+        assert _sha256(evolution.ACTIVE_FILE) == before_active
+
+    def test_rollback_requires_admin(self, client, evolution_store, monkeypatch):
+        monkeypatch.setenv("ADMIN_TOKEN", "secret-token")
+        resp = client.post("/api/strategy/evolution/rollback")
+        assert resp.status_code == 401
+
+    def test_rollback_to_factory_state(self, client, evolution_store, strategies_yaml):
+        """restored_from=None（首次激活前=出厂参数）时回滚: 指针回到 None, 快照为 None。"""
+        original = "trading_quant:\n  weights: {technical: 0.25}\n"
+        strategies_yaml.parent.mkdir(parents=True, exist_ok=True)
+        strategies_yaml.write_text(original, encoding="utf-8")
+        _seed_generation(1, fitness=0.42)
+        assert client.post("/api/strategy/evolution/activate", json={"generation_id": 1}).status_code == 200
+        resp = client.post("/api/strategy/evolution/rollback")
+        assert resp.status_code == 200
+        assert resp.json()["restored_from"] is None
+        active = evolution.load_active()
+        assert active["generation_id"] is None
+        assert active["params_snapshot"] is None
+        assert strategies_yaml.read_text(encoding="utf-8") == original
+
+    def test_rollback_rejects_invalid_backup_yaml(self, client, evolution_store, strategies_yaml):
+        import web.routes.evolution as evolution_route
+
+        strategies_yaml.parent.mkdir(parents=True, exist_ok=True)
+        strategies_yaml.write_text("trading_quant:\n  weights: {technical: 0.25}\n", encoding="utf-8")
+        _seed_generation(1, fitness=0.42)
+        assert client.post("/api/strategy/evolution/activate", json={"generation_id": 1}).status_code == 200
+        backup_path = evolution_route._resolve_backup_path(evolution.load_active()["backup_path"])
+        before = strategies_yaml.read_bytes()
+
+        # 非合法 YAML → 409, 真源零改动
+        backup_path.write_text("trading_quant: [broken", encoding="utf-8")
+        resp = client.post("/api/strategy/evolution/rollback")
+        assert resp.status_code == 409
+        assert resp.json()["detail"]["code"] == "NO_BACKUP_AVAILABLE"
+        assert strategies_yaml.read_bytes() == before
+
+        # 合法 YAML 但不是映射（顶层是字符串）→ 同样拒绝
+        backup_path.write_text("just a string\n", encoding="utf-8")
+        resp = client.post("/api/strategy/evolution/rollback")
+        assert resp.status_code == 409
+        assert resp.json()["detail"]["code"] == "NO_BACKUP_AVAILABLE"
+        assert strategies_yaml.read_bytes() == before
+
+    def test_rollback_write_failure_returns_503(self, client, evolution_store, strategies_yaml, monkeypatch):
+        import web.routes.evolution as evolution_route
+
+        strategies_yaml.parent.mkdir(parents=True, exist_ok=True)
+        strategies_yaml.write_text("trading_quant:\n  weights: {technical: 0.25}\n", encoding="utf-8")
+        _seed_generation(1, fitness=0.42)
+        assert client.post("/api/strategy/evolution/activate", json={"generation_id": 1}).status_code == 200
+        before = strategies_yaml.read_bytes()
+
+        def boom(*args, **kwargs):
+            raise OSError("read-only fs")
+
+        monkeypatch.setattr(evolution_route, "_restore_yaml_atomic", boom)
+        resp = client.post("/api/strategy/evolution/rollback")
+        assert resp.status_code == 503
+        assert resp.json()["detail"]["code"] == "ROLLBACK_WRITE_FAILED"
+        # 还原失败 → 真源未被改动, 回滚点仍在（可重试）
+        assert strategies_yaml.read_bytes() == before
+        assert evolution.load_active()["backup_path"]
+
+
+# ===========================================================================
+# 14. 读端点与激活/回滚边界（补齐 web/routes/evolution.py 的既有覆盖空洞）
+# ===========================================================================
+
+def _seed_corrupt_generation(gen_id: int) -> None:
+    """在谱系里登记一个指向不存在文件的代号（模拟代文件被清理/损坏）。"""
+    lineage = evolution.load_lineage()
+    evolution.append_lineage(lineage, {
+        "generation_id": gen_id, "created_at": evolution.now_iso(), "parent_id": None,
+        "fitness": 0.1, "improved": True, "origin": "evolution",
+        "file": f"gen_{gen_id}_missing.json",
+        "params_digest": evolution.params_digest(PARENT_PARAMS),
+    })
+
+
+class TestReadEndpoints:
+    def test_lineage_and_generation_reads(self, client, evolution_store):
+        _seed_generation(1, fitness=0.30)
+        _seed_generation(2, fitness=0.50)
+
+        resp = client.get("/api/strategy/evolution/lineage")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["count"] == 2
+        assert body["active_generation_id"] is None
+        # 按代号倒序
+        assert [g["generation_id"] for g in body["generations"]] == [2, 1]
+
+        resp = client.get("/api/strategy/evolution/generations/1")
+        assert resp.status_code == 200
+        assert resp.json()["params"]["weights"] == PARENT_PARAMS["weights"]
+
+        assert client.get("/api/strategy/evolution/generations/0").json()["detail"]["code"] == "INVALID_GEN_ID"
+        resp = client.get("/api/strategy/evolution/generations/99")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "GEN_NOT_FOUND"
+
+    def test_corrupted_generation_file_503(self, client, evolution_store):
+        _seed_corrupt_generation(5)
+        resp = client.get("/api/strategy/evolution/generations/5")
+        assert resp.status_code == 503
+        assert resp.json()["detail"]["code"] == "EVOLUTION_CORRUPTED"
+
+    def test_compare_requires_active_then_returns_diff(self, client, evolution_store, strategies_yaml):
+        # 无激活代 → 404 NO_ACTIVE_GENERATION
+        resp = client.get("/api/strategy/evolution/compare")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "NO_ACTIVE_GENERATION"
+
+        _seed_generation(1, fitness=0.30)
+        assert client.post("/api/strategy/evolution/activate", json={"generation_id": 1}).status_code == 200
+        _seed_generation(2, fitness=0.50)
+
+        resp = client.get("/api/strategy/evolution/compare?gen=2")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["active"]["generation_id"] == 1
+        assert body["candidate"]["generation_id"] == 2
+        assert set(body["param_diff"]) == {"weights", "signals"}
+        assert set(body["metric_diff"]) == {"annual_return", "max_drawdown", "sharpe", "win_rate", "fitness"}
+        # 缺省 gen → 取最新代
+        assert client.get("/api/strategy/evolution/compare").json()["candidate"]["generation_id"] == 2
+        # 不存在的代 → 404
+        resp = client.get("/api/strategy/evolution/compare?gen=99")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "GEN_NOT_FOUND"
+
+    def test_compare_with_active_pointer_but_empty_lineage(self, client, evolution_store):
+        """active.json 有指针而谱系为空（人工/异常态）→ 404 而非 500。"""
+        evolution.save_active({
+            "generation_id": 7, "activated_at": evolution.now_iso(), "activated_by": "admin",
+            "params_snapshot": PARENT_PARAMS,
+        })
+        resp = client.get("/api/strategy/evolution/compare")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "GEN_NOT_FOUND"
+        assert "谱系为空" in resp.json()["detail"]["message"]
+
+    def test_activate_missing_and_corrupted_generation(self, client, evolution_store, strategies_yaml):
+        resp = client.post("/api/strategy/evolution/activate", json={"generation_id": 99})
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "GEN_NOT_FOUND"
+
+        _seed_corrupt_generation(5)
+        resp = client.post("/api/strategy/evolution/activate", json={"generation_id": 5})
+        assert resp.status_code == 503
+        assert resp.json()["detail"]["code"] == "EVOLUTION_CORRUPTED"
+
+    def test_activate_pointer_write_failure_reports_yaml_already_updated(self, client, evolution_store,
+                                                                        strategies_yaml, monkeypatch):
+        strategies_yaml.parent.mkdir(parents=True, exist_ok=True)
+        strategies_yaml.write_text("trading_quant:\n  weights: {technical: 0.25}\n", encoding="utf-8")
+        _seed_generation(1, fitness=0.42)
+        before_yaml = strategies_yaml.read_bytes()
+
+        def boom(record):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(evolution, "save_active", boom)
+        resp = client.post("/api/strategy/evolution/activate", json={"generation_id": 1})
+        assert resp.status_code == 503
+        detail = resp.json()["detail"]
+        assert detail["code"] == "ACTIVATE_WRITE_FAILED"
+        # 报错口径要说明"真源已更新", 并给出可回退的备份路径
+        assert "已更新" in detail["message"] and "备份" in detail["message"]
+        assert strategies_yaml.read_bytes() != before_yaml
