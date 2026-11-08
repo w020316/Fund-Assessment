@@ -26,6 +26,12 @@ data/portfolio/
 data/backup/
 data/_*.json
 
+# SQLite 运行时状态(非源码; prediction.db 由 prediction.yml 备份到 daily-reports 分支)
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/*.db-journal
+
 # 测试产物
 .coverage
 coverage.json
