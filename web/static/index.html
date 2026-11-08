@@ -5808,7 +5808,7 @@ async function handleUploadFile(file) {
     return;
   }
   if (!resp.holdings.length) {
-    resultEl.innerHTML = `<div style="padding:12px;color:var(--text-muted);">${resp.message || '未识别到持仓数据'}</div>`;
+    resultEl.innerHTML = `<div style="padding:12px;color:var(--text-muted);">${escapeHtml(resp.message || '未识别到持仓数据')}</div>`;
     return;
   }
 
@@ -5819,7 +5819,7 @@ async function handleUploadFile(file) {
   const showWeightCol = hasWeight;
   const showAmountCol = hasAmount;
   const rows = resp.holdings.map((h, i) => `<tr>
-    <td>${i + 1}</td><td>${h.code || '-'}</td><td>${h.name || '-'}</td>
+    <td>${i + 1}</td><td>${escapeHtml(h.code || '-')}</td><td>${escapeHtml(h.name || '-')}</td>
     ${showWeightCol ? `<td style="text-align:right;">${(h.weight || 0).toFixed(2)}%</td>` : ''}
     ${showAmountCol ? `<td style="text-align:right;">¥${(h.amount || 0).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>` : ''}
   </tr>`).join('');
@@ -5827,7 +5827,7 @@ async function handleUploadFile(file) {
   const thAmount = showAmountCol ? `<th style="text-align:right;padding:4px;">市值</th>` : '';
   resultEl.innerHTML = `
     <div style="margin-bottom:8px;font-size:12px;color:var(--text-muted);">
-      识别到 <strong style="color:var(--text-primary);">${resp.count}</strong> 条持仓(来源:${resp.source === 'image' ? 'AI视觉识别' : resp.source})
+      识别到 <strong style="color:var(--text-primary);">${escapeHtml(resp.count)}</strong> 条持仓(来源:${resp.source === 'image' ? 'AI视觉识别' : escapeHtml(resp.source)})
     </div>
     <table style="width:100%;font-size:12px;border-collapse:collapse;">
       <thead><tr style="border-bottom:1px solid var(--border);"><th style="text-align:left;padding:4px;">#</th><th style="text-align:left;padding:4px;">代码</th><th style="text-align:left;padding:4px;">名称</th>${thWeight}${thAmount}</tr></thead>

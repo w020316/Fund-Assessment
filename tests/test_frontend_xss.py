@@ -107,3 +107,21 @@ def test_analysis_history_and_summary_are_escaped():
     assert "<td>${h.time}</td>" not in text
     assert "${summary}</span>" not in text
 
+
+def test_upload_result_table_is_escaped():
+    """上传识别结果回归(2026-11-08):持仓代码/名称来自用户上传的 Excel/CSV。
+
+    这是最直接的注入面 —— 不经过 LLM, 用户上传一个含 <img onerror> 的
+    表格即可在识别结果表格里执行。断言限定在 handleUploadFile 函数体内。
+    """
+    text = _text()
+    start = text.index("async function handleUploadFile(")
+    end = text.index("// P2-3 修复(2026-07-30):用户主动取消上传")
+    body = text[start:end]
+
+    assert "${escapeHtml(h.code || '-')}" in body
+    assert "${escapeHtml(h.name || '-')}" in body
+    assert "${escapeHtml(resp.message || '未识别到持仓数据')}" in body
+    assert "${h.code || '-'}" not in body
+    assert "${h.name || '-'}" not in body
+
