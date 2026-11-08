@@ -235,6 +235,39 @@ class TestWindowThreading:
         assert len(prices) == 40
 
 
+class TestMinuteSeriesAcceptance:
+    """A-03 回归：按「窗口端点可算」判定源可用，而非 crude len>window。"""
+
+    def test_sparse_series_covering_window_is_accepted(self, monkeypatch):
+        """仅 2 点但恰好覆盖窗口端点（新浪丢零成交分钟场景）应直接采纳，不回退。"""
+        def fake_tencent(code, window_minutes=ds2.ANOMALY_WINDOW_MINUTES):
+            return ({585: 10.0, 590: 11.0}, "2026-11-08")  # window=5: end=590, start=585
+
+        def fail_em(code, window_minutes=ds2.ANOMALY_WINDOW_MINUTES):
+            raise AssertionError("端点齐全不应回退到东财")
+
+        monkeypatch.setattr(ds2, "_minutes_from_tencent", fake_tencent)
+        monkeypatch.setattr(ds2, "_minutes_from_em", fail_em)
+        prices, source, day = ds2.get_stock_minute_series("300118", 5)
+        assert source == "tencent"
+        assert len(prices) == 2  # 旧 len>5 门槛会误拒此可用序列
+
+    def test_series_missing_window_start_falls_back(self, monkeypatch):
+        """点数够但缺窗口起点（end-5 不存在）应回退下一源，而非采纳后恒空。"""
+        def fake_tencent(code, window_minutes=ds2.ANOMALY_WINDOW_MINUTES):
+            # 6 点但 end=590 的起点 585 缺失（580~584 + 590）
+            return ({580: 10.0, 581: 10.0, 582: 10.0, 583: 10.0, 584: 10.0, 590: 10.0}, "2026-11-08")
+
+        def fake_em(code, window_minutes=ds2.ANOMALY_WINDOW_MINUTES):
+            return ({585: 10.0, 590: 11.0}, "2026-11-08")
+
+        monkeypatch.setattr(ds2, "_minutes_from_tencent", fake_tencent)
+        monkeypatch.setattr(ds2, "_minutes_from_em", fake_em)
+        prices, source, day = ds2.get_stock_minute_series("300118", 5)
+        assert source == "eastmoney"  # 腾讯缺起点 → 回退东财（端点齐全）
+        assert prices[590] == 11.0
+
+
 # ---------------------------------------------------------------------------
 # 4. 编排：筛选 → 精算 → 判定
 # ---------------------------------------------------------------------------

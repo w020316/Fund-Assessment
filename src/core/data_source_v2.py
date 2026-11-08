@@ -2964,7 +2964,9 @@ def get_stock_minute_series(code: str, window_minutes: int = ANOMALY_WINDOW_MINU
     ):
         try:
             prices, day = fetcher(code, window_minutes)
-            if len(prices) > window_minutes:
+            # 按「窗口端点可算」而非点数判定可用：稀疏但覆盖端点的序列（如新浪丢零
+            # 成交分钟）也应采纳；端点缺失才回退下一源，避免 len>window 误拒可用数据。
+            if compute_window_change(prices, window_minutes) is not None:
                 return prices, source, day
         except Exception as e:
             logger.debug(f"minute series {code} via {source} failed: {e}")
