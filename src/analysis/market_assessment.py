@@ -126,8 +126,16 @@ def _calc_sentiment_score(sentiment: dict) -> dict[str, Any]:
     if not sentiment or sentiment.get("sentiment") == "--":
         return {"score": 50, "note": "情绪数据不可用"}
 
-    rise = int(sentiment.get("rise_count", 0))
-    fall = int(sentiment.get("fall_count", 0))
+    # 2026-11-08 修复：上游在指数代理路径下会把 rise_count/fall_count 置为 None
+    # （counts_available=False，表示"没拿到涨跌家数"而不是"0 只上涨"）。
+    # 原写法 int(sentiment.get("rise_count", 0)) 的默认值只在 key 缺失时生效，
+    # key 存在且为 None 时返回 None → int(None) 抛 TypeError → /api/market/assessment 500。
+    # 注意：早退条件是 sentiment == "--"，而代理路径返回的是"偏空/偏多"，走不到早退。
+    if sentiment.get("counts_available") is False:
+        return {"score": 50, "note": "涨跌家数不可用（上游未返回计数）"}
+
+    rise = int(sentiment.get("rise_count") or 0)
+    fall = int(sentiment.get("fall_count") or 0)
     total = rise + fall
     if total == 0:
         return {"score": 50, "note": "无涨跌家数数据"}

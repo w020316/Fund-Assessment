@@ -147,6 +147,25 @@ class TestSentimentScore:
         result = _calc_sentiment_score({"sentiment": "--"})
         assert result["score"] == 50
 
+    def test_none_counts_does_not_crash(self):
+        """涨跌家数为 None 时不得抛异常（2026-11-08 回归）
+
+        背景：上游在指数代理路径下把 rise_count/fall_count 置为 None 并标记
+        counts_available=False（表示"没拿到"而非"0 只上涨"）。原实现
+        int(sentiment.get("rise_count", 0)) 的默认值只在 key 缺失时生效，
+        key 存在且为 None 时返回 None → int(None) 抛 TypeError →
+        /api/market/assessment 直接 500，行情页「大盘研判」整块不可用。
+        注意早退条件是 sentiment == "--"，而代理路径返回"偏空/偏多"，走不到早退。
+        """
+        sentiment = {
+            "rise_count": None, "fall_count": None, "flat_count": None,
+            "sentiment": "偏空", "ratio": 0.35,
+            "basis": "index_proxy", "counts_available": False,
+        }
+        result = _calc_sentiment_score(sentiment)
+        assert result["score"] == 50
+        assert "不可用" in result["note"]
+
     def test_bullish_sentiment(self):
         """偏多情绪 → 高分"""
         sentiment = {"rise_count": 3500, "fall_count": 1500, "sentiment": "偏多"}
