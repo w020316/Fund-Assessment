@@ -991,3 +991,124 @@ class TestReadEndpoints:
         # 报错口径要说明"真源已更新", 并给出可回退的备份路径
         assert "已更新" in detail["message"] and "备份" in detail["message"]
         assert strategies_yaml.read_bytes() != before_yaml
+
+
+# ===========================================================================
+# 15. QF3-10 · 超时后单飞锁的生命周期必须覆盖到工作线程结束
+#
+# 缺陷事实: wait_for + 线程池的组合不保证线程随超时结束。旧实现把锁释放在依赖
+# 的 finally（=响应返回时）, 超时后线程仍在 save_generation/append_lineage,
+# 而锁已空 → 下一个 /run 与在途线程并发读-改-写 lineage（丢代）。
+# 以下用例锁住三件事: (1) 在途线程的写盘不被丢弃且只发生一次; (2) 在途期间
+# 第二次 /run 被拒、**不启动第二个线程**; (3) 线程收尾后锁才释放（不泄漏）。
+# ===========================================================================
+
+def _slow_writing_run(delay: float, calls: dict):
+    """模拟 run_evolution 的真实尾部: 睡一会儿 → 读 lineage → 写 gen → 追加索引。"""
+
+    def runner(*args, **kwargs):
+        calls["n"] = calls.get("n", 0) + 1
+        time.sleep(delay)
+        lineage = evolution.load_lineage()
+        gen_id = int(lineage.get("next_gen_id", 1))
+        record = {
+            "version": 1, "generation_id": gen_id, "created_at": evolution.now_iso(),
+            "parent_id": None, "origin": "evolution", "params": PARENT_PARAMS,
+            "metrics": {"fitness": 0.2}, "improved_over_parent": True,
+        }
+        filename = evolution.save_generation(record)
+        evolution.append_lineage(lineage, {
+            "generation_id": gen_id, "created_at": record["created_at"], "parent_id": None,
+            "fitness": 0.2, "improved": True, "origin": "evolution", "file": filename,
+            "params_digest": evolution.params_digest(PARENT_PARAMS),
+        })
+        return {"improved": True, "generation_id": gen_id, "metrics": {"fitness": 0.2},
+                "candidates_evaluated": 1, "elapsed_ms": 0, "message": "stub"}
+
+    return runner
+
+
+def _start_inflight_run(client, monkeypatch, timeout: float = 0.1) -> dict:
+    """起一个后台 /run 请求, 其工作线程卡在 release 上（模拟"超时后在途线程"）。
+
+    注意 TestClient 的 portal 收尾会 join 默认线程池, 所以**请求返回时**线程
+    一定已经结束——"超时瞬间"的状态只能在请求尚未返回时从测试线程观察。
+    这正是本组用例要在后台线程里发请求的原因。
+    """
+    import web.routes.evolution as evolution_route
+
+    monkeypatch.setattr(evolution_route, "EVOLUTION_TIMEOUT_SECONDS", timeout)
+    entered, release = threading.Event(), threading.Event()
+    calls = {"n": 0}
+
+    def blocking_run(*args, **kwargs):
+        calls["n"] += 1
+        entered.set()
+        release.wait(15.0)
+        return {"improved": False, "generation_id": None, "metrics": {},
+                "candidates_evaluated": 0, "elapsed_ms": 0, "message": "stub"}
+
+    monkeypatch.setattr(evolution, "run_evolution", blocking_run)
+    holder: dict = {}
+    t = threading.Thread(
+        target=lambda: holder.update(resp=client.post("/api/strategy/evolution/run", json={}))
+    )
+    t.start()
+    assert entered.wait(5.0), "第一个请求未能启动工作线程"
+    return {"release": release, "calls": calls, "holder": holder, "thread": t}
+
+
+class TestRunLockLifetime:
+    def test_lock_held_until_inflight_thread_finishes(self, client, evolution_store, monkeypatch):
+        """超时后锁**仍被在途线程持有**（旧实现在响应时即释放, 此处为 False）。"""
+        from web.routes import strategy as strategy_route
+
+        ctx = _start_inflight_run(client, monkeypatch)
+        t = ctx["thread"]
+        try:
+            time.sleep(0.3)   # 越过 0.1s 超时点; 线程仍卡在 release.wait 上
+            assert t.is_alive(), "第一个请求应仍在收尾宽限内等待在途线程"
+            assert strategy_route._BACKTEST_GUARD.locked(), "超时后锁不得提前释放"
+        finally:
+            ctx["release"].set()
+            t.join(20.0)
+        assert ctx["holder"]["resp"].status_code == 503
+        assert ctx["holder"]["resp"].json()["detail"]["code"] == "EVOLUTION_TIMEOUT"
+        assert ctx["calls"]["n"] == 1
+        # 线程真正结束后才释放（否则单飞锁永久泄漏, 进化/回测全被拒）
+        assert not strategy_route._BACKTEST_GUARD.locked()
+
+    def test_second_run_rejected_while_inflight_thread_alive(self, client, evolution_store, monkeypatch):
+        """在途窗口内第二次 /run 必须被拒, 且**不启动第二个工作线程**。"""
+        from web.routes import strategy as strategy_route
+
+        ctx = _start_inflight_run(client, monkeypatch)
+        t = ctx["thread"]
+        try:
+            time.sleep(0.3)   # 第一个请求已超时, 线程未结束 → 旧实现此时锁已空
+            second = client.post("/api/strategy/evolution/run", json={})
+            assert second.status_code == 503
+            assert second.json()["detail"]["code"] == "EVOLUTION_BUSY"
+            assert ctx["calls"]["n"] == 1, "第二次请求不得启动并行的进化线程"
+        finally:
+            ctx["release"].set()
+            t.join(20.0)
+        assert ctx["holder"]["resp"].status_code == 503
+        assert ctx["holder"]["resp"].json()["detail"]["code"] == "EVOLUTION_TIMEOUT"
+        assert not strategy_route._BACKTEST_GUARD.locked()
+
+    def test_timed_out_write_not_duplicated_by_next_run(self, client, evolution_store, monkeypatch):
+        """超时那次写盘 + 下一次运行 → 代号必须顺延(1,2), 不得重复/回退(丢代的直接症状)。"""
+        import web.routes.evolution as evolution_route
+
+        monkeypatch.setattr(evolution_route, "EVOLUTION_TIMEOUT_SECONDS", 0.1)
+        calls: dict = {}
+        monkeypatch.setattr(evolution, "run_evolution", _slow_writing_run(0.3, calls))
+
+        assert client.post("/api/strategy/evolution/run", json={}).status_code == 503
+        assert client.post("/api/strategy/evolution/run", json={}).status_code == 503
+        gens = evolution.load_lineage()["generations"]
+        assert [g["generation_id"] for g in gens] == [1, 2]
+        assert calls["n"] == 2
+        # 两代文件都在（没有被并发写覆盖成一份）
+        assert len(list(evolution.GENERATIONS_DIR.glob("gen_*.json"))) == 2

@@ -15,12 +15,19 @@ QF3-02 修复(2026-11-10):原 activate 把样本内最优参数直接写进参�
    并把 ``backup_path`` / ``restored_from`` 记入 active.json（可审计）;
 2. 新增 ``POST /rollback``: 按 active.json 的 backup_path 还原原文,
    并把谱系指针回指 ``restored_from``。无备份 → 409 ``NO_BACKUP_AVAILABLE``。
+
+QF3-10 修复:``wait_for`` + 线程池的组合**不保证**线程随超时结束。旧实现把锁的
+释放在依赖的 finally 里（=响应返回时）, 超时后线程仍在写 lineage, 而锁已空 →
+下一个 /run 与在途线程并发读-改-写谱系（丢代）。现在锁由**工作线程自己**在真正
+结束时释放, 超时路径额外等待线程收尾（带上限）, 期间锁保持占用。
 """
 from __future__ import annotations
 
 import asyncio
 import os
 import shutil
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -124,19 +131,72 @@ def _restore_yaml_atomic(backup_path: Path, yaml_path: Path) -> None:
     os.replace(tmp_path, yaml_path)
 
 
-def _evolution_guard():
-    """单飞锁依赖: 非阻塞获取 strategy.py 的 _BACKTEST_GUARD（与回测同一把锁）。
+# ---------------------------------------------------------------------------
+# 单飞锁生命周期（QF3-10）: 唯一真源仍是 strategy.py 的 _BACKTEST_GUARD
+# ---------------------------------------------------------------------------
+# 未复用 strategy.py 的 _single_backtest_guard 依赖函数: 其 503 detail 为纯文本
+# （兼容既有前端）, 而本路由契约要求结构化错误码; 两者获取/释放的是**同一个锁
+# 对象**, 互斥语义完全一致。
+#
+# 超时后在途线程的收尾宽限: 路由最多再等这么久, 期间锁保持占用。
+# 超过宽限仍未结束 → 锁**不释放**（宁可拒绝后续请求, 也不让两个线程并发写
+# lineage）, 并打 error 日志留排查线索。
+RUN_DRAIN_GRACE_SECONDS = 5.0
 
-    说明: 未直接复用 strategy.py 的 _single_backtest_guard 依赖函数, 因其 503
-    detail 为纯文本(兼容既有前端), 而本路由契约要求结构化错误码 EVOLUTION_BUSY;
-    两者获取/释放的是**同一个锁对象**, 互斥语义完全一致。
+
+class _LockLease:
+    """恰好释放一次的单飞锁租约（QF3-10）。
+
+    为什么需要它: ``run_in_executor`` / ``to_thread`` 都**不可取消**。``wait_for``
+    超时只是让 await 结束, 工作线程仍在跑, 之后照样执行
+    save_generation / append_lineage。旧实现在依赖的 finally 里释放锁 → 响应一返回
+    锁就空了 → 下一个 /run 与在途线程并发写 lineage（读-改-写交错, 丢代）。
+    修法是把释放权交给**工作线程自己**（结束时释放）, 路由层在超时路径不再释放。
+
+    release() 幂等: "线程正常释放"与"路由兜底释放（线程从未提交）"可能先后发生,
+    而 threading.Lock.release() 在未持有时会抛 RuntimeError, 幂等标记把双释放
+    收敛成恰好一次。
     """
-    if not strategy_route._BACKTEST_GUARD.acquire(blocking=False):
-        raise _err("EVOLUTION_BUSY", "上一次进化/回测仍在进行, 请稍后再试")
-    try:
-        yield
-    finally:
-        strategy_route._BACKTEST_GUARD.release()
+
+    __slots__ = ("_lock", "_mutex", "_released")
+
+    def __init__(self, lock: Any) -> None:
+        self._lock = lock
+        self._mutex = threading.Lock()
+        self._released = False
+
+    def release(self) -> bool:
+        """释放锁; 首次返回 True, 重复调用返回 False（不抛异常）。"""
+        with self._mutex:
+            if self._released:
+                return False
+            self._released = True
+        self._lock.release()
+        return True
+
+    @property
+    def released(self) -> bool:
+        return self._released
+
+
+def _acquire_lease(status_code: int, code: str, message: str) -> _LockLease:
+    """非阻塞获取单飞锁（与 /backtest 同一把锁对象）; 占用则按给定口径抛错。"""
+    lock = strategy_route._BACKTEST_GUARD
+    if not lock.acquire(blocking=False):
+        raise _err(code, message, status_code=status_code, retryable=True)
+    return _LockLease(lock)
+
+
+async def _drain_worker(finished: threading.Event) -> bool:
+    """等超时后的在途线程收尾（上限 RUN_DRAIN_GRACE_SECONDS）。
+
+    Returns:
+        True=线程已结束（锁已由线程释放）; False=超过宽限仍在跑（锁保持占用）。
+    """
+    deadline = time.monotonic() + RUN_DRAIN_GRACE_SECONDS
+    while not finished.is_set() and time.monotonic() < deadline:
+        await asyncio.sleep(0.02)
+    return finished.is_set()
 
 
 class EvolutionRunRequest(BaseModel):
@@ -152,22 +212,46 @@ class EvolutionActivateRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# 1. POST /run —— 手动触发一次进化（需管理员鉴权 + 单飞锁）
+# 1. POST /run —— 手动触发一次进化（需管理员鉴权 + 单飞锁, 锁持有到线程结束）
 # ---------------------------------------------------------------------------
-@router.post("/run", dependencies=[Depends(require_admin), Depends(_evolution_guard)])
+@router.post("/run", dependencies=[Depends(require_admin)])
 async def run_evolution_endpoint(req: EvolutionRunRequest | None = None):
     candidates = req.candidates if req is not None else None
-    try:
-        result = await asyncio.wait_for(
-            asyncio.to_thread(
-                evolution_core.run_evolution,
+    # QF3-10: 锁的释放权交给工作线程（线程结束才放）, 不是响应结束就放
+    lease = _acquire_lease(503, "EVOLUTION_BUSY", "上一次进化/回测仍在进行, 请稍后再试")
+    finished = threading.Event()
+
+    def worker() -> dict[str, Any]:
+        try:
+            return evolution_core.run_evolution(
                 candidates if candidates else evolution_core.DEFAULT_CANDIDATES,
                 evolution_core.BUDGET_SECONDS,
-            ),
-            timeout=EVOLUTION_TIMEOUT_SECONDS,
-        )
+            )
+        finally:
+            # 无论成功/失败/超时后被丢弃, 线程真正结束才释放锁
+            finished.set()
+            lease.release()
+
+    loop = asyncio.get_running_loop()
+    try:
+        # 用 run_in_executor 而非 to_thread: 前者**立即提交**, 后者是惰性协程,
+        # 无法区分"提交失败(线程从未启动)"与"线程执行失败"——前者必须由路由
+        # 兜底释放锁, 否则单飞锁永久泄漏、进化与回测全被 503。
+        fut = loop.run_in_executor(None, worker)
+    except RuntimeError as e:
+        lease.release()
+        logger.exception("evolution run: executor unavailable")
+        raise _err("EVOLUTION_FAILED", f"进化执行失败(线程池不可用): {e}")
+
+    try:
+        result = await asyncio.wait_for(fut, timeout=EVOLUTION_TIMEOUT_SECONDS)
     except asyncio.TimeoutError:
-        logger.warning(f"evolution run timeout({EVOLUTION_TIMEOUT_SECONDS}s)")
+        # 超时后线程不可取消, 仍在写盘: 等它收尾再返回, 期间锁保持占用
+        drained = await _drain_worker(finished)
+        logger.warning(
+            f"evolution run timeout({EVOLUTION_TIMEOUT_SECONDS}s), "
+            f"in-flight thread {'drained' if drained else 'STILL RUNNING (lock kept, 后续请求将被拒绝)'}"
+        )
         raise _err("EVOLUTION_TIMEOUT", f"进化超时({EVOLUTION_TIMEOUT_SECONDS}s), 请稍后重试")
     except evolution_core.EvolutionDataUnavailable as e:
         logger.warning(f"evolution run data unavailable: {e}")
@@ -284,7 +368,7 @@ async def compare(gen: int | None = None):
 
 
 # ---------------------------------------------------------------------------
-# 5. POST /activate —— 激活指定代（需管理员鉴权; 写序 备份 → yaml → active.json）
+# 5. POST /activate —— 激活指定代（需管理员鉴权 + 单飞锁; 写序 备份 → yaml → active.json）
 # ---------------------------------------------------------------------------
 @router.post("/activate", dependencies=[Depends(require_admin)])
 async def activate(req: EvolutionActivateRequest):
@@ -357,7 +441,7 @@ async def activate(req: EvolutionActivateRequest):
 
 
 # ---------------------------------------------------------------------------
-# 6. POST /rollback —— 用激活前快照还原参数真源（需管理员鉴权）
+# 6. POST /rollback —— 用激活前快照还原参数真源（需管理员鉴权 + 单飞锁）
 # ---------------------------------------------------------------------------
 @router.post("/rollback", dependencies=[Depends(require_admin)])
 async def rollback():
