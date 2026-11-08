@@ -277,11 +277,11 @@
     gap: 8px;
   }
   .fund-head-actions {
-    flex-wrap: nowrap !important;
-    overflow-x: auto;
-    scrollbar-width: none;
+    /* 阶段5: 原为 nowrap + overflow-x:auto(隐藏滚动条)。实测 375px 下
+       「五信号建议」被切在视口外(右缘 384 > 375), 而隐藏滚动条让用户
+       无从发现还能横向滑 —— 按钮看起来像丢了。改为换行, 全部可达。 */
+    flex-wrap: wrap !important;
   }
-  .fund-head-actions::-webkit-scrollbar { display: none; }
   .fund-head-actions > .btn { flex: 0 0 auto; }
 }
 
