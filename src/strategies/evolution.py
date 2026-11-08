@@ -671,6 +671,11 @@ def run_evolution(
 
     # ---- 写盘路径: gen 文件 + lineage(含 50 代滚动清理) ----
     gen_id = int(lineage.get("next_gen_id", 1))
+    # 口径提醒(QF3-03 起): metrics 是**训练段**指标, val_metrics 是**验证段**指标,
+    # 两段的 eval_window_days 各自是本段交易日数-1（首日无 T-1 持仓, 不计）。
+    # 所以 eval_window_days 不再是"全窗口-1"——旧口径读到的 119 现在是 95(train)。
+    # 依赖方只有前端展示(web/static/js/evolution.js 的"评估窗 N 日"), 无计算逻辑;
+    # 需要总窗口天数时用 split_index 与 val_metrics.eval_window_days 相加推算。
     metrics_full = {
         **best["metrics"],
         "segment": "train",
