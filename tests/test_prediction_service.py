@@ -24,6 +24,7 @@ from src.core import data_source_v2 as ds2  # noqa: E402
 from src.core import prediction_service as svc  # noqa: E402
 from src.core import prediction_signals as sig  # noqa: E402
 from src.core.prediction_store import PredictionStore  # noqa: E402
+from tests.conftest import cst_on, trading_days_ago  # noqa: E402
 
 _CST = _dt.timezone(_dt.timedelta(hours=8))
 
@@ -198,10 +199,13 @@ def test_generate_prediction_llm_down_falls_back(env, monkeypatch) -> None:
 
 
 def test_generate_prediction_idempotent_overwrite(env, monkeypatch) -> None:
-    env.set_trading_day(_cst(2026, 11, 9))
+    # 日期取真实今天的相对基准: list_predictions(days=30) 以 date('now') 为基准,
+    # 硬编码日期会随时间滑出窗口(日期炸弹)。本用例只验证同日幂等覆盖, 与具体日历日无关。
+    now = cst_on(trading_days_ago(0))
+    env.set_trading_day(now)
     _patch_market(monkeypatch)
-    first = svc.generate_prediction(now=_cst(2026, 11, 9, 15, 40))
-    second = svc.generate_prediction(now=_cst(2026, 11, 9, 15, 50))
+    first = svc.generate_prediction(now=now)
+    second = svc.generate_prediction(now=now.replace(minute=50))
     assert first["id"] == second["id"]  # R3.3 同日幂等覆盖
     rows = env.store.list_predictions(days=30)
     assert len(rows) == 1

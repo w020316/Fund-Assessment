@@ -27,6 +27,7 @@ from src.core.prediction_store import (  # noqa: E402
     PredictionStore,
     resolve_db_path,
 )
+from tests.conftest import trading_days_ago  # noqa: E402
 
 
 def _file_state(p: Path) -> tuple[int, str] | None:
@@ -103,9 +104,13 @@ def test_snapshot_payload_corrupt_json_falls_back(store: PredictionStore) -> Non
 
 
 def test_upsert_prediction_idempotent(store: PredictionStore) -> None:
+    # 日期取自真实时钟的相对偏移: list_predictions(days=30) 以 date('now') 为基准,
+    # 硬编码日期会随时间滑出窗口而静默丢行(日期炸弹)。
+    trade_date = trading_days_ago(1)
+    target_date = trading_days_ago(0)
     p1 = store.upsert_prediction(
-        trade_date="2026-11-09",
-        target_date="2026-11-10",
+        trade_date=trade_date,
+        target_date=target_date,
         benchmark="HS300",
         direction="up",
         confidence=66.0,
@@ -119,8 +124,8 @@ def test_upsert_prediction_idempotent(store: PredictionStore) -> None:
     )
     assert p1 is not None and p1["id"] > 0
     p2 = store.upsert_prediction(
-        trade_date="2026-11-09",
-        target_date="2026-11-10",
+        trade_date=trade_date,
+        target_date=target_date,
         benchmark="HS300",
         direction="flat",
         confidence=50.0,
@@ -135,8 +140,8 @@ def test_upsert_prediction_idempotent(store: PredictionStore) -> None:
     assert p2 is not None
     assert p2["id"] == p1["id"]  # 同日同基准覆盖
     assert p2["direction"] == "flat"
-    assert store.get_prediction("2026-11-09")["conflict_flag"] == 0
-    assert store.list_predictions(days=30)[0]["trade_date"] == "2026-11-09"
+    assert store.get_prediction(trade_date)["conflict_flag"] == 0
+    assert store.list_predictions(days=30)[0]["trade_date"] == trade_date
 
 
 def test_replace_recommendations(store: PredictionStore) -> None:

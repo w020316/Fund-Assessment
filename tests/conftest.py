@@ -1,4 +1,5 @@
 """测试配置与公共fixtures"""
+import datetime as _dt
 import hashlib
 import os
 import sys
@@ -183,3 +184,52 @@ def sample_financial():
         "revenue_yoy": 15.8,
         "profit_yoy": 18.2,
     }
+
+
+# ===== 确定性日期辅助(消除"日期炸弹")=====
+# 背景: PredictionStore.list_predictions(days=N) / list_recommendations(days=N)
+# 的过滤基准是 SQLite 的 date('now')(真实时钟)。测试若用硬编码日期 seed, 该日期
+# 会随时间滑出滑动窗口, 造成"今天必过、某个具体日期起必挂"的日历型失败。
+# 这类失败不抖动、只到期引爆, 比随机 flaky 更难排查。
+#
+# 约定: 凡是断言依赖"滑动窗口"的用例, seed 日期必须与查询基准同源 ——
+# 即用下面的辅助函数按真实今天取相对偏移, 而不是写死某个日历日。
+# 注意: 这不是"把日期写死成更远的未来", 那只是把炸弹推远。
+
+_CST = _dt.timezone(_dt.timedelta(hours=8))
+
+
+def trading_days_ago(n: int) -> str:
+    """返回 n 个交易日前的日期字符串(YYYY-MM-DD, 跳过周末)。
+
+    n=0 表示今天。用于给 store 的 seed 数据提供"永远落在滑动窗口内"的日期。
+    """
+    if n < 0:
+        raise ValueError(f"n 必须 >= 0, 收到 {n}")
+    d = _dt.date.today()
+    remaining = n
+    while remaining > 0:
+        d -= _dt.timedelta(days=1)
+        if d.weekday() < 5:  # 0=周一 ... 4=周五
+            remaining -= 1
+    return d.strftime("%Y-%m-%d")
+
+
+def fixed_cst(y: int, m: int, d: int, hh: int = 15, mm: int = 40) -> _dt.datetime:
+    """显式构造北京时间 datetime, 替代依赖真实时钟的 beijing_now()。
+
+    服务层编排函数(如 verify_daily)都接受 now 入参, 应直接传入本函数的结果,
+    而不是 monkeypatch 时钟或依赖运行时的真实时刻。
+    """
+    return _dt.datetime(y, m, d, hh, mm, tzinfo=_CST)
+
+
+def cst_on(date_str: str, hh: int = 15, mm: int = 40) -> _dt.datetime:
+    """由 'YYYY-MM-DD' 构造当日北京时间 datetime(与 trading_days_ago 配合)。
+
+    典型用法: 让"注入的 now"与"seed 的日期"来自同一个真实时钟基准。
+        today = trading_days_ago(0)
+        now = cst_on(today)
+    """
+    d = _dt.date.fromisoformat(date_str)
+    return fixed_cst(d.year, d.month, d.day, hh, mm)
