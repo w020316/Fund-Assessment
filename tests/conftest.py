@@ -1,8 +1,11 @@
 """测试配置与公共fixtures"""
 import datetime as _dt
 import hashlib
+import inspect
 import os
+import re
 import sys
+import warnings
 from pathlib import Path
 
 import pytest
@@ -233,3 +236,107 @@ def cst_on(date_str: str, hh: int = 15, mm: int = 40) -> _dt.datetime:
     """
     d = _dt.date.fromisoformat(date_str)
     return fixed_cst(d.year, d.month, d.day, hh, mm)
+
+
+# ===== 启发式告警钩子(只 warn, 不 fail)=====
+# 两条检查都是启发式的, 做成失败会误伤合法用例(如专门测历史/未来日期边界的用例),
+# 最终一定会被人用 noqa 关掉而失去作用。故只 warnings.warn, 并提供豁免标记:
+#   @pytest.mark.allow_future_date     —— 允许用例包含未来日期字面量
+#   @pytest.mark.allow_hardcoded_date  —— 允许"硬编码日期 + 滑动窗口查询"共存
+
+_DATE_LITERAL_RE = re.compile(r"\b(20\d{2})-(\d{2})-(\d{2})\b")
+# 只有带 days= 的调用才是"按真实时钟滑动"的查询; 带显式 trade_date 的不算。
+_SLIDING_WINDOW_RE = re.compile(
+    r"list_(?:predictions|recommendations)\([^)]{0,200}?days\s*=", re.DOTALL
+)
+
+
+def _date_literals(text: str) -> list[tuple[str, _dt.date]]:
+    """提取文本中的 YYYY-MM-DD 字面量(忽略非法日期)。"""
+    out: list[tuple[str, _dt.date]] = []
+    for m in _DATE_LITERAL_RE.finditer(text):
+        try:
+            out.append((m.group(0), _dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))))
+        except ValueError:
+            continue
+    return out
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers", "allow_future_date: 允许用例包含未来日期字面量(启发式检查豁免)"
+    )
+    config.addinivalue_line(
+        "markers",
+        "allow_hardcoded_date: 允许硬编码日期与按真实时钟滑动的查询共存(启发式检查豁免)",
+    )
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """收集后扫描用例源码, 对两类"日期炸弹"风险发出告警(不失败)。
+
+    检查 A(未来日期): 用例源码里出现晚于今天的 YYYY-MM-DD 字面量。
+        风险: 用例隐含"今天是某个更早的日期"的假设, 到期后语义会变。
+    检查 B(硬编码日期 + 滑动窗口查询): 同一用例里既有 days= 形式的
+        list_predictions/list_recommendations 查询, 又有硬编码日期。
+        风险: 查询基准是 date('now'), 硬编码日期会随时间滑出窗口 → 日期炸弹。
+    """
+    today = _dt.date.today()
+    file_text: dict[str, str] = {}
+    reported: set[tuple[str, str, str]] = set()
+
+    def _text(path: str) -> str:
+        if path not in file_text:
+            try:
+                file_text[path] = Path(path).read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                file_text[path] = ""
+        return file_text[path]
+
+    for item in items:
+        path = str(getattr(item, "fspath", ""))
+        if not path.endswith(".py"):
+            continue
+        raw = _text(path)
+        # 便宜的预筛: 文件里没有任何日期字面量或不含滑动窗口查询 → 跳过
+        if "20" not in raw or not _DATE_LITERAL_RE.search(raw):
+            continue
+        func = getattr(item, "function", None)
+        if func is None:
+            continue
+        try:
+            src = inspect.getsource(func)
+        except (OSError, TypeError):
+            continue
+        markers = {m.name for m in item.iter_markers()}
+        literals = _date_literals(src)
+
+        # 检查 A: 未来日期
+        if literals and "allow_future_date" not in markers:
+            future = [s for s, d in literals if d > today]
+            key = (path, item.name, "future")
+            if future and key not in reported:
+                reported.add(key)
+                warnings.warn(
+                    f"[日期炸弹/未来日期] {item.name} 含晚于今天({today})的日期字面量 "
+                    f"{sorted(set(future))}。若用例隐含『今天是更早日期』的假设, "
+                    "请改用 conftest.trading_days_ago()/cst_on() 取相对基准; "
+                    "确属边界用例请加 @pytest.mark.allow_future_date。",
+                    stacklevel=2,
+                )
+
+        # 检查 B: 硬编码日期 + 滑动窗口查询
+        if literals and "allow_hardcoded_date" not in markers:
+            if _SLIDING_WINDOW_RE.search(src):
+                key = (path, item.name, "hardcoded")
+                if key not in reported:
+                    reported.add(key)
+                    warnings.warn(
+                        f"[日期炸弹/滑动窗口] {item.name} 同时含 days= 形式的"
+                        "list_predictions/list_recommendations 查询与硬编码日期 "
+                        f"{sorted({s for s, _ in literals})}。查询基准是 date('now'), "
+                        "硬编码日期会随时间滑出窗口而静默丢行; 请改用 "
+                        "conftest.trading_days_ago() 让 seed 与查询同源, "
+                        "或加 @pytest.mark.allow_hardcoded_date。",
+                        stacklevel=2,
+                    )
