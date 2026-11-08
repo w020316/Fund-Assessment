@@ -147,6 +147,33 @@ class TestCacheClear:
         """空目录 clear 不报错"""
         cache.clear()
 
+    def test_clear_skips_locked_file_without_raising(self, cache, monkeypatch):
+        """L-04 回归(2026-11-08): 单个缓存文件被占用时 clear() 不得抛出。
+
+        实测场景: Windows 下 data/cache/<name>.json 被其他线程持有句柄时
+        unlink 抛 PermissionError[WinError 5], 导致
+        tests/test_market_detail_quality.py 的 autouse fixture 在 setup 阶段
+        直接 error(整轮全量因此非确定)。残留文件最多造成一次未命中, 不应升级
+        为故障。
+        """
+        cache.set("locked", "v1")
+        cache.set("free", "v2")
+
+        real_unlink = Path.unlink
+
+        def _flaky_unlink(self, *args, **kwargs):
+            if self.name.startswith("locked"):
+                raise PermissionError(13, "拒绝访问")
+            return real_unlink(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "unlink", _flaky_unlink)
+        cache.clear()  # 不得抛出 —— 这是本用例唯一的核心断言
+
+        # 被占用的文件保留、可删的文件已删除（残留由 TTL 兜底，不再升级为故障）
+        remaining = {p.name for p in cache.cache_dir.glob("*.json")}
+        assert any(n.startswith("locked") for n in remaining), "被占用的文件应保留"
+        assert not any(n.startswith("free") for n in remaining), "可删的文件应被删除"
+
 
 class TestInvalidateByPrefix:
     """invalidate_by_prefix 按前缀批量失效(借鉴 diskcache evict(tag) 设计)"""

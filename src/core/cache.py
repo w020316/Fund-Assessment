@@ -239,9 +239,26 @@ class DataCache:
         path.unlink(missing_ok=True)
 
     def clear(self):
+        """清空内存层与磁盘层。
+
+        磁盘文件删除失败不应让调用方崩溃：Windows 下文件被其他线程/进程持有句柄时
+        `unlink` 会抛 `PermissionError: [WinError 5]`。残留的缓存文件在 TTL 到期或
+        被覆盖前可能被读到旧值（这是有界代价，由 TTL 兜底）；而让 clear() 抛出会把
+        "清缓存"这种辅助动作升级成故障 —— 实测曾导致 pytest 在 fixture setup 阶段
+        直接 error（tests/test_market_detail_quality.py::_clear_route_cache）。
+        因此逐文件容错，汇总后记 warning，由调用方决定是否需要处理。
+        """
         self._memory.clear()
+        failed: list[str] = []
         for f in self.cache_dir.glob("*.json"):
-            f.unlink(missing_ok=True)
+            try:
+                f.unlink(missing_ok=True)
+            except OSError as exc:  # WinError 5/32 等占用场景
+                failed.append(f"{f.name}({exc.__class__.__name__})")
+        if failed:
+            logger.warning(
+                f"DataCache.clear: {len(failed)} 个缓存文件删除失败已跳过: {failed[:3]}"
+            )
 
     def memory_stats(self) -> dict[str, Any]:
         """返回内存层命中率统计(供 /api/health 返回)"""
