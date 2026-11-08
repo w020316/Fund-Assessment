@@ -1362,6 +1362,19 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
           </div>
         </div>
 
+        <!-- 个股异动监测（砸盘/拉高）: 判定依据=近 N 分钟自算涨跌幅, 见 /api/market/stock_anomaly -->
+        <div class="card mb-16" id="stockAnomalyCard" role="region" aria-labelledby="stockAnomalyTitle">
+          <div class="card-title" id="stockAnomalyTitle" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+            <span>异动监测
+              <span style="font-size:11px;color:var(--text-muted);font-weight:400;margin-left:6px;">近 5 分钟涨跌 ≥3%（拉高）/ ≤−3%（砸盘）</span>
+            </span>
+            <span id="stockAnomalyMeta" style="font-size:11px;color:var(--text-muted);"></span>
+          </div>
+          <div id="stockAnomalyBody">
+            <div style="color:var(--text-muted);font-size:12px;padding:8px 0;">加载中…</div>
+          </div>
+        </div>
+
         <!-- 阶段二 R-04: 资金面(北向 + 板块主力) -->
         <div class="card mb-16" id="capitalFlowCard" role="region" aria-labelledby="capitalFlowTitle">
           <div class="card-title" id="capitalFlowTitle" style="display:flex;justify-content:space-between;align-items:center;">
@@ -3793,10 +3806,11 @@ updateTime();
 let marketRefreshTimer = null;
 
 async function loadMarketData() {
-  // 性能优化:6个API并行调用(原串行约5x时间,并行仅需最慢1个时间)
+  // 性能优化:7个API并行调用(原串行约5x时间,并行仅需最慢1个时间)
   Promise.all([
     loadIndexData(),
     loadHotStocks('gain'),
+    loadStockAnomaly(),
     loadSectorRanking(),
     loadGlobalNews(),
     loadGlobalIndexBar(),
@@ -3807,6 +3821,8 @@ async function loadMarketData() {
   marketRefreshTimer = setInterval(() => {
     loadIndexData();
     loadHotStocks(currentHotTab);
+    // 异动监测按 60s 客户端缓存 + 服务端 60s 缓存, 15s 轮询不会打穿上游
+    loadStockAnomaly();
   }, CONFIG.MARKET_REFRESH_MS);
 }
 
@@ -4280,6 +4296,83 @@ async function loadHotStocks(type) {
 }
 
 // 行业板块热力图
+/* ===== 个股异动监测（砸盘/拉高）=====
+   数据契约: GET /api/market/stock_anomaly → {data:[item], _meta:{...}}
+   item.basis 带窗口起止分钟与具体涨幅, 逐条可复核。
+   空态必须区分三种: 请求失败 / 查过但没有异动 / 数据源降级。 */
+const ANOMALY_KIND_LABEL = { surge: '拉高', dump: '砸盘' };
+
+async function loadStockAnomaly() {
+  const body = document.getElementById('stockAnomalyBody');
+  const metaEl = document.getElementById('stockAnomalyMeta');
+  if (!body) return;
+  const resp = await apiCached('/api/market/stock_anomaly', 'stock_anomaly', 60);
+  const meta = (resp && resp._meta) || {};
+  const items = (resp && Array.isArray(resp.data)) ? resp.data : null;
+
+  // 元信息: 数据时间 + 窗口 + 覆盖度, 让用户能判断"这份数据有多新"
+  if (metaEl) {
+    const bits = [];
+    if (meta.as_of) bits.push(`${meta.market_closed ? '收盘' : '数据'} ${escapeHtml(meta.as_of)}`);
+    if (meta.window_minutes) bits.push(`窗口 ${meta.window_minutes} 分钟`);
+    if (typeof meta.scanned === 'number') bits.push(`扫描 ${meta.scanned} 只`);
+    if (meta.unavailable) bits.push(`不可用 ${meta.unavailable} 只`);
+    metaEl.textContent = bits.join(' · ');
+  }
+
+  if (items === null) {
+    renderEmpty(body, '异动数据暂不可用', '上游行情接口无响应, 请稍后刷新');
+    return;
+  }
+  if (items.length === 0) {
+    // 区分"数据源降级/为空"与"确实没有异动": 后者说明查询是成功的
+    const scanned = Number(meta.scanned || 0);
+    if (scanned === 0) {
+      renderEmpty(body, '数据源暂不可用', escapeHtml(meta.degraded_reason || '候选池为空'));
+    } else {
+      renderEmpty(body, '当前窗口内无符合条件的异动',
+        `已扫描 ${scanned} 只活跃股 · ${meta.window_minutes || 5} 分钟内涨跌幅均未达阈值`);
+    }
+    return;
+  }
+
+  const rows = items.map(function (it) {
+    const b = it.basis || {};
+    const isSurge = it.kind === 'surge';
+    const kindColor = isSurge ? 'var(--color-up)' : 'var(--color-down)';
+    const wchg = Number(b.window_change_pct);
+    const sign = wchg > 0 ? '+' : '';
+    return `<tr>
+      <td><span class="signal" style="background:${isSurge ? 'rgba(239,68,68,0.14)' : 'rgba(34,197,94,0.14)'};color:${kindColor};">${ANOMALY_KIND_LABEL[it.kind] || escapeHtml(it.kind)}</span></td>
+      <td style="color:var(--accent-cyan);cursor:pointer;" data-anomaly-code="${escapeHtml(it.code)}">${escapeHtml(it.code)}</td>
+      <td>${escapeHtml(it.name)}</td>
+      <td style="color:${changeColor(it.change_pct)}">${fmtNum(it.price)}</td>
+      <td style="color:${changeColor(it.change_pct)}">${changeSign(it.change_pct)}${fmtNum(it.change_pct)}%</td>
+      <td style="color:${kindColor};font-weight:600;">${sign}${fmtNum(wchg)}%</td>
+      <td style="color:var(--text-muted);font-size:12px;">${escapeHtml(b.from_minute || '')}→${escapeHtml(b.to_minute || '')}</td>
+      <td style="color:var(--text-muted);font-size:12px;">${b.volume_ratio == null ? '—' : fmtNum(b.volume_ratio)}</td>
+    </tr>`;
+  }).join('');
+
+  const degradedTip = meta.degraded
+    ? `<div style="margin-bottom:8px;padding:6px 10px;border-radius:6px;background:rgba(245,158,11,0.10);color:var(--color-warn,#f59e0b);font-size:11px;">⚠ ${escapeHtml(meta.degraded_reason || '数据源降级, 结果可能不完整')}</div>`
+    : '';
+
+  body.innerHTML = degradedTip + `<div class="table-wrap" tabindex="0" style="max-height:300px;overflow-y:auto;">
+    <table>
+      <thead><tr><th>类型</th><th>代码</th><th>名称</th><th>现价</th><th>当日涨跌</th><th>窗口涨幅</th><th>窗口区间</th><th>量比</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+
+  // 点击代码打开个股详情: 用 data-* + addEventListener, 不在内联事件属性里插模板变量
+  // (tests/test_trace_and_security.py 明令禁止该写法, 防 XSS)
+  body.querySelectorAll('[data-anomaly-code]').forEach(function (el) {
+    el.addEventListener('click', function () { loadStockDetail(el.dataset.anomalyCode); });
+  });
+}
+
+
 async function loadSectorRanking() {
   const data = await apiCached('/api/market/sector_ranking', 'sector_ranking', 60);
   const container = document.getElementById('sectorHeatmap');
@@ -4992,16 +5085,22 @@ function _renderStrategyLab(title, rows, note) {
 function _strategyLabError(title, err) {
   const box = document.getElementById('strategyLabResult');
   const msg = String(err.message || err);
-  const needToken = msg.includes('401') || msg.includes('503');
+  // 2026-11-08：503 不是"缺令牌"，是服务端问题（未配 ADMIN_TOKEN / 上游降级）。
+  // 原实现把 401 与 503 混为一谈，会在服务端 503 时错误引导用户去配令牌。
+  const is401 = msg.includes('401');
+  const is503 = msg.includes('503');
+  const needToken = is401;
   if (needToken && !_hasAdminToken()) {
     // U2 修复(2026-11-07)：原文案让用户"打开控制台执行 localStorage.setItem"，
     // 等于把浏览器开发者工具当配置界面。改为可点击的"去设置"。
     box.innerHTML = tokenGateHTML('策略实验室');
     return;
   }
-  const hint = needToken
+  const hint = is401
     ? '<div style="margin-top:4px;color:var(--text-muted);">令牌已配置但服务端仍拒绝，可能是 Token 不匹配，请到「设置 → 管理鉴权」重新保存。</div>'
-    : '';
+    : (is503
+      ? '<div style="margin-top:4px;color:var(--text-muted);">服务暂时不可用（可能是服务端未配置 ADMIN_TOKEN，或上游数据源降级），请稍后重试。</div>'
+      : '');
   box.innerHTML = `<div style="color:var(--color-up);font-weight:600;">${escapeHtml(title)}</div>${hint}`;
 }
 
