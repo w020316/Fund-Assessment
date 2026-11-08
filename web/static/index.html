@@ -2825,6 +2825,29 @@ function fmtNum(n, decimals=2) {
   return Number(n).toLocaleString('zh-CN', {minimumFractionDigits:decimals, maximumFractionDigits:decimals});
 }
 
+// 数字滚动(阶段5 signature #2): 仅在数据到达后播放一次。
+// 安全约定: 初始渲染 '—', 动画结束**必定**回填真值; 减少动态偏好下直接写真值;
+// 任何异常都不会把中间值留在页面上(见 finally 分支)。
+function countUpEl(el, target, decimals=2, dur=420) {
+  if (!el || target == null || isNaN(target)) return;
+  const done = () => { el.textContent = fmtNum(target, decimals); };
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    done(); return;
+  }
+  const t0 = performance.now();
+  const step = (t) => {
+    try {
+      const p = Math.min(1, (t - t0) / dur);
+      const eased = 1 - Math.pow(1 - p, 3);
+      el.textContent = fmtNum(target * eased, decimals);
+      if (p < 1) requestAnimationFrame(step); else done();
+    } catch (e) {
+      done();   // 动画出错也要落到真值
+    }
+  };
+  requestAnimationFrame(step);
+}
+
 // 格式化金额
 function fmtMoney(n) {
   if (n == null || isNaN(n)) return '—';
@@ -3738,6 +3761,7 @@ async function loadMarketData() {
 }
 
 // 指数数据
+let _indexCountupDone = false;   // 数字滚动只播一次, 后续刷新直接写真值, 避免闪回 '—'
 async function loadIndexData() {
   const data = await apiCached('/api/market/index_realtime', 'index_realtime', 30);
   const container = document.getElementById('indexCards');
@@ -3797,7 +3821,7 @@ async function loadIndexData() {
       <div class="flex-between mb-12">
         <div>
           <div style="font-size:12px;color:var(--text-muted);">${idx.name}</div>
-          <div style="font-size:28px;font-weight:700;color:${color};">${fmtNum(idx.price)}</div>
+          <div class="qf-count" data-countup="${idx.price}" style="font-size:28px;font-weight:700;color:${color};">—</div>
         </div>
         <svg id="${svgId}" class="sparkline" width="100" height="40" viewBox="0 0 100 40"></svg>
       </div>
@@ -3815,6 +3839,15 @@ async function loadIndexData() {
     const svgId = 'spark-' + idx.code.replace(/\./g, '_').replace(/[^\w]/g, '_');
     drawSparkline(svgId, idx.change_pct >= 0, idx.code);
   });
+
+  // 阶段5 signature #2: 首次渲染播放数字滚动; 后续刷新直接写真值
+  const priceEls = container.querySelectorAll('[data-countup]');
+  if (!_indexCountupDone) {
+    priceEls.forEach(el => countUpEl(el, Number(el.dataset.countup), 2));
+    _indexCountupDone = true;
+  } else {
+    priceEls.forEach(el => { el.textContent = fmtNum(Number(el.dataset.countup), 2); });
+  }
 }
 
 // 顶部栏追加国际指数(道琼斯/恒生等)
