@@ -68,22 +68,41 @@ def strategies_yaml(tmp_path, monkeypatch):
     return cfg_dir / "strategies.yaml"
 
 
+# 单飞锁泄漏源（由 _no_leaked_guard 在 teardown 记录, 供后续用例的 setup 报出）
+_GUARD_LEAK_SOURCE: dict[str, str | None] = {"nodeid": None}
+
+
 @pytest.fixture(autouse=True)
-def _no_leaked_guard():
+def _no_leaked_guard(request):
     """单飞锁在用例前后必须空闲（L-04）。
 
     单飞锁是**模块级** threading.Lock, 一旦某个用例泄漏租约, 后面不相干的用例会
     成串变红（qa-lead 复跑看到的"4 条随机红"里, TestWriteGuard 那 2 条就是被
-    前一个用例的泄漏带崩的: 它在 setup 阶段 acquire 直接失败）。这条 fixture 让
-    泄漏在**源头**用例上暴露并给出明确信息, 而不是变成一串莫名其妙的红灯。
+    前一个用例的泄漏带崩的: 它在 setup 阶段 acquire 直接失败）。
+
+    两条断言的分工:
+    - teardown 断言 → 在**泄漏源**用例上失败, 并记下它的 nodeid;
+    - setup 断言    → 后续用例失败时**直接报出泄漏源的 nodeid**, 让它一眼可定位,
+      而不是变成一串"看起来各自独立"的红灯。级联本身不掩盖（泄漏源已经红了）,
+      但必须指认清楚。
     只做断言, 不强行释放——强解他人持有的锁会让真正的泄漏被掩盖。
     """
     from web.routes import strategy as strategy_route
 
     lock = strategy_route._BACKTEST_GUARD
-    assert not lock.locked(), "进入用例时单飞锁已被占用: 上一个用例泄漏了租约"
+    if lock.locked():
+        source = _GUARD_LEAK_SOURCE["nodeid"] or "未知用例（可能来自其他测试模块）"
+        pytest.fail(
+            f"单飞锁在进入 {request.node.nodeid} 前仍被占用。"
+            f"泄漏源: {source}。本用例未做任何改动, 此失败是级联信号——请修泄漏源"
+        )
     yield
-    assert not lock.locked(), "用例结束时单飞锁仍被占用: 租约泄漏（检查 finally 收尾）"
+    if lock.locked():
+        _GUARD_LEAK_SOURCE["nodeid"] = request.node.nodeid
+        pytest.fail(
+            f"{request.node.nodeid} 结束时单飞锁仍被占用: 租约泄漏"
+            f"（检查 try/finally 中的 finish() 收尾与工作线程是否已 join）"
+        )
 
 
 def _write_yaml(path: Path, section: dict | None) -> None:
