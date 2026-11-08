@@ -507,7 +507,19 @@ def get_index_realtime() -> list[dict]:
     cached = _cache_get("index_realtime")
     if cached is not None:
         return cached
-    codes = ["sh000001", "sz399001", "sz399006"]
+    # 2026-11-08：用户反馈"行情页只有三个指数，数据不全"。
+    # 补沪深300/中证500/科创50/上证50/中小100，覆盖大盘-中盘-成长-蓝筹四个维度。
+    # 全部为腾讯行情源实测可用的代码（返回字段长度 > 40，含名称与涨跌幅）。
+    codes = [
+        "sh000001",  # 上证指数
+        "sz399001",  # 深证成指
+        "sz399006",  # 创业板指
+        "sh000300",  # 沪深300
+        "sh000905",  # 中证500
+        "sh000688",  # 科创50
+        "sh000016",  # 上证50
+        "sz399005",  # 中小100
+    ]
     prefixed = ",".join(codes)
     url = f"https://qt.gtimg.cn/q={prefixed}"
     try:
@@ -2719,4 +2731,424 @@ def get_global_market_overview() -> dict:
         "hk_hot": fetched.get("hk_hot") or [],
     }
     _cache_set("global_market_overview", result, 10)
+    return result
+
+
+# =====================================================================
+# 个股异动（砸盘 / 拉高）—— 2026-11-08 新增
+#
+# 口径实测结论（决定了本模块的设计，勿凭常识改）：
+# 1. 东财 push2 clist 的 f22 实测是「1 分钟涨速(%)」，**不是** 5 分钟。
+#    验证方法：取涨速榜前 8 只，用 1 分钟 K 线反算 1/3/5/10 分钟涨幅逐一比对，
+#    f22 与「1 分钟涨幅」逐位相等（1.90 / 1.73 / 1.65 / 1.16），与 5 分钟不等
+#    （同批 5 分钟分别为 2.36 / 3.52 / 1.65 / 1.16）。故 f22 只可用于**筛选候选**，
+#    不可作为判定依据——否则「拉高/砸盘」的窗口会变成 1 分钟，语义漂移且无文档。
+# 2. 判定依据一律由本模块用**分钟序列自算**，窗口 = ANOMALY_WINDOW_MINUTES。
+#    这样上游改字段口径时，判定结果不会静默改变（只影响候选池覆盖度）。
+# 3. 分钟序列按「东财 1 分钟 K 线 → 腾讯分时 → 新浪 1 分钟 K 线」回退。
+#    实测三者字段结构不同，且新浪会丢弃零成交分钟（出现 14:57 → 15:00 跳空），
+#    腾讯收盘后会补 1529/1530 冗余点，因此**统一先转成 {分钟序号: 价格} 的字典**，
+#    再按分钟序号精确取窗口端点；端点缺失即判「数据不足」，不用相邻分钟硬凑
+#    （硬凑会把「5 分钟」悄悄变成「7 分钟」，是典型的静默错值）。
+# =====================================================================
+ANOMALY_WINDOW_MINUTES = 5        # 判定窗口（分钟）
+ANOMALY_SURGE_PCT = 3.0           # 拉高阈值：窗口内涨幅 >= 3%
+ANOMALY_DUMP_PCT = -3.0           # 砸盘阈值：窗口内跌幅 <= -3%
+ANOMALY_SCREEN_PER_SIDE = 8       # 涨/跌两个方向各取多少只候选
+_ANOMALY_CLOSE_MINUTE = 15 * 60   # 15:00，收盘后补点(1529/1530)一律剔除
+
+
+def _minute_index(hhmm: str) -> int | None:
+    """'0931' -> 571（当日第几分钟）。非法格式返回 None。"""
+    raw = str(hhmm or "").strip()
+    if len(raw) != 4 or not raw.isdigit():
+        return None
+    hour, minute = int(raw[:2]), int(raw[2:])
+    if hour > 23 or minute > 59:
+        return None
+    return hour * 60 + minute
+
+
+def compute_window_change(
+    prices: dict[int, float],
+    window_minutes: int = ANOMALY_WINDOW_MINUTES,
+) -> tuple[float, int, int] | None:
+    """从 {分钟序号: 价格} 计算「最近 window_minutes 分钟」的涨跌幅（%）。
+
+    纯函数（无 IO），单测直接覆盖。
+
+    严格按分钟序号取端点：end = 最大分钟，start = end - window_minutes。
+    start 不存在就返回 None（数据不足/窗口跨午休断裂），**不用相邻分钟顶替**——
+    顶替会把「5 分钟」静默变成别的跨度，属于数据说谎。
+
+    Returns:
+        (change_pct, start_minute, end_minute) 或 None。
+    """
+    if not prices or window_minutes <= 0:
+        return None
+    end_minute = max(prices)
+    start_minute = end_minute - int(window_minutes)
+    start_price = prices.get(start_minute)
+    end_price = prices.get(end_minute)
+    if not start_price or not end_price or start_price <= 0:
+        return None
+    return (end_price / start_price - 1.0) * 100.0, start_minute, end_minute
+
+
+def classify_anomaly(
+    change_pct: float | None,
+    surge_pct: float = ANOMALY_SURGE_PCT,
+    dump_pct: float = ANOMALY_DUMP_PCT,
+) -> str | None:
+    """窗口涨跌幅 → 'surge' / 'dump' / None。
+
+    纯函数。change_pct 为 None（数据缺失）时返回 None —— **不猜、不默认 0**，
+    否则「缺数据」会被误判成「无异动」。
+    """
+    if change_pct is None:
+        return None
+    if change_pct >= surge_pct:
+        return "surge"
+    if change_pct <= dump_pct:
+        return "dump"
+    return None
+
+
+def _parse_tx_minutes(payload: list[str]) -> tuple[dict[int, float], str]:
+    """腾讯分时 → ({分钟序号: 价格}, 'YYYY-MM-DD')。
+
+    行格式: '0931 1450.98 4465 646486481.69'（时间 价格 累计量 累计额）。
+    实测收盘后会补 1529/1530 等冗余点，一律按 > 15:00 剔除。
+    """
+    prices: dict[int, float] = {}
+    for row in payload or []:
+        parts = str(row).split()
+        if len(parts) < 2:
+            continue
+        idx = _minute_index(parts[0])
+        if idx is None or idx > _ANOMALY_CLOSE_MINUTE:
+            continue
+        try:
+            price = float(parts[1])
+        except (TypeError, ValueError):
+            continue
+        if price > 0:
+            prices[idx] = price
+    return prices, ""
+
+
+def _parse_em_minutes(klines: list[str]) -> tuple[dict[int, float], str]:
+    """东财 1 分钟 K 线 → ({分钟序号: 价格}, 日期)。
+
+    行格式: '2026-11-06 14:58,1451.00,1451.00,1451.00,1451.00,8,1160705.00'
+    （时间,开,收,高,低,量,额）→ 取第 3 列（收盘价）。
+    """
+    prices: dict[int, float] = {}
+    day = ""
+    for row in klines or []:
+        cols = str(row).split(",")
+        if len(cols) < 3:
+            continue
+        stamp = cols[0].strip()
+        if len(stamp) < 16:
+            continue
+        day = stamp[:10]
+        idx = _minute_index(stamp[11:16].replace(":", ""))
+        if idx is None or idx > _ANOMALY_CLOSE_MINUTE:
+            continue
+        try:
+            price = float(cols[2])
+        except (TypeError, ValueError):
+            continue
+        if price > 0:
+            prices[idx] = price
+    return prices, day
+
+
+def _parse_sina_minutes(bars: list[dict]) -> tuple[dict[int, float], str]:
+    """新浪 1 分钟 K 线 → ({分钟序号: 价格}, 日期)。
+
+    条目形如 {'day': '2026-11-06 14:51:00', 'close': '1449.500', ...}。
+    新浪会丢弃零成交分钟，序列可能跳空 —— 由 compute_window_change 的
+    「端点必须存在」规则兜住，不做插值。
+    """
+    prices: dict[int, float] = {}
+    day = ""
+    for bar in bars or []:
+        stamp = str(bar.get("day") or "")
+        if len(stamp) < 16:
+            continue
+        day = stamp[:10]
+        idx = _minute_index(stamp[11:16].replace(":", ""))
+        if idx is None or idx > _ANOMALY_CLOSE_MINUTE:
+            continue
+        try:
+            price = float(bar.get("close"))
+        except (TypeError, ValueError):
+            continue
+        if price > 0:
+            prices[idx] = price
+    return prices, day
+
+
+def _minutes_from_em(code: str) -> tuple[dict[int, float], str]:
+    secid = _em_secid(code)
+    resp = em_get("https://push2his.eastmoney.com/api/qt/stock/kline/get", {
+        "secid": secid,
+        "fields1": "f1,f2,f3,f4,f5,f6",
+        "fields2": "f51,f52,f53,f54,f55,f56,f57",
+        "klt": "1",
+        "fqt": "1",
+        "lmt": str(ANOMALY_WINDOW_MINUTES + 4),
+        "end": "20500101",
+    })
+    klines = ((resp.json() or {}).get("data") or {}).get("klines") or []
+    return _parse_em_minutes(klines)
+
+
+def _minutes_from_tencent(code: str) -> tuple[dict[int, float], str]:
+    resp = requests.get(
+        "https://web.ifzq.gtimg.cn/appstock/app/minute/query",
+        params={"code": _prefix_code(code)},
+        headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://gu.qq.com/",
+        },
+        timeout=5,
+    )
+    node = ((resp.json() or {}).get("data") or {}).get(_prefix_code(code)) or {}
+    inner = node.get("data") or {}
+    prices, _ = _parse_tx_minutes(inner.get("data") or [])
+    raw_date = str(inner.get("date") or "")
+    day = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:8]}" if len(raw_date) == 8 else ""
+    return prices, day
+
+
+def _minutes_from_sina(code: str) -> tuple[dict[int, float], str]:
+    resp = requests.get(
+        "https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getKLineData",
+        params={"symbol": _prefix_code(code), "scale": 1, "ma": "no",
+                "datalen": str(ANOMALY_WINDOW_MINUTES + 6)},
+        headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://finance.sina.com.cn/",
+        },
+        timeout=5,
+    )
+    return _parse_sina_minutes(resp.json() or [])
+
+
+def get_stock_minute_series(code: str) -> tuple[dict[int, float], str, str]:
+    """取单只个股的分钟价格序列，按 东财 → 腾讯 → 新浪 回退。
+
+    Returns:
+        (prices, source, trade_date)；全失败返回 ({}, "", "")。
+    """
+    for source, fetcher in (
+        ("eastmoney", _minutes_from_em),
+        ("tencent", _minutes_from_tencent),
+        ("sina", _minutes_from_sina),
+    ):
+        try:
+            prices, day = fetcher(code)
+            if len(prices) > ANOMALY_WINDOW_MINUTES:
+                return prices, source, day
+        except Exception as e:
+            logger.debug(f"minute series {code} via {source} failed: {e}")
+    return {}, "", ""
+
+
+def _screen_em_speed(per_side: int) -> list[dict]:
+    """东财涨速榜候选（fid=f22），附带量比/换手率/成交额用于「放量」佐证。
+
+    不复用 get_stock_ranking_em：那个函数是既有端点的契约（只回 11 个字段），
+    这里需要 f8/f10 才有「放量」上下文。宁可多一个专用请求，也不改既有契约。
+    """
+    url = "https://push2.eastmoney.com/api/qt/clist/get"
+    rows: list[dict] = []
+    for order in (1, 0):  # 1=降序(拉高) 0=升序(砸盘)
+        params = {
+            "pn": 1,
+            "pz": per_side,
+            "po": order,
+            "np": 1,
+            "fltt": 2,
+            "invt": 2,
+            "fid": "f22",
+            "fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23",
+            "fields": "f2,f3,f5,f6,f8,f10,f12,f14,f22",
+        }
+        resp = em_get(url, params=params)
+        items = ((resp.json() or {}).get("data") or {}).get("diff") or []
+        for item in items:
+            rows.append({
+                "code": _safe_str(item.get("f12")),
+                "name": _safe_str(item.get("f14")),
+                "price": _opt_float(item.get("f2")),
+                "change_pct": _opt_float(item.get("f3")),
+                "volume": _opt_float(item.get("f5")),
+                "amount": _opt_float(item.get("f6")),
+                "turnover_pct": _opt_float(item.get("f8")),
+                "volume_ratio": _opt_float(item.get("f10")),
+                "speed_1min_pct": _opt_float(item.get("f22")),
+            })
+    return rows
+
+
+def _screen_sina_change(per_side: int) -> list[dict]:
+    """新浪当日涨跌幅榜候选（降级口径：当日涨跌幅，非短时涨速）。"""
+    url = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData"
+    rows: list[dict] = []
+    for asc in (0, 1):  # 0=降序(涨幅榜) 1=升序(跌幅榜)
+        resp = requests.get(url, params={
+            "page": 1, "num": per_side, "sort": "changepercent", "asc": asc,
+            "node": "hs_a", "symbol": "", "_s_r_a": "auto",
+        }, timeout=5, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://finance.sina.com.cn/",
+        })
+        resp.encoding = "gbk"
+        for item in resp.json() or []:
+            rows.append({
+                "code": _safe_str(item.get("code")),
+                "name": _safe_str(item.get("name")),
+                "price": _opt_float(item.get("trade")),
+                "change_pct": _opt_float(item.get("changepercent")),
+                "volume": _opt_float(item.get("volume")),
+                "amount": _opt_float(item.get("amount")),
+                "turnover_pct": _opt_float(item.get("turnoverratio")),
+                "volume_ratio": None,  # 新浪排行无「量比」字段，如实留空不猜
+                "speed_1min_pct": None,
+            })
+    return rows
+
+
+def _screen_candidates(per_side: int = ANOMALY_SCREEN_PER_SIDE) -> tuple[list[dict], str]:
+    """候选池：涨速榜 / 当日涨跌幅榜各取 per_side 只（按代码去重）。
+
+    Returns:
+        (candidates, screen_source)
+        screen_source = 'eastmoney_speed'（口径=1 分钟涨速，上游原生涨速榜）
+                      | 'sina_changepercent'（降级：口径=当日涨跌幅，覆盖度更差，
+                        必须在 _meta 里标出来，否则用户会以为是「短时异动」）
+    """
+    candidates: list[dict] = []
+    seen: set[str] = set()
+
+    def _merge(rows: list[dict]) -> None:
+        for row in rows or []:
+            code = _safe_str(row.get("code"))
+            if not code or code in seen:
+                continue
+            seen.add(code)
+            candidates.append(row)
+
+    if _check_em_available():
+        try:
+            em_rows = _screen_em_speed(per_side)
+        except Exception as e:
+            logger.warning(f"anomaly screen em failed, fallback to sina: {e}")
+            em_rows = []
+        if em_rows:
+            _merge(em_rows)
+            return candidates, "eastmoney_speed"
+
+    try:
+        _merge(_screen_sina_change(per_side))
+    except Exception as e:
+        logger.warning(f"anomaly screen sina failed: {e}")
+    return candidates, "sina_changepercent"
+
+
+def get_stock_anomalies(
+    window_minutes: int = ANOMALY_WINDOW_MINUTES,
+    per_side: int = ANOMALY_SCREEN_PER_SIDE,
+) -> dict:
+    """个股异动（砸盘/拉高）编排：筛选 → 逐只自算窗口涨跌幅 → 判定。
+
+    返回结构（供路由层直接包 _meta）：
+        {
+          "items": [{code,name,price,change_pct,surge_or_dump,kind,basis{...},trade_date}],
+          "window_minutes": int, "screen_source": str, "kline_source": str,
+          "scanned": int, "unavailable": int, "as_of": str,
+        }
+
+    铁律：判定只用自算值；某只取不到分钟数据就**跳过并计数**，绝不填 0 或猜。
+    """
+    cached = _cache_get(f"stock_anomaly_{window_minutes}_{per_side}")
+    if cached is not None:
+        return cached
+
+    candidates, screen_source = _screen_candidates(per_side)
+    if not candidates:
+        result = {"items": [], "window_minutes": window_minutes,
+                  "screen_source": screen_source, "kline_source": "",
+                  "scanned": 0, "unavailable": 0, "as_of": ""}
+        _cache_set(f"stock_anomaly_{window_minutes}_{per_side}", result, 30)
+        data_health.record_failure("stock_anomaly", "empty candidate pool")
+        return result
+
+    fetched = _parallel_fetch(
+        [(row["code"], (lambda c=row["code"]: get_stock_minute_series(c))) for row in candidates],
+        deadline=6.0,
+    )
+
+    items: list[dict] = []
+    unavailable = 0
+    sources: dict[str, int] = {}
+    latest: tuple[str, int] = ("", 0)
+    for row in candidates:
+        series = fetched.get(row["code"])
+        prices, source, day = (series if isinstance(series, tuple) else ({}, "", ""))
+        if not prices:
+            unavailable += 1
+            continue
+        sources[source] = sources.get(source, 0) + 1
+        window = compute_window_change(prices, window_minutes)
+        if window is None:
+            unavailable += 1
+            continue
+        change_pct, start_minute, end_minute = window
+        kind = classify_anomaly(change_pct)
+        if kind is None:
+            continue
+        if (day, end_minute) > latest:
+            latest = (day, end_minute)
+        items.append({
+            "code": row.get("code"),
+            "name": row.get("name"),
+            "price": row.get("price"),
+            "change_pct": row.get("change_pct"),
+            "kind": kind,
+            "basis": {
+                "window_minutes": window_minutes,
+                "window_change_pct": round(change_pct, 2),
+                "from_minute": f"{start_minute // 60:02d}:{start_minute % 60:02d}",
+                "to_minute": f"{end_minute // 60:02d}:{end_minute % 60:02d}",
+                "volume_ratio": row.get("volume_ratio"),
+                "turnover_pct": row.get("turnover_pct"),
+                "amount": row.get("amount"),
+                "threshold_pct": ANOMALY_SURGE_PCT if kind == "surge" else ANOMALY_DUMP_PCT,
+                "minute_source": source,
+            },
+            "trade_date": day,
+        })
+
+    items.sort(key=lambda it: abs(it["basis"]["window_change_pct"]), reverse=True)
+    kline_source = max(sources, key=sources.get) if sources else ""
+    as_of = f"{latest[0]} {latest[1] // 60:02d}:{latest[1] % 60:02d}" if latest[0] else ""
+    result = {
+        "items": items,
+        "window_minutes": window_minutes,
+        "screen_source": screen_source,
+        "kline_source": kline_source,
+        "scanned": len(candidates),
+        "unavailable": unavailable,
+        "as_of": as_of,
+    }
+    _cache_set(f"stock_anomaly_{window_minutes}_{per_side}", result, 30)
+    if items:
+        data_health.record_success("stock_anomaly", len(items))
+    else:
+        data_health.record_success("stock_anomaly", 0)
     return result

@@ -457,7 +457,10 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 }
 .news-ticker-inner {
   display:inline-block;
-  animation:ticker-scroll 30s linear infinite;
+  /* 2026-11-08：时长由 JS 按内容宽度注入（--ticker-dur，固定 60px/s）。
+     原来写死 30s：40 条资讯内容宽约 1.5 万像素，30 秒跑完 ≈ 520px/s，
+     肉眼来不及读。默认值仅作兜底。 */
+  animation:ticker-scroll var(--ticker-dur, 90s) linear infinite;
 }
 @keyframes ticker-scroll {
   0% { transform:translateX(0); }
@@ -1328,9 +1331,13 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
         <!-- 指数卡片 -->
         <div class="flex-between mb-12">
           <div style="font-size:18px;font-weight:600;letter-spacing:.01em;">指数行情</div>
-          <div class="data-freshness" id="marketFreshness"><span class="freshness-icon"></span><span>—</span></div>
+          <div style="display:flex;align-items:center;gap:12px;">
+            <div class="data-freshness" id="marketFreshness"><span class="freshness-icon"></span><span>—</span></div>
+            <button class="btn btn-sm btn-outline" style="min-height:32px;" onclick="openIndicatorHelp()"
+                    title="看不懂 K线/均线/MACD？点这里">指标说明</button>
+          </div>
         </div>
-        <div class="grid-3 mb-16" id="indexCards"></div>
+        <div class="grid-4 mb-16" id="indexCards"></div>
 
         <!-- 热门股票 + 行业板块 -->
         <div class="grid-2 mb-16">
@@ -2263,6 +2270,28 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
       </div>
 
       <!-- P1-2 基金重仓股分析弹窗 -->
+      <!-- ===== 2026-11-08: 指标说明（面向新手） ===== -->
+      <div id="indicatorHelpModal" class="modal-mask" style="display:none;">
+        <div class="modal-box" style="max-width:760px;">
+          <div class="modal-header">
+            <span>指标说明 · 新手速查</span>
+            <span class="modal-close" role="button" tabindex="0" aria-label="关闭"
+                  onclick="document.getElementById('indicatorHelpModal').style.display='none'">×</span>
+          </div>
+          <div class="modal-body" style="max-height:70vh;overflow-y:auto;font-size:13px;line-height:1.8;">
+            <p style="color:var(--text-secondary);margin-bottom:12px;">
+              这些指标都是<b>概率工具</b>，用来判断"当前更可能偏强还是偏弱"，<b>不预测未来</b>。
+              新手建议先只看 <b>K线 + 均线 + 成交量 + MACD</b> 四个，足够避开大部分坑。
+            </p>
+            <div id="indicatorHelpBody"></div>
+            <p style="margin-top:16px;padding:10px 12px;border:1px solid var(--color-warning);border-radius:6px;color:var(--text-secondary);">
+              ⚠ 任何单一指标都会失效。指标之间互相矛盾时，以<b>价格与成交量</b>为准；
+              看不懂就不要下单——本系统所有结论仅供参考，不构成投资建议。
+            </p>
+          </div>
+        </div>
+      </div>
+
       <div id="holdingsModal" class="modal-mask" style="display:none;">
         <div class="modal-box" style="max-width:900px;">
           <div class="modal-header">
@@ -2709,7 +2738,22 @@ function _friendlyApiError(status, err) {
     return { title: '网络连接失败', message: '无法连接服务器,请检查网络后重试。' };
   }
   if (status === 401) {
-    return { title: '需要管理权限', message: '此操作需要管理员令牌,请到"设置"页配置后重试。' };
+    // 2026-11-08：区分"没配令牌"与"配了但不匹配"。原来一律提示"请到设置页配置"，
+    // 而用户明明已经配过（服务端返回 401「令牌无效」），这句提示自相矛盾，
+    // 会让人反复重填同一个错误的值。用后端 detail 区分两种成因。
+    if (readable.includes('缺少') || readable.includes('令牌为空')) {
+      return { title: '需要管理权限', message: '尚未配置管理员令牌，请到"设置"页填写后重试。' };
+    }
+    return {
+      title: '令牌不匹配',
+      message: '已配置的令牌与服务端不一致。请核对部署平台环境变量 ADMIN_TOKEN 的值（注意首尾空格），重新填入后重试。'
+    };
+  }
+  if (status === 503 && readable.includes('鉴权未配置')) {
+    return {
+      title: '服务端未配置鉴权',
+      message: '服务器没有设置 ADMIN_TOKEN，任何令牌都无法通过。需在部署平台（Render）环境变量中添加 ADMIN_TOKEN 并重新部署。'
+    };
   }
   if (status === 403) {
     return { title: '暂无操作权限', message: '当前身份无权执行此操作。' };
@@ -4288,6 +4332,46 @@ async function loadGlobalNews() {
     return `<span class="news-item"><span class="news-dot"></span>${escapeHtml(title)}${escapeHtml(source)}</span>`;
   }).join('');
   container.innerHTML = html + html;
+
+  // 按内容宽度计算滚动时长，使速度恒定在约 60px/s（≈ 3 个中文字/秒，可读）。
+  // 内容长度随资讯条数变化，固定时长会让条目多时飞快、条目少时爬行。
+  requestAnimationFrame(() => {
+    const half = container.scrollWidth / 2;   // 内容重复了两遍，半宽即一轮位移
+    if (!half || !isFinite(half)) return;
+    const dur = Math.max(24, Math.min(600, half / 60));
+    container.style.setProperty('--ticker-dur', dur.toFixed(1) + 's');
+  });
+}
+
+/* ===== 2026-11-08: 指标说明（新手速查） =====
+   内容来源：用户提供的「股票小白必懂的 10 个技术指标」，改写为可操作的判读口径。
+   注意措辞：一律用"更可能/通常"，不写成确定性结论——指标是概率工具。 */
+const INDICATOR_HELP = [
+  { n: 'K线', how: '收盘 > 开盘 = 红（涨），收盘 < 开盘 = 绿（跌）。上影线长 = 上方抛压重，下影线长 = 下方有承接。', tip: '连续大跌后出现长下影，往往是止跌信号；长上影出现在高位要警惕。' },
+  { n: '均线 MA', how: '常用 5 / 10 / 20 / 60 日。股价在均线上方偏强，下方偏弱；短期均线在长期均线上方 = 多头排列。', tip: '均线是"平均成本"，跌破 20 日线通常意味着短期趋势转弱。' },
+  { n: '成交量 VOL', how: '价涨量增 = 上涨健康；价涨量缩 = 上涨乏力；价跌量增 = 抛压重。', tip: '高位放量但不涨（滞涨）比放量下跌更危险。' },
+  { n: 'MACD', how: 'DIF 上穿 DEA = 金叉（偏多），下穿 = 死叉（偏空）。零轴上方偏强，下方偏弱。', tip: '金叉在零轴下方出现，信号弱于零轴上方；震荡市里金叉死叉会频繁假信号。' },
+  { n: 'KDJ', how: 'K、D、J 三条线，0–100 区间。80 以上超买，20 以下超卖，J 最敏感。', tip: 'J 值在 20 以下拐头向上，比单纯"超卖"更有参考价值。' },
+  { n: 'RSI 相对强弱', how: '70 以上超买，30 以下超卖，50 是多空分界线。', tip: '强势股 RSI 长期在 50–70 之间运行，不必因为"超过 70"就卖出。' },
+  { n: 'BOLL 布林线', how: '上轨 = 压力，中轨 = 均势，下轨 = 支撑。开口放大 = 波动加剧，收口 = 变盘前兆。', tip: '股价沿上轨运行是强势特征，不等于立刻要跌。' },
+  { n: '换手率', how: '1%–3% 正常，3%–10% 活跃，10%–15% 异常活跃，15% 以上多为资金博弈。', tip: '低位高换手可能是启动，高位高换手更可能是派发。' },
+  { n: '量比', how: '0.8–1.5 正常，1.5–2.5 温和放量，2.5–5 明显放量，5 以上需结合价格判断。', tip: '量比大且价格上涨 = 有资金进场；量比大但价格不涨 = 有人在出货。' },
+  { n: '支撑 / 压力', how: '前期低点通常是支撑，前期高点通常是压力。跌破支撑转弱，突破压力转强。', tip: '支撑被反复测试后往往失效——"第三次踩同一根线"要小心。' },
+];
+
+function openIndicatorHelp() {
+  const body = document.getElementById('indicatorHelpBody');
+  if (body && !body.dataset.rendered) {
+    body.innerHTML = INDICATOR_HELP.map((it, i) => `
+      <div style="padding:10px 0;border-bottom:1px solid var(--border-subtle, rgba(255,255,255,.06));">
+        <div style="font-weight:600;margin-bottom:4px;">${i + 1}. ${escapeHtml(it.n)}</div>
+        <div style="color:var(--text-secondary);">${escapeHtml(it.how)}</div>
+        <div style="color:var(--accent-blue);font-size:12px;margin-top:2px;">💡 ${escapeHtml(it.tip)}</div>
+      </div>`).join('');
+    body.dataset.rendered = '1';
+  }
+  const m = document.getElementById('indicatorHelpModal');
+  if (m) m.style.display = 'flex';
 }
 
 /* ========== 2. 智能分析 ========== */
@@ -7938,10 +8022,36 @@ function loadAuthStatus() {
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
       <button class="btn btn-sm btn-primary" onclick="saveAdminToken()">保存令牌</button>
       <button class="btn btn-sm btn-outline" onclick="clearAdminToken()">清除令牌</button>
+      <button class="btn btn-sm btn-outline" onclick="testAdminToken()" title="用当前令牌请求一个只读管理接口，验证是否真的能用">测试令牌</button>
       <span style="font-size:12px;opacity:0.7;">${token ? '当前: 已配置' : '当前: 未配置'}</span>
     </div>
     <div style="margin-top:8px;font-size:12px;opacity:0.6;line-height:1.5;">写操作(添加/删除持仓、交易)需要管理令牌。令牌保存在浏览器本地,不会上传。</div>
   `;
+}
+
+// 2026-11-08：新增"测试令牌"。用户反馈"配了令牌仍报无权限"，但页面只说
+// "请到设置页配置"，无法判断是"没配"、"配错"还是"服务端没配"。
+// 这里用当前令牌打一个只读管理接口，把三种成因分别说清楚。
+async function testAdminToken() {
+  const token = (localStorage.getItem('admin_token') || '').trim();
+  if (!token) { showToast('尚未配置令牌，请先输入并保存', 'warning'); return; }
+  try {
+    const r = await fetch('/api/agent/history?limit=1', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if (r.ok) { showToast('令牌有效，管理功能可用', 'success'); return; }
+    let detail = '';
+    try { detail = (await r.json()).detail || ''; } catch (e) { /* 非 JSON */ }
+    if (r.status === 503) {
+      showToast('服务端未配置 ADMIN_TOKEN：需在 Render 环境变量添加后重新部署', 'error');
+    } else if (r.status === 401) {
+      showToast('令牌不匹配：与服务端 ADMIN_TOKEN 不一致（注意首尾空格）', 'error');
+    } else {
+      showToast('测试失败：HTTP ' + r.status + (detail ? ' · ' + detail : ''), 'error');
+    }
+  } catch (e) {
+    showToast('网络错误，无法完成测试', 'error');
+  }
 }
 
 function saveAdminToken() {
