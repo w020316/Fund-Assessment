@@ -376,7 +376,11 @@ def _snapshot_is_stale(snapshot: dict[str, Any]) -> bool:
 
 
 def generate_prediction(now: _dt.datetime | None = None) -> dict[str, Any]:
-    """生成当日对次交易日的沪深300方向预测(同日幂等覆盖)。"""
+    """生成当日对次交易日的沪深300方向预测(同日幂等覆盖)。
+
+    三信号全缺失(insufficient)时不生成预测: 返回 skipped=True 且不落库,
+    避免把"无证据"伪装成"确定结论"污染准确率统计。
+    """
     now = now or beijing_now()
     today = now.strftime("%Y-%m-%d")
     store = get_store()
@@ -391,6 +395,21 @@ def generate_prediction(now: _dt.datetime | None = None) -> dict[str, Any]:
         payload.get("top_sectors") or None,
         sig.load_signal_config(),
     )
+    # P0 QF3-01 守卫: 三信号全缺失 → 无证据可依, 不调 LLM(不消耗额度)、不落库。
+    # 落库一条"全盲却确定"的预测会污染 /verify 的准确率分子分母, 必须阻断。
+    if syn["insufficient"]:
+        missing_signals = [r["signal"] for r in syn["reasons"] if r.get("verdict") == "missing"]
+        logger.warning(
+            f"generate_prediction: 数据不足, 跳过预测(不调 LLM/不落库) "
+            f"trade_date={today} missing={missing} missing_signals={missing_signals}"
+        )
+        return {
+            "trade_date": today,
+            "skipped": True,
+            "reason": "insufficient_data",
+            "missing_fields": missing,
+        }
+
     reasons: list[dict[str, Any]] = list(syn["reasons"])
     if missing:
         reasons.append({"signal": "missing_fields", "value": ",".join(missing), "verdict": "missing"})

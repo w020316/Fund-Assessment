@@ -99,9 +99,21 @@ def test_synthesize_flat_when_signals_mixed() -> None:
     assert out["confidence"] == pytest.approx(50.0)
 
 
-def test_synthesize_all_missing_is_flat_low_confidence() -> None:
+def test_synthesize_all_missing_is_insufficient() -> None:
+    """QF3-01 修复(2026-11-08):三信号全缺失必须判为 insufficient, 不得兜底成 flat/50。
+
+    历史断言 `direction == "flat"` 锁定的是缺陷行为本身(composite=0 落入 else 分支),
+    不是产品规格 —— PRD R3.1 仅要求"每交易日 1 条预测落库", 未定义全缺失口径。
+    该行数据会进入 /verify 的准确率分子分母, 属于数据真实性红线。
+    """
     out = sig.synthesize(None, None, None, sig.DEFAULT_CONFIG)
-    assert out["direction"] == "flat"
+    assert out["insufficient"] is True
+    assert out["valid_signals"] == 0
+    assert out["direction"] is None
+    assert out["rule_direction"] is None
+    assert out["confidence"] is None
+    assert out["rule_confidence"] is None
+    assert out["composite"] == 0.0          # 保留可追溯性: 合成值仍为 0
     assert all(r["verdict"] == "missing" for r in out["reasons"])
 
 

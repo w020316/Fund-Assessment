@@ -150,7 +150,14 @@ def synthesize(
     cfg: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """三信号合成: 返回 {direction, confidence, rule_direction, rule_confidence,
-    composite, reasons[]}。reasons 每项 {signal, value, verdict} 可追溯。"""
+    composite, reasons[], valid_signals, insufficient}。
+    reasons 每项 {signal, value, verdict} 可追溯。
+
+    数据不足口径(P0 QF3-01): 三信号全部 missing 时 valid_signals==0 且
+    insufficient 为 True, direction/confidence/rule_* 一律返回 None。
+    无任何证据不得输出确定性结论, 更不得用 flat/50 兜底冒充"有判断"。
+    composite 与 reasons 保持原样, 便于追溯"为何判定为数据不足"。
+    """
     cfg = cfg or DEFAULT_CONFIG
     weights = cfg["confidence"]["weights"]
     threshold = float(cfg["direction"]["composite_threshold"])
@@ -234,17 +241,26 @@ def synthesize(
     else:
         reasons.append({"signal": "sector_momentum", "value": None, "verdict": "missing"})
 
-    if composite > threshold:
-        direction = "up"
-    elif composite < -threshold:
-        direction = "down"
-    else:
-        direction = "flat"
+    # 有效信号计数(P0 QF3-01): 只有 verdict != "missing" 才算真正参与合成
+    valid_signals = sum(1 for r in reasons if r.get("verdict") != "missing")
+    insufficient = valid_signals == 0
 
-    cmin = float(cfg["confidence"]["min"])
-    cmax = float(cfg["confidence"]["max"])
-    base = float(cfg["confidence"]["base"])
-    confidence = round(min(cmax, max(cmin, base + abs(composite))), 1)
+    if insufficient:
+        # 三个信号全缺失: 没有任何证据支撑方向判断 → 结论必须为空, 不得兜底
+        direction = None
+        confidence = None
+    else:
+        if composite > threshold:
+            direction = "up"
+        elif composite < -threshold:
+            direction = "down"
+        else:
+            direction = "flat"
+
+        cmin = float(cfg["confidence"]["min"])
+        cmax = float(cfg["confidence"]["max"])
+        base = float(cfg["confidence"]["base"])
+        confidence = round(min(cmax, max(cmin, base + abs(composite))), 1)
 
     return {
         "direction": direction,
@@ -253,6 +269,8 @@ def synthesize(
         "rule_confidence": confidence,
         "composite": round(composite, 2),
         "reasons": reasons,
+        "valid_signals": valid_signals,
+        "insufficient": insufficient,
     }
 
 
