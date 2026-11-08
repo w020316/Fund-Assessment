@@ -2939,14 +2939,22 @@ def _minutes_from_sina(code: str) -> tuple[dict[int, float], str]:
 
 
 def get_stock_minute_series(code: str) -> tuple[dict[int, float], str, str]:
-    """取单只个股的分钟价格序列，按 东财 → 腾讯 → 新浪 回退。
+    """取单只个股的分钟价格序列，按 腾讯 → 东财 → 新浪 回退。
+
+    顺序依据实测（2026-11-08）：
+    - 腾讯分时：单请求、无限速、稳定（16 只并发 ~1s），本机代理下可用性最好；
+    - 东财 1 分钟 K 线：数据最规整（240 根无缺口），但 em_get 有全局 0.3s 限速，
+      16 只串行化后 ≥5s，且本机代理偶发阻断 push2his；
+    - 新浪 1 分钟 K 线：会丢弃零成交分钟（出现 14:57→15:00 跳空），
+      窗口端点可能缺失，放最后。
+    所以「最快且最稳」的腾讯优先，而不是「最规整」的东财优先。
 
     Returns:
         (prices, source, trade_date)；全失败返回 ({}, "", "")。
     """
     for source, fetcher in (
-        ("eastmoney", _minutes_from_em),
         ("tencent", _minutes_from_tencent),
+        ("eastmoney", _minutes_from_em),
         ("sina", _minutes_from_sina),
     ):
         try:
@@ -3109,11 +3117,14 @@ def get_stock_anomalies(
             unavailable += 1
             continue
         change_pct, start_minute, end_minute = window
+        # as_of 反映「数据本身的时间」，与是否命中异动无关 ——
+        # 若只在命中时更新，零异动时前端就拿不到数据时间，无法区分
+        # 「刚刚查过、确实没有异动」和「数据是昨天的」。
+        if (day, end_minute) > latest:
+            latest = (day, end_minute)
         kind = classify_anomaly(change_pct)
         if kind is None:
             continue
-        if (day, end_minute) > latest:
-            latest = (day, end_minute)
         items.append({
             "code": row.get("code"),
             "name": row.get("name"),

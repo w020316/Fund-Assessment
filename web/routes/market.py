@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 try:
@@ -781,6 +781,74 @@ class StockDetailResponse(BaseModel):
     financial: dict
     capital_flow: dict
     kline_summary: dict
+
+
+@router.get("/stock_anomaly")
+async def stock_anomaly(window: int = Query(5, ge=1, le=30)):
+    """个股异动监测（砸盘 / 拉高）。
+
+    判定口径（可解释、可复现，勿改语义）：
+    - 窗口 = 最近 `window` 分钟（默认 5），由本服务用**分钟序列自算**涨跌幅，
+      不使用上游「涨速」字段直接判定（实测东财 f22 是 1 分钟窗口，见
+      data_source_v2 模块注释），因此上游改口径不会静默改变判定结果。
+    - 拉高 surge: 窗口涨幅 >= +3%；砸盘 dump: <= -3%。
+    - 每条 item 的 basis 里带窗口起止分钟与具体涨幅，可逐条复核。
+
+    降级口径（必须让用户看见，不能假装正常）：
+    - screen_source='sina_changepercent' 表示涨速榜不可用、退化为「当日涨跌幅榜」
+      选候选，覆盖度更差 → _meta.degraded=true + degraded_reason。
+    - 分钟数据取不到的个股计入 unavailable，**不填 0、不猜**。
+    - 空数组 ≠ 出错：items 为空但 scanned>0 说明「查过、确实没有异动」，
+      前端据此区分「无异动」与「数据源不可用」。
+    """
+    cache_key = f"market:stock_anomaly:{window}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached["items"],
+                "_meta": _anomaly_meta(cached, cached_hit=True)}
+    try:
+        payload = await asyncio.to_thread(ds2.get_stock_anomalies, window)
+    except Exception as e:
+        # 编排层异常也要给出结构化降级，而不是 500（上游抖动是常态）
+        logger.warning(f"stock_anomaly failed: {e}")
+        return {"data": [], "_meta": _build_meta(
+            "eastmoney", cached=False, quality_score=0.0,
+            extra={"window_minutes": window, "degraded_reason": f"编排失败: {type(e).__name__}"})}
+    cache.set(cache_key, payload, 60)
+    return {"data": payload["items"], "_meta": _anomaly_meta(payload, cached_hit=False)}
+
+
+def _anomaly_meta(payload: dict, cached_hit: bool) -> dict:
+    """异动端点的 _meta：把「口径 / 时间 / 覆盖度」显式化，便于前端与排查。"""
+    items = payload.get("items") or []
+    scanned = int(payload.get("scanned") or 0)
+    screen_source = str(payload.get("screen_source") or "")
+    as_of = str(payload.get("as_of") or "")
+    today = (datetime.now(timezone(timedelta(hours=8)))).strftime("%Y-%m-%d")
+    market_closed = bool(as_of) and not as_of.startswith(today)
+    if scanned == 0:
+        quality = 0.0
+        reason = "候选池为空（上游榜单不可用）"
+    elif screen_source != "eastmoney_speed":
+        quality = 60.0
+        reason = "涨速榜不可用，候选池退化为「当日涨跌幅榜」，短时异动可能漏检"
+    else:
+        quality = 90.0 if items else 85.0
+        reason = ""
+    extra = {
+        "window_minutes": payload.get("window_minutes"),
+        "screen_source": screen_source,
+        "minute_source": payload.get("kline_source"),
+        "scanned": scanned,
+        "unavailable": payload.get("unavailable"),
+        "as_of": as_of,
+        "market_closed": market_closed,
+        "threshold_pct": {"surge": ds2.ANOMALY_SURGE_PCT, "dump": ds2.ANOMALY_DUMP_PCT},
+    }
+    if reason:
+        extra["degraded_reason"] = reason
+    return _build_meta(screen_source or "eastmoney", cached=cached_hit,
+                       quality_score=quality, extra=extra)
 
 
 @router.get("/heatmap")
