@@ -183,6 +183,59 @@ class TestParsers:
 
 
 # ---------------------------------------------------------------------------
+# 3b. 窗口贯穿取数层（A-07 回归：window>5 且腾讯失败回退时取点必须随 window 缩放）
+# ---------------------------------------------------------------------------
+
+class _FakeResp:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+class TestWindowThreading:
+    def test_em_fetch_limit_scales_with_window(self, monkeypatch):
+        """东财 lmt 必须 = window+4，而非硬编码常量 5+4（否则 window>5 取点不足）。"""
+        captured = {}
+
+        def fake_em_get(url, params=None, **kw):
+            captured.update(params or {})
+            return _FakeResp({"data": {"klines": []}})
+
+        monkeypatch.setattr(ds2, "em_get", fake_em_get)
+        ds2._minutes_from_em("300118", 30)
+        assert captured["lmt"] == "34"
+        ds2._minutes_from_em("300118", 5)
+        assert captured["lmt"] == "9"
+
+    def test_sina_fetch_limit_scales_with_window(self, monkeypatch):
+        captured = {}
+
+        def fake_get(url, params=None, **kw):
+            captured.update(params or {})
+            return _FakeResp([])
+
+        monkeypatch.setattr(ds2.requests, "get", fake_get)
+        ds2._minutes_from_sina("300118", 30)
+        assert captured["datalen"] == "36"
+
+    def test_minute_series_forwards_window_to_fetcher(self, monkeypatch):
+        """get_stock_minute_series 必须把 window_minutes 透传给上游 fetcher。"""
+        captured = {}
+
+        def fake_tencent(code, window_minutes=ds2.ANOMALY_WINDOW_MINUTES):
+            captured["window"] = window_minutes
+            return ({i: 10.0 for i in range(40)}, "2026-11-08")
+
+        monkeypatch.setattr(ds2, "_minutes_from_tencent", fake_tencent)
+        prices, source, day = ds2.get_stock_minute_series("300118", 30)
+        assert captured["window"] == 30
+        assert source == "tencent"
+        assert len(prices) == 40
+
+
+# ---------------------------------------------------------------------------
 # 4. 编排：筛选 → 精算 → 判定
 # ---------------------------------------------------------------------------
 
@@ -206,7 +259,7 @@ class TestOrchestration:
         """取不到分钟数据的个股计入 unavailable，且**不产生**任何异动条目。"""
         monkeypatch.setattr(ds2, "_screen_candidates",
                             lambda per_side=8: ([_candidate()], "eastmoney_speed"))
-        monkeypatch.setattr(ds2, "get_stock_minute_series", lambda code: ({}, "", ""))
+        monkeypatch.setattr(ds2, "get_stock_minute_series", lambda code, window_minutes=5: ({}, "", ""))
         res = ds2.get_stock_anomalies()
         assert res["items"] == []
         assert res["scanned"] == 1
@@ -218,7 +271,7 @@ class TestOrchestration:
         monkeypatch.setattr(ds2, "_screen_candidates",
                             lambda per_side=8: ([_candidate()], "eastmoney_speed"))
         monkeypatch.setattr(ds2, "get_stock_minute_series",
-                            lambda code: (prices, "tencent", "2026-11-06"))
+                            lambda code, window_minutes=5: (prices, "tencent", "2026-11-06"))
         res = ds2.get_stock_anomalies()
         assert len(res["items"]) == 1
         item = res["items"][0]
@@ -237,7 +290,7 @@ class TestOrchestration:
         monkeypatch.setattr(ds2, "_screen_candidates",
                             lambda per_side=8: ([_candidate(code="600715", name="文投控股")], "eastmoney_speed"))
         monkeypatch.setattr(ds2, "get_stock_minute_series",
-                            lambda code: (prices, "tencent", "2026-11-06"))
+                            lambda code, window_minutes=5: (prices, "tencent", "2026-11-06"))
         res = ds2.get_stock_anomalies()
         assert len(res["items"]) == 1
         assert res["items"][0]["kind"] == "dump"
@@ -247,7 +300,7 @@ class TestOrchestration:
         monkeypatch.setattr(ds2, "_screen_candidates",
                             lambda per_side=8: ([_candidate()], "eastmoney_speed"))
         monkeypatch.setattr(ds2, "get_stock_minute_series",
-                            lambda code: (prices, "tencent", "2026-11-06"))
+                            lambda code, window_minutes=5: (prices, "tencent", "2026-11-06"))
         res = ds2.get_stock_anomalies()
         assert res["items"] == []
         # 查过了、确实没有异动 —— as_of 仍要有值，前端才能显示数据时间

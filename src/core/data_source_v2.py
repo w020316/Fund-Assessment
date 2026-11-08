@@ -2891,7 +2891,7 @@ def _parse_sina_minutes(bars: list[dict]) -> tuple[dict[int, float], str]:
     return prices, day
 
 
-def _minutes_from_em(code: str) -> tuple[dict[int, float], str]:
+def _minutes_from_em(code: str, window_minutes: int = ANOMALY_WINDOW_MINUTES) -> tuple[dict[int, float], str]:
     secid = _em_secid(code)
     resp = em_get("https://push2his.eastmoney.com/api/qt/stock/kline/get", {
         "secid": secid,
@@ -2899,14 +2899,15 @@ def _minutes_from_em(code: str) -> tuple[dict[int, float], str]:
         "fields2": "f51,f52,f53,f54,f55,f56,f57",
         "klt": "1",
         "fqt": "1",
-        "lmt": str(ANOMALY_WINDOW_MINUTES + 4),
+        "lmt": str(window_minutes + 4),
         "end": "20500101",
     })
     klines = ((resp.json() or {}).get("data") or {}).get("klines") or []
     return _parse_em_minutes(klines)
 
 
-def _minutes_from_tencent(code: str) -> tuple[dict[int, float], str]:
+def _minutes_from_tencent(code: str, window_minutes: int = ANOMALY_WINDOW_MINUTES) -> tuple[dict[int, float], str]:
+    # 腾讯分时返回全天序列，窗口端点由 compute_window_change 精确截取，无需按 window 限量。
     resp = requests.get(
         "https://web.ifzq.gtimg.cn/appstock/app/minute/query",
         params={"code": _prefix_code(code)},
@@ -2924,11 +2925,11 @@ def _minutes_from_tencent(code: str) -> tuple[dict[int, float], str]:
     return prices, day
 
 
-def _minutes_from_sina(code: str) -> tuple[dict[int, float], str]:
+def _minutes_from_sina(code: str, window_minutes: int = ANOMALY_WINDOW_MINUTES) -> tuple[dict[int, float], str]:
     resp = requests.get(
         "https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getKLineData",
         params={"symbol": _prefix_code(code), "scale": 1, "ma": "no",
-                "datalen": str(ANOMALY_WINDOW_MINUTES + 6)},
+                "datalen": str(window_minutes + 6)},
         headers={
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Referer": "https://finance.sina.com.cn/",
@@ -2938,7 +2939,7 @@ def _minutes_from_sina(code: str) -> tuple[dict[int, float], str]:
     return _parse_sina_minutes(resp.json() or [])
 
 
-def get_stock_minute_series(code: str) -> tuple[dict[int, float], str, str]:
+def get_stock_minute_series(code: str, window_minutes: int = ANOMALY_WINDOW_MINUTES) -> tuple[dict[int, float], str, str]:
     """取单只个股的分钟价格序列，按 腾讯 → 东财 → 新浪 回退。
 
     顺序依据实测（2026-11-08）：
@@ -2949,6 +2950,10 @@ def get_stock_minute_series(code: str) -> tuple[dict[int, float], str, str]:
       窗口端点可能缺失，放最后。
     所以「最快且最稳」的腾讯优先，而不是「最规整」的东财优先。
 
+    window_minutes 决定东财/新浪的取数量（此前硬编码为常量 5，导致 window>5
+    且腾讯失败回退时取点不足、compute_window_change 恒返回 None）。腾讯返回全天
+    序列不受此限。
+
     Returns:
         (prices, source, trade_date)；全失败返回 ({}, "", "")。
     """
@@ -2958,8 +2963,8 @@ def get_stock_minute_series(code: str) -> tuple[dict[int, float], str, str]:
         ("sina", _minutes_from_sina),
     ):
         try:
-            prices, day = fetcher(code)
-            if len(prices) > ANOMALY_WINDOW_MINUTES:
+            prices, day = fetcher(code, window_minutes)
+            if len(prices) > window_minutes:
                 return prices, source, day
         except Exception as e:
             logger.debug(f"minute series {code} via {source} failed: {e}")
@@ -3097,7 +3102,7 @@ def get_stock_anomalies(
         return result
 
     fetched = _parallel_fetch(
-        [(row["code"], (lambda c=row["code"]: get_stock_minute_series(c))) for row in candidates],
+        [(row["code"], (lambda c=row["code"]: get_stock_minute_series(c, window_minutes))) for row in candidates],
         deadline=6.0,
     )
 
