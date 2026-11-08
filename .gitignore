@@ -48,3 +48,6 @@ verify_full.py
 # 质量评估产出（阶段报告含未修复缺陷的可利用细节，公开仓库暂不入库；
 # 待对应缺陷全部修复上线后可按需解除忽略）
 deliverables/
+
+# 本地分享产物(工具生成, 非源码)
+.trae-html-share-packages/
