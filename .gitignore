@@ -27,6 +27,8 @@ data/backup/
 data/_*.json
 
 # SQLite 运行时状态(非源码; prediction.db 由 prediction.yml 备份到 daily-reports 分支)
+# 注意: 上方 `*.db` 无法覆盖伴随文件(glob 要求文件名以 .db 结尾, 匹配不到 .db-wal),
+# 下面 4 条不可删; 删掉会导致每次跑服务/测试后 `?? data/` 复发。
 data/*.db
 data/*.db-wal
 data/*.db-shm
