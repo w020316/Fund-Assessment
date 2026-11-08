@@ -206,6 +206,11 @@ body {
    （375/414/768 实测一致，360 视口 468px），向上取整到 172/360/484。 */
 #indexCards { min-height:172px; }
 #indexCards > .card { contain:layout; }
+/* 阶段5: 策略页两张图表卡被栅格 stretch 拉到等高(受 K线卡 450px 影响), 空态雷达
+   只有 120px 内容却顶在上边, 下方留出大片空白。让首卡纵向 flex + 内容区 flex:1,
+   空白就分布到上下变成呼吸, 而不是堆在底部像没渲染完。 */
+#page-strategy .grid-2 > .card:first-child { display:flex; flex-direction:column; }
+#page-strategy .grid-2 > .card:first-child > div:last-child { flex:1; }
 #sectorHeatmap { min-height:510px; max-height:510px; overflow-y:auto; }
 #hotStockWrap { min-height:360px; }
 @media (max-width:1024px) {
@@ -4564,11 +4569,17 @@ function drawRadarChart(scores) {
   // mock 数据误导修复(2026-07-31):原代码无 scores 时使用 mock 分数(技术75/资金60/基本面80/消息65/情绪55),
   // 综合评分永远 67.0 显示"建议买入",用户误以为是真实分析结果。改为:无数据时显示空状态。
   if (!scores) {
-    svg.innerHTML = `<text x="140" y="140" text-anchor="middle" fill="var(--text-muted)" font-size="12">暂无评分数据</text>
-      <text x="140" y="160" text-anchor="middle" fill="var(--text-muted)" font-size="10">请输入股票代码进行分析</text>`;
+    // 阶段5 空态瘦身: 无数据时把画布压到 120px, 避免 280px 空框占满首屏
+    svg.setAttribute('viewBox', '0 0 280 120');
+    svg.setAttribute('height', '120');
+    svg.innerHTML = `<text x="140" y="54" text-anchor="middle" fill="var(--text-muted)" font-size="12">暂无评分数据</text>
+      <text x="140" y="80" text-anchor="middle" fill="var(--text-muted)" font-size="11">输入股票代码后点击「一键分析」</text>`;
     document.getElementById('signalLevel').innerHTML = '<span class="signal" style="background:var(--text-muted)22;color:var(--text-muted);">待分析</span>';
     return;
   }
+  // 有数据: 恢复完整画布(空态曾把它压到 120px)
+  svg.setAttribute('viewBox', '0 0 280 280');
+  svg.setAttribute('height', '280');
   const s = scores;
   const dims = [
     {label:'技术', key:'tech'},
@@ -4654,9 +4665,16 @@ async function loadKline() {
   // API 失败时用户看到假 K 线可能误判走势并据此决策。改为:API 无数据时显示空状态。
   const items = (data && data.data) ? data.data : [];
   if (!items || items.length === 0) {
-    svg.innerHTML = `<text x="300" y="150" text-anchor="middle" fill="var(--text-muted)" font-size="14">暂无K线数据,请检查股票代码或稍后重试</text>`;
+    // 阶段5 空态瘦身: 无数据时把画布压到 120px, 避免 300px 空框占满首屏
+    svg.setAttribute('viewBox', '0 0 600 120');
+    svg.setAttribute('height', '120');
+    svg.innerHTML = `<text x="300" y="56" text-anchor="middle" fill="var(--text-muted)" font-size="13">暂无K线数据</text>
+      <text x="300" y="82" text-anchor="middle" fill="var(--text-muted)" font-size="11">请检查股票代码或稍后重试</text>`;
     return;
   }
+  // 有数据: 恢复完整画布(空态曾把它压到 120px)
+  svg.setAttribute('viewBox', '0 0 600 300');
+  svg.setAttribute('height', '300');
 
   const W = 600, H = 300;
   const padL = 50, padR = 10, padT = 10, padB = 30;
