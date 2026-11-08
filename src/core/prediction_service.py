@@ -638,6 +638,81 @@ def _verify_earliest(now: _dt.datetime, cfg: dict[str, Any]) -> _dt.datetime:
         return now.replace(hour=15, minute=0, second=0, microsecond=0)
 
 
+def _mark_orphans(
+    store: Any, today: str, cfg: dict[str, Any]
+) -> tuple[int, list[dict[str, Any]]]:
+    """把 target_date 已过期且无验证行的预测/推荐标记为 missing=1(QF3-05)。
+
+    next_trading_date() 只跳周末(仓库无交易日历), 节前最后一个交易日生成的预测,
+    target_date 会落在节假日; 而 verify_daily 用 target_date == today 精确查,
+    查不到就静默消失 —— 样本既没被验证也没被标记, 连一条日志都没有。
+
+    这里按回溯窗口兜底: 窗口内标 missing=1(因 missing 行被排除在准确率之外,
+    所以既不算命中也不算未命中, 只是把"样本消失"变成"可观测的缺失");
+    超窗只汇总告警不回填, 避免一次扫描把历史全标脏。
+
+    返回 (标记条数, detail 列表)。
+    """
+    try:
+        lookback = int(cfg.get("verify", {}).get("orphan_lookback_days", 10) or 10)
+    except (TypeError, ValueError):
+        lookback = 10
+    lookback = max(lookback, 0)
+    window_start = (
+        _dt.datetime.strptime(today, "%Y-%m-%d") - _dt.timedelta(days=lookback)
+    ).strftime("%Y-%m-%d")
+    # 取数窗口比回溯窗口放宽, 以便统计"超窗孤儿"条数; 是否孤儿由 target_date 精确判定
+    span = max(lookback + 30, 40)
+
+    marked = 0
+    beyond = 0
+    detail: list[dict[str, Any]] = []
+
+    candidates: list[tuple[str, dict[str, Any]]] = [
+        ("prediction", p) for p in store.list_predictions(days=span)
+    ] + [("recommendation", r) for r in store.list_recommendations(days=span)]
+
+    for kind, row in candidates:
+        target_date = str(row.get("target_date", "") or "")
+        if not target_date or target_date >= today:
+            continue  # 目标日未过期(今日或未来) → 由正常验证流程负责
+        if store.get_verification(target_date, kind, row["id"]) is not None:
+            continue  # 已有验证行(含 missing 占位) → 不是孤儿
+        if target_date < window_start:
+            beyond += 1
+            continue  # 超窗: 只计数, 不回填
+        store.upsert_verification(
+            target_date,
+            kind,
+            row["id"],
+            str(row.get("direction", "") or ""),
+            "",
+            None,
+            None,
+            missing=1,
+        )
+        marked += 1
+        detail.append({
+            "target_kind": kind,
+            "target_id": row["id"],
+            "target_date": target_date,
+            "missing": 1,
+            "error_code": "orphan_target_date",
+        })
+
+    if marked:
+        logger.warning(
+            f"verify_daily: 标记 {marked} 条孤儿目标日(已过期且无验证行)为 missing=1, "
+            f"回溯窗口 {window_start} ~ {today}"
+        )
+    if beyond:
+        logger.warning(
+            f"verify_daily: 另有 {beyond} 条孤儿目标日超出回溯窗口({lookback} 天), "
+            f"不自动回填(避免一次扫描把历史全标脏)"
+        )
+    return marked, detail
+
+
 def verify_daily(now: _dt.datetime | None = None) -> dict[str, Any]:
     """验证今日(target_date=今日, 由上一交易日 15:40 生成的次日)预测与推荐(R6.1)。
 
@@ -647,6 +722,8 @@ def verify_daily(now: _dt.datetime | None = None) -> dict[str, Any]:
     周一验证。幂等 upsert, 16:30 重试覆盖。
 
     时点守卫(QF3-04): 早于 earliest_hhmm(默认 15:00)直接跳过, 不读库不写库。
+    孤儿兜底(QF3-05): 正常流程后标记 target_date 已过期且无验证行的预测/推荐
+    (节假日前生成的目标日会落空), 使其以 missing=1 可观测, 而不是静默消失。
     """
     now = now or beijing_now()
     today = now.strftime("%Y-%m-%d")
@@ -710,10 +787,13 @@ def verify_daily(now: _dt.datetime | None = None) -> dict[str, Any]:
             logger.warning(f"verify_daily: 实际行情取不到且已过最终时点, 写 missing 占位 {missing} 条")
         else:
             logger.info("verify_daily: 实际行情暂取不到, 等待 16:30 重试(不写占位)")
+        orphaned, orphan_detail = _mark_orphans(store, today, cfg)
+        detail.extend(orphan_detail)
         compute_accuracy(store=store, persist=True)
         return {
             "verified": verified,
             "missing": missing,
+            "orphaned": orphaned,
             "skipped": False,
             "detail": detail,
             "target_date": target_date,
@@ -751,6 +831,10 @@ def verify_daily(now: _dt.datetime | None = None) -> dict[str, Any]:
         verified += 1
         detail.append({"target_kind": "recommendation", "target_id": r["id"], "hit": hit})
 
+    # QF3-05: 正常验证之后兜底标记孤儿目标日(节假日前生成的预测会落到非交易日)
+    orphaned, orphan_detail = _mark_orphans(store, today, cfg)
+    detail.extend(orphan_detail)
+
     compute_accuracy(store=store, persist=True)
     # 验证成功后顺带跑保留策略清理(R5.2)
     try:
@@ -760,6 +844,7 @@ def verify_daily(now: _dt.datetime | None = None) -> dict[str, Any]:
     return {
         "verified": verified,
         "missing": missing,
+        "orphaned": orphaned,
         "skipped": False,
         "detail": detail,
         "target_date": target_date,
