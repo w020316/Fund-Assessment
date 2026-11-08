@@ -31,6 +31,7 @@ from src.core import data_source_v2 as ds2  # noqa: E402
 from src.core import prediction_service as svc  # noqa: E402
 from src.core import prediction_signals as sig  # noqa: E402
 from src.core.prediction_store import PredictionStore  # noqa: E402
+from tests.conftest import cst_on, trading_days_ago  # noqa: E402
 
 _CST = _dt.timezone(_dt.timedelta(hours=8))
 
@@ -164,15 +165,19 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 def test_generate_prediction_insufficient_skips_without_persisting(env, monkeypatch) -> None:
     """三信号全缺失 → skipped=True, 不调 LLM, 不调用 store.upsert_prediction。"""
-    env.set_trading_day(_cst(2026, 11, 9))
+    # 日期取真实今天的相对基准: list_predictions(days=30) 以 date('now') 为基准,
+    # 硬编码日期会随时间滑出窗口(日期炸弹)。
+    today = trading_days_ago(0)
+    now = cst_on(today)
+    env.set_trading_day(now)
     env.set_all_sources_missing()
 
-    out = svc.generate_prediction(now=_cst(2026, 11, 9, 15, 40))
+    out = svc.generate_prediction(now=now)
 
     # 返回口径
     assert out["skipped"] is True
     assert out["reason"] == "insufficient_data"
-    assert out["trade_date"] == "2026-11-09"
+    assert out["trade_date"] == today
     assert out["missing_fields"] == ["sentiment"]  # 逐源容错仍如实记录
     assert "direction" not in out  # 绝不返回兜底方向
 
@@ -206,7 +211,10 @@ def test_generate_prediction_insufficient_logs_warning(env, caplog) -> None:
 
 def test_generate_prediction_one_valid_signal_still_persists(env, monkeypatch) -> None:
     """仅 1 个信号有效 → 正常路径: 调 LLM 且落库一次。"""
-    env.set_trading_day(_cst(2026, 11, 9))
+    # 同上: 日期取真实今天的相对基准, 避免 list_predictions(days=30) 的窗口漂移。
+    today = trading_days_ago(0)
+    now = cst_on(today)
+    env.set_trading_day(now)
 
     def _boom():
         raise RuntimeError("情绪源不可用(模拟)")
@@ -218,11 +226,13 @@ def test_generate_prediction_one_valid_signal_still_persists(env, monkeypatch) -
         lambda: [{"name": "半导体", "change_pct": 2.4}, {"name": "证券", "change_pct": 1.6}],
     )
 
-    out = svc.generate_prediction(now=_cst(2026, 11, 9, 15, 40))
+    out = svc.generate_prediction(now=now)
 
     assert out["skipped"] is False
     assert out["direction"] == "up"
-    assert out["target_date"] == "2026-11-10"
+    # 目标日独立校验: 晚于今日且为工作日(不拿被测函数当 oracle)
+    assert out["target_date"] > today
+    assert _dt.date.fromisoformat(out["target_date"]).weekday() < 5
     assert env.upsert_spy.call_count == 1
     assert len(env.store.list_predictions(days=30)) == 1
     assert len(env.llm.calls) == 1  # deep 档正常调用
