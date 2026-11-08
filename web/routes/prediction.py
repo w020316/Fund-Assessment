@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from loguru import logger
 
@@ -30,6 +30,28 @@ router = APIRouter()
 
 class CollectSnapshotRequest(BaseModel):
     session: str = Field(..., description="时段: morning / noon / close")
+
+
+def _respond(result: dict):
+    """写端点统一响应(QF3-06): 交易日探针不可用 → 503, 让调度 Action 变红。
+
+    non_trading_day 是正常业务状态, 维持 200;
+    只有 probe_failed(上游故障导致无法判定是否交易日)才升级为 503 ——
+    否则故障会被伪装成"今天休市", GitHub Action 拿到 200 记 notice 视为成功,
+    可以持续多日无人发现。
+    """
+    if isinstance(result, dict) and result.get("reason") == "probe_failed":
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "PREDICTION_PROBE_UNAVAILABLE",
+                "message": (
+                    "交易日探针不可用, 无法判定是否交易日; "
+                    "本次任务未执行, 请稍后重试或检查上游数据源"
+                ),
+            },
+        )
+    return success(result)
 
 
 @router.get("/snapshots")
@@ -52,7 +74,7 @@ async def post_collect_snapshot(req: CollectSnapshotRequest):
     except Exception as e:  # noqa: BLE001 — 上游全部失败也不 500
         logger.warning(f"snapshots/collect failed: {e}")
         return error(f"快照采集失败: {e}")
-    return success(result)
+    return _respond(result)
 
 
 @router.get("/predictions")
@@ -70,7 +92,7 @@ async def post_generate_prediction():
     except Exception as e:  # noqa: BLE001
         logger.warning(f"predictions/generate failed: {e}")
         return error(f"预测生成失败: {e}")
-    return success(result)
+    return _respond(result)
 
 
 @router.get("/recommendations")
@@ -91,7 +113,7 @@ async def post_generate_recommendations():
     except Exception as e:  # noqa: BLE001
         logger.warning(f"recommendations/generate failed: {e}")
         return error(f"推荐生成失败: {e}")
-    return success(result)
+    return _respond(result)
 
 
 @router.get("/accuracy")
@@ -112,7 +134,7 @@ async def post_verify():
     except Exception as e:  # noqa: BLE001
         logger.warning(f"verify failed: {e}")
         return error(f"验证失败: {e}")
-    return success(result)
+    return _respond(result)
 
 
 @router.get("/export", dependencies=[Depends(require_admin)])

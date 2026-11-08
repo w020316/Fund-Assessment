@@ -64,18 +64,51 @@ def _extract_date_part(update_time: str) -> str:
     return ""
 
 
-def check_trading_day(now: _dt.datetime | None = None) -> bool:
-    """018957 净值日期探针(fail-closed: 取不到一律按非交易日)。"""
+def probe_trading_day(now: _dt.datetime | None = None) -> str:
+    """018957 净值日期探针, 三态返回: "trading" / "non_trading" / "probe_failed"。
+
+    与旧 check_trading_day 的关键差异(QF3-06): 取数异常与"无返回数据"不再折叠成
+    "非交易日"。旧行为下上游一挂, 采集/预测/推荐/验证全部静默跳过, 调度任务拿到
+    200 记为成功 —— 故障被伪装成"今天休市", 可能持续多日无人发现。
+    """
     target = (now or beijing_now()).strftime("%Y-%m-%d")
     try:
         rows = ds2.get_fund_realtime_tencent([_TRADE_GUARD_FUND])
     except Exception as exc:  # noqa: BLE001
-        logger.warning(f"prediction 交易日守卫探针取数失败: {exc}")
-        return False
+        logger.error(f"prediction 交易日探针取数失败(probe_failed): {exc}")
+        return "probe_failed"
     if not rows:
-        logger.warning("prediction 交易日守卫: 探针基金无返回数据, 按非交易日处理")
-        return False
-    return _extract_date_part(str(rows[0].get("update_time", ""))) == target
+        logger.error("prediction 交易日探针无返回数据(probe_failed)")
+        return "probe_failed"
+    got = _extract_date_part(str(rows[0].get("update_time", "")))
+    return "trading" if got == target else "non_trading"
+
+
+def check_trading_day(now: _dt.datetime | None = None) -> bool:
+    """薄包装(保留旧签名与语义): 只有明确探到交易日才为 True。
+
+    既有调用方零行为变化: probe_failed 与 non_trading 都返回 False。
+    需要区分"故障"与"休市"的编排层请直接用 probe_trading_day()。
+    """
+    return probe_trading_day(now) == "trading"
+
+
+def _probe_skip_reason(now: _dt.datetime, today: str, who: str) -> str | None:
+    """探针守卫: trading 返回 None(继续); 否则返回跳过原因并记日志。
+
+    故障(probe_failed)必须与休市(non_trading_day)区分: 前者是异常, 需要让调度
+    变红; 后者是正常业务状态。
+    """
+    status = probe_trading_day(now)
+    if status == "trading":
+        return None
+    if status == "probe_failed":
+        logger.error(
+            f"{who}: 交易日探针不可用, 无法判定是否交易日, 跳过 —— 这不等于休市(QF3-06)"
+        )
+        return "probe_failed"
+    logger.info(f"{who}: 非交易日({today}), 跳过")
+    return "non_trading_day"
 
 
 def next_trading_date(today: str) -> str:
@@ -325,13 +358,13 @@ def collect_snapshot(session: str, now: _dt.datetime | None = None) -> dict[str,
     if existing and not _snapshot_is_stale(existing):
         return {**existing, "idempotent": True}
 
-    if not check_trading_day(now):
-        logger.info(f"collect_snapshot: 非交易日({today}), 跳过 session={session}")
+    reason = _probe_skip_reason(now, today, "collect_snapshot")
+    if reason is not None:
         return {
             "trade_date": today,
             "session": session,
             "skipped": True,
-            "reason": "non_trading_day",
+            "reason": reason,
         }
 
     payload, missing = _collect_market_payload()
@@ -384,9 +417,9 @@ def generate_prediction(now: _dt.datetime | None = None) -> dict[str, Any]:
     now = now or beijing_now()
     today = now.strftime("%Y-%m-%d")
     store = get_store()
-    if not check_trading_day(now):
-        logger.info(f"generate_prediction: 非交易日({today}), 跳过")
-        return {"trade_date": today, "skipped": True, "reason": "non_trading_day"}
+    reason = _probe_skip_reason(now, today, "generate_prediction")
+    if reason is not None:
+        return {"trade_date": today, "skipped": True, "reason": reason}
 
     payload, missing = _collect_market_payload()
     syn = sig.synthesize(
@@ -481,9 +514,9 @@ def generate_recommendations(now: _dt.datetime | None = None) -> dict[str, Any]:
     now = now or beijing_now()
     today = now.strftime("%Y-%m-%d")
     store = get_store()
-    if not check_trading_day(now):
-        logger.info(f"generate_recommendations: 非交易日({today}), 跳过")
-        return {"trade_date": today, "skipped": True, "reason": "non_trading_day"}
+    reason = _probe_skip_reason(now, today, "generate_recommendations")
+    if reason is not None:
+        return {"trade_date": today, "skipped": True, "reason": reason}
 
     cfg = sig.load_signal_config()
     try:
@@ -631,9 +664,15 @@ def verify_daily(now: _dt.datetime | None = None) -> dict[str, Any]:
         return {"verified": 0, "missing": 0, "skipped": True, "reason": "too_early", "detail": []}
 
     store = get_store()
-    if not check_trading_day(now):
-        logger.info(f"verify_daily: 非交易日({today}), 跳过")
-        return {"verified": 0, "missing": 0, "skipped": True, "reason": "non_trading_day", "detail": []}
+    reason = _probe_skip_reason(now, today, "verify_daily")
+    if reason is not None:
+        return {
+            "verified": 0,
+            "missing": 0,
+            "skipped": True,
+            "reason": reason,
+            "detail": [],
+        }
 
     band = float(cfg.get("verify", {}).get("flat_band_pct", 0.3))
     # 验证目标日 = 今日(check_trading_day 已保证是交易日)。今日即上一交易日
