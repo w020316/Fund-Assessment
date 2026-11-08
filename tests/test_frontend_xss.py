@@ -125,3 +125,22 @@ def test_upload_result_table_is_escaped():
     assert "${h.code || '-'}" not in body
     assert "${h.name || '-'}" not in body
 
+
+def test_config_inputs_are_escaped_in_attribute_context():
+    """F-14 回归(2026-11-08):属性上下文(value="...")同样必须转义。
+
+    innerHTML 里 `value="${x}"` 与文本节点不同 —— 未转义时一个双引号即可
+    闭合 value 属性并注入 onfocus/onerror。同文件 :7810 已有正确写法
+    value="${escapeHtml(...)}", 设置页这 5 处属遗漏。
+    """
+    text = _text()
+    for expr in (
+        'value="${escapeHtml(currentConfig.notify_email || \'\')}"',
+        'value="${escapeHtml(currentConfig.refresh_interval || 5)}"',
+        'value="${escapeHtml(currentConfig.max_position || 80)}"',
+        'value="${escapeHtml(currentConfig.stop_loss || 5)}"',
+        'value="${escapeHtml(currentConfig.take_profit || 15)}"',
+    ):
+        assert expr in text, f"属性上下文缺少转义: {expr}"
+    assert 'value="${currentConfig.notify_email' not in text
+

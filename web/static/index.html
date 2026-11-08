@@ -7943,7 +7943,7 @@ async function loadSettings() {
     </div>
     <div class="form-group">
       <label for="cfg-email" class="form-label">通知邮箱</label>
-      <input class="input" id="cfg-email" value="${currentConfig.notify_email || ''}">
+      <input class="input" id="cfg-email" value="${escapeHtml(currentConfig.notify_email || '')}">
     </div>
     <div class="form-group">
       <label for="cfg-wechat" class="form-label">微信通知</label>
@@ -7954,7 +7954,7 @@ async function loadSettings() {
     </div>
     <div class="form-group">
       <label for="cfg-refresh" class="form-label">数据刷新间隔（秒）</label>
-      <input class="input" id="cfg-refresh" type="number" value="${currentConfig.refresh_interval || 5}" min="1" max="60">
+      <input class="input" id="cfg-refresh" type="number" value="${escapeHtml(currentConfig.refresh_interval || 5)}" min="1" max="60">
     </div>
   `;
 
@@ -7962,15 +7962,15 @@ async function loadSettings() {
   riskParams.innerHTML = `
     <div class="form-group">
       <label for="risk-max-pos" class="form-label">最大仓位（%）</label>
-      <input class="input" id="risk-max-pos" type="number" value="${currentConfig.max_position || 80}" min="10" max="100">
+      <input class="input" id="risk-max-pos" type="number" value="${escapeHtml(currentConfig.max_position || 80)}" min="10" max="100">
     </div>
     <div class="form-group">
       <label for="risk-stop-loss" class="form-label">止损线（%）</label>
-      <input class="input" id="risk-stop-loss" type="number" value="${currentConfig.stop_loss || 5}" min="1" max="50" step="0.5">
+      <input class="input" id="risk-stop-loss" type="number" value="${escapeHtml(currentConfig.stop_loss || 5)}" min="1" max="50" step="0.5">
     </div>
     <div class="form-group">
       <label for="risk-take-profit" class="form-label">止盈线（%）</label>
-      <input class="input" id="risk-take-profit" type="number" value="${currentConfig.take_profit || 15}" min="1" max="100" step="0.5">
+      <input class="input" id="risk-take-profit" type="number" value="${escapeHtml(currentConfig.take_profit || 15)}" min="1" max="100" step="0.5">
     </div>
   `;
 }
