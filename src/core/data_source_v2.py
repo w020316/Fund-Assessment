@@ -2191,7 +2191,14 @@ def get_market_sentiment() -> dict:
     cached = _cache_get("market_sentiment")
     if cached is not None:
         return cached
-    result: dict = {"rise_count": 0, "fall_count": 0, "flat_count": 0, "sentiment": "--", "ratio": 0.5}
+    result: dict = {
+        "rise_count": None, "fall_count": None, "flat_count": None,
+        "sentiment": "--", "ratio": 0.5,
+        # 2026-11-08：显式声明结论的依据来源。计数缺失时 sentiment 由指数涨跌幅
+        # 推算（basis=index_proxy），与"涨跌家数统计"不是一回事，消费方必须能区分，
+        # 否则 0/0/0 + "偏空" 会被读成"0 只上涨"。
+        "basis": "unavailable", "counts_available": False,
+    }
     try:
         url = "https://push2.eastmoney.com/api/qt/clist/get"
         params = {
@@ -2235,6 +2242,8 @@ def get_market_sentiment() -> dict:
                     "flat_count": flat,
                     "sentiment": label,
                     "ratio": round(ratio, 3),
+                    "basis": "counts",
+                    "counts_available": True,
                 }
     except Exception as e:
         logger.warning(f"get_market_sentiment em failed: {e}")
@@ -2259,12 +2268,13 @@ def get_market_sentiment() -> dict:
                 if len(parts) > 32:
                     chg = _safe_float(parts[32])
                     if "sh000001" in segment:
+                        # 计数缺失：三个 count 一律 None（不是 0），并标注结论来源。
                         if chg > 0.3:
-                            result = {"rise_count": 0, "fall_count": 0, "flat_count": 0, "sentiment": "偏多", "ratio": 0.65}
+                            result = {"rise_count": None, "fall_count": None, "flat_count": None, "sentiment": "偏多", "ratio": 0.65, "basis": "index_proxy", "counts_available": False}
                         elif chg < -0.3:
-                            result = {"rise_count": 0, "fall_count": 0, "flat_count": 0, "sentiment": "偏空", "ratio": 0.35}
+                            result = {"rise_count": None, "fall_count": None, "flat_count": None, "sentiment": "偏空", "ratio": 0.35, "basis": "index_proxy", "counts_available": False}
                         else:
-                            result = {"rise_count": 0, "fall_count": 0, "flat_count": 0, "sentiment": "中性", "ratio": 0.5}
+                            result = {"rise_count": None, "fall_count": None, "flat_count": None, "sentiment": "中性", "ratio": 0.5, "basis": "index_proxy", "counts_available": False}
                         break
         except Exception as e:
             logger.warning(f"get_market_sentiment tencent fallback failed: {e}")

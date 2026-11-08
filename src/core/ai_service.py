@@ -938,19 +938,11 @@ def _fallback_result(stock_code: str, reason: str) -> dict[str, Any]:
     """
     now = datetime.now().isoformat()
     error_code = "DATA_UNAVAILABLE" if "无法获取" in reason else "LLM_ALL_PROVIDERS_FAILED"
-    fallback_roles = ["fundamental", "technical", "sentiment", "news", "policy", "hot_money", "lockup"]
-    fallback_opinions = []
-    for role in fallback_roles:
-        fallback_opinions.append({
-            "role": role,
-            "stock_code": stock_code,
-            "signal": "NEUTRAL",
-            "confidence": 0.1,
-            "reasoning": f"[降级] {reason}",
-            "key_points": ["分析降级"],
-            "score": 50.0,
-            "timestamp": now,
-        })
+    # 2026-11-08：这里原本会伪造 7 条 agent_opinions（signal=NEUTRAL、confidence=0.1、
+    # reasoning="[降级] ..."），让降级结果"看起来像"完整分析。当前 8 个 AI 端点都调了
+    # _raise_if_degraded 把它转成 503，所以用户看不到；但任何新增端点漏掉那一行，
+    # 前端就会渲染出 7 个假分析师。改为空列表，从根上消除这个地雷。
+    fallback_opinions: list[dict[str, Any]] = []
     return {
         "stock_code": stock_code,
         "action": "HOLD",

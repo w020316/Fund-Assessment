@@ -320,8 +320,20 @@ async def health_check():
     from src.core.ai_service import _check_api_keys
     keys = _check_api_keys()
     # 返回各 key 的配置状态(布尔值,不泄露 key 本身),供前端状态展示与诊断
-    has_ai = any([keys.get("ttapi"), keys.get("agnes"), keys.get("tavily"),
-                  keys.get("tinyfish"), keys.get("openai_key"), keys.get("api_key")]) or bool(os.getenv("ZHIPU_API_KEY"))
+    has_keys = any([keys.get("ttapi"), keys.get("agnes"), keys.get("tavily"),
+                    keys.get("tinyfish"), keys.get("openai_key"), keys.get("api_key")]) or bool(os.getenv("ZHIPU_API_KEY"))
+    # 2026-11-08 修复：原实现只查上述 4 个 key + ZHIPU 特判，而 llm_router 实际支持
+    # 15+ Provider —— 只配 GROQ/DeepSeek 等其它 Provider 时，AI 完全可用却报
+    # ai_ready=false，前端因此显示"AI 不可用"。改为以路由器「实际可用 Provider」
+    # 为准，并保留 key 判定作为兜底（例如只配视觉 OCR 凭证、无文本 Provider 的场景）。
+    try:
+        from src.core.llm_router import get_llm_router
+        _providers = get_llm_router().health_check()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"health: llm router probe failed: {exc}")
+        _providers = {}
+    available_providers = [name for name, info in _providers.items() if info.get("available")]
+    has_ai = bool(available_providers) or has_keys
     # 阶段六:把"能不能用"拆成可判定项,状态码仍保持 200(fail-open 探活),
     # 但 degraded=True 让运维/前端一眼看出是"降级运行"而非"完全正常"。
     checks = {
@@ -338,6 +350,9 @@ async def health_check():
         "core_modules": _HAS_CORE,
         "ai_ready": has_ai,
         "ai_keys": keys,
+        # 路由器视角的真实可用 Provider 列表（空数组表示当前没有任何 LLM 可用），
+        # 前端/运维据此判断"AI 是否真的能用"，而不是只看 key 是否存在。
+        "ai_providers": available_providers,
         # 监控指标(借鉴 prometheus/client_python 指标设计)
         "metrics": metrics.snapshot(),
         # P0:缓存命中率统计(借鉴 prometheus client_py 的 info 指标)

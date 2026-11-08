@@ -509,11 +509,21 @@ def build_review_board(
     market = market or {}
 
     sentiment = market.get("sentiment") or {}
-    rise_count = _to_int(sentiment.get("rise_count", 0))
-    fall_count = _to_int(sentiment.get("fall_count", 0))
-    flat_count = _to_int(sentiment.get("flat_count", 0))
-    denom = rise_count + fall_count + flat_count
-    rise_ratio = round(rise_count / denom, 3) if denom > 0 else 0.5
+    # 2026-11-08：涨跌家数缺失时保留 None，不再 _to_int 兜成 0 —— 0 会被前端渲染成
+    # "涨 0 / 跌 0 / 平 0"，与"未获取到涨跌家数"是两件事。上游 get_market_sentiment
+    # 在走指数代理路径时会显式给出 counts_available=False。
+    _rise_raw = sentiment.get("rise_count")
+    _fall_raw = sentiment.get("fall_count")
+    _flat_raw = sentiment.get("flat_count")
+    counts_missing = (
+        sentiment.get("counts_available") is False
+        or (_rise_raw is None and _fall_raw is None and _flat_raw is None)
+    )
+    rise_count = None if counts_missing else _to_int(_rise_raw)
+    fall_count = None if counts_missing else _to_int(_fall_raw)
+    flat_count = None if counts_missing else _to_int(_flat_raw)
+    denom = (rise_count or 0) + (fall_count or 0) + (flat_count or 0)
+    rise_ratio = round((rise_count or 0) / denom, 3) if denom > 0 else 0.5
 
     index_info = _index_summary(market.get("indices") or [])
     sectors = market.get("sectors") or []
@@ -549,7 +559,7 @@ def build_review_board(
     # 数据完整性:核心池全部为空说明当天无数据(非交易日照常返回空)
     available = bool(limit_pool or broken_pool or limit_down_pool)
     # 有效涨跌家数 > 0 才算完整;仅拿到涨停池、缺市场广度时标记 partial
-    data_quality = "normal" if available and rise_count > 0 else ("partial" if available else "empty")
+    data_quality = "normal" if available and (rise_count or 0) > 0 else ("partial" if available else "empty")
 
     return {
         "date": f"{target[:4]}-{target[4:6]}-{target[6:]}",
@@ -561,6 +571,8 @@ def build_review_board(
             "rise_count": rise_count,
             "fall_count": fall_count,
             "flat_count": flat_count,
+            "counts_available": not counts_missing,
+            "sentiment_basis": str(sentiment.get("basis", "counts" if not counts_missing else "unavailable")),
             "rise_ratio": rise_ratio,
             "sentiment_label": str(sentiment.get("sentiment", "--")),
             "index_avg_change_pct": index_info["avg_change_pct"],

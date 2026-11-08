@@ -376,13 +376,18 @@ class TestFallbackResult:
         assert result["risk_assessment"]["risk_level"] == "HIGH"
         assert "测试原因" in result["reasoning"]
 
-    def test_includes_seven_fallback_opinions(self):
-        """应包含 7 个降级分析师意见"""
+    def test_does_not_fabricate_agent_opinions(self):
+        """降级结果不得伪造分析师意见（2026-11-08 契约变更）
+
+        原实现生成 7 条 signal=NEUTRAL / confidence=0.1 的假意见，让降级结果
+        "看起来像"完整分析。现有 8 个 AI 端点都靠 _raise_if_degraded 转 503 挡住，
+        但任何新增端点漏掉那一行，前端就会渲染出 7 个假分析师。故从数据层直接
+        返回空列表，并从根上消除这个地雷。
+        """
         result = _fallback_result("600519", "失败")
-        assert len(result["agent_opinions"]) == 7
-        roles = [op["role"] for op in result["agent_opinions"]]
-        assert "fundamental" in roles
-        assert "lockup" in roles
+        assert result["agent_opinions"] == []
+        assert result["degraded"] is True
+        assert result["error_code"], "降级结果必须带 error_code 供路由层转 503"
 
     def test_astock_constraints_default(self):
         """A 股约束应有默认值"""

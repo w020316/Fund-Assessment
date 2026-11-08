@@ -3330,7 +3330,13 @@ const ReviewDesk = {
       breadthEl.style.color = (market.rise_ratio || 0) >= 0.5 ? 'var(--color-up)' : 'var(--color-down)';
     }
     const breadthSub = document.getElementById('reviewBreadthSub');
-    if (breadthSub) breadthSub.textContent = `涨 ${market.rise_count ?? 0} / 跌 ${market.fall_count ?? 0} / 平 ${market.flat_count ?? 0}`;
+    if (breadthSub) {
+      // 2026-11-08：计数缺失时后端返回 null（不是 0），这里必须显示"—"。
+      // 此前用 `?? 0` 兜底，会把"没拿到涨跌家数"渲染成"涨 0 / 跌 0 / 平 0"。
+      const cnt = (v) => (v === null || v === undefined ? '—' : v);
+      const proxyNote = (market.counts_available === false) ? '（涨跌家数未获取，情绪由指数涨跌幅推算）' : '';
+      breadthSub.textContent = `涨 ${cnt(market.rise_count)} / 跌 ${cnt(market.fall_count)} / 平 ${cnt(market.flat_count)}${proxyNote}`;
+    }
 
     const compare = document.getElementById('reviewCompare');
     if (compare) {

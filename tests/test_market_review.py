@@ -92,7 +92,11 @@ def test_build_review_board_returns_empty_without_fabrication():
     assert board["available"] is False
     assert board["data_quality"] == "empty"
     assert board["limit"]["limit_up_count"] == 0
-    assert board["market"]["rise_count"] == 0
+    # 2026-11-08 契约变更：无行情上下文时涨跌家数是 None 而非 0。
+    # 0 会被前端渲染成"涨 0 / 跌 0 / 平 0"，读起来像"全市场无一上涨"，
+    # 与"根本没拿到涨跌家数"是两件事。None 让前端显示"—"。
+    assert board["market"]["rise_count"] is None
+    assert board["market"]["counts_available"] is False
     assert board["tonight"]["risk"]
 
 
