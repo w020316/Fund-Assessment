@@ -6188,20 +6188,20 @@ async function multiAgentAnalyze(fundCode, fundName, costNav, shares) {
       const c = stance === 'bullish' || stance === '多' ? 'var(--color-up)' :
                 stance === 'bearish' || stance === '空' ? 'var(--color-down)' : 'var(--color-flat)';
       return `<div class="analyst-card">
-        <div class="analyst-name">${name} <span style="font-size:11px;color:${c};margin-left:4px;">${stance}</span></div>
-        <div class="analyst-opinion">${view}</div>
-        <div style="margin-top:4px;font-size:11px;color:${c};">评分: ${score}</div>
+        <div class="analyst-name">${escapeHtml(name)} <span style="font-size:11px;color:${c};margin-left:4px;">${escapeHtml(stance)}</span></div>
+        <div class="analyst-opinion">${escapeHtml(view)}</div>
+        <div style="margin-top:4px;font-size:11px;color:${c};">评分: ${escapeHtml(score)}</div>
       </div>`;
     }).join('');
 
     // 多空辩论
     const debate = data.bull_bear_debate || {};
-    const bullArgs = (debate.bull_arguments || debate.bull_points || []).map(a => `<li style="margin:4px 0;font-size:12px;color:var(--text-secondary);">${typeof a === 'string' ? a : (a.point || a.argument || '—')}</li>`).join('');
-    const bearArgs = (debate.bear_arguments || debate.bear_points || []).map(a => `<li style="margin:4px 0;font-size:12px;color:var(--text-secondary);">${typeof a === 'string' ? a : (a.point || a.argument || '—')}</li>`).join('');
+    const bullArgs = (debate.bull_arguments || debate.bull_points || []).map(a => `<li style="margin:4px 0;font-size:12px;color:var(--text-secondary);">${escapeHtml(typeof a === 'string' ? a : (a.point || a.argument || '—'))}</li>`).join('');
+    const bearArgs = (debate.bear_arguments || debate.bear_points || []).map(a => `<li style="margin:4px 0;font-size:12px;color:var(--text-secondary);">${escapeHtml(typeof a === 'string' ? a : (a.point || a.argument || '—'))}</li>`).join('');
 
     // 风险辩论
     const riskDebate = data.risk_debate || {};
-    const risks = (riskDebate.risks || riskDebate.key_risks || finalRec.key_risks || []).map(r => `<li style="margin:4px 0;font-size:12px;color:var(--text-secondary);">${typeof r === 'string' ? r : (r.risk || r.description || '—')}</li>`).join('');
+    const risks = (riskDebate.risks || riskDebate.key_risks || finalRec.key_risks || []).map(r => `<li style="margin:4px 0;font-size:12px;color:var(--text-secondary);">${escapeHtml(typeof r === 'string' ? r : (r.risk || r.description || '—'))}</li>`).join('');
 
     bodyEl.innerHTML = `
       <div class="card mb-16" style="padding:16px;background:rgba(245,158,11,0.05);border:1px solid var(--accent);">
@@ -6212,13 +6212,13 @@ async function multiAgentAnalyze(fundCode, fundName, costNav, shares) {
             <span style="font-size:13px;color:var(--text-muted);margin-left:8px;">置信度 ${(confidence * 100).toFixed(0)}%</span>
           </div>
         </div>
-        <div style="font-size:13px;color:var(--text-secondary);margin-bottom:6px;">${reasoning}</div>
+        <div style="font-size:13px;color:var(--text-secondary);margin-bottom:6px;">${escapeHtml(reasoning)}</div>
         <div style="display:flex;gap:16px;font-size:12px;color:var(--text-muted);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);flex-wrap:wrap;">
-          ${targetPrice ? `<span>目标价: <strong style="color:var(--accent);">${targetPrice}</strong></span>` : ''}
-          ${stopLoss ? `<span>止损位: <strong style="color:var(--color-down);">${stopLoss}</strong></span>` : ''}
-          <span>仓位建议: <strong style="color:var(--accent-cyan);">${positionAdvice}</strong></span>
-          ${finalRec.expected_return ? `<span>预期回报: <strong style="color:var(--accent);">${finalRec.expected_return}</strong></span>` : ''}
-          ${finalRec.time_horizon ? `<span>时间维度: <strong>${finalRec.time_horizon}</strong></span>` : ''}
+          ${targetPrice ? `<span>目标价: <strong style="color:var(--accent);">${escapeHtml(targetPrice)}</strong></span>` : ''}
+          ${stopLoss ? `<span>止损位: <strong style="color:var(--color-down);">${escapeHtml(stopLoss)}</strong></span>` : ''}
+          <span>仓位建议: <strong style="color:var(--accent-cyan);">${escapeHtml(positionAdvice)}</strong></span>
+          ${finalRec.expected_return ? `<span>预期回报: <strong style="color:var(--accent);">${escapeHtml(finalRec.expected_return)}</strong></span>` : ''}
+          ${finalRec.time_horizon ? `<span>时间维度: <strong>${escapeHtml(finalRec.time_horizon)}</strong></span>` : ''}
         </div>
       </div>
 
