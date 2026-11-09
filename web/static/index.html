@@ -5385,7 +5385,7 @@ async function loadSectorRotation() {
       const change = Number(s.change_pct || 0);
       const changeColor = change >= 0 ? 'var(--color-down)' : 'var(--color-up)';
       html += `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);">
-        <span>${s.name || ''}</span>
+        <span>${escapeHtml(s.name)}</span>
         <span style="color:${changeColor};">${change >= 0 ? '+' : ''}${change.toFixed(2)}%</span>
       </div>`;
     });
@@ -5401,7 +5401,7 @@ async function loadSectorRotation() {
       const change = Number(s.change_pct || 0);
       const changeColor = change >= 0 ? 'var(--color-down)' : 'var(--color-up)';
       html += `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);">
-        <span>${s.name || ''}</span>
+        <span>${escapeHtml(s.name)}</span>
         <span style="color:${changeColor};">${change >= 0 ? '+' : ''}${change.toFixed(2)}%</span>
       </div>`;
     });
@@ -5418,7 +5418,7 @@ async function loadSectorRotation() {
     hotSectors.slice(0,5).forEach(s => {
       const amount = Number(s.amount || 0);
       const amountStr = amount >= 1e8 ? (amount / 1e8).toFixed(2) + '亿' : amount >= 1e4 ? (amount / 1e4).toFixed(0) + '万' : amount.toFixed(0);
-      html += `<span style="display:inline-block;padding:2px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;font-size:12px;">${s.name || ''} <span style="color:var(--text-muted);">${amountStr}</span></span>`;
+      html += `<span style="display:inline-block;padding:2px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;font-size:12px;">${escapeHtml(s.name)} <span style="color:var(--text-muted);">${amountStr}</span></span>`;
     });
     html += '</div></div>';
   }
@@ -5433,7 +5433,7 @@ async function loadSectorRotation() {
     html += `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
       <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">轮动信号</div>
       <div style="display:flex;justify-content:space-between;align-items:center;">
-        <span style="color:${signalColor};font-weight:600;">${sr.rotation_signal}</span>
+        <span style="color:${signalColor};font-weight:600;">${escapeHtml(sr.rotation_signal)}</span>
         <span style="color:var(--text-muted);font-size:12px;">涨 ${gainCount} / 跌 ${fallCount} / 共 ${totalSectors}</span>
       </div>
     </div>`;
