@@ -5427,9 +5427,10 @@ async function loadSectorRotation() {
   if (sr.rotation_signal) {
     const signalMap = {'普涨':'var(--color-down)','普跌':'var(--color-up)','分化':'var(--color-warning)'};
     const signalColor = signalMap[sr.rotation_signal] || 'var(--accent)';
-    const gainCount = sr.gain_count || 0;
-    const fallCount = sr.fall_count || 0;
-    const totalSectors = sr.total_sectors || (gainCount + fallCount);
+    const cnt = (v) => (v === null || v === undefined ? '—' : v);
+    const gainCount = cnt(sr.gain_count);
+    const fallCount = cnt(sr.fall_count);
+    const totalSectors = cnt(sr.total_sectors);
     html += `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
       <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">轮动信号</div>
       <div style="display:flex;justify-content:space-between;align-items:center;">
