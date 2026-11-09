@@ -129,3 +129,127 @@ def test_generate_prediction_service_error_envelope(monkeypatch: pytest.MonkeyPa
     resp = client.post("/api/prediction/predictions/generate")
     assert resp.status_code == 200
     assert resp.json()["code"] == -1
+
+
+# ---------------------------------------------------------------------------
+# COV-01（第四轮）：补齐公开读 GET /predictions、/recommendations，写端点
+# /recommendations/generate 成功+异常，/export 成功+库不可读，以及 collect/verify
+# 的兜底异常分支（上游全失败也不 500，统一 code=-1）。
+# ---------------------------------------------------------------------------
+
+def test_get_predictions_response_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _fake(days):
+        assert days == 30
+        return [{"trade_date": "2026-11-06", "target_date": "2026-11-07", "direction": "up"}]
+
+    monkeypatch.setattr(prediction_routes.svc, "get_predictions", _fake)
+    resp = client.get("/api/prediction/predictions")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["code"] == 0 and body["message"] == "success"
+    assert body["data"]["count"] == 1
+    assert body["data"]["predictions"][0]["direction"] == "up"
+
+
+def test_get_recommendations_response_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _fake(trade_date, days):
+        assert trade_date is None  # date 空 → None
+        return [{"fund_code": "002891", "action": "buy", "rule_signal": "s"}]
+
+    monkeypatch.setattr(prediction_routes.svc, "get_recommendations", _fake)
+    resp = client.get("/api/prediction/recommendations?days=30")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["code"] == 0
+    assert body["data"]["count"] == 1
+    assert body["data"]["recommendations"][0]["fund_code"] == "002891"
+
+
+def test_generate_recommendations_success_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ADMIN_TOKEN", raising=False)
+
+    async def _fake():
+        return {"trade_date": "2026-11-09", "generated": 3}
+
+    monkeypatch.setattr(prediction_routes.svc, "async_generate_recommendations", _fake)
+    resp = client.post("/api/prediction/recommendations/generate")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["code"] == 0
+    assert body["data"]["generated"] == 3
+
+
+def test_generate_recommendations_service_error_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ADMIN_TOKEN", raising=False)
+
+    async def _boom():
+        raise RuntimeError("落库失败(模拟)")
+
+    monkeypatch.setattr(prediction_routes.svc, "async_generate_recommendations", _boom)
+    resp = client.post("/api/prediction/recommendations/generate")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["code"] == -1
+    assert "推荐生成失败" in body["message"]
+
+
+def test_collect_snapshot_upstream_failure_not_500(monkeypatch: pytest.MonkeyPatch) -> None:
+    """非 ValueError 的上游异常走兜底分支：code=-1，不 500（区别于非法 session）。"""
+    monkeypatch.delenv("ADMIN_TOKEN", raising=False)
+
+    async def _boom(_session):
+        raise RuntimeError("上游全部失败(模拟)")
+
+    monkeypatch.setattr(prediction_routes.svc, "async_collect_snapshot", _boom)
+    resp = client.post("/api/prediction/snapshots/collect", json={"session": "morning"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["code"] == -1
+    assert "快照采集失败" in body["message"]
+
+
+def test_verify_service_error_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ADMIN_TOKEN", raising=False)
+
+    async def _boom():
+        raise RuntimeError("验证落库失败(模拟)")
+
+    monkeypatch.setattr(prediction_routes.svc, "async_verify_daily", _boom)
+    resp = client.post("/api/prediction/verify")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["code"] == -1
+    assert "验证失败" in body["message"]
+
+
+def test_export_db_success_streams_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ADMIN_TOKEN", raising=False)
+    import src.core.prediction_store as store_mod
+
+    class _FakeStore:
+        def export_bytes(self):
+            return b"SQLITE-CONSISTENT-SNAPSHOT"
+
+    monkeypatch.setattr(store_mod, "get_store", lambda: _FakeStore())
+    resp = client.get("/api/prediction/export")
+    assert resp.status_code == 200
+    assert resp.content == b"SQLITE-CONSISTENT-SNAPSHOT"
+    assert resp.headers["content-type"].startswith("application/octet-stream")
+    assert "prediction_snapshot.db" in resp.headers["content-disposition"]
+
+
+def test_export_db_unreadable_returns_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """export_bytes 返回 None（库不可读）→ code=-1 业务失败，不抛 500、不返回空字节流。"""
+    monkeypatch.delenv("ADMIN_TOKEN", raising=False)
+    import src.core.prediction_store as store_mod
+
+    class _FakeStore:
+        def export_bytes(self):
+            return None
+
+    monkeypatch.setattr(store_mod, "get_store", lambda: _FakeStore())
+    resp = client.get("/api/prediction/export")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["code"] == -1
+    assert "导出失败" in body["message"]
