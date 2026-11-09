@@ -814,6 +814,8 @@ async def stock_anomaly(window: int = Query(5, ge=1, le=30)):
         return {"data": [], "_meta": _build_meta(
             "eastmoney", cached=False, quality_score=0.0,
             extra={"window_minutes": window, "degraded_reason": f"编排失败: {type(e).__name__}"})}
+    # 缓存陈旧上限 = 路由 TTL 60s（ds2 内层 30s 仅在路由 miss 时命中，不叠加），
+    # 客户端再 60s 轮询。对「近 window 分钟异动」是可接受的限速权衡，非实时推送。
     cache.set(cache_key, payload, 60)
     return {"data": payload["items"], "_meta": _anomaly_meta(payload, cached_hit=False)}
 
@@ -825,6 +827,9 @@ def _anomaly_meta(payload: dict, cached_hit: bool) -> dict:
     screen_source = str(payload.get("screen_source") or "")
     as_of = str(payload.get("as_of") or "")
     today = (datetime.now(timezone(timedelta(hours=8)))).strftime("%Y-%m-%d")
+    # 语义边界：market_closed 实为「数据非今日」（as_of 日期≠今天），区分「上一
+    # 交易日数据」与「今日数据」；不判断「今日 15:00 收盘后」——只要 as_of 是今天
+    # 就为 False。命名沿用历史，勿据此推断当前是否休市（文案矛盾已由 eec6a6b 修）。
     market_closed = bool(as_of) and not as_of.startswith(today)
     if scanned == 0:
         quality = 0.0
