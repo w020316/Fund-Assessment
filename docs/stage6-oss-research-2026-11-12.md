@@ -35,6 +35,7 @@
 ## 三、立项建议（按优先级）
 
 ### 立项 1（P1）：回测绩效 Tear Sheet —— 借鉴 quantstats
+> **状态：已实施（2026-11-12，commit `ab4afd1`）**。BacktestResult 新增 `skewness`/`kurtosis`/`monthly_returns`，`optimize_ma_cross` 的 best 附带 tear sheet 字段，ma-optimizer 页渲染「最优组合月度收益 · Tear Sheet」（红=正/绿=负/缺失=—）；7 个行为级测试，全量回归 2743 passed，已上线指纹复验。立项 4 因本机 pip 出网被拦（moviepy/edge-tts 不可安装）维持 backlog。
 - **依据**：本项目回测/网格输出只有 4-6 个指标卡（收益/回撤/夏普/IR/交易次数），quantstats 生态已验证"月度收益热力表 + 尾部比率（Sortino/Calmar/尾部损失/偏度峰度）+ 滚动指标"是判读策略质量的标准形态；与 roadmap「网格高原识别」天然互补（高原判读需要逐组合完整指标）。
 - **范围**：`BacktestEngine` 结果增加 monthly-returns 表与 tail-ratios 计算（纯 pandas，无新依赖），前端复用热力图组件渲染月度表。
 - **成本**：低-中；与既有"缺失显示缺失"红线兼容（样本不足的指标显示 —）。
