@@ -673,3 +673,142 @@ class TestOptimizeMaCross:
         assert js.status_code == 200
         assert "innerHTML" not in js.text
         assert "localStorage.setItem" not in js.text
+
+
+class TestCompareMaCross:
+    """POST /api/strategy/compare-ma-cross — 多标的 MA 金叉横向对比"""
+
+    endpoint = "/api/strategy/compare-ma-cross"
+
+    @pytest.fixture(autouse=True)
+    def _reset_rate_limiter(self):
+        from web.rate_limiter import limiter
+        storage = getattr(limiter, "_storage", None)
+        if storage is not None and hasattr(storage, "reset"):
+            storage.reset()
+        yield
+        if storage is not None and hasattr(storage, "reset"):
+            storage.reset()
+
+    @staticmethod
+    def _canned_result(code, ir, total_return=0.12):
+        best = {"short_window": 5, "long_window": 20, "total_return": total_return,
+                "annual_return": 0.25, "max_drawdown": 0.08, "sharpe_ratio": 1.2,
+                "information_ratio": ir, "trade_count": 6}
+        return {"stock_code": code, "start_date": "2025-01-01", "end_date": "2025-06-30",
+                "grid": [best], "best": best}
+
+    def test_ranks_by_ir_desc_and_warns(self, client):
+        with patch("src.core.backtest.BacktestEngine") as engine_cls:
+            engine = engine_cls.return_value
+            engine.optimize_ma_cross.side_effect = lambda code, s, e: (
+                self._canned_result(code, ir=0.2) if code == "600519" else self._canned_result(code, ir=0.9)
+            )
+            resp = client.post(self.endpoint, json={"stock_codes": ["600519", "000001"]})
+        assert resp.status_code == 200
+        body = resp.json()
+        results = body["data"]["results"]
+        assert [r["stock_code"] for r in results] == ["000001", "600519"]
+        assert results[0]["best"]["information_ratio"] == 0.9
+        assert "幸存者偏差" in body["warning"]
+
+    def test_dedupes_and_passes_dates(self, client):
+        with patch("src.core.backtest.BacktestEngine") as engine_cls:
+            engine_cls.return_value.optimize_ma_cross.side_effect = lambda code, s, e: self._canned_result(code, ir=0.1)
+            resp = client.post(self.endpoint, json={
+                "stock_codes": ["600519", "600519", "000001"],
+                "start_date": "2025-01-01", "end_date": "2025-06-30",
+            })
+        assert resp.status_code == 200
+        engine = engine_cls.return_value.optimize_ma_cross
+        assert engine.call_count == 2
+        assert engine.call_args_list[0].args == ("600519", "2025-01-01", "2025-06-30")
+        assert engine.call_args_list[1].args == ("000001", "2025-01-01", "2025-06-30")
+
+    @pytest.mark.parametrize("payload", [
+        {},
+        {"stock_codes": ["600519"]},
+        {"stock_codes": ["600519"] * 6},
+        {"stock_codes": ["600519", "60051"]},
+        {"stock_codes": ["600519", "ABC123"]},
+        {"stock_codes": ["600519", "6005191"]},
+        {"stock_codes": ["600519", "600519"], "start_date": "2025/01/01"},
+        {"stock_codes": ["600519", "000001"], "end_date": "not-a-date"},
+        {"stock_codes": ["600519", "000001"], "start_date": "2025-06-01", "end_date": "2025-01-01"},
+    ])
+    def test_rejects_invalid_request(self, client, payload):
+        with patch("src.core.backtest.BacktestEngine") as engine_cls:
+            resp = client.post(self.endpoint, json=payload)
+        assert resp.status_code == 422
+        engine_cls.assert_not_called()
+
+    def test_single_stock_failure_is_isolated(self, client):
+        with patch("src.core.backtest.BacktestEngine") as engine_cls:
+            engine = engine_cls.return_value
+            engine.optimize_ma_cross.side_effect = [
+                self._canned_result("600519", ir=0.2), RuntimeError("upstream down"),
+            ]
+            resp = client.post(self.endpoint, json={"stock_codes": ["600519", "000001"]})
+        assert resp.status_code == 200
+        results = resp.json()["data"]["results"]
+        assert results[0]["stock_code"] == "600519"
+        assert results[1]["stock_code"] == "000001"
+        assert results[1]["best"] is None
+        assert "该股票数据获取或回测失败" in results[1]["error"]
+
+    def test_timeout_is_503(self, client, monkeypatch):
+        from web.routes import strategy as strategy_mod
+
+        class _SlowEngine:
+            def optimize_ma_cross(self, code, start, end):
+                import time
+                time.sleep(1)
+
+        monkeypatch.setattr(strategy_mod, "BACKTEST_TIMEOUT_SECONDS", 0.05)
+        with patch("src.core.backtest.BacktestEngine", return_value=_SlowEngine()):
+            resp = client.post(self.endpoint, json={"stock_codes": ["600519", "000001"]})
+        assert resp.status_code == 503
+        assert "对比超时" in resp.json()["detail"]
+
+    def test_rate_limit(self, client):
+        with patch("src.core.backtest.BacktestEngine") as engine_cls:
+            engine_cls.return_value.optimize_ma_cross.side_effect = lambda code, s, e: self._canned_result(code, ir=0.1)
+            responses = [client.post(self.endpoint, json={"stock_codes": ["600519", "000001"]}) for _ in range(3)]
+        assert [resp.status_code for resp in responses] == [200, 200, 429]
+
+    def test_requires_auth_and_accepts_valid_token(self, client, monkeypatch):
+        monkeypatch.setenv("APP_ENV", "production")
+        monkeypatch.setenv("ADMIN_TOKEN", "compare-ma-test-token")
+        monkeypatch.delenv("ADMIN_TOKENS", raising=False)
+        with patch("src.core.backtest.BacktestEngine") as engine_cls:
+            assert client.post(
+                self.endpoint, json={"stock_codes": ["600519", "000001"]}).status_code == 401
+            engine_cls.assert_not_called()
+            resp = client.post(self.endpoint, json={"stock_codes": ["600519", "000001"]},
+                               headers={"Authorization": "Bearer compare-ma-test-token"})
+        assert resp.status_code == 200
+
+    def test_shares_backtest_guard(self, client):
+        from web.routes.strategy import _single_backtest_guard
+        guard = _single_backtest_guard()
+        next(guard)
+        try:
+            with patch("src.core.backtest.BacktestEngine") as engine_cls:
+                resp = client.post(self.endpoint, json={"stock_codes": ["600519", "000001"]})
+            assert resp.status_code == 503
+            engine_cls.assert_not_called()
+        finally:
+            guard.close()
+
+    def test_compare_page_is_served_and_linked(self, client):
+        resp = client.get("/static/stock-compare.html")
+        assert resp.status_code == 200
+        assert "多标的 MA 金叉策略对比" in resp.text
+        assert "历史回测不代表未来收益" in resp.text
+        js = client.get("/static/js/stock-compare.js")
+        assert js.status_code == 200
+        assert "innerHTML" not in js.text
+        index = client.get("/")
+        assert index.status_code == 200
+        assert "/static/stock-compare.html" in index.text
+

@@ -559,6 +559,77 @@ async def optimize_ma_cross(request: Request, req: OptimizeMaCrossRequest) -> di
     }
 
 
+class CompareMaCrossRequest(BaseModel):
+    # 多标的对比(范围裁决后量化本体首项): 每只股票独立跑默认网格取最优,
+    # 上限 5 只 —— 单飞锁整段持有, 数量越大锁占用越久(逐票拉 K 线是主要耗时)。
+    stock_codes: list[Annotated[str, Field(min_length=6, max_length=6)]] = Field(
+        ..., min_length=2, max_length=5,
+    )
+    start_date: str = Field("", max_length=10, description="YYYY-MM-DD,空则默认近一年")
+    end_date: str = Field("", max_length=10, description="YYYY-MM-DD,空则默认今天")
+
+
+@router.post("/compare-ma-cross", dependencies=[Depends(require_admin), Depends(_single_backtest_guard)])
+@limiter.limit("2/minute")
+async def compare_ma_cross(request: Request, req: CompareMaCrossRequest) -> dict[str, Any]:
+    """多标的 MA 金叉策略横向对比。
+
+    每只股票独立跑默认网格(向量化 63 组合)取各自最优组合, 按信息比率
+    降序排名。单只失败不拖垮整体, 在该条目中带 error 字段。与回测/优化
+    共用单飞锁。各股票的"网格最优"存在幸存者偏差, 仅用于横向相对观察。
+    """
+    from datetime import date as _date, timedelta as _timedelta
+
+    from src.core.backtest import BacktestEngine
+
+    codes: list[str] = []
+    for raw in req.stock_codes:
+        code = raw.strip()
+        if len(code) != 6 or not code.isdigit():
+            raise HTTPException(status_code=422, detail=f"股票代码 {code!r} 必须是 6 位数字的 A 股代码")
+        if code not in codes:
+            codes.append(code)
+    if len(codes) < 2:
+        raise HTTPException(status_code=422, detail="去重后至少需要 2 只不同的股票代码")
+    try:
+        end = _date.fromisoformat(req.end_date.strip()) if req.end_date.strip() else _date.today()
+        start = _date.fromisoformat(req.start_date.strip()) if req.start_date.strip() else _date.today() - _timedelta(days=365)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="日期格式应为 YYYY-MM-DD") from exc
+    if start >= end:
+        raise HTTPException(status_code=422, detail="start_date 必须早于 end_date")
+
+    def _run_all() -> list[dict[str, Any]]:
+        engine = BacktestEngine()
+        entries: list[dict[str, Any]] = []
+        for code in codes:
+            try:
+                res = engine.optimize_ma_cross(code, start.isoformat(), end.isoformat())
+                entries.append({"stock_code": code, **res})
+            except Exception as e:
+                logger.warning(f"compare_ma_cross {code} 执行失败: {e}")
+                entries.append({"stock_code": code, "grid": [], "best": None, "error": "该股票数据获取或回测失败"})
+        return entries
+
+    try:
+        # 与 optimize-ma-cross 单票 2×30s 预算对齐, 整体按票数放大
+        entries = await asyncio.wait_for(asyncio.to_thread(_run_all), timeout=BACKTEST_TIMEOUT_SECONDS * 2 * len(codes))
+    except asyncio.TimeoutError:
+        logger.warning(f"compare_ma_cross {codes} 超时")
+        raise HTTPException(status_code=503, detail="对比超时，请减少股票数量或缩小日期范围后重试")
+    except Exception as e:
+        logger.exception(f"compare_ma_cross {codes} 执行失败: {e}")
+        raise HTTPException(status_code=503, detail="对比执行失败，请稍后重试")
+
+    entries.sort(key=lambda item: (
+        item["best"]["information_ratio"] if item.get("best") else float("-inf"),
+    ), reverse=True)
+    return {
+        "data": {"results": entries, "start_date": start.isoformat(), "end_date": end.isoformat()},
+        "warning": "各标的取的是各自网格最优组合（幸存者偏差），横向排名仅反映同一区间内策略表现的相对差异；历史回测不代表未来收益。",
+    }
+
+
 @router.post("/validate", dependencies=[Depends(require_admin)])
 @limiter.limit("20/minute")
 async def validate_backtest(request: Request, req: ValidateRequest) -> dict[str, Any]:

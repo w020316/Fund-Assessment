@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>多标的策略对比 · QuantFlow Pro</title>
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <style>
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { margin: 0; background: var(--qf-bg-deep); color: var(--qf-text-primary); font: 14px/1.7 var(--qf-font-body); }
+    main { max-width: 1240px; margin: auto; padding: 28px 24px 60px; }
+    a { color: var(--qf-neon-cyan); text-underline-offset: 4px; }
+    nav, .section-title, .actions { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+    nav { padding-bottom: 26px; border-bottom: 1px solid var(--qf-line-1); }
+    nav strong { letter-spacing: 1px; }
+    .eyebrow { color: var(--qf-neon-cyan); font: 12px var(--qf-font-mono); letter-spacing: 2px; margin: 34px 0 10px; }
+    h1 { margin: 0; font-size: clamp(27px, 4vw, 40px); letter-spacing: -1px; }
+    h2 { font-size: 18px; margin: 0; }
+    h3 { font-size: 14px; margin: 0 0 12px; }
+    p { margin: 10px 0; }
+    .muted, small { color: var(--qf-text-secondary); }
+    .intro { max-width: 880px; }
+    .badge { color: var(--qf-neon-cyan); border: 1px solid var(--qf-line-neon); border-radius: 99px; padding: 3px 12px; font-size: 12px; }
+    .panel { margin-top: 20px; padding: 24px; border: 1px solid var(--qf-line-1); border-radius: 14px; background: var(--qf-bg-surface); }
+    .section-title { margin-bottom: 18px; }
+    .notice { padding: 12px 16px; border-left: 3px solid var(--qf-sem-warn); background: var(--qf-bg-elev); color: var(--qf-text-secondary); }
+    .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin: 18px 0; }
+    label { display: flex; flex-direction: column; gap: 6px; color: var(--qf-text-secondary); }
+    input, button { font: inherit; border-radius: 7px; }
+    input { width: 100%; background: var(--qf-bg-deep); border: 1px solid var(--qf-line-2); color: var(--qf-text-primary); padding: 9px 11px; min-width: 0; }
+    button { background: var(--qf-bg-elev); border: 1px solid var(--qf-line-2); color: var(--qf-text-primary); padding: 8px 15px; cursor: pointer; text-decoration: none; }
+    button.primary { background: var(--qf-neon-cyan); color: var(--qf-ink); font-weight: 700; border-color: transparent; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    :focus-visible { outline: 2px solid var(--qf-neon-cyan); outline-offset: 3px; }
+    .actions { justify-content: flex-start; }
+    .auth { max-width: 420px; margin: 18px 0; }
+    #status { min-height: 28px; margin: 14px 0 0; overflow-wrap: anywhere; }
+    #status.error { color: var(--qf-sem-critical); }
+    #status.success { color: var(--qf-neon-cyan); }
+    code { font-family: var(--qf-font-mono); font-size: 12px; color: var(--qf-neon-cyan); overflow-wrap: anywhere; }
+    .table-wrap { overflow: auto; max-height: 560px; margin-top: 14px; }
+    table { width: 100%; border-collapse: collapse; white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 13px; }
+    td, th { text-align: center; padding: 8px 10px; border-bottom: 1px solid var(--qf-line-1); }
+    th { color: var(--qf-text-secondary); font-weight: 500; background: var(--qf-bg-elev); }
+    td.axis, th.axis { color: var(--qf-text-secondary); background: var(--qf-bg-elev); font-family: var(--qf-font-mono); font-size: 12px; }
+    td.cell { font-family: var(--qf-font-mono); font-size: 12px; }
+    footer { margin-top: 40px; color: var(--qf-text-secondary); font-size: 13px; }
+    @media (max-width: 640px) {
+      input, button { min-height: 44px; }
+      nav a { display: inline-flex; align-items: center; min-height: 44px; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <nav><strong>QuantFlow Pro</strong><a href="/">返回工作台</a></nav>
+  <p class="eyebrow">参数优化与迭代 / 多标的对比</p>
+  <h1>多标的 MA 金叉策略对比</h1>
+  <p class="intro muted">对 2–5 只 A 股的同一历史区间，各自跑同一套 <code>MA_short × MA_long</code> 默认网格（向量化 63 组合），取各自最优组合并按信息比率（IR）降序排名，用于观察同一策略在不同标的上的<strong>相对</strong>表现差异。IR 为正表示该参数下策略跑赢买入持有。</p>
+  <div class="notice">每只股票取的都是它自己网格里的最优参数——这是幸存者偏差最强的读法。排名只反映同一区间内的相对差异，不代表这些参数未来依然有效；历史回测不代表未来收益。</div>
+
+  <form id="compareForm">
+    <section class="panel" aria-labelledby="inputHeading">
+      <div class="section-title"><h2 id="inputHeading">01 / 对比设置</h2><span class="badge">逐票拉取 K 线，向量化网格</span></div>
+      <div class="fields">
+        <label for="stockCodes">股票代码（2–5 只，逗号或空格分隔）<input id="stockCodes" type="text" required placeholder="600519, 000001, 601318" maxlength="41" title="输入 2–5 个 6 位数字的 A 股代码"></label>
+        <label for="startDate">开始日期（可选）<input id="startDate" type="date"></label>
+        <label for="endDate">结束日期（可选）<input id="endDate" type="date"></label>
+      </div>
+      <p class="muted">日期留空默认回看近一年；网格默认 MA_short 3–11、MA_long 10/15/20/25/30/35/40。计算沿用管理员鉴权，每分钟最多 2 次，与回测共用同一把单飞锁；单只失败不影响其余标的的排名。</p>
+      <label class="auth" for="adminToken">管理令牌（可选）<input id="adminToken" type="password" autocomplete="off" placeholder="沿用主页面鉴权；在此输入仅用于本次请求"></label>
+      <div class="actions"><button id="runCompare" class="primary" type="submit">运行对比</button></div>
+      <p id="status" role="status" aria-live="polite">输入至少 2 只股票代码后运行；逐票拉取 K 线，股票越多耗时越长。</p>
+    </section>
+  </form>
+
+  <section class="panel" id="report" aria-labelledby="reportHeading" hidden>
+    <div class="section-title"><h2 id="reportHeading">02 / 排名结果</h2><span id="compareInfo" class="muted"></span></div>
+    <p id="warning" class="notice" hidden></p>
+    <div class="table-wrap" tabindex="0"><table id="rankTable"></table></div>
+    <p class="muted">排名按各自最优组合的信息比率降序；回撤为最大回撤；「—」表示缺失。悬停行查看对应最优参数。</p>
+  </section>
+  <footer>方法与「MA 参数热力图」页同源（数据 → 信号 → 回测 → 参数优化 → 横向对比）。结果不构成投资建议。</footer>
+</main>
+<script src="/static/js/stock-compare.js"></script>
+</body>
+</html>
