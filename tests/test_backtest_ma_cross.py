@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from src.core.backtest import (
     BacktestEngine,
@@ -253,3 +254,76 @@ class TestEngineMaCrossIntegration:
         opt = engine.optimize_ma_cross("600519", "2025-01-01", "2025-03-31")
         assert opt["grid"] == []
         assert opt["best"] is None
+
+
+class TestVectorizedEventEquivalence:
+    """立项 2(借鉴 vectorbt): 向量化快路径 vs 事件引擎交叉校验。
+
+    快路径复刻了事件引擎的成交语义(手数/佣金/印花税/买入失败重试),
+    残差仅可能来自 MA 求和口径的 1 ulp 级差异导致交叉日偏移 — 因此
+    断言用容差而非精确相等, 容差已在多 seed 随机游走下验证充分小。
+    """
+
+    @staticmethod
+    def _run(seed: int, rows: int = 180) -> tuple[dict, dict]:
+        rng = np.random.default_rng(seed)
+        closes = (100 + np.cumsum(rng.normal(0.03, 1.2, rows))).tolist()
+        engine = BacktestEngine(data_manager=_mock_dm(_make_kline(closes)))
+        kw = dict(stock_code="600519", start_date="2025-01-01", end_date="2025-12-31",
+                  short_windows=range(3, 9), long_windows=range(10, 31, 5))
+        return engine.optimize_ma_cross(**kw), engine.optimize_ma_cross(**kw, use_vectorized=False)
+
+    @staticmethod
+    def _by_combo(opt: dict) -> dict:
+        return {(g["short_window"], g["long_window"]): g for g in opt["grid"]}
+
+    def test_grid_matches_event_engine(self):
+        for seed in (1, 5, 42):
+            fast, slow = self._run(seed)
+            assert set(self._by_combo(fast)) == set(self._by_combo(slow)), f"seed={seed}"
+            for key, f in self._by_combo(fast).items():
+                s = self._by_combo(slow)[key]
+                assert f["trade_count"] == s["trade_count"], f"seed={seed} combo={key}"
+                assert f["total_return"] == pytest.approx(s["total_return"], abs=1e-6)
+                assert f["sharpe_ratio"] == pytest.approx(s["sharpe_ratio"], abs=1e-6)
+                assert f["information_ratio"] == pytest.approx(s["information_ratio"], abs=1e-6)
+                assert f["max_drawdown"] == pytest.approx(s["max_drawdown"], abs=1e-6)
+
+    def test_best_tear_sheet_matches_event_engine(self):
+        fast, slow = self._run(7)
+        fb, sb = fast["best"], slow["best"]
+        assert fb["monthly_returns"] or sb["monthly_returns"]
+        assert len(fb["monthly_returns"]) == len(sb["monthly_returns"])
+        for fm, sm in zip(fb["monthly_returns"], sb["monthly_returns"]):
+            assert fm["month"] == sm["month"]
+            assert fm["return_pct"] == pytest.approx(sm["return_pct"], abs=1e-6)
+        assert fb["skewness"] == pytest.approx(sb["skewness"], abs=1e-6)
+        assert fb["kurtosis"] == pytest.approx(sb["kurtosis"], abs=1e-6)
+
+    def test_fallback_on_unparseable_dates(self):
+        """日期含无法解析的行 → 自动回退事件引擎, 网格仍非空且与强制事件路径一致"""
+        closes = (100 + np.cumsum(np.random.default_rng(9).normal(0.03, 1.2, 120))).tolist()
+        df = _make_kline(closes)
+        df.loc[7, "日期"] = "not-a-date"
+        engine = BacktestEngine(data_manager=_mock_dm(df))
+        kw = dict(stock_code="600519", start_date="2025-01-01", end_date="2025-12-31",
+                  short_windows=range(3, 6), long_windows=range(10, 21, 5))
+        auto = engine.optimize_ma_cross(**kw)
+        forced = engine.optimize_ma_cross(**kw, use_vectorized=False)
+        assert auto["grid"], "回退后网格不应为空"
+        assert len(auto["grid"]) == len(forced["grid"])
+        for a, f in zip(auto["grid"], forced["grid"]):
+            assert a["trade_count"] == f["trade_count"]
+            assert a["total_return"] == pytest.approx(f["total_return"], abs=1e-9)
+
+    def test_dense_grid_800_plus_combos(self):
+        """高密度网格(短窗 2-60 × 长窗 5-200)可完成且结果结构完整"""
+        rng = np.random.default_rng(11)
+        closes = (100 + np.cumsum(rng.normal(0.03, 1.2, 250))).tolist()
+        engine = BacktestEngine(data_manager=_mock_dm(_make_kline(closes)))
+        opt = engine.optimize_ma_cross(
+            "600519", "2025-01-01", "2025-12-31",
+            short_windows=range(2, 62, 2), long_windows=range(4, 204, 4),
+        )
+        assert len(opt["grid"]) >= 800
+        assert opt["best"]["monthly_returns"] is not None

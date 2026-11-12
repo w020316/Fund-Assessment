@@ -7,6 +7,7 @@ from typing import Callable, Optional
 import numpy as np
 import pandas as pd
 from loguru import logger
+from numpy.lib.stride_tricks import sliding_window_view
 
 from .data_source import DataSourceManager
 from .executor import OrderSide, Signal
@@ -566,6 +567,125 @@ class BacktestEngine:
             benchmark_returns=benchmark_returns, equity_dates=equity_dates,
         )
 
+    def _simulate_ma_cross_fast(
+        self,
+        close: np.ndarray,
+        dates: list[date],
+        short_window: int,
+        long_window: int,
+        initial_capital: float,
+        stock_code: str,
+        start_date: str,
+        end_date: str,
+        strategy_name: str = "ma_cross",
+    ) -> BacktestResult:
+        """内置 MA cross 的向量化快路径(立项 2,借鉴 vectorbt 信号矩阵思想)。
+
+        与事件引擎 _simulate 的成交语义逐条对齐, 差异仅在计算方式:
+        - 首个可交易日为 index = long_window-1(此前 MA 为 NaN, 交叉条件恒 False)
+        - 金叉(short_ma > long_ma)满仓买入: 当日收盘价、100 股整数手、
+          佣金 max(万3, 5 元); 现金不足导致买入失败时, 事件引擎会逐日重试,
+          这里同样逐日扫描直到成功或金叉条件结束
+        - 死叉(short_ma < long_ma)清仓: 当日收盘价, 佣金 + 印花税
+        - 相等/NaN 维持前一日状态(事件引擎同日只发一个信号)
+
+        MA 用 sliding_window_view 逐窗 np.mean 计算(与事件引擎逐日 Series.mean
+        的求和口径一致); 极少数边界点仍可能存在 1 ulp 级差异导致交叉日偏移,
+        由 TestVectorizedEventEquivalence 容差交叉校验兜底, 该残差已写入
+        optimize_ma_cross docstring, 不对外夸大精度。
+        """
+        n = len(close)
+        trades: list[dict] = []
+        events: list[tuple[int, float, float]] = []  # (day_idx, 交易后现金, 交易后持仓股数)
+        cash = initial_capital
+        qty = 0.0
+        cost_price = 0.0
+
+        def _ma(window: int) -> np.ndarray:
+            ma = np.full(n, np.nan)
+            if n >= window:
+                ma[window - 1:] = sliding_window_view(close, window).mean(axis=1)
+            return ma
+
+        short_ma = _ma(short_window)
+        long_ma = _ma(long_window)
+
+        i = 0
+        while i < n:
+            if qty > 0 and short_ma[i] < long_ma[i]:
+                price = float(close[i])
+                amount = price * qty
+                commission = max(amount * _COMMISSION_RATE, _MIN_COMMISSION)
+                stamp_tax = amount * _STAMP_TAX_RATE
+                cash += amount - commission - stamp_tax
+                profit = (price - cost_price) * qty - commission - stamp_tax
+                trades.append({
+                    "date": dates[i].isoformat(), "symbol": stock_code, "side": "sell",
+                    "price": price, "quantity": qty, "amount": amount,
+                    "commission": commission, "stamp_tax": stamp_tax, "profit": profit,
+                    "strategy": strategy_name,
+                    "reason": f"死叉 MA{short_window}<MA{long_window} 空仓观望",
+                })
+                events.append((i, cash, 0.0))
+                qty = 0.0
+                i += 1
+            elif qty == 0 and short_ma[i] > long_ma[i]:
+                # 与事件引擎一致: 平仓且金叉期间逐日重试买入, 直到成功或条件结束
+                j = i
+                bought = False
+                while j < n and short_ma[j] > long_ma[j]:
+                    price = float(close[j])
+                    quantity = float(int(cash / price / 100) * 100)
+                    if quantity >= 100:
+                        amount = price * quantity
+                        commission = max(amount * _COMMISSION_RATE, _MIN_COMMISSION)
+                        total_cost = amount + commission
+                        if total_cost <= cash:
+                            cash -= total_cost
+                            qty = quantity
+                            cost_price = price
+                            trades.append({
+                                "date": dates[j].isoformat(), "symbol": stock_code, "side": "buy",
+                                "price": price, "quantity": qty, "amount": amount,
+                                "commission": commission, "stamp_tax": 0.0,
+                                "strategy": strategy_name,
+                                "reason": f"金叉 MA{short_window}>MA{long_window} 满仓买入",
+                            })
+                            events.append((j, cash, qty))
+                            bought = True
+                            break
+                    j += 1
+                i = j + 1 if bought else j
+            else:
+                i += 1
+
+        # 权益曲线: (cash, qty) 在成交日间为常数, 成交日当天用交易后状态
+        equity = np.empty(n + 1)
+        equity[0] = initial_capital
+        cash_cur, qty_cur = initial_capital, 0.0
+        ev_i = 0
+        for t in range(n):
+            if ev_i < len(events) and events[ev_i][0] == t:
+                _, cash_cur, qty_cur = events[ev_i]
+                ev_i += 1
+            equity[t + 1] = cash_cur + qty_cur * close[t]
+
+        peak = np.maximum.accumulate(equity)
+        dd = np.where(peak > 0, (peak - equity) / peak, 0.0)
+        max_drawdown = float(dd.max())
+
+        # 基准与事件引擎同口径: 全部行日期有效(快路径前置校验保证)才逐日对齐
+        benchmark_returns: Optional[list[float]] = None
+        closes_list = close.tolist()
+        if len(closes_list) >= 2 and closes_list[0] > 0:
+            padded = [closes_list[0]] + closes_list[:-1]
+            benchmark_returns = ((np.array(closes_list) - np.array(padded)) / np.array(padded)).tolist()
+
+        return self._calc_metrics(
+            equity.tolist(), trades, initial_capital, start_date, end_date, max_drawdown,
+            benchmark_returns=benchmark_returns, equity_dates=dates,
+        )
+
     def _execute_signal(
         self,
         signal: Signal,
@@ -743,6 +863,7 @@ class BacktestEngine:
         initial_capital: float = 1_000_000.0,
         short_windows: Optional[range] = None,
         long_windows: Optional[range] = None,
+        use_vectorized: bool = True,
     ) -> dict:
         """MA 金叉策略参数网格优化(视频"量化对轰"链路 STEP 15:参数优化与迭代)。
 
@@ -753,6 +874,10 @@ class BacktestEngine:
         Args:
             short_windows: 短期均线窗口候选,默认 range(3, 12)
             long_windows: 长期均线窗口候选,默认 range(10, 41, 5)
+            use_vectorized: 立项 2(2026-11-12,借鉴 vectorbt)—— True 时内置策略走
+                向量化快路径(_simulate_ma_cross_fast, 语义与事件引擎逐条对齐),
+                支撑 800+ 组合高密度网格; K线日期存在解析失败等边界时自动回退
+                事件引擎逐笔路径, 不牺牲正确性。False 时强制事件引擎(交叉校验用)。
 
         Returns:
             {"stock_code", "start_date", "end_date", "grid": [...按 IR 降序...],
@@ -774,16 +899,36 @@ class BacktestEngine:
         grid: list[dict] = []
         results_by_combo: dict[tuple[int, int], BacktestResult] = {}
         if df is not None and not df.empty:
+            # 快路径前置校验: 日期全部可解析才可信逐日对齐; 否则整体回退事件引擎
+            fast_ok = False
+            close_arr: Optional[np.ndarray] = None
+            date_list: list[date] = []
+            if use_vectorized:
+                try:
+                    parsed = pd.to_datetime(df["日期"])
+                    if parsed.isna().any():
+                        raise ValueError("unparseable dates in kline")
+                    close_arr = df["收盘"].astype(float).to_numpy()
+                    date_list = [ts.date() for ts in parsed]
+                    fast_ok = True
+                except Exception as e:
+                    logger.warning(f"optimize_ma_cross fallback to event engine: {e}")
             for short in short_windows:
                 for long in long_windows:
                     if short >= long:
                         continue
-                    strategy = make_ma_cross_strategy(short, long)
                     try:
-                        result = self._simulate(
-                            strategy, df, start_date, end_date, initial_capital,
-                            stock_code=stock_code, copy_slices=False,
-                        )
+                        if fast_ok:
+                            result = self._simulate_ma_cross_fast(
+                                close_arr, date_list, short, long, initial_capital,
+                                stock_code, start_date, end_date,
+                            )
+                        else:
+                            strategy = make_ma_cross_strategy(short, long)
+                            result = self._simulate(
+                                strategy, df, start_date, end_date, initial_capital,
+                                stock_code=stock_code, copy_slices=False,
+                            )
                     except Exception as e:
                         logger.warning(f"optimize_ma_cross failed for ({short},{long}): {e}")
                         continue
