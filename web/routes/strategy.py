@@ -474,6 +474,51 @@ async def factor_research(request: Request, req: FactorResearchRequest) -> dict[
     return {"data": result}
 
 
+class OptimizeMaCrossRequest(BaseModel):
+    stock_code: str = Field(..., min_length=1, max_length=12)
+    start_date: str = Field("", max_length=10, description="YYYY-MM-DD,空则默认近一年")
+    end_date: str = Field("", max_length=10, description="YYYY-MM-DD,空则默认今天")
+
+
+@router.post("/optimize-ma-cross", dependencies=[Depends(require_admin), Depends(_single_backtest_guard)])
+@limiter.limit("3/minute")
+async def optimize_ma_cross(request: Request, req: OptimizeMaCrossRequest) -> dict[str, Any]:
+    """MA 金叉策略参数网格优化(视频链路 STEP 15)。
+
+    K线单次取数,对每组 (MA_short, MA_long) 复用同一份数据模拟,
+    网格按信息比率降序,前端据此画热力图。与回测共用单飞锁。
+    """
+    from datetime import date as _date, timedelta as _timedelta
+
+    from src.core.backtest import BacktestEngine
+
+    stock_code = req.stock_code.strip()
+    try:
+        end = _date.fromisoformat(req.end_date.strip()) if req.end_date.strip() else _date.today()
+        start = _date.fromisoformat(req.start_date.strip()) if req.start_date.strip() else _date.today() - _timedelta(days=365)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="日期格式应为 YYYY-MM-DD") from exc
+    if start >= end:
+        raise HTTPException(status_code=422, detail="start_date 必须早于 end_date")
+
+    engine = BacktestEngine()
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(engine.optimize_ma_cross, stock_code, start.isoformat(), end.isoformat()),
+            timeout=BACKTEST_TIMEOUT_SECONDS * 2,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(f"optimize_ma_cross {stock_code} 超时")
+        raise HTTPException(status_code=503, detail="参数优化超时，请缩小日期范围后重试")
+    except Exception as e:
+        logger.exception(f"optimize_ma_cross {stock_code} 执行失败: {e}")
+        raise HTTPException(status_code=503, detail="参数优化执行失败，请稍后重试")
+    return {
+        "data": result,
+        "warning": "量化策略存在失效可能，历史回测不代表未来收益；网格最优点通常是过拟合幸存者，实盘请先小资金验证。",
+    }
+
+
 @router.post("/validate", dependencies=[Depends(require_admin)])
 @limiter.limit("20/minute")
 async def validate_backtest(request: Request, req: ValidateRequest) -> dict[str, Any]:

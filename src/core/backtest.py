@@ -445,8 +445,14 @@ class BacktestEngine:
         end_date: str,
         initial_capital: float,
         stock_code: str = "",
+        copy_slices: bool = True,
     ) -> BacktestResult:
-        """在给定K线数据上模拟策略(不重新取数),供 run 与 optimize_ma_cross 复用。"""
+        """在给定K线数据上模拟策略(不重新取数),供 run 与 optimize_ma_cross 复用。
+
+        copy_slices=False 时策略拿到的是切片视图而非副本:内置策略只读不写,
+        网格优化跑几十组模拟时省掉 O(n²) 的每日复制;外部自定义策略若会修改
+        切片,必须保持默认 True。
+        """
         portfolio: dict = {
             "cash": initial_capital,
             "positions": {},
@@ -478,7 +484,7 @@ class BacktestEngine:
             )
             portfolio["total_value"] = portfolio["cash"] + position_value
 
-            data_slice = df.iloc[:idx + 1].copy()
+            data_slice = df.iloc[:idx + 1].copy() if copy_slices else df.iloc[:idx + 1]
 
             try:
                 signals = strategy_func(current_date, portfolio, data_slice)
@@ -720,7 +726,8 @@ class BacktestEngine:
                     strategy = make_ma_cross_strategy(short, long)
                     try:
                         result = self._simulate(
-                            strategy, df, start_date, end_date, initial_capital, stock_code=stock_code,
+                            strategy, df, start_date, end_date, initial_capital,
+                            stock_code=stock_code, copy_slices=False,
                         )
                     except Exception as e:
                         logger.warning(f"optimize_ma_cross failed for ({short},{long}): {e}")

@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MA 参数优化热力图 · QuantFlow Pro</title>
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <style>
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { margin: 0; background: var(--qf-bg-deep); color: var(--qf-text-primary); font: 14px/1.7 var(--qf-font-body); }
+    main { max-width: 1240px; margin: auto; padding: 28px 24px 60px; }
+    a { color: var(--qf-neon-cyan); text-underline-offset: 4px; }
+    nav, .section-title, .actions { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+    nav { padding-bottom: 26px; border-bottom: 1px solid var(--qf-line-1); }
+    nav strong { letter-spacing: 1px; }
+    .eyebrow { color: var(--qf-neon-cyan); font: 12px var(--qf-font-mono); letter-spacing: 2px; margin: 34px 0 10px; }
+    h1 { margin: 0; font-size: clamp(27px, 4vw, 40px); letter-spacing: -1px; }
+    h2 { font-size: 18px; margin: 0; }
+    h3 { font-size: 14px; margin: 0 0 12px; }
+    p { margin: 10px 0; }
+    .muted, small { color: var(--qf-text-secondary); }
+    .intro { max-width: 880px; }
+    .badge { color: var(--qf-neon-cyan); border: 1px solid var(--qf-line-neon); border-radius: 99px; padding: 3px 12px; font-size: 12px; }
+    .panel { margin-top: 20px; padding: 24px; border: 1px solid var(--qf-line-1); border-radius: 14px; background: var(--qf-bg-surface); }
+    .section-title { margin-bottom: 18px; }
+    .notice { padding: 12px 16px; border-left: 3px solid var(--qf-sem-warn); background: var(--qf-bg-elev); color: var(--qf-text-secondary); }
+    .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin: 18px 0; }
+    label { display: flex; flex-direction: column; gap: 6px; color: var(--qf-text-secondary); }
+    input, button { font: inherit; border-radius: 7px; }
+    input { width: 100%; background: var(--qf-bg-deep); border: 1px solid var(--qf-line-2); color: var(--qf-text-primary); padding: 9px 11px; min-width: 0; }
+    button { background: var(--qf-bg-elev); border: 1px solid var(--qf-line-2); color: var(--qf-text-primary); padding: 8px 15px; cursor: pointer; text-decoration: none; }
+    button.primary { background: var(--qf-neon-cyan); color: var(--qf-ink); font-weight: 700; border-color: transparent; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    :focus-visible { outline: 2px solid var(--qf-neon-cyan); outline-offset: 3px; }
+    .actions { justify-content: flex-start; }
+    .auth { max-width: 420px; margin: 18px 0; }
+    #status { min-height: 28px; margin: 14px 0 0; overflow-wrap: anywhere; }
+    #status.error { color: var(--qf-sem-critical); }
+    #status.success { color: var(--qf-neon-cyan); }
+    code { font-family: var(--qf-font-mono); font-size: 12px; color: var(--qf-neon-cyan); overflow-wrap: anywhere; }
+    .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 18px 0; }
+    .metric { border: 1px solid var(--qf-line-1); border-radius: 9px; padding: 16px; }
+    .metric strong { display: block; font: 26px/1.5 var(--qf-font-mono); color: var(--qf-text-primary); }
+    .metric span { color: var(--qf-text-secondary); font-size: 12px; }
+    .table-wrap { overflow: auto; max-height: 560px; margin-top: 14px; }
+    table { width: 100%; border-collapse: collapse; white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 13px; }
+    td, th { text-align: center; padding: 8px 10px; border-bottom: 1px solid var(--qf-line-1); }
+    th { color: var(--qf-text-secondary); font-weight: 500; background: var(--qf-bg-elev); }
+    td.axis, th.axis { color: var(--qf-text-secondary); background: var(--qf-bg-elev); font-family: var(--qf-font-mono); font-size: 12px; }
+    td.cell { font-family: var(--qf-font-mono); font-size: 12px; cursor: default; }
+    td.cell.best { outline: 2px solid var(--qf-neon-cyan); outline-offset: -2px; font-weight: 700; }
+    td.cell.empty { color: var(--qf-text-secondary); background: var(--qf-bg-elev2); }
+    footer { margin-top: 40px; color: var(--qf-text-secondary); font-size: 13px; }
+  </style>
+</head>
+<body>
+<main>
+  <nav><strong>QuantFlow Pro</strong><a href="/">返回工作台</a></nav>
+  <p class="eyebrow">STEP 15 / 参数优化与迭代</p>
+  <h1>MA 金叉参数优化热力图</h1>
+  <p class="intro muted">对同一只股票的同一份历史 K 线，穷举 <code>MA_short × MA_long</code> 参数组合回测「金叉满仓 / 死叉空仓」策略，按信息比率（IR = 相对买入持有的超额收益 ÷ 跟踪误差）排序。颜色越深代表 IR 绝对值越大：<strong style="color:var(--qf-sem-up)">红 = 跑赢躺平</strong>，<strong style="color:var(--qf-sem-down)">绿 = 跑输躺平</strong>。</p>
+  <div class="notice">别迷信最优参数，只看它是不是一片高原：孤立的深色格子多半是过拟合幸存者，连片的高原才更可信。量化策略存在失效可能，历史回测不代表未来收益，实盘请先小资金验证。</div>
+
+  <form id="optimizerForm">
+    <section class="panel" aria-labelledby="inputHeading">
+      <div class="section-title"><h2 id="inputHeading">01 / 回测设置</h2><span class="badge">K线单次取数，网格内存计算</span></div>
+      <div class="fields">
+        <label for="stockCode">股票代码（六位 A 股）<input id="stockCode" type="text" required pattern="[0-9A-Za-z]{1,12}" placeholder="600519" maxlength="12"></label>
+        <label for="startDate">开始日期（可选）<input id="startDate" type="date"></label>
+        <label for="endDate">结束日期（可选）<input id="endDate" type="date"></label>
+      </div>
+      <p class="muted">日期留空默认回看近一年；网格默认 MA_short 3–11、MA_long 10/15/20/25/30/35/40，仅评估短窗口小于长窗口的组合。计算沿用管理员鉴权，每分钟最多 3 次，与回测共用同一把单飞锁。</p>
+      <label class="auth" for="adminToken">管理令牌（可选）<input id="adminToken" type="password" autocomplete="off" placeholder="沿用主页面鉴权；在此输入仅用于本次请求"></label>
+      <div class="actions"><button id="runOptimizer" class="primary" type="submit">运行参数优化</button></div>
+      <p id="status" role="status" aria-live="polite">输入股票代码后运行；首次服务启动拉取 K 线可能较慢。</p>
+    </section>
+  </form>
+
+  <section class="panel" id="report" aria-labelledby="reportHeading" hidden>
+    <div class="section-title"><h2 id="reportHeading">02 / 网格结果</h2><span id="gridInfo" class="muted"></span></div>
+    <div class="metrics" id="bestMetrics"></div>
+    <p id="warning" class="notice" hidden></p>
+    <h3 style="margin-top:22px">信息比率热力图 · 行 = MA_long，列 = MA_short</h3>
+    <div class="table-wrap" tabindex="0"><table id="heatmap"></table></div>
+    <p class="muted" id="heatmapNote">单元格数值为年化信息比率；灰色空格为无效组合（短窗口 ≥ 长窗口）。悬停查看年化收益/回撤/夏普/交易次数。</p>
+  </section>
+  <footer>方法对照「量化对轰」科普视频链路（数据 → 指标 → 信号 → 回测 → 参数优化）。仅参考方法，不采信视频中任何收益数字；结果不构成投资建议。</footer>
+</main>
+<script src="/static/js/ma-optimizer.js"></script>
+</body>
+</html>

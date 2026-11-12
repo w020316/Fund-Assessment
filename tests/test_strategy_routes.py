@@ -494,3 +494,118 @@ class TestAuth:
         resp = client.post("/api/strategy/backtest", json={"strategy": "bspro_quant", "stock_code": "600519"})
         assert resp.status_code == 503
         assert "超时" in resp.json()["detail"]
+
+
+class TestOptimizeMaCross:
+    """POST /api/strategy/optimize-ma-cross — MA 金叉参数网格优化(视频链路 STEP 15)"""
+
+    endpoint = "/api/strategy/optimize-ma-cross"
+
+    @pytest.fixture(autouse=True)
+    def _reset_rate_limiter(self):
+        """限流桶为本进程内存态,先清空避免与其它测试类的请求串桶"""
+        from web.rate_limiter import limiter
+        storage = getattr(limiter, "_storage", None)
+        if storage is not None and hasattr(storage, "reset"):
+            storage.reset()
+        yield
+        if storage is not None and hasattr(storage, "reset"):
+            storage.reset()
+
+    @staticmethod
+    def _canned_result():
+        return {
+            "stock_code": "600519", "start_date": "2025-01-01", "end_date": "2025-06-30",
+            "grid": [
+                {"short_window": 5, "long_window": 20, "total_return": 0.12, "annual_return": 0.25,
+                 "max_drawdown": 0.08, "sharpe_ratio": 1.2, "information_ratio": 0.9, "trade_count": 6},
+                {"short_window": 3, "long_window": 10, "total_return": 0.05, "annual_return": 0.10,
+                 "max_drawdown": 0.10, "sharpe_ratio": 0.6, "information_ratio": 0.3, "trade_count": 9},
+            ],
+            "best": {"short_window": 5, "long_window": 20, "total_return": 0.12, "annual_return": 0.25,
+                     "max_drawdown": 0.08, "sharpe_ratio": 1.2, "information_ratio": 0.9, "trade_count": 6},
+        }
+
+    def test_returns_grid_and_warning(self, client):
+        canned = self._canned_result()
+        with patch("src.core.backtest.BacktestEngine") as engine_cls:
+            engine_cls.return_value.optimize_ma_cross.return_value = canned
+            resp = client.post(self.endpoint, json={
+                "stock_code": "600519", "start_date": "2025-01-01", "end_date": "2025-06-30",
+            })
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["data"] == canned
+        assert "历史回测不代表未来收益" in body["warning"]
+        engine_cls.return_value.optimize_ma_cross.assert_called_once_with("600519", "2025-01-01", "2025-06-30")
+
+    def test_default_dates_filled(self, client):
+        with patch("src.core.backtest.BacktestEngine") as engine_cls:
+            engine_cls.return_value.optimize_ma_cross.return_value = self._canned_result()
+            resp = client.post(self.endpoint, json={"stock_code": "000001"})
+        assert resp.status_code == 200
+        args = engine_cls.return_value.optimize_ma_cross.call_args.args
+        assert args[0] == "000001"
+        # 默认区间:开始早于结束,约一年跨度
+        assert args[1] < args[2]
+
+    @pytest.mark.parametrize("fields", [
+        {}, {"stock_code": ""}, {"stock_code": "x" * 13},
+        {"stock_code": "600519", "start_date": "2025/01/01"},
+        {"stock_code": "600519", "end_date": "not-a-date"},
+        {"stock_code": "600519", "start_date": "2025-06-01", "end_date": "2025-01-01"},
+        {"stock_code": "600519", "start_date": "2025-01-01", "end_date": "2025-01-01"},
+    ])
+    def test_rejects_invalid_request(self, client, fields):
+        payload = {"stock_code": "600519", **fields} if fields else {}
+        with patch("src.core.backtest.BacktestEngine") as engine_cls:
+            resp = client.post(self.endpoint, json=payload)
+        assert resp.status_code == 422
+        engine_cls.assert_not_called()
+
+    def test_engine_error_is_503(self, client):
+        with patch("src.core.backtest.BacktestEngine") as engine_cls:
+            engine_cls.return_value.optimize_ma_cross.side_effect = RuntimeError("upstream down")
+            resp = client.post(self.endpoint, json={"stock_code": "600519"})
+        assert resp.status_code == 503
+        assert "参数优化执行失败" in resp.json()["detail"]
+
+    def test_rate_limit(self, client):
+        with patch("src.core.backtest.BacktestEngine") as engine_cls:
+            engine_cls.return_value.optimize_ma_cross.return_value = self._canned_result()
+            responses = [client.post(self.endpoint, json={"stock_code": "600519"}) for _ in range(4)]
+        assert [resp.status_code for resp in responses] == [200, 200, 200, 429]
+
+    def test_requires_auth_and_accepts_valid_token(self, client, monkeypatch):
+        monkeypatch.setenv("APP_ENV", "production")
+        monkeypatch.setenv("ADMIN_TOKEN", "optimize-ma-test-token")
+        monkeypatch.delenv("ADMIN_TOKENS", raising=False)
+        with patch("src.core.backtest.BacktestEngine") as engine_cls:
+            assert client.post(self.endpoint, json={"stock_code": "600519"}).status_code == 401
+            engine_cls.assert_not_called()
+            resp = client.post(self.endpoint, json={"stock_code": "600519"},
+                               headers={"Authorization": "Bearer optimize-ma-test-token"})
+        assert resp.status_code == 200
+        engine_cls.return_value.optimize_ma_cross.assert_called_once()
+
+    def test_shares_backtest_guard(self, client):
+        from web.routes.strategy import _single_backtest_guard
+        guard = _single_backtest_guard()
+        next(guard)
+        try:
+            with patch("src.core.backtest.BacktestEngine") as engine_cls:
+                resp = client.post(self.endpoint, json={"stock_code": "600519"})
+            assert resp.status_code == 503
+            engine_cls.assert_not_called()
+        finally:
+            guard.close()
+
+    def test_optimizer_page_is_served(self, client):
+        resp = client.get("/static/ma-optimizer.html")
+        assert resp.status_code == 200
+        assert "MA 金叉参数优化热力图" in resp.text
+        assert "历史回测不代表未来收益" in resp.text
+        js = client.get("/static/js/ma-optimizer.js")
+        assert js.status_code == 200
+        assert "innerHTML" not in js.text
+        assert "localStorage.setItem" not in js.text
