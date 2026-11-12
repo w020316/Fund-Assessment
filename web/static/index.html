@@ -5143,7 +5143,7 @@ async function runStrategyBacktest() {
       ['最大回撤', fmtNum(data.max_drawdown)],
       ['夏普比率', fmtNum(data.sharpe_ratio)],
       ['胜率', fmtNum(data.win_rate)],
-      ['样本只数', fmtNum(data.trades)]
+      ['交易次数', fmtNum(data.trades)]
     ], `${data.warning || '假设性回测：因子取当前快照，存在未来函数偏差。'}${data.partial ? ' 本次仅完成部分候选股票计算。' : ''} 未扣交易成本；仅作筛选参考，不是真实历史业绩。`);
   } catch (e) {
     _strategyLabError(`回测失败(执行异常或行情不可用)`, e);
