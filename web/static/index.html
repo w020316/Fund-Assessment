@@ -2089,6 +2089,17 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
           </div>
         </div>
 
+        <!-- 分散度诊断(2026-11-12):权重集中度 HHI/有效持仓数 + 持仓间相关矩阵 -->
+        <div class="card mb-16">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+            <span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/></svg> 分散度诊断</span>
+            <button class="btn btn-outline" style="padding:4px 12px;font-size:12px;" onclick="loadPortfolioDiversification()">诊断</button>
+          </div>
+          <div id="portfolioDiverBody" style="padding:8px 0;">
+            <div style="color:var(--text-muted);text-align:center;padding:20px 0;">点击"诊断"评估持仓集中度与持仓间相关性——名义分散不等于实际分散</div>
+          </div>
+        </div>
+
         <!-- 风控状态 -->
         <div class="card">
           <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> 风控状态</div>
@@ -7305,6 +7316,70 @@ async function loadPortfolioRisk() {
     `;
   } catch (e) {
     body.innerHTML = `<div style="color:var(--accent-blue);text-align:center;padding:20px 0;">分析失败: ${escapeHtml(e.message || e)}</div>`;
+  }
+}
+
+// 分散度诊断(2026-11-12): HHI/有效持仓数 + 持仓间相关矩阵。
+// 缺失显示缺失(—), 相关性低→高 用 绿→红 着色(高相关=风险)。
+async function loadPortfolioDiversification() {
+  const body = document.getElementById('portfolioDiverBody');
+  if (!localStorage.getItem('admin_token')) {
+    if (body) body.innerHTML = tokenGateHTML('分散度诊断');
+    return;
+  }
+  body.innerHTML = '<div style="text-align:center;padding:20px 0;color:var(--text-muted);">诊断中... 逐只拉取历史净值并计算相关性,持仓越多耗时越长</div>';
+  try {
+    const data = await api('/api/portfolio/diversification?window=1y');
+    const d = (data && data.data) ? data.data : data;
+    if (!d) { body.innerHTML = '<div style="color:var(--accent-blue);text-align:center;padding:20px 0;">接口返回空</div>'; return; }
+    if (!d.funds || !d.funds.length) {
+      body.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:20px 0;">暂无持仓,请先在持仓页录入。</div>';
+      return;
+    }
+    const corrColor = (v) => (v == null ? 'var(--text-muted)'
+      : (v > 0.85 ? 'var(--color-up)' : (v > 0.6 ? '#FBBF24' : 'var(--accent-cyan)')));
+    const fundsRow = (d.funds || []).map(f => {
+      const w = (d.weights && d.weights[f.fund_code] != null) ? (d.weights[f.fund_code] * 100) : null;
+      return `<tr>
+        <td style="color:var(--accent-cyan);">${escapeHtml(f.fund_code)}</td>
+        <td>${escapeHtml(f.fund_name || '—')}</td>
+        <td style="font-weight:600;">${w == null ? '—' : fmtNum(w) + '%'}</td>
+        <td>${f.degraded ? '<span style="color:var(--accent-blue);">数据不足</span>' : f.nav_points + ' 点'}</td>
+      </tr>`;
+    }).join('');
+    const codes = (d.correlation && d.correlation.codes) || [];
+    const matrix = (d.correlation && d.correlation.matrix) || [];
+    const corrTable = codes.length >= 2
+      ? `<div class="table-wrap" tabindex="0" style="max-height:260px;overflow:auto;margin-top:8px;">
+          <table>
+            <thead><tr><th></th>${codes.map(c => `<th>${escapeHtml(c)}</th>`).join('')}</tr></thead>
+            <tbody>${matrix.map((row, i) => `<tr><td style="color:var(--accent-cyan);">${escapeHtml(codes[i])}</td>${
+              row.map((v, j) => `<td style="color:${i === j ? 'var(--text-muted)' : corrColor(v)};${i === j ? 'background:rgba(255,255,255,0.03);' : ''}">${i === j ? '—' : (v == null ? '—' : fmtNum(v, 2))}</td>`).join('')
+            }</tr>`).join('')}</tbody>
+          </table>
+        </div>`
+      : '<div style="color:var(--text-muted);text-align:center;padding:12px 0;">持仓不足 2 只(或有效净值不足),无法计算相关矩阵。</div>';
+    body.innerHTML = `
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;padding:8px 12px;background:rgba(255,255,255,0.02);border-radius:6px;flex-wrap:wrap;">
+        <div style="font-size:11px;color:var(--text-muted);">有效持仓</div>
+        <div style="font-size:18px;font-weight:700;color:var(--accent-cyan);">${d.effective_holdings == null ? '—' : d.effective_holdings}</div>
+        <div style="font-size:11px;color:var(--text-muted);">/ 名义 ${d.funds.length} 只 · HHI ${d.hhi == null ? '—' : fmtNum(d.hhi, 3)}</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-left:auto;">平均相关 ${d.correlation && d.correlation.avg_correlation != null ? fmtNum(d.correlation.avg_correlation, 2) : '—'}</div>
+      </div>
+      <div style="margin-top:4px;font-size:12px;color:var(--text-muted);">${escapeHtml(d.note || '')}</div>
+      ${corrTable}
+      <div class="table-wrap" tabindex="0" style="max-height:200px;overflow-y:auto;margin-top:12px;">
+        <table>
+          <thead><tr><th>代码</th><th>名称</th><th>市值权重</th><th>净值样本</th></tr></thead>
+          <tbody>${fundsRow}</tbody>
+        </table>
+      </div>
+      <div style="margin-top:8px;font-size:11px;color:var(--text-muted);">
+        口径:有效持仓 = 1/HHI(赫芬达尔),即与当前集中度等价的等权持仓数;相关性为近一年日期交集日收益的 Pearson 相关系数,重叠不足 21 个交易日或零方差显示 —。名义分散≠实际分散:若持仓高度同涨同跌,跌时难以幸免。静态份额口径,忽略申赎现金流。
+      </div>
+    `;
+  } catch (e) {
+    body.innerHTML = `<div style="color:var(--accent-blue);text-align:center;padding:20px 0;">诊断失败: ${escapeHtml(e.message || e)}</div>`;
   }
 }
 

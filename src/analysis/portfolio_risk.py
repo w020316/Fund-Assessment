@@ -168,3 +168,88 @@ def _safe_shares(val: Any) -> float:
     except (TypeError, ValueError):
         return 0.0
     return v if v > 0 and np.isfinite(v) else 0.0
+
+
+# ===== 分散度诊断(2026-11-12,范围裁决后量化向) =====
+
+MIN_CORR_OVERLAP_RETURNS: int = 21  # 相关性最少重叠日收益数(约一个月),不足按缺失
+
+
+def compute_correlation(series_map: dict[str, list[tuple[str, float]]]) -> dict[str, Any]:
+    """持仓间相关性: 日期交集上的日收益 Pearson 相关矩阵。
+
+    与 combine_portfolio_nav 同一交集口径(缺日期不静默填 0);交集日收益
+    < MIN_CORR_OVERLAP_RETURNS 点,或某基金零方差(如货基) → 该基金对为
+    None(不编相关系数)。对称矩阵,对角线恒 1.0(自身)。
+    """
+    valid = {
+        code: [(d, float(v)) for d, v in seq if float(v) > 0]
+        for code, seq in series_map.items() if seq
+    }
+    codes = sorted(valid)
+    n = len(codes)
+    out: dict[str, Any] = {
+        "codes": codes,
+        "matrix": [[1.0 if i == j else None for j in range(n)] for i in range(n)],
+        "avg_correlation": None,
+        "overlap_points": 0,
+        "valid_pairs": 0,
+    }
+    if n < 2:
+        return out
+    common: set[str] | None = None
+    for seq in valid.values():
+        dates = {d for d, _ in seq}
+        common = dates if common is None else (common & dates)
+    if not common:  # type: ignore[operator]
+        return out
+    lookup = {code: dict(seq) for code, seq in valid.items()}
+    dates_sorted = sorted(common)  # type: ignore[arg-type]
+    rets: dict[str, np.ndarray] = {}
+    for code in codes:
+        arr = np.array([lookup[code][d] for d in dates_sorted], dtype=np.float64)
+        r = np.diff(arr) / arr[:-1]
+        if r.size >= MIN_CORR_OVERLAP_RETURNS and np.std(r, ddof=1) > 0:
+            rets[code] = r
+    out["overlap_points"] = int(next(iter(rets.values())).size) if rets else 0
+    pair_vals: list[float] = []
+    for i, a in enumerate(codes):
+        for j in range(i + 1, n):
+            b = codes[j]
+            if a in rets and b in rets:
+                corr = float(np.corrcoef(rets[a], rets[b])[0, 1])
+                if np.isfinite(corr):
+                    out["matrix"][i][j] = out["matrix"][j][i] = round(corr, 4)
+                    pair_vals.append(corr)
+    out["valid_pairs"] = len(pair_vals)
+    out["avg_correlation"] = round(sum(pair_vals) / len(pair_vals), 4) if pair_vals else None
+    return out
+
+
+def compute_concentration(
+    shares_map: dict[str, float], last_nav_map: dict[str, float],
+) -> dict[str, Any]:
+    """权重集中度: HHI 与有效持仓数(=1/HHI,赫芬达尔口径)。
+
+    权重按市值(份额 × 最新净值);市值合计 ≤0 或净值缺失 → None(缺失显示缺失)。
+    effective_holdings 是"若各持仓等权,多少只等权持仓的 HHI 与当前相同"。
+    """
+    mv: dict[str, float] = {}
+    for code, nav in last_nav_map.items():
+        shares = _safe_shares(shares_map.get(code))
+        try:
+            nav_f = float(nav)
+        except (TypeError, ValueError):
+            continue
+        if shares > 0 and nav_f > 0 and np.isfinite(nav_f):
+            mv[code] = shares * nav_f
+    total = sum(mv.values())
+    if total <= 0:
+        return {"weights": {}, "hhi": None, "effective_holdings": None}
+    weights = {code: mv[code] / total for code in mv}
+    hhi = float(sum(w * w for w in weights.values()))
+    return {
+        "weights": {code: round(w, 6) for code, w in weights.items()},
+        "hhi": round(hhi, 4),
+        "effective_holdings": round(1.0 / hhi, 2) if hhi > 0 else None,
+    }

@@ -288,3 +288,179 @@ class TestRiskRoute:
         resp = client.get("/api/portfolio/risk")
         assert resp.status_code == 200
         assert resp.json()["degraded"] is True
+
+
+# ============ 分散度诊断:纯计算(2026-11-12) ============
+
+
+def _seq(dates_returns: list[tuple[str, float]]) -> list[tuple[str, float]]:
+    return list(dates_returns)
+
+
+def _navs_from_returns(rets: list[float], start: float = 1.0) -> list[float]:
+    """由显式日收益序列构造净值(保证日收益有方差,避免常数收益的退化相关)。"""
+    navs = [start]
+    for r in rets:
+        navs.append(navs[-1] * (1 + r))
+    return navs
+
+
+_RET_PATTERN = [0.01, -0.004, 0.008, 0.015, -0.002, 0.006, -0.009, 0.012]
+
+
+def _pattern_returns(n: int) -> list[float]:
+    return [_RET_PATTERN[i % len(_RET_PATTERN)] for i in range(n)]
+
+
+class TestComputeCorrelation:
+    def test_perfect_positive_and_negative(self):
+        # b 与 a 日收益完全相同 → 1;c 完全取反 → -1(手算对拍)
+        dates = [f"d{i:02d}" for i in range(25)]
+        rets = _pattern_returns(24)
+        a = _seq([(dates[i], v) for i, v in enumerate(_navs_from_returns(rets))])
+        b = _seq([(dates[i], v) for i, v in enumerate(_navs_from_returns(rets))])
+        c = _seq([(dates[i], v) for i, v in enumerate(_navs_from_returns([-r for r in rets]))])
+        out = prisk.compute_correlation({"A": a, "B": b, "C": c})
+        codes = out["codes"]
+        ia, ib, ic = codes.index("A"), codes.index("B"), codes.index("C")
+        assert out["matrix"][ia][ib] == pytest.approx(1.0, abs=1e-6)
+        assert out["matrix"][ia][ic] == pytest.approx(-1.0, abs=1e-6)
+        assert out["avg_correlation"] is not None
+        assert out["valid_pairs"] == 3
+        assert out["overlap_points"] == 24
+        # 对角线恒 1,矩阵对称
+        assert out["matrix"][ia][ia] == 1.0
+        assert out["matrix"][ic][ib] == out["matrix"][ib][ic]
+
+    def test_insufficient_overlap_returns_none(self):
+        """交集日收益 < 21 点 → 相关对 None,不编相关系数。"""
+        dates = [f"d{i}" for i in range(15)]  # 14 个日收益 < 21
+        a = _seq([(dates[i], 1.0 + 0.01 * i) for i in range(15)])
+        b = _seq([(dates[i], 1.0 - 0.005 * i) for i in range(15)])
+        out = prisk.compute_correlation({"A": a, "B": b})
+        assert out["valid_pairs"] == 0
+        assert out["matrix"][0][1] is None
+        assert out["avg_correlation"] is None
+
+    def test_disjoint_dates_returns_none(self):
+        a = _seq([(f"a{i}", 1.0 + 0.01 * i) for i in range(30)])
+        b = _seq([(f"b{i}", 1.0 - 0.01 * i) for i in range(30)])
+        out = prisk.compute_correlation({"A": a, "B": b})
+        assert out["valid_pairs"] == 0
+
+    def test_zero_variance_fund_excluded(self):
+        """零方差(如货基)基金不参与相关对,但不影响其它对。"""
+        dates = [f"d{i:02d}" for i in range(25)]
+        a = _seq([(dates[i], 1.0 * (1.01 ** i)) for i in range(25)])
+        flat = _seq([(dates[i], 1.0) for i in range(25)])
+        c = _seq([(dates[i], 1.0 * (0.99 ** i)) for i in range(25)])
+        out = prisk.compute_correlation({"A": a, "FLAT": flat, "C": c})
+        iflat = out["codes"].index("FLAT")
+        ia, ic = out["codes"].index("A"), out["codes"].index("C")
+        assert out["matrix"][iflat][ia] is None
+        assert out["matrix"][ia][ic] is not None
+        assert out["valid_pairs"] == 1
+
+    def test_single_fund_and_empty(self):
+        one = _seq([(f"d{i}", 1.0 + 0.01 * i) for i in range(30)])
+        out = prisk.compute_correlation({"A": one})
+        assert out["codes"] == ["A"]
+        assert out["avg_correlation"] is None
+        assert prisk.compute_correlation({})["codes"] == []
+
+
+class TestComputeConcentration:
+    def test_two_funds_weights_hhi(self):
+        # A 市值 100×2=200,B 50×2=100 → 权重 2/3、1/3
+        out = prisk.compute_concentration({"A": 100.0, "B": 50.0}, {"A": 2.0, "B": 2.0})
+        assert out["weights"]["A"] == pytest.approx(2 / 3, abs=1e-6)
+        assert out["weights"]["B"] == pytest.approx(1 / 3, abs=1e-6)
+        hhi = (2 / 3) ** 2 + (1 / 3) ** 2
+        assert out["hhi"] == pytest.approx(hhi, abs=1e-4)
+        assert out["effective_holdings"] == pytest.approx(1 / hhi, abs=1e-2)
+
+    def test_equal_weights_effective_equals_n(self):
+        out = prisk.compute_concentration({"A": 1.0, "B": 1.0, "C": 1.0, "D": 1.0},
+                                          {c: 2.0 for c in "ABCD"})
+        assert out["effective_holdings"] == pytest.approx(4.0, abs=1e-6)
+
+    def test_missing_nav_fail_closed(self):
+        out = prisk.compute_concentration({"A": 100.0}, {"A": 0.0})
+        assert out["hhi"] is None and out["effective_holdings"] is None
+        out2 = prisk.compute_concentration({}, {})
+        assert out2["weights"] == {} and out2["hhi"] is None
+
+
+# ============ 分散度诊断:路由(2026-11-12) ============
+
+
+class TestDiversificationRoute:
+    def test_requires_admin_token(self, client, monkeypatch):
+        monkeypatch.setenv("ADMIN_TOKEN", "secret-token")
+        monkeypatch.setenv("APP_ENV", "production")
+        assert client.get("/api/portfolio/diversification").status_code == 401
+
+    def test_invalid_window_422(self, client):
+        resp = client.get("/api/portfolio/diversification", params={"window": "10y"})
+        assert resp.status_code == 422
+        assert "非法窗口" in resp.json()["detail"]
+
+    def test_empty_positions(self, client):
+        resp = client.get("/api/portfolio/diversification")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["funds"] == []
+        assert data["note"] == "暂无持仓"
+        assert data["effective_holdings"] is None
+
+    def test_two_correlated_funds(self, client, tmp_path):
+        """两基金日收益高度重叠 → 相关矩阵可算,note 含有效持仓。"""
+        (tmp_path / "positions.json").write_text(
+            '{"positions":[{"fund_code":"110022","fund_name":"消费","shares":100.0,"cost_nav":2.0},'
+            '{"fund_code":"008984","fund_name":"科技","shares":50.0,"cost_nav":1.5}]}',
+            encoding="utf-8",
+        )
+        rets = _pattern_returns(27)
+        navs_a = _navs_from_returns(rets)
+        navs_b = _navs_from_returns([r * 0.8 for r in rets], start=2.0)  # 同向略异幅
+        dates = [f"2026-10-{i:02d}" for i in range(1, 29)]
+        series = {
+            "110022": [{"date": d, "nav": v, "acc_nav": v} for d, v in zip(dates, navs_a)],
+            "008984": [{"date": d, "nav": v, "acc_nav": v} for d, v in zip(dates, navs_b)],
+        }
+
+        def _fake_history(code, period):
+            return series.get(code, [])
+
+        with patch("src.core.fund_nav_source.get_fund_nav_history", side_effect=_fake_history):
+            resp = client.get("/api/portfolio/diversification")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["degraded"] is False
+        assert data["effective_holdings"] is not None
+        corr = data["correlation"]
+        assert corr["valid_pairs"] == 1
+        assert corr["matrix"][0][1] is not None and corr["matrix"][0][1] > 0.9
+        assert "有效持仓" in data["note"]
+
+    def test_history_missing_degrades(self, client, tmp_path):
+        (tmp_path / "positions.json").write_text(
+            '{"positions":[{"fund_code":"110022","fund_name":"消费","shares":100.0,"cost_nav":2.0}]}',
+            encoding="utf-8",
+        )
+        with patch("src.core.fund_nav_source.get_fund_nav_history", return_value=[]):
+            resp = client.get("/api/portfolio/diversification")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["degraded"] is True
+        assert data["funds"][0]["degraded"] is True
+        assert data["effective_holdings"] is None
+
+    def test_compute_exception_still_200(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "web.routes.portfolio.fund_route._load_positions",
+            lambda: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+        resp = client.get("/api/portfolio/diversification")
+        assert resp.status_code == 200
+        assert resp.json()["degraded"] is True

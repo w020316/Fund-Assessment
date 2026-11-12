@@ -470,6 +470,126 @@ async def get_portfolio_risk(
         }
 
 
+@router.get("/diversification", dependencies=[Depends(require_admin)])
+async def get_portfolio_diversification(
+    window: str = Query("1y", max_length=8, description="窗口: 1m|3m|6m|1y|3y|max"),
+):
+    """组合分散度诊断(2026-11-12,范围裁决后量化向)。
+
+    两块互补信息:① 权重集中度(HHI/有效持仓数,按份额×最新净值市值);
+    ② 持仓间相关矩阵(日期交集日收益 Pearson,重叠 <21 日或零方差按缺失)。
+    名义持仓多但相关性高 = 名义分散、实际集中,note 据实提示。
+    与 /risk 同一套降级纪律:数据缺失降级标注,绝不 500,绝不编数。
+    """
+    empty = {
+        "window": window, "method": "static-shares",
+        "funds": [], "effective_holdings": None, "hhi": None,
+        "correlation": {"codes": [], "matrix": [], "avg_correlation": None,
+                        "overlap_points": 0, "valid_pairs": 0},
+        "degraded": False, "note": "暂无持仓", "generated_at": _now_iso(),
+    }
+    try:
+        try:
+            period = prisk.resolve_period(window)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=_status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e),
+            ) from e
+
+        positions = fund_route._load_positions()
+        held = [
+            (_safe_str(p.get("fund_code")), _safe_float(p.get("shares")), _safe_str(p.get("fund_name")))
+            for p in positions
+        ]
+        held = [(code, shares, name) for code, shares, name in held if code and shares > 0]
+        if not held:
+            return empty
+
+        sem = asyncio.Semaphore(_RISK_FETCH_CONCURRENCY)
+
+        async def _load(code: str) -> list[dict]:
+            async with sem:
+                return await asyncio.to_thread(_fetch_fund_nav_series, code, period)
+
+        fetched = await asyncio.gather(*(_load(code) for code, _s, _n in held), return_exceptions=True)
+
+        funds_out: list[dict] = []
+        series_map: dict[str, list[tuple[str, float]]] = {}
+        shares_map: dict[str, float] = {}
+        last_nav_map: dict[str, float] = {}
+        degraded = False
+        for (code, shares, name), series in zip(held, fetched):
+            if isinstance(series, BaseException):
+                logger.warning(f"get_portfolio_diversification {code} 历史拉取失败: {series}")
+                series = []
+            shares_map[code] = shares
+            seq = sorted(
+                (
+                    (_safe_str(row.get("date")), _safe_float(row.get("acc_nav"), _safe_float(row.get("nav"))))
+                    for row in series
+                ),
+                key=lambda item: item[0],
+            )
+            seq = [(d, v) for d, v in seq if d and v > 0]
+            fund_degraded = len(seq) < 2
+            if fund_degraded:
+                degraded = True
+            else:
+                series_map[code] = seq
+                last_nav_map[code] = seq[-1][1]
+            funds_out.append({
+                "fund_code": code,
+                "fund_name": name,
+                "window": window,
+                "degraded": fund_degraded,
+                "nav_points": len(seq),
+            })
+
+        correlation = prisk.compute_correlation(series_map)
+        concentration = prisk.compute_concentration(shares_map, last_nav_map)
+        eff = concentration["effective_holdings"]
+        avg_corr = correlation["avg_correlation"]
+
+        notes: list[str] = []
+        if eff is not None:
+            if eff < 1.5:
+                notes.append(f"有效持仓仅 {eff} 只,权重高度集中")
+            else:
+                notes.append(f"按市值 HHI 折算有效持仓 {eff} 只(名义 {len(held)} 只)")
+        else:
+            notes.append("净值缺失,集中度无法评估")
+        if correlation["valid_pairs"] == 0:
+            notes.append(f"净值重叠区间不足 {prisk.MIN_CORR_OVERLAP_RETURNS} 个交易日或零方差,相关性无法评估")
+        elif avg_corr is not None:
+            if avg_corr > 0.85:
+                notes.append(f"平均相关 {avg_corr:.2f} 偏高——名义分散、实际同涨同跌")
+            elif avg_corr > 0.6:
+                notes.append(f"平均相关 {avg_corr:.2f} 中等,分散效果有限")
+            else:
+                notes.append(f"平均相关 {avg_corr:.2f} 较低,分散效果较好")
+
+        return {
+            "window": window,
+            "period": period,
+            "method": "static-shares",
+            "funds": funds_out,
+            "effective_holdings": eff,
+            "hhi": concentration["hhi"],
+            "weights": concentration["weights"],
+            "correlation": correlation,
+            "degraded": degraded,
+            "note": "；".join(notes),
+            "generated_at": _now_iso(),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"get_portfolio_diversification failed: {e}")
+        payload = dict(empty)
+        payload.update({"degraded": True, "note": f"分散度计算异常: {e}"})
+        return payload
+
+
 # ==================================================================
 # STAGE6: attribution 收益归因(批次 B 功能 #5)
 # ==================================================================
