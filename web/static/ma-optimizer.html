@@ -87,6 +87,11 @@
   <section class="panel" id="report" aria-labelledby="reportHeading" hidden>
     <div class="section-title"><h2 id="reportHeading">02 / 网格结果</h2><span id="gridInfo" class="muted"></span></div>
     <div class="metrics" id="bestMetrics"></div>
+    <div id="tearSheet" hidden>
+      <h3 style="margin-top:22px">最优组合月度收益 · Tear Sheet</h3>
+      <p class="muted" id="tearNote"></p>
+      <div class="table-wrap" tabindex="0"><table id="monthlyTable"></table></div>
+    </div>
     <p id="warning" class="notice" hidden></p>
     <h3 style="margin-top:22px">信息比率热力图 · 行 = MA_long，列 = MA_short</h3>
     <div class="legend" role="img" aria-label="色标：绿色为负 IR（跑输），红色为正 IR（跑赢），深浅表示绝对值大小">

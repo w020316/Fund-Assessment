@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import math
-from datetime import date
+from datetime import date, timedelta
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -835,3 +835,134 @@ class TestRunAllStrategies:
         )
         # 至少部分策略应有结果
         assert len(results) >= 1
+
+
+class TestTearSheet:
+    """立项 1(2026-11-12,借鉴 quantstats): 月度收益表 + 偏度/峰度。
+
+    红线: 缺失显示缺失 —— 样本不足返回 None/[],不填 0 冒充。
+    """
+
+    def test_monthly_returns_known_curve(self):
+        """两月逐日已知权益 → 月度表精确且链式衔接"""
+        from src.core.backtest import _calc_monthly_returns
+
+        initial = 1_000_000.0
+        # 2025-01: 20 个交易日,+1%/日 → 月末 = initial * 1.01^20
+        jan = [date(2025, 1, d) for d in range(2, 25)]
+        # 2025-02: 5 个交易日,-2%/日
+        feb = [date(2025, 2, d) for d in range(3, 10)]
+        dates = jan + feb
+        curve = [initial]
+        equity = initial
+        for i in range(len(dates)):
+            equity *= 1.01 if i < len(jan) else 0.98
+            curve.append(equity)
+
+        monthly = _calc_monthly_returns(dates, curve)
+        assert len(monthly) == 2
+        assert monthly[0]["month"] == "2025-01"
+        assert monthly[0]["return_pct"] == pytest.approx((1.01 ** len(jan) - 1) * 100, abs=0.01)
+        assert monthly[1]["month"] == "2025-02"
+        assert monthly[1]["return_pct"] == pytest.approx((0.98 ** len(feb) - 1) * 100, abs=0.01)
+
+    def test_monthly_returns_misaligned_dates_returns_empty(self):
+        """日期与权益曲线长度不齐 → 返回 [],不伪造月度序列"""
+        from src.core.backtest import _calc_monthly_returns
+
+        assert _calc_monthly_returns([date(2025, 1, 2)], [100.0, 101.0, 102.0]) == []
+        assert _calc_monthly_returns([], [100.0]) == []
+
+    def test_skew_kurtosis_known_series(self):
+        """对称序列偏度≈0;右偏序列偏度>0;峰度随极值增大"""
+        from src.core.backtest import _calc_skew_kurtosis
+
+        rng = np.random.default_rng(3)
+        normal = rng.normal(0.0, 0.01, 100).tolist()
+        skew, kurt = _calc_skew_kurtosis(normal)
+        assert skew is not None and abs(skew) < 0.6
+        assert kurt is not None and abs(kurt) < 0.6
+
+        right_skewed = [0.001] * 29 + [0.10]
+        skew2, kurt2 = _calc_skew_kurtosis(right_skewed)
+        assert skew2 is not None and skew2 > 2.0
+        assert kurt2 is not None and kurt2 > 5.0
+
+    def test_skew_kurtosis_insufficient_sample_returns_none(self):
+        """样本 <3 → (None, None);样本=3 → 偏度有值、峰度 None"""
+        from src.core.backtest import _calc_skew_kurtosis
+
+        assert _calc_skew_kurtosis([]) == (None, None)
+        assert _calc_skew_kurtosis([0.01]) == (None, None)
+        assert _calc_skew_kurtosis([0.01, -0.01]) == (None, None)
+        skew, kurt = _calc_skew_kurtosis([0.01, -0.01, 0.02])
+        assert skew is not None
+        assert kurt is None
+
+    def test_calc_metrics_fills_tear_sheet_fields(self):
+        """_calc_metrics 带 equity_dates → monthly_returns/skew/kurt 被填充"""
+        engine = BacktestEngine.__new__(BacktestEngine)
+        initial = 1_000_000.0
+        rng = np.random.default_rng(11)
+        daily_returns = rng.normal(0.0004, 0.012, 60)
+        equity_curve = [initial]
+        for r in daily_returns:
+            equity_curve.append(equity_curve[-1] * (1 + r))
+        dates: list[date] = []
+        d = date(2025, 1, 2)
+        while len(dates) < len(daily_returns):
+            if d.weekday() < 5:
+                dates.append(d)
+            d += timedelta(days=1)
+
+        result = engine._calc_metrics(
+            equity_curve=equity_curve,
+            trades=[],
+            initial_capital=initial,
+            start_date="2025-01-01",
+            end_date="2025-03-31",
+            max_drawdown=0.05,
+            equity_dates=dates,
+        )
+        assert result.monthly_returns, "60 个交易日应覆盖至少 2 个月"
+        assert sum(m["return_pct"] for m in result.monthly_returns) == pytest.approx(
+            (equity_curve[-1] / initial - 1) * 100, abs=0.5
+        )
+        assert result.skewness is not None
+        assert result.kurtosis is not None
+
+    def test_calc_metrics_without_dates_monthly_empty(self):
+        """未传 equity_dates(旧调用方兼容)→ monthly_returns=[]、skew/kurt 正常"""
+        engine = BacktestEngine.__new__(BacktestEngine)
+        initial = 1_000_000.0
+        rng = np.random.default_rng(12)
+        daily_returns = rng.normal(0.0004, 0.012, 30)
+        equity_curve = [initial]
+        for r in daily_returns:
+            equity_curve.append(equity_curve[-1] * (1 + r))
+        result = engine._calc_metrics(
+            equity_curve=equity_curve,
+            trades=[],
+            initial_capital=initial,
+            start_date="2025-01-01",
+            end_date="2025-02-15",
+            max_drawdown=0.05,
+        )
+        assert result.monthly_returns == []
+        assert result.skewness is not None
+
+    def test_optimize_best_includes_tear_sheet(self):
+        """optimize_ma_cross 的 best 应带 monthly_returns/skewness/kurtosis,网格其余条目不带"""
+        from tests.test_backtest_ma_cross import _make_kline, _mock_dm
+
+        rng = np.random.default_rng(5)
+        closes = (100 + np.cumsum(rng.normal(0.05, 1.5, 150))).tolist()
+        engine = BacktestEngine(data_manager=_mock_dm(_make_kline(closes)))
+        opt = engine.optimize_ma_cross(
+            "600519", "2025-01-01", "2025-08-31",
+            short_windows=range(3, 7), long_windows=range(10, 26, 5),
+        )
+        assert opt["grid"], "网格不应为空"
+        assert opt["best"]["monthly_returns"], "best 应带月度收益表"
+        assert isinstance(opt["best"]["skewness"], float)
+        assert "monthly_returns" not in opt["grid"][-1] or opt["grid"][-1] is not opt["best"]

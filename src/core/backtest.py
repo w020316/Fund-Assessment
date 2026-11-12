@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Callable, Optional
 
@@ -35,6 +35,10 @@ class BacktestResult:
     calmar_ratio: float = 0.0   # Calmar 比率:年化收益/最大回撤
     volatility: float = 0.0     # 年化波动率:daily_returns.std * sqrt(252)
     information_ratio: float = 0.0  # 信息比率:相对买入持有基准的超额收益/跟踪误差
+    # 立项 1(2026-11-12,借鉴 quantstats tear sheet):日收益分布形态 + 月度收益表
+    skewness: float | None = None   # 日收益偏度,样本 <3 或退化时 None(JSON null → 前端 —)
+    kurtosis: float | None = None   # 日收益超额峰度(pandas/Fisher 口径),样本 <4 时 None
+    monthly_returns: list[dict] = field(default_factory=list)  # [{"month": "YYYY-MM", "return_pct": 5.2}]
 
 
 def _calc_sortino_ratio(returns: list[float], risk_free: float = _RISK_FREE_RATE) -> float:
@@ -141,6 +145,47 @@ def _calc_information_ratio(
     if tracking_error <= 0:
         return 0.0
     return float(np.mean(excess) * _TRADING_DAYS_PER_YEAR / (tracking_error * np.sqrt(_TRADING_DAYS_PER_YEAR)))
+
+
+def _calc_skew_kurtosis(returns: list[float]) -> tuple[Optional[float], Optional[float]]:
+    """日收益偏度与超额峰度(pandas 口径,kurt 为 Fisher 超额峰度,正态分布=0)。
+
+    立项 1(2026-11-12,借鉴 quantstats tear sheet 的分布形态指标)。
+    样本不足(偏度需 ≥3、峰度需 ≥4)或序列退化时返回 None —— 缺失显示缺失,
+    不填 0 冒充"零偏度"。
+    """
+    if len(returns) < 3:
+        return None, None
+    s = pd.Series(returns, dtype=float)
+    skew = s.skew()
+    kurt = s.kurt() if len(returns) >= 4 else None
+    skew_v = float(skew) if pd.notna(skew) else None
+    kurt_v = float(kurt) if kurt is not None and pd.notna(kurt) else None
+    return skew_v, kurt_v
+
+
+def _calc_monthly_returns(equity_dates: list, equity_curve: list[float]) -> list[dict]:
+    """按自然月聚合权益曲线的月度收益表(%),借鉴 quantstats Monthly Returns 表。
+
+    equity_curve[0] 为期初本金(无日期),equity_dates 与 equity_curve[1:] 逐日对齐;
+    长度不齐(如日期解析跳行)返回 [],由前端按缺失显示 —,不伪造月度序列。
+    相邻月份存在日历缺口时,该行收益为两个观测月末间的区间收益(如实计算)。
+    """
+    if not equity_dates or len(equity_dates) != len(equity_curve) - 1:
+        return []
+    month_end: dict[tuple[int, int], float] = {}
+    for d, equity in zip(equity_dates, equity_curve[1:]):
+        month_end[(d.year, d.month)] = equity  # 逐日覆盖,循环结束即该月最后观测值
+    monthly: list[dict] = []
+    prev = equity_curve[0]
+    for key in sorted(month_end):
+        end_equity = month_end[key]
+        monthly.append({
+            "month": f"{key[0]:04d}-{key[1]:02d}",
+            "return_pct": round((end_equity / prev - 1) * 100, 2) if prev > 0 else 0.0,
+        })
+        prev = end_equity
+    return monthly
 
 
 StrategyFunc = Callable[[date, dict, pd.DataFrame], list[Signal]]
@@ -460,6 +505,7 @@ class BacktestEngine:
         }
 
         equity_curve: list[float] = [initial_capital]
+        equity_dates: list[date] = []  # 与 equity_curve[1:] 逐日对齐,供月度收益表聚合
         trades: list[dict] = []
         peak_equity = initial_capital
         max_drawdown = 0.0
@@ -500,6 +546,7 @@ class BacktestEngine:
             )
             portfolio["total_value"] = portfolio["cash"] + position_value
             equity_curve.append(portfolio["total_value"])
+            equity_dates.append(current_date)
 
             if portfolio["total_value"] > peak_equity:
                 peak_equity = portfolio["total_value"]
@@ -516,7 +563,7 @@ class BacktestEngine:
 
         return self._calc_metrics(
             equity_curve, trades, initial_capital, start_date, end_date, max_drawdown,
-            benchmark_returns=benchmark_returns,
+            benchmark_returns=benchmark_returns, equity_dates=equity_dates,
         )
 
     def _execute_signal(
@@ -604,6 +651,7 @@ class BacktestEngine:
         end_date: str,
         max_drawdown: float,
         benchmark_returns: Optional[list[float]] = None,
+        equity_dates: Optional[list[date]] = None,
     ) -> BacktestResult:
         total_return = (equity_curve[-1] - initial_capital) / initial_capital if initial_capital > 0 else 0.0
 
@@ -631,6 +679,8 @@ class BacktestEngine:
         calmar = _calc_calmar_ratio(annual_return, max_drawdown)
         volatility = _calc_volatility(daily_returns_list)
         information_ratio = _calc_information_ratio(daily_returns_list, benchmark_returns)
+        skew, kurt = _calc_skew_kurtosis(daily_returns_list)
+        monthly = _calc_monthly_returns(equity_dates or [], equity_curve)
 
         sell_trades = [t for t in trades if t["side"] == "sell"]
         win_trades = [t for t in sell_trades if t.get("profit", 0) > 0]
@@ -656,6 +706,9 @@ class BacktestEngine:
             calmar_ratio=round(calmar, 4),
             volatility=round(volatility, 4),
             information_ratio=round(information_ratio, 4),
+            skewness=round(skew, 4) if skew is not None else None,
+            kurtosis=round(kurt, 4) if kurt is not None else None,
+            monthly_returns=monthly,
         )
 
     def run_all_strategies(
@@ -702,7 +755,9 @@ class BacktestEngine:
             long_windows: 长期均线窗口候选,默认 range(10, 41, 5)
 
         Returns:
-            {"stock_code", "start_date", "end_date", "grid": [...按 IR 降序...], "best": 首项或 None}
+            {"stock_code", "start_date", "end_date", "grid": [...按 IR 降序...],
+             "best": 首项或 None(含 tear sheet 字段: monthly_returns/skewness/kurtosis,
+             立项 1 借鉴 quantstats,仅 best 附带以免网格条目膨胀)}
         """
         if short_windows is None:
             short_windows = range(3, 12)
@@ -717,6 +772,7 @@ class BacktestEngine:
             df = None
 
         grid: list[dict] = []
+        results_by_combo: dict[tuple[int, int], BacktestResult] = {}
         if df is not None and not df.empty:
             for short in short_windows:
                 for long in long_windows:
@@ -731,6 +787,7 @@ class BacktestEngine:
                     except Exception as e:
                         logger.warning(f"optimize_ma_cross failed for ({short},{long}): {e}")
                         continue
+                    results_by_combo[(short, long)] = result
                     grid.append({
                         "short_window": short,
                         "long_window": long,
@@ -743,10 +800,16 @@ class BacktestEngine:
                     })
 
         grid.sort(key=lambda item: item["information_ratio"], reverse=True)
+        best = grid[0] if grid else None
+        if best:
+            best_result = results_by_combo[(best["short_window"], best["long_window"])]
+            best["skewness"] = best_result.skewness
+            best["kurtosis"] = best_result.kurtosis
+            best["monthly_returns"] = best_result.monthly_returns
         return {
             "stock_code": stock_code,
             "start_date": start_date,
             "end_date": end_date,
             "grid": grid,
-            "best": grid[0] if grid else None,
+            "best": best,
         }

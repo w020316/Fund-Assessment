@@ -50,6 +50,46 @@
     return container;
   }
 
+  // 立项 1(借鉴 quantstats): 最优组合 tear sheet —— 月度收益表 + 偏度/峰度。
+  // 红线: 缺失显示缺失(—), 不填 0 冒充。
+  function renderTearSheet(best) {
+    const wrap = byId('tearSheet');
+    const months = Array.isArray(best.monthly_returns) ? best.monthly_returns : [];
+    const shapeNote = [
+      best.skewness == null ? null : `偏度 ${number(best.skewness, 2)}`,
+      best.kurtosis == null ? null : `峰度 ${number(best.kurtosis, 2)}（超额，正态=0）`,
+    ].filter(Boolean).join(' · ');
+    if (!months.length && !shapeNote) { wrap.hidden = true; return; }
+    wrap.hidden = false;
+    byId('tearNote').textContent = shapeNote
+      ? `日收益分布形态：${shapeNote}。月度收益为自然月区间收益，跨月缺口的月份为区间观测值。`
+      : '月度收益为自然月区间收益，跨月缺口的月份为区间观测值。';
+    const table = byId('monthlyTable');
+    table.replaceChildren();
+    const head = document.createElement('tr');
+    head.append(
+      Object.assign(document.createElement('th'), { className: 'axis', textContent: '月份' }),
+      Object.assign(document.createElement('th'), { className: 'axis', textContent: '收益' }),
+    );
+    table.append(head);
+    for (const m of months) {
+      const tr = document.createElement('tr');
+      const tdMonth = document.createElement('td');
+      tdMonth.className = 'axis';
+      tdMonth.textContent = m.month;
+      const tdRet = document.createElement('td');
+      tdRet.className = 'cell';
+      if (m.return_pct == null || !finite(m.return_pct)) {
+        tdRet.textContent = '—';
+      } else {
+        tdRet.textContent = `${m.return_pct > 0 ? '+' : ''}${m.return_pct.toFixed(2)}%`;
+        tdRet.style.color = m.return_pct >= 0 ? 'var(--qf-sem-up)' : 'var(--qf-sem-down)';
+      }
+      tr.append(tdMonth, tdRet);
+      table.append(tr);
+    }
+  }
+
   function render() {
     if (!result) return;
     const data = result.data;
@@ -67,6 +107,7 @@
       metric('最优年化收益', percent(best.annual_return), `回撤 ${percent(best.max_drawdown)}`),
       metric('最优夏普', number(best.sharpe_ratio), `${best.trade_count} 次交易`)
     );
+    renderTearSheet(best);
     const warning = byId('warning');
     warning.textContent = result.warning || '';
     warning.hidden = !result.warning;
