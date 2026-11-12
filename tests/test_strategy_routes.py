@@ -332,6 +332,20 @@ class TestFactorResearch:
         assert resp.status_code == 422
         assert resp.json()["detail"] == "缺少必需字段 amount"
 
+    def test_timeout_returns_503(self, client, monkeypatch):
+        """F-2(2026-11-12): 计算挂起时 wait_for 兜底 503, 不无限占用单飞锁。"""
+        from web.routes import strategy as strategy_module
+
+        def _hang(*_a, **_kw):
+            import time
+            time.sleep(5)
+
+        monkeypatch.setattr(strategy_module, "BACKTEST_TIMEOUT_SECONDS", 0.05)
+        with patch("src.core.factor_research.research_alpha144", side_effect=_hang):
+            resp = client.post(self.endpoint, json={"csv_data": "csv"})
+        assert resp.status_code == 503
+        assert "超时" in resp.json()["detail"]
+
     def test_rate_limit(self, client):
         with patch("src.core.factor_research.research_alpha144", return_value={"available": False}):
             responses = [client.post(self.endpoint, json={"csv_data": "csv"}) for _ in range(4)]

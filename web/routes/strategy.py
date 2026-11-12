@@ -467,8 +467,18 @@ async def backtest(req: BacktestRequest):
 async def factor_research(request: Request, req: FactorResearchRequest) -> dict[str, Any]:
     from src.core.factor_research import research_alpha144
 
+    # F-2(2026-11-12): 与 backtest/optimize 对齐补超时保护。输入虽有界(2MB/面板
+    # 10 万格)最坏耗时秒级, 但单飞锁会被占住, 兜底防止异常环境下的无限挂起。
     try:
-        result = await asyncio.to_thread(research_alpha144, **req.model_dump())
+        result = await asyncio.wait_for(
+            asyncio.to_thread(research_alpha144, **req.model_dump()),
+            timeout=BACKTEST_TIMEOUT_SECONDS * 2,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("factor_research 超时")
+        raise HTTPException(
+            status_code=503, detail="因子检验超时，请缩小 CSV 日期范围或股票池后重试"
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"data": result}
