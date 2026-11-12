@@ -48,6 +48,6 @@
 
 | 探针 | 预期 | 实测 |
 |---|---|---|
-| `/api/health.version` | `8df9ff9` | （复验时回填） |
-| `/static/index.html` 含「交易次数」 | 是 | （复验时回填） |
-| CI run 43196343750 | success | in_progress |
+| `/api/health.version` | `8df9ff9` | `8df9ff9`（2026-11-12 实测；后续提交已继续滚动部署至 `b0a9501`） |
+| `/static/index.html` 含「交易次数」 | 是 | 是（grep 命中 1 处） |
+| CI run 43196343750 | success | success（1m51s） |
