@@ -162,19 +162,22 @@ def test_replace_recommendations(store: PredictionStore) -> None:
 
 
 def test_verification_upsert_and_retry_overwrite(store: PredictionStore) -> None:
-    v1 = store.upsert_verification("2026-11-10", "prediction", 42, "up", "up", 1, 0.8)
+    # 相对日期(conftest.trading_days_ago): 避免未来日期字面量随时间漂移成 warning/红测
+    day = trading_days_ago(2)
+    window_start, window_end = trading_days_ago(30), trading_days_ago(0)
+    v1 = store.upsert_verification(day, "prediction", 42, "up", "up", 1, 0.8)
     assert v1 is not None and v1["hit"] == 1
     # 16:30 重试: missing 占位覆盖原结果(幂等 upsert)
     v2 = store.upsert_verification(
-        "2026-11-10", "prediction", 42, "up", "", None, None, missing=1
+        day, "prediction", 42, "up", "", None, None, missing=1
     )
     assert v2 is not None
     assert v2["missing"] == 1 and v2["hit"] is None
     rows = store.list_verifications(days=30)
     assert len(rows) == 1
     # 统计取数口径: 默认排除 missing
-    assert store.list_verifications_between("2026-11-01", "2026-11-30") == []
-    assert len(store.list_verifications_between("2026-11-01", "2026-11-30", include_missing=True)) == 1
+    assert store.list_verifications_between(window_start, window_end) == []
+    assert len(store.list_verifications_between(window_start, window_end, include_missing=True)) == 1
 
 
 def test_accuracy_stats_upsert(store: PredictionStore) -> None:
