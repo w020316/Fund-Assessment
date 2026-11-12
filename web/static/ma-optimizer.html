@@ -78,6 +78,17 @@
         <label for="endDate">结束日期（可选）<input id="endDate" type="date"></label>
       </div>
       <p class="muted">日期留空默认回看近一年；网格默认 MA_short 3–11、MA_long 10/15/20/25/30/35/40，仅评估短窗口小于长窗口的组合。计算沿用管理员鉴权，每分钟最多 3 次，与回测共用同一把单飞锁。</p>
+      <details id="advancedGrid">
+        <summary class="muted">自定义网格范围（可选）</summary>
+        <div class="fields" style="margin-top:10px">
+          <label for="shortMin">MA_short 起<input id="shortMin" type="number" min="2" max="120" step="1" placeholder="3"></label>
+          <label for="shortMax">MA_short 止<input id="shortMax" type="number" min="2" max="120" step="1" placeholder="11"></label>
+          <label for="longMin">MA_long 起<input id="longMin" type="number" min="2" max="120" step="1" placeholder="10"></label>
+          <label for="longMax">MA_long 止<input id="longMax" type="number" min="2" max="120" step="1" placeholder="40"></label>
+          <label for="longStep">MA_long 步长<input id="longStep" type="number" min="1" max="50" step="1" placeholder="5"></label>
+        </div>
+        <p class="muted">向量化快路径支撑高密度网格：每组窗口最多 60 个取值，有效组合总数上限 2000；短窗口必须小于长窗口。超限返回 422。</p>
+      </details>
       <label class="auth" for="adminToken">管理令牌（可选）<input id="adminToken" type="password" autocomplete="off" placeholder="沿用主页面鉴权；在此输入仅用于本次请求"></label>
       <div class="actions"><button id="runOptimizer" class="primary" type="submit">运行参数优化</button></div>
       <p id="status" role="status" aria-live="polite">输入股票代码后运行；首次服务启动拉取 K 线可能较慢。</p>

@@ -1,4 +1,4 @@
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import asyncio
 import threading
@@ -488,6 +488,13 @@ class OptimizeMaCrossRequest(BaseModel):
     stock_code: str = Field(..., min_length=1, max_length=12)
     start_date: str = Field("", max_length=10, description="YYYY-MM-DD,空则默认近一年")
     end_date: str = Field("", max_length=10, description="YYYY-MM-DD,空则默认今天")
+    # 立项 2 收口(2026-11-12): 自定义窗口范围,空则用引擎默认(3-11 × 10-40:5)。
+    # 向量化快路径实测 77x,支撑高密度网格;上限防滥用(单维 60 值/总组合 2000)。
+    short_windows: list[Annotated[int, Field(ge=2, le=120)]] = Field(default_factory=list, max_length=60)
+    long_windows: list[Annotated[int, Field(ge=2, le=120)]] = Field(default_factory=list, max_length=60)
+
+
+_MAX_GRID_COMBOS = 2000
 
 
 @router.post("/optimize-ma-cross", dependencies=[Depends(require_admin), Depends(_single_backtest_guard)])
@@ -497,6 +504,7 @@ async def optimize_ma_cross(request: Request, req: OptimizeMaCrossRequest) -> di
 
     K线单次取数,对每组 (MA_short, MA_long) 复用同一份数据模拟,
     网格按信息比率降序,前端据此画热力图。与回测共用单飞锁。
+    自定义窗口范围(立项 2 收口): 组合总数上限 2000,超限 422。
     """
     from datetime import date as _date, timedelta as _timedelta
 
@@ -515,10 +523,28 @@ async def optimize_ma_cross(request: Request, req: OptimizeMaCrossRequest) -> di
     if start >= end:
         raise HTTPException(status_code=422, detail="start_date 必须早于 end_date")
 
+    shorts = sorted(set(req.short_windows)) if req.short_windows else None
+    longs = sorted(set(req.long_windows)) if req.long_windows else None
+    if shorts or longs:
+        valid_pairs = sum(
+            1 for s in (shorts or range(3, 12)) for lw in (longs or range(10, 41, 5)) if s < lw
+        )
+        if valid_pairs == 0:
+            raise HTTPException(status_code=422, detail="网格为空：MA_short 必须小于 MA_long 才有有效组合")
+        if valid_pairs > _MAX_GRID_COMBOS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"网格组合数 {valid_pairs} 超过上限 {_MAX_GRID_COMBOS}，请缩小窗口范围或增大步长",
+            )
+
     engine = BacktestEngine()
     try:
+        kwargs: dict[str, Any] = {}
+        if shorts or longs:
+            kwargs["short_windows"] = shorts
+            kwargs["long_windows"] = longs
         result = await asyncio.wait_for(
-            asyncio.to_thread(engine.optimize_ma_cross, stock_code, start.isoformat(), end.isoformat()),
+            asyncio.to_thread(engine.optimize_ma_cross, stock_code, start.isoformat(), end.isoformat(), **kwargs),
             timeout=BACKTEST_TIMEOUT_SECONDS * 2,
         )
     except asyncio.TimeoutError:

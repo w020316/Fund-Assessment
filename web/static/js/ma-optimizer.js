@@ -147,6 +147,38 @@
 
   form.addEventListener('input', invalidate);
 
+  // 立项 2 收口: 自定义网格范围 → 显式窗口数组(空 = 服务端默认)。
+  // 返回: {} = 未填写走默认; false = 填写非法(行内报错); 其余为窗口对象。
+  function buildRange(minText, maxText, step) {
+    if (!minText && !maxText) return null;
+    if (!minText || !maxText) return false;
+    const min = Number(minText);
+    const max = Number(maxText);
+    if (!Number.isInteger(min) || !Number.isInteger(max) || min < 2 || max > 120 || min > max) return false;
+    const values = [];
+    for (let v = min; v <= max; v += step) values.push(v);
+    return values;
+  }
+
+  function customWindows() {
+    const stepRaw = byId('longStep').value.trim();
+    const step = stepRaw ? Number(stepRaw) : 5;
+    if (!Number.isInteger(step) || step < 1 || step > 50) return false;
+    const shorts = buildRange(byId('shortMin').value.trim(), byId('shortMax').value.trim(), 1);
+    const longs = buildRange(byId('longMin').value.trim(), byId('longMax').value.trim(), step);
+    if (shorts === false || longs === false) return false;
+    if (shorts === null && longs === null) return {};
+    const s = shorts || [];
+    const l = longs || [];
+    if (s.length > 60 || l.length > 60) return false;
+    const pairs = s.length && l.length ? s.reduce((acc, v) => acc + l.filter((x) => x > v).length, 0) : (s.length || l.length);
+    if (pairs > 2000) return false;
+    const windows = {};
+    if (shorts) windows.short_windows = shorts;
+    if (longs) windows.long_windows = longs;
+    return windows;
+  }
+
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (busy) return;
@@ -155,10 +187,16 @@
       return;
     }
     invalidate();
+    const windows = customWindows();
+    if (windows === false) {
+      status('自定义网格范围有误：窗口需为 2–120 的整数、起 ≤ 止、步长 1–50，且有效组合数 ≤ 2000。', 'error');
+      return;
+    }
     const payload = {
       stock_code: byId('stockCode').value.trim(),
       start_date: byId('startDate').value,
       end_date: byId('endDate').value,
+      ...windows,
     };
     const headers = { 'Content-Type': 'application/json' };
     let token = byId('adminToken').value.trim();

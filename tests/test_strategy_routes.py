@@ -585,6 +585,55 @@ class TestOptimizeMaCross:
         assert resp.status_code == 503
         assert "参数优化执行失败" in resp.json()["detail"]
 
+    def test_custom_windows_passed_through(self, client):
+        """立项 2 收口: 自定义窗口数组去重排序后透传引擎"""
+        with patch("src.core.backtest.BacktestEngine") as engine_cls:
+            engine_cls.return_value.optimize_ma_cross.return_value = self._canned_result()
+            resp = client.post(self.endpoint, json={
+                "stock_code": "600519", "short_windows": [5, 3, 5], "long_windows": [20, 10],
+            })
+        assert resp.status_code == 200
+        kwargs = engine_cls.return_value.optimize_ma_cross.call_args.kwargs
+        assert kwargs["short_windows"] == [3, 5]
+        assert kwargs["long_windows"] == [10, 20]
+
+    def test_custom_windows_empty_pair_rejected(self, client):
+        """短窗口 ≥ 长窗口导致零有效组合 → 422, 引擎不被调用"""
+        with patch("src.core.backtest.BacktestEngine") as engine_cls:
+            resp = client.post(self.endpoint, json={
+                "stock_code": "600519", "short_windows": [20], "long_windows": [10],
+            })
+        assert resp.status_code == 422
+        assert "MA_short 必须小于 MA_long" in resp.json()["detail"]
+        engine_cls.assert_not_called()
+
+    def test_custom_windows_combo_cap_rejected(self, client):
+        """有效组合数超过 2000 → 422 明确报上限"""
+        shorts = list(range(2, 62))
+        longs = list(range(4, 122, 2))
+        assert max(longs) <= 120 and sum(1 for s in shorts for lw in longs if s < lw) > 2000
+        with patch("src.core.backtest.BacktestEngine") as engine_cls:
+            resp = client.post(self.endpoint, json={
+                "stock_code": "600519", "short_windows": shorts, "long_windows": longs,
+            })
+        assert resp.status_code == 422
+        assert "上限" in resp.json()["detail"]
+        engine_cls.assert_not_called()
+
+    @pytest.mark.parametrize("fields", [
+        {"short_windows": [1]},
+        {"short_windows": [121]},
+        {"short_windows": list(range(2, 63))},
+        {"long_windows": [0]},
+        {"long_windows": ["a"]},
+        {"short_windows": [3], "long_windows": [10, 20], "start_date": "bad-date"},
+    ])
+    def test_custom_windows_invalid_rejected(self, client, fields):
+        with patch("src.core.backtest.BacktestEngine") as engine_cls:
+            resp = client.post(self.endpoint, json={"stock_code": "600519", **fields})
+        assert resp.status_code == 422
+        engine_cls.assert_not_called()
+
     def test_rate_limit(self, client):
         with patch("src.core.backtest.BacktestEngine") as engine_cls:
             engine_cls.return_value.optimize_ma_cross.return_value = self._canned_result()
