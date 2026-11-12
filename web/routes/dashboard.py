@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from pathlib import Path
 
 from typing import Any
@@ -364,7 +365,7 @@ class PortfolioRiskResponse(BaseModel):
     trading_days: int  # 实际使用的交易日数
     annual_volatility: float  # 年化波动率(%)
     sharpe_ratio: float  # 夏普比率(年化超额收益/年化波动)
-    sortino_ratio: float  # Sortino 比率(只惩罚下行波动)
+    sortino_ratio: float | None = None  # Sortino 比率;无下行波动时上游返回 inf,边界消毒为 None(前端渲染 —)
     max_drawdown: float  # 最大回撤(%)
     calmar_ratio: float  # Calmar 比率(年化收益/最大回撤)
     weighted_returns: list[float]  # 近 30 日组合日收益率(%)
@@ -544,6 +545,11 @@ async def portfolio_risk(request: Request):
         sortino = _calc_sortino_ratio(portfolio_returns, risk_free)
     except Exception:
         sortino = 0.0
+    # F-1(2026-11-12): 无下跌日且均值为正时 _calc_sortino_ratio 返回 inf(既有设计,
+    # 由 tests/test_backtest_analyzers.py 锁定), 但 inf 会被序列化为裸 Infinity——
+    # 非法 JSON, 浏览器 JSON.parse 整体失败 → 边界消毒为 None, 前端渲染 —。
+    if not math.isfinite(sortino):
+        sortino = None
 
     # 累计收益曲线 + 最大回撤
     cumulative = [1.0]
@@ -568,7 +574,7 @@ async def portfolio_risk(request: Request):
         trading_days=min_len,
         annual_volatility=round(annual_vol * 100, 2),
         sharpe_ratio=round(sharpe, 3),
-        sortino_ratio=round(sortino, 3),
+        sortino_ratio=round(sortino, 3) if sortino is not None else None,
         max_drawdown=max_dd,
         calmar_ratio=round(calmar, 3),
         weighted_returns=recent_returns,

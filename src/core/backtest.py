@@ -49,15 +49,18 @@ def _calc_sortino_ratio(returns: list[float], risk_free: float = _RISK_FREE_RATE
         risk_free: 年化无风险利率,默认 3%
 
     Returns:
-        Sortino 比率,无数据返回 0.0,无下行波动返回 99.0(表示无下行风险)
+        Sortino 比率,无数据返回 0.0,无下行波动返回 inf(表示无下行风险)。
+        注意: inf 不能直接进 JSON 响应,Web 边界必须先做 isfinite 消毒
+        (见 web/routes/dashboard.py portfolio_risk)。
     """
     if not returns:
         return 0.0
     arr = np.array(returns, dtype=float)
     downside = arr[arr < 0]
     if len(downside) == 0:
-        # P3-7 修复(2026-07-30):原返回 inf 不利于 JSON 序列化(json.dumps 默认不允许 inf),
-        # 前端 JSON.parse 会报错。改为有限大数 99.0 表示"无下行风险"。
+        # 2026-08-01 决策(2dfe9e1): 无下行波动返回 inf 而非有限大数 99.0,inf 语义由
+        # tests/test_backtest_analyzers.py 锁定。inf 会被 JSON 序列化为非法的裸
+        # Infinity → Web 边界必须先做 isfinite 消毒(dashboard.py portfolio_risk)。
         return float('inf') if float(arr.mean()) > 0 else 0.0
     if len(downside) < 2:
         # 单个下行点无法可靠估计 std,视为无下行波动

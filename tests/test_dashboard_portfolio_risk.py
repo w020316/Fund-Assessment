@@ -144,6 +144,20 @@ class TestPortfolioRiskRoute:
         for value in data.values():
             assert not (isinstance(value, float) and math.isnan(value))
 
+    def test_all_positive_returns_sortino_none(self, client, tmp_path, monkeypatch):
+        """F-1(2026-11-12): 无下跌日且均值为正 → _calc_sortino_ratio 返回 inf(既有
+        设计, 由 test_backtest_analyzers 锁定), API 边界必须消毒为 None; 响应不得含
+        裸 Infinity(非法 JSON, 浏览器 JSON.parse 会整体失败)。"""
+        _write_positions(tmp_path / "positions.json", [POSITION])
+        closes = [100.0 + i for i in range(10)]
+        monkeypatch.setattr(dashboard.ds2, "get_kline_mootdx", lambda code, period, count: _klines(closes))
+        resp = client.get("/api/dashboard/portfolio_risk")
+        assert resp.status_code == 200
+        assert "Infinity" not in resp.text and "NaN" not in resp.text
+        data = resp.json()
+        assert data["data_quality"] == "normal"
+        assert data["sortino_ratio"] is None
+
     def test_two_positions_weighted(self, client, tmp_path, monkeypatch):
         _write_positions(
             tmp_path / "positions.json",
