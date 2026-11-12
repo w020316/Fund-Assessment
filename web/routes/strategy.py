@@ -503,6 +503,10 @@ async def optimize_ma_cross(request: Request, req: OptimizeMaCrossRequest) -> di
     from src.core.backtest import BacktestEngine
 
     stock_code = req.stock_code.strip()
+    # F-4(2026-11-12): 六位数字 A 股代码服务端校验, 莫让非法代码走完上游取数
+    # 才以"网格为空"的笼统提示失败, 用户无从知道错在输入。
+    if len(stock_code) != 6 or not stock_code.isdigit():
+        raise HTTPException(status_code=422, detail="股票代码必须是 6 位数字的 A 股代码")
     try:
         end = _date.fromisoformat(req.end_date.strip()) if req.end_date.strip() else _date.today()
         start = _date.fromisoformat(req.start_date.strip()) if req.start_date.strip() else _date.today() - _timedelta(days=365)

@@ -565,6 +565,7 @@ class TestOptimizeMaCross:
 
     @pytest.mark.parametrize("fields", [
         {}, {"stock_code": ""}, {"stock_code": "x" * 13},
+        {"stock_code": "ABC123"}, {"stock_code": "60051"}, {"stock_code": "6005191"},
         {"stock_code": "600519", "start_date": "2025/01/01"},
         {"stock_code": "600519", "end_date": "not-a-date"},
         {"stock_code": "600519", "start_date": "2025-06-01", "end_date": "2025-01-01"},

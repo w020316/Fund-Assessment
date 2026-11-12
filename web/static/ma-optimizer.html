@@ -66,7 +66,7 @@
     <section class="panel" aria-labelledby="inputHeading">
       <div class="section-title"><h2 id="inputHeading">01 / 回测设置</h2><span class="badge">K线单次取数，网格内存计算</span></div>
       <div class="fields">
-        <label for="stockCode">股票代码（六位 A 股）<input id="stockCode" type="text" required pattern="[0-9A-Za-z]{1,12}" placeholder="600519" maxlength="12"></label>
+        <label for="stockCode">股票代码（六位 A 股）<input id="stockCode" type="text" required pattern="[0-9]{6}" placeholder="600519" maxlength="6" inputmode="numeric" title="请输入 6 位数字的 A 股代码"></label>
         <label for="startDate">开始日期（可选）<input id="startDate" type="date"></label>
         <label for="endDate">结束日期（可选）<input id="endDate" type="date"></label>
       </div>
