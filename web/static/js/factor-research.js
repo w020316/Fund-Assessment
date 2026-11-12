@@ -192,7 +192,11 @@
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    if (busy || !form.reportValidity()) return;
+    if (busy) return;
+    if (!form.reportValidity()) {
+      status('请检查标红的输入：研究参数需在规定范围内（如因子窗口 2~120、分位组数 2~10）。', 'error');
+      return;
+    }
     const csv = byId('csvData').value.trim();
     if (!csv) { status('请先导入历史 CSV 数据。', 'error'); return; }
     if (new TextEncoder().encode(csv).length > maxBytes) { status('CSV 内容超过 2 MB，请缩小数据范围。', 'error'); return; }

@@ -43,6 +43,8 @@
     .metric { border: 1px solid var(--qf-line-1); border-radius: 9px; padding: 16px; }
     .metric strong { display: block; font: 26px/1.5 var(--qf-font-mono); color: var(--qf-text-primary); }
     .metric span { color: var(--qf-text-secondary); font-size: 12px; }
+    .legend { display: flex; align-items: center; gap: 10px; margin-top: 14px; color: var(--qf-text-secondary); font-size: 12px; }
+    .legend-bar { flex: 1; height: 10px; border-radius: 5px; background: linear-gradient(90deg, var(--qf-sem-down), var(--qf-bg-elev2), var(--qf-sem-up)); }
     .table-wrap { overflow: auto; max-height: 560px; margin-top: 14px; }
     table { width: 100%; border-collapse: collapse; white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 13px; }
     td, th { text-align: center; padding: 8px 10px; border-bottom: 1px solid var(--qf-line-1); }
@@ -87,6 +89,11 @@
     <div class="metrics" id="bestMetrics"></div>
     <p id="warning" class="notice" hidden></p>
     <h3 style="margin-top:22px">信息比率热力图 · 行 = MA_long，列 = MA_short</h3>
+    <div class="legend" role="img" aria-label="色标：绿色为负 IR（跑输），红色为正 IR（跑赢），深浅表示绝对值大小">
+      <span>跑输（IR&lt;0）</span>
+      <span class="legend-bar"></span>
+      <span>跑赢（IR&gt;0）</span>
+    </div>
     <div class="table-wrap" tabindex="0"><table id="heatmap"></table></div>
     <p class="muted" id="heatmapNote">单元格数值为年化信息比率；灰色空格为无效组合（短窗口 ≥ 长窗口）。悬停查看年化收益/回撤/夏普/交易次数。</p>
   </section>

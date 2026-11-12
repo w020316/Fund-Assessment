@@ -56,6 +56,10 @@
     .report-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 22px; }
     #icChart { display: block; width: 100%; height: auto; min-height: 160px; }
     .group-row { display: grid; grid-template-columns: 35px 1fr 80px; align-items: center; gap: 12px; margin: 14px 0; }
+    .legend { display: flex; align-items: center; gap: 8px; margin: 10px 0; color: var(--qf-text-secondary); font-size: 12px; }
+    .legend-dot { width: 14px; height: 10px; border-radius: 3px; display: inline-block; }
+    .legend-pos { background: var(--qf-sem-up); }
+    .legend-neg { background: var(--qf-sem-down); }
     .group-track { height: 10px; background: var(--qf-bg-elev2); border-radius: 3px; overflow: hidden; }
     .group-bar { height: 100%; background: var(--qf-sem-up); }
     .group-row output { text-align: right; font-family: var(--qf-font-mono); }
@@ -130,7 +134,12 @@
     <div class="metrics" id="metrics"></div>
     <div class="report-grid">
       <div><h3>逐日 Rank IC · 越接近 ±1，排序相关越强</h3><svg id="icChart" viewBox="0 0 600 220" role="img" aria-label="逐日 Rank IC，缺失日期不连线"></svg><p id="chartInfo" class="muted"></p></div>
-      <div><h3>各组平均远期收益 · 非净值</h3><div id="groupChart"></div><p class="muted">G1 为低分组，最后一组为高分组。并列值不强行拆组，空组显示 —。</p></div>
+      <div><h3>各组平均远期收益 · 非净值</h3>
+        <div class="legend" role="img" aria-label="色标：红色柱为正收益，绿色柱为负收益，柱长表示收益幅度">
+          <span class="legend-dot legend-pos"></span><span>正收益</span>
+          <span class="legend-dot legend-neg"></span><span>负收益</span>
+        </div>
+        <div id="groupChart"></div><p class="muted">G1 为低分组，最后一组为高分组。并列值不强行拆组，空组显示 —。</p></div>
     </div>
     <h3 style="margin-top:22px">市值暴露 · 全段候选样本诊断</h3><p id="sizeInfo"></p>
     <h3 style="margin-top:22px">研究边界</h3><ul id="notes"></ul>

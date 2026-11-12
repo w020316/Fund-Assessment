@@ -108,7 +108,11 @@
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    if (busy || !form.reportValidity()) return;
+    if (busy) return;
+    if (!form.reportValidity()) {
+      status('请检查标红的输入：股票代码必须是 6 位数字，日期需为有效区间（开始早于结束）。', 'error');
+      return;
+    }
     invalidate();
     const payload = {
       stock_code: byId('stockCode').value.trim(),
