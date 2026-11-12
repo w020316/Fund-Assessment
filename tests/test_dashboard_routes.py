@@ -216,17 +216,22 @@ class TestEnrichPositions:
         assert result[0]["name"] == "贵州茅台"
 
     @pytest.mark.asyncio
-    async def test_uses_cost_when_quote_missing(self, sample_positions):
-        """行情缺失时回退到成本价"""
+    async def test_marks_degraded_when_quote_missing(self, sample_positions):
+        """R-08 B1-a(2026-11-09):行情缺失 → None + degraded,不再兜成本价伪造持平。
+
+        原 test_uses_cost_when_quote_missing 断言「现价=成本、profit=0」的旧伪造行为;
+        经工程负责人批准的契约反转(规则4协议),改为断言诚实缺失(None)并标降级。
+        """
         from web.routes.dashboard import _enrich_positions_with_realtime
         with patch("web.routes.dashboard.ds2.get_realtime_quote_tencent",
                    return_value=[]):
             result = await _enrich_positions_with_realtime([dict(sample_positions[0])])
-        # 无行情,current_price 回退到 cost_price
-        assert result[0]["current_price"] == 1500.0
-        assert result[0]["market_value"] == round(1500.0 * 100, 2)
-        assert result[0]["profit"] == 0.0
-        assert result[0]["profit_pct"] == 0.0
+        # 无行情 → 现价/市值/盈亏均 None(前端渲染 —),标降级,不伪造成本价/持平
+        assert result[0]["current_price"] is None
+        assert result[0]["market_value"] is None
+        assert result[0]["profit"] is None
+        assert result[0]["profit_pct"] is None
+        assert result[0]["data_quality"] == "degraded"
 
     @pytest.mark.asyncio
     async def test_handles_zero_cost_price(self):
@@ -240,13 +245,15 @@ class TestEnrichPositions:
 
     @pytest.mark.asyncio
     async def test_handles_quote_exception(self, sample_positions):
-        """行情接口异常时,回退到成本价"""
+        """行情接口异常 → quotes=[] → 缺失标 None + degraded(不伪造成本价)。"""
         from web.routes.dashboard import _enrich_positions_with_realtime
         with patch("web.routes.dashboard.ds2.get_realtime_quote_tencent",
                    side_effect=Exception("network down")):
             result = await _enrich_positions_with_realtime([dict(sample_positions[0])])
-        # 异常被捕获,quotes=[],回退成本价
-        assert result[0]["current_price"] == 1500.0
+        # 异常被捕获,quotes=[] → 现价 None + 降级(原断言「回退成本价」系旧伪造行为,已反转)
+        assert result[0]["current_price"] is None
+        assert result[0]["profit"] is None
+        assert result[0]["data_quality"] == "degraded"
 
     @pytest.mark.asyncio
     async def test_updates_name_from_quote(self):
@@ -261,16 +268,19 @@ class TestEnrichPositions:
 
     @pytest.mark.asyncio
     async def test_partial_match_only_updates_matched(self, sample_positions, sample_quotes):
-        """部分匹配:仅匹配的持仓被更新"""
+        """部分匹配:匹配的正常计算,未匹配的标 None + degraded(不兜成本)。"""
         from web.routes.dashboard import _enrich_positions_with_realtime
         # 只返回第一只的行情
         with patch("web.routes.dashboard.ds2.get_realtime_quote_tencent",
                    return_value=[sample_quotes[0]]):
             result = await _enrich_positions_with_realtime([dict(p) for p in sample_positions])
-        # 第一只被更新
+        # 第一只被更新(行情存在)
         assert result[0]["current_price"] == 1688.0
-        # 第二只回退成本价
-        assert result[1]["current_price"] == 10.0
+        assert result[0]["data_quality"] == "normal"
+        # 第二只行情缺失 → None + degraded(原断言「回退成本 10.0」系旧伪造,已反转)
+        assert result[1]["current_price"] is None
+        assert result[1]["profit"] is None
+        assert result[1]["data_quality"] == "degraded"
 
 
 class TestOverviewEndpoint:
@@ -537,3 +547,75 @@ class TestPydanticModels:
         )
         assert m.level == "NORMAL"
         assert m.pause_until is None
+
+
+class TestB1AHonestDegradation:
+    """R-08 B1-a(2026-11-09)契约反转验收:行情缺失 → null + degraded,聚合不当 0。
+
+    全部 mock _load_user_positions / ds2 行情,不读写真实持仓文件(隐私红线)。
+    """
+
+    def test_positions_missing_quote_serializes_null_and_degraded(self, client, sample_positions):
+        with patch("web.routes.dashboard._load_user_positions", return_value=[sample_positions[0]]), \
+             patch("web.routes.dashboard.ds2.get_realtime_quote_tencent", return_value=[]):
+            resp = client.get("/api/dashboard/positions")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        # 行情四字段序列化为 JSON null(前端 —),data_quality  survives 模型(此前被丢弃)
+        assert data[0]["current_price"] is None
+        assert data[0]["market_value"] is None
+        assert data[0]["profit"] is None
+        assert data[0]["profit_pct"] is None
+        assert data[0]["data_quality"] == "degraded"
+        # 用户自有字段(成本/数量)不属行情缺失,仍如实
+        assert data[0]["cost_price"] == 1500.0
+        assert data[0]["quantity"] == 100
+
+    def test_positions_present_quote_serializes_values_and_normal(self, client, sample_positions, sample_quotes):
+        with patch("web.routes.dashboard._load_user_positions", return_value=[sample_positions[0]]), \
+             patch("web.routes.dashboard.ds2.get_realtime_quote_tencent", return_value=[sample_quotes[0]]):
+            data = client.get("/api/dashboard/positions").json()
+        assert data[0]["current_price"] == 1688.0
+        assert data[0]["profit"] == 18800.0
+        assert data[0]["data_quality"] == "normal"
+
+    def test_positions_partial_missing_per_row_quality(self, client, sample_positions, sample_quotes):
+        with patch("web.routes.dashboard._load_user_positions", return_value=sample_positions), \
+             patch("web.routes.dashboard.ds2.get_realtime_quote_tencent", return_value=[sample_quotes[0]]):
+            data = client.get("/api/dashboard/positions").json()
+        assert data[0]["data_quality"] == "normal"
+        assert data[0]["current_price"] == 1688.0
+        assert data[1]["data_quality"] == "degraded"
+        assert data[1]["current_price"] is None
+        assert data[1]["profit"] is None
+
+    def test_overview_partial_missing_excludes_none_and_degraded(self, client, sample_positions, sample_quotes):
+        # 只第一只有行情:market_value 仅计 1688*100=168800,第二只 None 不计入(不当 0/成本)
+        with patch("web.routes.dashboard._load_user_positions", return_value=sample_positions), \
+             patch("web.routes.dashboard._load_user_cash", return_value=100000.0), \
+             patch("web.routes.dashboard.ds2.get_realtime_quote_tencent", return_value=[sample_quotes[0]]):
+            data = client.get("/api/dashboard/overview").json()
+        assert data["market_value"] == 168800.0
+        assert data["data_quality"] == "degraded"
+        assert data["position_count"] == 2
+
+    def test_risk_missing_profit_notes_underestimate(self, client, sample_positions):
+        with patch("web.routes.dashboard._load_user_positions", return_value=[sample_positions[0]]), \
+             patch("web.routes.dashboard._load_user_cash", return_value=100000.0), \
+             patch("web.routes.dashboard.ds2.get_realtime_quote_tencent", return_value=[]):
+            resp = client.get("/api/dashboard/risk")
+        assert resp.status_code == 200
+        data = resp.json()
+        # 缺失盈亏不计入求和 → 不崩溃;message 注明可能低估(诚实降级)
+        assert "行情缺失" in data["message"]
+        assert data["drawdown_pct"] == 0.0
+
+    def test_position_item_optional_defaults_none(self):
+        from web.routes.dashboard import PositionItem
+        m = PositionItem(symbol="600519", name="X", quantity=100, available_quantity=100, cost_price=1500.0)
+        assert m.current_price is None
+        assert m.market_value is None
+        assert m.profit is None
+        assert m.profit_pct is None
+        assert m.data_quality == "normal"

@@ -237,19 +237,13 @@ class TestScanEndpoints:
 class TestBacktest:
     """POST /api/strategy/backtest 回测(需鉴权)"""
 
-    def test_backtest_disabled_returns_zeros(self, client):
-        """_HAS_STRATEGIES=False 时回测返回全零结果"""
+    def test_backtest_disabled_returns_unavailable(self, client):
         with patch("web.routes.strategy._HAS_STRATEGIES", False):
             resp = client.post("/api/strategy/backtest", json={
                 "strategy": "bspro_quant", "stock_code": ""
             })
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["strategy"] == "bspro_quant"
-        assert data["total_return"] == 0
-        assert data["sharpe_ratio"] == 0
-        assert data["win_rate"] == 0
-        assert data["trades"] == 0
+        assert resp.status_code == 503
+        assert "未执行回测" in resp.json()["detail"]
 
     def test_backtest_enabled_returns_parsed_result(self, client):
         """_HAS_STRATEGIES=True 时回测返回 BSProQuant 解析后的结果"""
@@ -273,6 +267,22 @@ class TestBacktest:
         assert data["sharpe_ratio"] == 1.2
         assert data["win_rate"] == 0.6
         assert data["trades"] == 42
+        assert "未来函数偏差" in data["warning"]
+        assert data["partial"] is False
+
+    def test_backtest_preserves_partial_warning(self, client):
+        mock_quant = MagicMock()
+        mock_quant.backtest_strategy.return_value = {
+            "total_return": 1, "annualized_return": 2, "max_drawdown": -3,
+            "sharpe_ratio": 0.4, "win_rate": 50, "trades": 2,
+            "warning": "假设性回测：部分股票因子未完成", "partial": True,
+        }
+        with patch("web.routes.strategy._HAS_STRATEGIES", True), \
+             patch("web.routes.strategy.BSProQuant", return_value=mock_quant):
+            resp = client.post("/api/strategy/backtest", json={})
+        assert resp.status_code == 200
+        assert resp.json()["partial"] is True
+        assert resp.json()["warning"] == "假设性回测：部分股票因子未完成"
 
     def test_backtest_exception_returns_503(self, client):
         """_HAS_STRATEGIES=True 但回测异常时返回 503(不静默吞异常)"""
@@ -285,6 +295,89 @@ class TestBacktest:
             })
         assert resp.status_code == 503
         assert "回测执行失败" in resp.json()["detail"]
+
+
+class TestFactorResearch:
+    endpoint = "/api/strategy/factor-research"
+
+    def test_forwards_parameters_and_preserves_report(self, client):
+        report = {"available": False, "message": "样本不足", "notes": ["未扣成本"],
+                  "summary": {"test": {"rank_ic_mean": None}}}
+        with patch("src.core.factor_research.research_alpha144", return_value=report) as compute:
+            resp = client.post(self.endpoint, json={"csv_data": "csv", "direction": -1})
+        assert resp.status_code == 200
+        assert resp.json() == {"data": report}
+        assert compute.call_args.kwargs == {
+            "csv_data": "csv", "window": 20, "horizon": 20, "groups": 5,
+            "min_listing_days": 120, "min_average_amount": 5_000_000,
+            "direction": -1, "train_ratio": 0.7,
+        }
+
+    @pytest.mark.parametrize("fields", [
+        {}, {"csv_data": ""}, {"window": 1}, {"window": 121}, {"window": True},
+        {"horizon": 0}, {"groups": 11}, {"direction": 0}, {"train_ratio": 0.95},
+        {"min_average_amount": -1}, {"min_listing_days": 1001},
+        {"csv_data": "x" * 2_000_001},
+    ])
+    def test_rejects_invalid_request(self, client, fields):
+        payload = {"csv_data": "csv", **fields} if fields else {}
+        with patch("src.core.factor_research.research_alpha144") as compute:
+            resp = client.post(self.endpoint, json=payload)
+        assert resp.status_code == 422
+        compute.assert_not_called()
+
+    def test_csv_error_is_actionable(self, client):
+        with patch("src.core.factor_research.research_alpha144", side_effect=ValueError("缺少必需字段 amount")):
+            resp = client.post(self.endpoint, json={"csv_data": "date,stock_code"})
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "缺少必需字段 amount"
+
+    def test_rate_limit(self, client):
+        with patch("src.core.factor_research.research_alpha144", return_value={"available": False}):
+            responses = [client.post(self.endpoint, json={"csv_data": "csv"}) for _ in range(4)]
+        assert [resp.status_code for resp in responses] == [200, 200, 200, 429]
+
+    def test_requires_auth_and_accepts_valid_token(self, client, monkeypatch):
+        monkeypatch.setenv("APP_ENV", "production")
+        monkeypatch.setenv("ADMIN_TOKEN", "factor-research-test-token")
+        monkeypatch.delenv("ADMIN_TOKENS", raising=False)
+        with patch("src.core.factor_research.research_alpha144", return_value={"available": False}) as compute:
+            assert client.post(self.endpoint, json={"csv_data": "csv"}).status_code == 401
+            compute.assert_not_called()
+            resp = client.post(self.endpoint, json={"csv_data": "csv"},
+                               headers={"Authorization": "Bearer factor-research-test-token"})
+        assert resp.status_code == 200
+        compute.assert_called_once()
+
+    def test_production_without_token_fails_closed(self, client, monkeypatch):
+        monkeypatch.setenv("APP_ENV", "production")
+        with patch("src.utils.auth._get_admin_tokens", return_value=[]), \
+             patch("src.core.factor_research.research_alpha144") as compute:
+            resp = client.post(self.endpoint, json={"csv_data": "csv"})
+        assert resp.status_code == 503
+        compute.assert_not_called()
+
+    def test_shares_backtest_guard(self, client):
+        from web.routes.strategy import _single_backtest_guard
+        guard = _single_backtest_guard()
+        next(guard)
+        try:
+            with patch("src.core.factor_research.research_alpha144") as compute:
+                resp = client.post(self.endpoint, json={"csv_data": "csv"})
+            assert resp.status_code == 503
+            compute.assert_not_called()
+        finally:
+            guard.close()
+
+    def test_research_page_is_served(self, client):
+        resp = client.get("/static/factor-research.html")
+        assert resp.status_code == 200
+        assert "因子研究实验室" in resp.text
+        assert "不内置或自动填充模拟行情" in resp.text
+        js = client.get("/static/js/factor-research.js")
+        assert js.status_code == 200
+        assert "innerHTML" not in js.text
+        assert "localStorage.setItem" not in js.text
 
 
 class TestBacktestGuard:

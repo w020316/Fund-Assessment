@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from src.core import data_source_v2 as ds2
 from src.utils.auth import require_admin
-from src.utils.convert import safe_float as _safe_float, safe_str as _safe_str
+from src.utils.convert import opt_float, safe_str as _safe_str
 from src.utils.file_io import safe_read_json
 
 router = APIRouter()
@@ -55,26 +55,33 @@ async def _enrich_positions_with_realtime(positions: list[dict]) -> list[dict]:
     symbols = [p["symbol"] for p in positions]
     if not symbols:
         return positions
-    # P1 修复(2026-07-30):原代码 except Exception 后 quotes=[] 静默吞异常,
-    # 用户会看到错误的市值/盈亏(用成本价计算)。改为日志记录,并在 positions 上标记 data_quality。
+    # R-08 B1-a(2026-11-09):行情缺失/现价无效 → None + data_quality=degraded,
+    # 不再兜成本价伪造「持平盈亏」(缺失必须显示缺失 —,不得填 0/成本)。
+    # 整体接口异常与单标的缺失统一走下方 None 分支,前端持仓行 ⚠ 降级提示。
     try:
         quotes = await asyncio.to_thread(ds2.get_realtime_quote_tencent, symbols)
     except Exception as e:
-        logger.warning(f"_enrich_positions_with_realtime: 行情接口失败,降级用成本价: {e}")
+        logger.warning(f"_enrich_positions_with_realtime: 行情接口失败,缺失标的标降级: {e}")
         quotes = []
-        for p in positions:
-            p["data_quality"] = "degraded"  # 标记行情数据降级,前端可显示提示
     quote_map = {q.get("code", ""): q for q in quotes}
     for p in positions:
         q = quote_map.get(p["symbol"], {})
-        current_price = _safe_float(q.get("price"), p.get("cost_price", 0))
-        p["current_price"] = current_price
-        p["market_value"] = round(current_price * p["quantity"], 2)
-        cost = p["cost_price"] * p["quantity"]
-        p["profit"] = round(p["market_value"] - cost, 2)
-        p["profit_pct"] = round((current_price / p["cost_price"] - 1) * 100, 2) if p["cost_price"] else 0.0
-        p["_change_pct"] = _safe_float(q.get("change_pct"), 0)
-        p["_prev_close"] = _safe_float(q.get("prev_close"), 0)
+        current_price = opt_float(q.get("price"))
+        if current_price is None or current_price <= 0:
+            p["current_price"] = None
+            p["market_value"] = None
+            p["profit"] = None
+            p["profit_pct"] = None
+            p["data_quality"] = "degraded"
+        else:
+            p["current_price"] = current_price
+            p["market_value"] = round(current_price * p["quantity"], 2)
+            cost = p["cost_price"] * p["quantity"]
+            p["profit"] = round(p["market_value"] - cost, 2)
+            p["profit_pct"] = round((current_price / p["cost_price"] - 1) * 100, 2) if p["cost_price"] else 0.0
+            p["data_quality"] = "normal"
+        p["_change_pct"] = opt_float(q.get("change_pct"))
+        p["_prev_close"] = opt_float(q.get("prev_close"))
         if q.get("name"):
             p["name"] = _safe_str(q.get("name"))
     return positions
@@ -101,10 +108,13 @@ class PositionItem(BaseModel):
     quantity: float
     available_quantity: float
     cost_price: float
-    current_price: float
-    market_value: float
-    profit: float
-    profit_pct: float
+    # R-08 B1-a(2026-11-09):行情缺失时现价/市值/盈亏为 None(前端渲染 —),
+    # 不再兜成本价伪造持平。data_quality=degraded 标记该行行情不可信。
+    current_price: float | None = None
+    market_value: float | None = None
+    profit: float | None = None
+    profit_pct: float | None = None
+    data_quality: str = "normal"  # normal | degraded
 
 
 class TradeItem(BaseModel):
@@ -150,22 +160,20 @@ def _get_state(request: Request) -> dict[str, Any]:
 async def overview(request: Request):
     if not _HAS_CORE:
         enriched = await _enrich_positions_with_realtime([dict(p) for p in _load_user_positions()])
-        market_value = sum(p.get("market_value", 0) for p in enriched)
+        # R-08 B1-a:市值缺失(None)不计入求和(不当 0),并标记降级。
+        market_value = sum(p["market_value"] for p in enriched if p.get("market_value") is not None)
+        mv_missing = any(p.get("market_value") is None for p in enriched)
         daily_pnl = 0.0
-        # P2-6 修复(2026-07-30):标记 daily_pnl 计算是否降级。
-        # 触发降级的情形:1) 实时行情获取失败(_change_pct/_prev_close 缺失)
-        #                 2) 计算过程异常。前端据此显示"盈亏降级"提示。
+        # 触发降级:1) 行情缺失(_change_pct/_prev_close 为 None) 2) 计算异常 3) 市值缺失。
         daily_pnl_degraded = False
         try:
             for p in enriched:
-                change_pct = _safe_float(p.get("_change_pct", 0))
-                prev_close = _safe_float(p.get("_prev_close", 0))
-                if prev_close > 0:
+                change_pct = p.get("_change_pct")
+                prev_close = p.get("_prev_close")
+                if prev_close is not None and prev_close > 0 and change_pct is not None:
                     daily_pnl += p["quantity"] * prev_close * change_pct / 100.0
-                else:
-                    # 有持仓但缺 prev_close → 行情数据不完整 → 降级
-                    if p.get("quantity", 0) > 0:
-                        daily_pnl_degraded = True
+                elif p.get("quantity", 0) > 0:
+                    daily_pnl_degraded = True
         except Exception as e:
             logger.warning(f"calc daily_pnl for overview failed: {e}")
             daily_pnl_degraded = True
@@ -181,14 +189,15 @@ async def overview(request: Request):
             position_count=len(enriched),
             risk_level="NORMAL",
             risk_message="系统正常运行",
-            data_quality="degraded" if daily_pnl_degraded else "normal",
+            data_quality="degraded" if (daily_pnl_degraded or mv_missing) else "normal",
         )
     state = _get_state(request)
     broker = state.get("broker")
     risk_manager = state.get("risk_manager")
     if not broker or not risk_manager:
         enriched = await _enrich_positions_with_realtime([dict(p) for p in _load_user_positions()])
-        market_value = sum(p.get("market_value", 0) for p in enriched)
+        market_value = sum(p["market_value"] for p in enriched if p.get("market_value") is not None)
+        mv_missing = any(p.get("market_value") is None for p in enriched)
         return OverviewResponse(
             available_cash=1_000_000.0,
             total_assets=round(1_000_000.0 + market_value, 2),
@@ -198,6 +207,7 @@ async def overview(request: Request):
             position_count=len(enriched),
             risk_level="NORMAL",
             risk_message="模拟模式",
+            data_quality="degraded" if mv_missing else "normal",
         )
     balance, positions, risk_status = await asyncio.gather(
         asyncio.to_thread(broker.get_balance),
@@ -226,6 +236,7 @@ async def positions(request: Request):
                 available_quantity=p["available_quantity"], cost_price=p["cost_price"],
                 current_price=p["current_price"], market_value=p["market_value"],
                 profit=p["profit"], profit_pct=p["profit_pct"],
+                data_quality=p.get("data_quality", "normal"),
             )
             for p in enriched
         ]
@@ -274,19 +285,21 @@ async def trades(request: Request, limit: int = 20):
 async def risk(request: Request):
     if not _HAS_CORE:
         enriched = await _enrich_positions_with_realtime([dict(p) for p in _load_user_positions()])
-        market_value = sum(p.get("market_value", 0) for p in enriched)
+        # R-08 B1-a:市值/盈亏缺失(None)不计入求和(不当 0);缺失会低估回撤,message 注明。
+        market_value = sum(p["market_value"] for p in enriched if p.get("market_value") is not None)
         daily_pnl = 0.0
         try:
             for p in enriched:
-                change_pct = _safe_float(p.get("_change_pct", 0))
-                prev_close = _safe_float(p.get("_prev_close", 0))
-                if prev_close > 0:
+                change_pct = p.get("_change_pct")
+                prev_close = p.get("_prev_close")
+                if prev_close is not None and prev_close > 0 and change_pct is not None:
                     daily_pnl += p["quantity"] * prev_close * change_pct / 100.0
         except Exception as e:
             logger.warning(f"calc daily_pnl for risk failed: {e}")
         available_cash = _load_user_cash()
         total_assets = available_cash + market_value
-        total_profit = sum(p.get("profit", 0) for p in enriched)
+        total_profit = sum(p["profit"] for p in enriched if p.get("profit") is not None)
+        profit_missing = any(p.get("profit") is None for p in enriched)
         total_cost = sum(p.get("cost_price", 0) * p.get("quantity", 0) for p in enriched)
         drawdown_pct = 0.0
         if total_cost > 0 and total_profit < 0:
@@ -299,6 +312,9 @@ async def risk(request: Request):
             level = "DANGER"
         elif drawdown_pct >= 5:
             level = "WARNING"
+        message = "风控正常" if level == "NORMAL" else f"回撤 {drawdown_pct}%，需关注"
+        if profit_missing:
+            message += "（部分持仓行情缺失，盈亏/回撤可能低估）"
         return RiskResponse(
             level=level, total_assets=round(total_assets, 2),
             peak_assets=round(total_assets, 2),
@@ -306,7 +322,7 @@ async def risk(request: Request):
             daily_pnl_pct=daily_pnl_pct, consecutive_stop_losses=0,
             is_paused=False, pause_until=None, is_emergency_stopped=False,
             no_new_positions=False, position_reduction=1.0,
-            message="风控正常" if level == "NORMAL" else f"回撤 {drawdown_pct}%，需关注",
+            message=message,
         )
     state = _get_state(request)
     risk_manager = state["risk_manager"]
@@ -405,7 +421,8 @@ async def portfolio_risk(request: Request):
 
     # 获取实时行情以计算市值权重(复用 _enrich)
     enriched = await _enrich_positions_with_realtime([dict(p) for p in positions])
-    valid = [p for p in enriched if p.get("market_value", 0) > 0 and p.get("quantity", 0) > 0]
+    # R-08 B1-a:市值缺失(None)的持仓无法计权重,排除(不当 0);全缺失则下方 insufficient。
+    valid = [p for p in enriched if p.get("market_value") is not None and p["market_value"] > 0 and p.get("quantity", 0) > 0]
     if not valid:
         result = PortfolioRiskResponse(
             position_count=len(positions), trading_days=0,

@@ -92,6 +92,14 @@ class TestPortfolioRiskRoute:
         # 持仓存在但无有效市值 → position_count 如实为持仓条数
         assert data["position_count"] == 1
 
+    def test_missing_quote_excluded_insufficient(self, client, tmp_path, monkeypatch):
+        """R-08 B1-a:行情缺失 → market_value None → 无有效市值 → insufficient(不兜成本伪造权重)。"""
+        _write_positions(tmp_path / "positions.json", [POSITION])
+        monkeypatch.setattr(dashboard.ds2, "get_realtime_quote_tencent", lambda symbols: [])
+        data = client.get("/api/dashboard/portfolio_risk").json()
+        assert data["data_quality"] == "insufficient"
+        assert data["position_count"] == 1
+
     def test_kline_all_failed_degraded(self, client, tmp_path, monkeypatch):
         _write_positions(tmp_path / "positions.json", [POSITION])
 

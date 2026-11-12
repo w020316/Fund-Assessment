@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>因子研究实验室 · QuantFlow Pro</title>
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <style>
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { margin: 0; background: var(--qf-bg-deep); color: var(--qf-text-primary); font: 14px/1.7 var(--qf-font-body); }
+    main { max-width: 1240px; margin: auto; padding: 28px 24px 60px; }
+    a { color: var(--qf-neon-cyan); text-underline-offset: 4px; }
+    nav, .section-title, .actions { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+    nav { padding-bottom: 26px; border-bottom: 1px solid var(--qf-line-1); }
+    nav strong { letter-spacing: 1px; }
+    .eyebrow { color: var(--qf-neon-cyan); font: 12px var(--qf-font-mono); letter-spacing: 2px; margin: 34px 0 10px; }
+    h1 { margin: 0; font-size: clamp(27px, 4vw, 40px); letter-spacing: -1px; }
+    h2 { font-size: 18px; margin: 0; }
+    h3 { font-size: 14px; margin: 0 0 12px; }
+    p { margin: 10px 0; }
+    .muted, small { color: var(--qf-text-secondary); }
+    .intro { max-width: 880px; }
+    .badge { color: var(--qf-neon-cyan); border: 1px solid var(--qf-line-neon); border-radius: 99px; padding: 3px 12px; font-size: 12px; }
+    .steps { display: flex; flex-wrap: wrap; gap: 8px; margin: 22px 0; padding: 0; list-style: none; }
+    .steps li { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--qf-line-1); color: var(--qf-text-secondary); }
+    .panel { margin-top: 20px; padding: 24px; border: 1px solid var(--qf-line-1); border-radius: 14px; background: var(--qf-bg-surface); }
+    .section-title { margin-bottom: 18px; }
+    .notice { padding: 12px 16px; border-left: 3px solid var(--qf-sem-warn); background: var(--qf-bg-elev); color: var(--qf-text-secondary); }
+    .fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin: 18px 0; }
+    label { display: flex; flex-direction: column; gap: 6px; color: var(--qf-text-secondary); }
+    input, select, textarea, button, .button { font: inherit; border-radius: 7px; }
+    input, select, textarea { width: 100%; background: var(--qf-bg-deep); border: 1px solid var(--qf-line-2); color: var(--qf-text-primary); padding: 9px 11px; min-width: 0; }
+    input[type="file"] { margin: 12px 0; }
+    textarea { font: 12px/1.6 var(--qf-font-mono); resize: vertical; }
+    button, .button { background: var(--qf-bg-elev); border: 1px solid var(--qf-line-2); color: var(--qf-text-primary); padding: 8px 15px; cursor: pointer; text-decoration: none; }
+    button.primary { background: var(--qf-neon-cyan); color: var(--qf-ink); font-weight: 700; border-color: transparent; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    :focus-visible { outline: 2px solid var(--qf-neon-cyan); outline-offset: 3px; }
+    .actions { justify-content: flex-start; }
+    .auth { max-width: 420px; margin: 18px 0; }
+    #status { min-height: 28px; margin: 14px 0 0; overflow-wrap: anywhere; }
+    #status.error { color: var(--qf-sem-critical); }
+    #status.success { color: var(--qf-neon-cyan); }
+    code { font-family: var(--qf-font-mono); font-size: 12px; color: var(--qf-neon-cyan); overflow-wrap: anywhere; }
+    details { margin-top: 14px; }
+    summary { cursor: pointer; color: var(--qf-text-secondary); }
+    .table-wrap { overflow: auto; max-height: 440px; margin-top: 14px; }
+    table { width: 100%; border-collapse: collapse; white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 13px; }
+    td, th { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--qf-line-1); }
+    th { color: var(--qf-text-secondary); font-weight: 500; background: var(--qf-bg-elev); }
+    .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 18px 0; }
+    .metric { border: 1px solid var(--qf-line-1); border-radius: 9px; padding: 16px; }
+    .metric strong { display: block; font: 26px/1.5 var(--qf-font-mono); color: var(--qf-text-primary); }
+    .metric span { color: var(--qf-text-secondary); font-size: 12px; }
+    .report-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 22px; }
+    #icChart { display: block; width: 100%; height: auto; min-height: 160px; }
+    .group-row { display: grid; grid-template-columns: 35px 1fr 80px; align-items: center; gap: 12px; margin: 14px 0; }
+    .group-track { height: 10px; background: var(--qf-bg-elev2); border-radius: 3px; overflow: hidden; }
+    .group-bar { height: 100%; background: var(--qf-sem-up); }
+    .group-row output { text-align: right; font-family: var(--qf-font-mono); }
+    #coverage, #splitInfo, #sizeInfo { color: var(--qf-text-secondary); }
+    #segment { width: auto; min-width: 165px; }
+    #notes { padding-left: 20px; color: var(--qf-text-secondary); }
+    footer { margin-top: 24px; color: var(--qf-text-muted); font-size: 12px; }
+    @media (max-width: 850px) { .fields, .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .report-grid { grid-template-columns: 1fr; } }
+    @media (max-width: 480px) { main { padding: 18px 14px 40px; } .panel { padding: 17px; } .fields { grid-template-columns: 1fr; } .metric { padding: 12px; } .metric strong { font-size: 21px; } nav { gap: 8px; } }
+  </style>
+  <script src="/static/js/factor-research.js" defer></script>
+</head>
+<body>
+<main>
+  <nav aria-label="页面导航"><strong>QuantFlow Pro <span class="muted">/ Research</span></strong><a href="/static/index.html">返回量化工作台</a></nav>
+  <div class="eyebrow">FACTOR RESEARCH / ALPHA 144</div>
+  <h1>先验证因子，再讨论收益。</h1>
+  <p class="intro muted">将历史价量数据变成可复核的证据：复权与过滤、因子排序、IC 检验、分组收益和市值暴露。负相关也可能有信息，漂亮的曲线却不一定是独立 alpha。</p>
+  <ol class="steps" aria-label="研究流程"><li>01 导入历史面板</li><li>02 设定研究规则</li><li>03 隔离未来标签</li><li>04 检验与归因</li></ol>
+  <div class="notice">这里只做历史数据诊断，不训练模型、不下单。分组远期收益未扣费用与滑点，不是可交易净值，也不构成收益承诺。</div>
+
+  <form id="researchForm">
+    <section class="panel" aria-labelledby="inputHeading">
+      <div class="section-title"><h2 id="inputHeading">01 / 历史数据</h2><span class="badge">仅本项目服务内存计算</span></div>
+      <p class="muted">上传 UTF-8 CSV 或粘贴内容。最多 20,000 行、200 只股票、1,000 个交易日；日期与股票展开后不超过 100,000 格。</p>
+      <label for="csvFile">选择 CSV 文件<input id="csvFile" type="file" accept=".csv,text/csv"></label>
+      <label for="csvData">CSV 内容<textarea id="csvData" rows="7" required maxlength="2000000" spellcheck="false" placeholder="date,stock_code,open,close,amount,adj_factor,is_st,listing_days,market_cap"></textarea></label>
+      <div class="actions" style="margin-top:12px"><button type="button" id="downloadTemplate">下载 CSV 表头</button><small id="fileInfo">不内置或自动填充模拟行情。</small></div>
+      <details>
+        <summary>查看字段要求与 Alpha144 公式</summary>
+        <p><code>date,stock_code,open,close,amount,adj_factor,is_st,listing_days</code> 为必需表头，<code>market_cap</code> 可选。</p>
+        <div class="table-wrap" tabindex="0"><table><thead><tr><th>字段</th><th>含义</th></tr></thead><tbody>
+          <tr><td>date / stock_code</td><td>YYYY-MM-DD / 六位股票代码；同日同股不可重复</td></tr>
+          <tr><td>open / close</td><td>未复权开盘价 / 收盘价，单位元</td></tr>
+          <tr><td>adj_factor</td><td>该日历史复权因子；价格乘此值，成交额不复权</td></tr>
+          <tr><td>amount</td><td>该日真实成交额，单位元；不得用成交量替代</td></tr>
+          <tr><td>is_st / listing_days</td><td>该日 ST 状态（0/1）/ 截至该日上市交易日数</td></tr>
+          <tr><td>market_cap</td><td>该日总市值，单位元；缺失则不推断小盘暴露</td></tr>
+        </tbody></table></div>
+        <p><code>r[t] = adj_close[t] / adj_close[t-1] - 1</code><br><code>Alpha144 = SUM(max(-r, 0) / amount, window) / COUNT(r &lt; 0, window)</code></p>
+        <p class="muted">窗口必须完整且每天成交额有效；无下跌日时因子不可用。缺失数值留空，不填零；复权价与未复权价不可混用。请包含预热窗口和标签观测期，并提供完整历史股票池、交易日历及当时已知的状态，而非今天的股票列表。</p>
+      </details>
+    </section>
+    <section class="panel" aria-labelledby="rulesHeading">
+      <h2 id="rulesHeading">02 / 固定研究规则</h2>
+      <div class="fields">
+        <label for="window">因子窗口（交易日）<input id="window" type="number" value="20" min="2" max="120" step="1" required></label>
+        <label for="horizon">远期收益周期（交易日）<input id="horizon" type="number" value="20" min="1" max="120" step="1" required></label>
+        <label for="groups">分位组数<input id="groups" type="number" value="5" min="2" max="10" step="1" required></label>
+        <label for="direction">事先确定的因子方向<select id="direction"><option value="1">正向：高值高分</option><option value="-1">反向：低值高分</option></select></label>
+        <label for="minListing">最少上市交易日<input id="minListing" type="number" value="120" min="0" max="1000" step="1" required></label>
+        <label for="minAmount">窗口日均成交额下限（元）<input id="minAmount" type="number" value="5000000" min="0" max="1000000000000" step="1" required></label>
+        <label for="trainRatio">前段研究占比<select id="trainRatio"><option value="0.6">60%</option><option value="0.7" selected>70%</option><option value="0.8">80%</option></select></label>
+      </div>
+      <p class="muted">当日收盘生成因子，从次日开盘计算远期收益。前段标签若跨入测试段则剔除（purge）；尾部尚未到期的收益不填零。不根据测试段自动选择方向或调参。</p>
+      <label class="auth" for="adminToken">管理令牌（可选）<input id="adminToken" type="password" autocomplete="off" placeholder="沿用主页面鉴权；在此输入仅用于本次请求"></label>
+      <p class="muted">点击运行会将 CSV 发送至本项目服务，不持久化、不发送第三方。计算接口沿用管理员鉴权，每分钟最多 3 次。</p>
+      <div class="actions"><button id="runResearch" class="primary" type="submit">运行因子检验</button><button type="button" id="downloadReport" disabled>下载研究报告 JSON</button></div>
+      <p id="status" role="status" aria-live="polite">等待历史数据。上传单只股票无法完成横截面 IC 检验。</p>
+    </section>
+  </form>
+
+  <section class="panel" id="report" aria-labelledby="reportHeading" hidden>
+    <div class="section-title"><h2 id="reportHeading">03 / 因子检验报告</h2><label for="segment">展示范围<select id="segment"><option value="test">时间留出测试段</option><option value="train">前段研究样本</option><option value="all">全段描述统计</option></select></label></div>
+    <p id="coverage"></p><p id="splitInfo"></p>
+    <div class="notice">时间留出只是固定因子的分段检验，并不等同于模型训练后的样本外业绩。若反复查看测试段再调参，该测试段就不再独立。</div>
+    <div class="metrics" id="metrics"></div>
+    <div class="report-grid">
+      <div><h3>逐日 Rank IC · 越接近 ±1，排序相关越强</h3><svg id="icChart" viewBox="0 0 600 220" role="img" aria-label="逐日 Rank IC，缺失日期不连线"></svg><p id="chartInfo" class="muted"></p></div>
+      <div><h3>各组平均远期收益 · 非净值</h3><div id="groupChart"></div><p class="muted">G1 为低分组，最后一组为高分组。并列值不强行拆组，空组显示 —。</p></div>
+    </div>
+    <h3 style="margin-top:22px">市值暴露 · 全段候选样本诊断</h3><p id="sizeInfo"></p>
+    <h3 style="margin-top:22px">研究边界</h3><ul id="notes"></ul>
+    <details><summary>查看逐日检验明细（最近 80 个日期，完整数据见 JSON）</summary><div class="table-wrap" tabindex="0"><table><thead><tr><th>日期</th><th>分段</th><th>配对数</th><th>Pearson IC</th><th>Rank IC</th></tr></thead><tbody id="dailyRows"></tbody></table></div></details>
+  </section>
+  <footer>研究方法参考用户提供的 <a href="https://v.douyin.com/4xFljZtsJDg/" target="_blank" rel="noopener noreferrer">鲁班科普视频</a> 与 <a href="https://v.douyin.com/zMVOXq6Vmxg/" target="_blank" rel="noopener noreferrer">量化舵 Alpha144 教程</a>。仅参考方法，不采信或复用视频中的收益数字。</footer>
+</main>
+</body>
+</html>

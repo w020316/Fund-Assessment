@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import math
 
-from src.utils.convert import safe_float, safe_int, safe_str
+from src.utils.convert import opt_float, safe_float, safe_int, safe_str
 
 
 class TestSafeFloat:
@@ -81,3 +81,39 @@ class TestSafeInt:
 
     def test_negative_float_string(self):
         assert safe_int("-5.9") == -5
+
+
+class TestOptFloat:
+    """R-08 B1(2026-11-09):诚实变体,缺失→None(区别于 safe_float 兜 0)。"""
+
+    def test_none_returns_none(self):
+        assert opt_float(None) is None
+
+    def test_missing_markers_return_none(self):
+        for raw in ("", "-", "--", "—", "None", "null", "nan", "   "):
+            assert opt_float(raw) is None
+
+    def test_nan_inf_return_none(self):
+        assert opt_float(float("nan")) is None
+        assert opt_float(float("inf")) is None
+        assert opt_float(float("-inf")) is None
+
+    def test_invalid_string_returns_none(self):
+        assert opt_float("abc") is None
+
+    def test_valid_string_returns_float(self):
+        assert opt_float("3.14") == 3.14
+        assert opt_float("  2.5  ") == 2.5
+
+    def test_zero_is_real_value_not_missing(self):
+        # 真实 0 与缺失必须可区分:0 是合法值,返回 0.0 而非 None
+        assert opt_float(0) == 0.0
+        assert opt_float("0") == 0.0
+        assert opt_float(0.0) == 0.0
+
+    def test_int_float_return_float(self):
+        assert opt_float(42) == 42.0
+        assert opt_float(3.14) == 3.14
+
+    def test_negative_returns_float(self):
+        assert opt_float(-2.5) == -2.5

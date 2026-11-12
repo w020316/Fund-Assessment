@@ -25,6 +25,31 @@ def safe_float(val: Any, default: float = 0.0) -> float:
         return default
 
 
+def opt_float(val: Any) -> float | None:
+    """诚实变体: 只在值确实存在且为有效数字时返回 float, 其余一律 None。
+
+    与 safe_float 的区别(R-08 B1, 2026-11-09): safe_float 缺字段兜 0.0,
+    使「数据缺失」与「真实值 0」无法区分, 缺失被渲染成 0.00/0.00% 冒充真值,
+    违反「缺失必须显示缺失(—), 不得填 0」红线。语义与 data_source_v2._opt_float
+    完全一致, 供路由层渲染契约 float→Optional 迁移复用; 前端 None→—。
+    """
+    if val is None:
+        return None
+    if isinstance(val, str):
+        val = val.strip()
+        if val in ("", "-", "--", "—", "None", "null", "nan"):
+            return None
+    if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+        return None
+    try:
+        result = float(val)
+    except (ValueError, TypeError):
+        return None
+    if math.isnan(result) or math.isinf(result):
+        return None
+    return result
+
+
 def safe_str(val: Any, default: str = "") -> str:
     """安全转 str, 处理 None 与 NaN。"""
     if val is None:

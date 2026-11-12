@@ -1880,6 +1880,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
             <button class="btn btn-sm btn-outline" onclick="runStrategyBacktest()">回测</button>
             <input class="input" id="strategyLabRuns" type="number" min="100" max="5000" step="100" value="1000" style="max-width:110px;" title="蒙特卡洛次数">
             <button class="btn btn-sm btn-outline" onclick="runStrategyValidate()">样本外验证</button>
+            <a class="btn btn-sm btn-outline" href="/static/factor-research.html">因子研究实验室</a>
           </div>
           <div id="strategyLabResult" style="font-size:12px;color:var(--text-secondary);">选择操作后在此查看结果。样本外验证使用该股票近 120 日真实 K 线收盘价计算收益率序列;回测为假设性回测(因子取当前快照,存在未来函数偏差),结果仅供参考。</div>
         </div>
@@ -5142,7 +5143,7 @@ async function runStrategyBacktest() {
       ['夏普比率', fmtNum(data.sharpe_ratio)],
       ['胜率', fmtNum(data.win_rate)],
       ['样本只数', fmtNum(data.trades)]
-    ], '假设性回测:因子取当前快照,存在未来函数偏差;样本为候选池前 15 只中因子最高的 5 只,仅作筛选参考。');
+    ], `${data.warning || '假设性回测：因子取当前快照，存在未来函数偏差。'}${data.partial ? ' 本次仅完成部分候选股票计算。' : ''} 未扣交易成本；仅作筛选参考，不是真实历史业绩。`);
   } catch (e) {
     _strategyLabError(`回测失败(执行异常或行情不可用)`, e);
   }
@@ -7481,24 +7482,29 @@ async function loadPositions() {
     const code = p.symbol || p.code || '';
     const qty = p.quantity || p.qty || 0;
     const cost = p.cost_price || p.cost || 0;
-    const price = p.current_price || p.price || 0;
-    const profit = p.profit || p.pnl || 0;
-    const profitPct = p.profit_pct || p.pnl_pct || 0;
-    const color = changeColor(profitPct);
-    // P2-5/6 收尾(2026-07-30):后端 _enrich_positions_with_realtime 失败时给持仓项
-    // 标记 data_quality=degraded,前端在该行代码后追加 ⚠ 标识,鼠标悬停显示原因。
+    // R-08 B1-a(2026-11-09):行情缺失时后端给 None(null),不再 || 0 伪造持平。
+    // 保留 null 交给 fmtNum/fmtMoney(已 null→—);缺失列用 muted 色,不渲染涨跌色/百分号。
+    const price = p.current_price != null ? p.current_price : (p.price != null ? p.price : null);
+    const profit = p.profit != null ? p.profit : (p.pnl != null ? p.pnl : null);
+    const profitPct = p.profit_pct != null ? p.profit_pct : (p.pnl_pct != null ? p.pnl_pct : null);
+    const color = profitPct == null ? 'var(--text-muted)' : changeColor(profitPct);
+    const priceCell = price == null ? '—' : fmtNum(price);
+    const profitCell = profit == null ? '—' : changeSign(profit) + fmtMoney(profit);
+    const profitPctCell = profitPct == null ? '—' : changeSign(profitPct) + fmtNum(profitPct) + '%';
+    // 后端 _enrich_positions_with_realtime 行情缺失给该行标 data_quality=degraded,
+    // 代码后追加 ⚠ 标识,鼠标悬停显示原因。
     const degraded = (p.data_quality === 'degraded');
     const warnIcon = degraded
-      ? ` <span title="实时行情获取失败,当前价/盈亏可能不准确" style="color:var(--accent-blue);font-size:11px;cursor:help;">⚠</span>`
+      ? ` <span title="实时行情缺失,当前价/盈亏不可信(显示 —)" style="color:var(--accent-blue);font-size:11px;cursor:help;">⚠</span>`
       : '';
     return `<tr${degraded ? ' style="opacity:0.85;"' : ''}>
       <td style="color:var(--accent-cyan);">${escapeHtml(code)}${warnIcon}</td>
       <td>${escapeHtml(p.name)}</td>
       <td>${qty}</td>
       <td>${fmtNum(cost)}</td>
-      <td style="color:${color}">${fmtNum(price)}</td>
-      <td style="color:${color}">${changeSign(profit)}${fmtMoney(profit)}</td>
-      <td style="color:${color}">${changeSign(profitPct)}${fmtNum(profitPct)}%</td>
+      <td style="color:${color}">${priceCell}</td>
+      <td style="color:${color}">${profitCell}</td>
+      <td style="color:${color}">${profitPctCell}</td>
       <td><button class="btn btn-sm" style="padding:2px 8px;font-size:11px;color:var(--color-up);" data-code="${escapeHtml(code)}" onclick="onDeleteStockPositionClick(this)">删除</button></td>
     </tr>`;
   }).join('');

@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 import asyncio
 import threading
@@ -113,6 +113,8 @@ class BacktestResponse(BaseModel):
     sharpe_ratio: float
     win_rate: float
     trades: int
+    warning: str = "假设性回测：因子为当前快照，存在未来函数偏差，且未扣交易成本"
+    partial: bool = False
 
 
 class StrategyInfo(BaseModel):
@@ -120,6 +122,17 @@ class StrategyInfo(BaseModel):
     display_name: str
     description: str
     enabled: bool
+
+
+class FactorResearchRequest(BaseModel):
+    csv_data: str = Field(..., min_length=1, max_length=2_000_000)
+    window: int = Field(20, ge=2, le=120, strict=True)
+    horizon: int = Field(20, ge=1, le=120, strict=True)
+    groups: int = Field(5, ge=2, le=10, strict=True)
+    min_listing_days: int = Field(120, ge=0, le=1000, strict=True)
+    min_average_amount: float = Field(5_000_000, ge=0, le=1e12, allow_inf_nan=False)
+    direction: Literal[-1, 1] = 1
+    train_ratio: float = Field(0.7, ge=0.5, le=0.9, allow_inf_nan=False)
 
 
 class ValidateRequest(BaseModel):
@@ -406,11 +419,7 @@ async def scan_cb():
              dependencies=[Depends(require_admin), Depends(_single_backtest_guard)])
 async def backtest(req: BacktestRequest):
     if not _HAS_STRATEGIES:
-        return BacktestResponse(
-            strategy=req.strategy, stock_code=req.stock_code,
-            total_return=0, annualized_return=0, max_drawdown=0,
-            sharpe_ratio=0, win_rate=0, trades=0,
-        )
+        raise HTTPException(status_code=503, detail="策略模块不可用，未执行回测")
     try:
         quant = BSProQuant()
         factor_combo = {"pe": -0.2, "roe_change": 0.3, "return_3m": 0.3, "sharpe": 0.2}
@@ -435,6 +444,8 @@ async def backtest(req: BacktestRequest):
             sharpe_ratio=result["sharpe_ratio"],
             win_rate=result["win_rate"],
             trades=result["trades"],
+            warning=result.get("warning") or BacktestResponse.model_fields["warning"].default,
+            partial=result.get("partial", False),
         )
     except asyncio.TimeoutError:
         logger.warning(f"backtest {req.strategy} 超时({BACKTEST_TIMEOUT_SECONDS}s)")
@@ -449,6 +460,18 @@ async def backtest(req: BacktestRequest):
     except Exception as e:
         logger.exception(f"backtest {req.strategy} failed")
         raise HTTPException(status_code=503, detail="回测执行失败，请稍后重试")
+
+
+@router.post("/factor-research", dependencies=[Depends(require_admin), Depends(_single_backtest_guard)])
+@limiter.limit("3/minute")
+async def factor_research(request: Request, req: FactorResearchRequest) -> dict[str, Any]:
+    from src.core.factor_research import research_alpha144
+
+    try:
+        result = await asyncio.to_thread(research_alpha144, **req.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"data": result}
 
 
 @router.post("/validate", dependencies=[Depends(require_admin)])
