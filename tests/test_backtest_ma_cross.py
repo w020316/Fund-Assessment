@@ -15,6 +15,7 @@ import pytest
 from src.core.backtest import (
     BacktestEngine,
     BacktestResult,
+    _analyze_plateau,
     _calc_information_ratio,
     make_ma_cross_strategy,
     ma_cross_strategy,
@@ -327,3 +328,63 @@ class TestVectorizedEventEquivalence:
         )
         assert len(opt["grid"]) >= 800
         assert opt["best"]["monthly_returns"] is not None
+
+
+class TestPlateauDetection:
+    """网格高原识别(启发式): 正 IR 连通域区分连片高原与孤立尖峰"""
+
+    @staticmethod
+    def _grid(ir_by_combo: dict[tuple[int, int], float]) -> list[dict]:
+        rows = [
+            {"short_window": s, "long_window": lw, "information_ratio": ir}
+            for (s, lw), ir in ir_by_combo.items()
+        ]
+        rows.sort(key=lambda r: r["information_ratio"], reverse=True)
+        return rows
+
+    def test_connected_blob_is_plateau(self):
+        # 最优(3,10) 与 (4,10)、(3,20) 正 IR 相邻 → 连通域 3 个
+        grid = self._grid({
+            (3, 10): 1.2, (4, 10): 0.8, (3, 20): 0.5,
+            (5, 20): -0.4, (4, 20): -0.2, (5, 10): -0.6,
+        })
+        plateau = _analyze_plateau(grid)
+        assert plateau["best_short"] == 3 and plateau["best_long"] == 10
+        assert plateau["component_size"] == 3
+        assert plateau["component_ir_mean"] == pytest.approx((1.2 + 0.8 + 0.5) / 3, abs=1e-4)
+        assert plateau["grid_positive_count"] == 3
+
+    def test_isolated_spike(self):
+        # 最优正 IR, 但所有邻居负 IR → 连通域只有自己
+        grid = self._grid({
+            (3, 10): 1.5, (4, 10): -0.8, (3, 20): -0.5, (4, 20): -0.3,
+        })
+        plateau = _analyze_plateau(grid)
+        assert plateau["component_size"] == 1
+        assert plateau["component_ir_mean"] == pytest.approx(1.5, abs=1e-9)
+        assert plateau["grid_positive_count"] == 1
+
+    def test_nonpositive_best_returns_none(self):
+        assert _analyze_plateau(self._grid({(3, 10): -0.5, (4, 10): -0.2})) is None
+        assert _analyze_plateau([]) is None
+
+    def test_diagonal_is_not_adjacent(self):
+        # 仅对角线邻居正 IR 不连通(4-邻接), 连通域仍为 1
+        grid = self._grid({(3, 10): 1.0, (4, 20): 0.9, (4, 10): -0.5, (3, 20): -0.5})
+        plateau = _analyze_plateau(grid)
+        assert plateau["component_size"] == 1
+        assert plateau["grid_positive_count"] == 2
+
+    def test_optimize_result_carries_plateau(self):
+        closes = (100 + np.cumsum(np.random.default_rng(3).normal(0.05, 1.0, 180))).tolist()
+        engine = BacktestEngine(data_manager=_mock_dm(_make_kline(closes)))
+        opt = engine.optimize_ma_cross(
+            "600519", "2025-01-01", "2025-12-31",
+            short_windows=range(3, 9), long_windows=range(10, 31, 5),
+        )
+        assert "plateau" in opt
+        if opt["best"] and opt["best"]["information_ratio"] > 0:
+            assert opt["plateau"]["component_size"] >= 1
+            assert opt["plateau"]["best_short"] == opt["best"]["short_window"]
+        else:
+            assert opt["plateau"] is None

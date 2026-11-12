@@ -90,6 +90,21 @@
     }
   }
 
+  // 高原识别(启发式): 最优组合所在正 IR 连通域的规模与平均 IR。
+  // 红线: 服务端无 plateau 或最优 IR 非正时显示缺失(隐藏注记), 不伪造判读。
+  function renderPlateauNote(plateau) {
+    const note = byId('plateauNote');
+    const size = plateau && typeof plateau.component_size === 'number'
+      && Number.isFinite(plateau.component_size) ? plateau.component_size : 0;
+    if (!size) { note.hidden = true; note.textContent = ''; return; }
+    const verdict = size >= 3
+      ? '连片高原，可信度相对较高'
+      : (size === 1 ? '孤立尖峰，大概率是过拟合幸存者，谨慎采信' : '小片区域，可信度有限');
+    note.textContent = `高原识别（启发式）：最优 MA${plateau.best_short}/MA${plateau.best_long} 所在的正 IR 连通域含 `
+      + `${size} 个组合、平均 IR ${plateau.component_ir_mean}（网格内正 IR 组合共 ${plateau.grid_positive_count} 个）—— ${verdict}。`;
+    note.hidden = false;
+  }
+
   function render() {
     if (!result) return;
     const data = result.data;
@@ -108,6 +123,7 @@
       metric('最优夏普', number(best.sharpe_ratio), `${best.trade_count} 次交易`)
     );
     renderTearSheet(best);
+    renderPlateauNote(data.plateau);
     const warning = byId('warning');
     warning.textContent = result.warning || '';
     warning.hidden = !result.warning;

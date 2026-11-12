@@ -192,6 +192,49 @@ def _calc_monthly_returns(equity_dates: list, equity_curve: list[float]) -> list
 StrategyFunc = Callable[[date, dict, pd.DataFrame], list[Signal]]
 
 
+def _analyze_plateau(grid: list[dict]) -> Optional[dict]:
+    """网格高原识别(启发式, 非统计检验): 最优组合所在正 IR 连通域分析。
+
+    在 (MA_short, MA_long) 网格轴上做 4-邻接连通域划分, 节点为
+    information_ratio > 0 的有效组合。返回最优组合所在连通域的规模与
+    平均 IR: 连片(≥3)提示高原, 孤立(=1)提示过拟合尖峰。最优 IR 非正
+    或网格为空返回 None(缺失必须显示缺失, 不伪造高原)。
+    """
+    if not grid:
+        return None
+    best = grid[0]
+    best_ir = best.get("information_ratio")
+    if not isinstance(best_ir, float) or not best_ir > 0:
+        return None
+    shorts = sorted({row["short_window"] for row in grid})
+    longs = sorted({row["long_window"] for row in grid})
+    s_idx = {w: i for i, w in enumerate(shorts)}
+    l_idx = {w: i for i, w in enumerate(longs)}
+    cells = {
+        (s_idx[row["short_window"]], l_idx[row["long_window"]]): row["information_ratio"]
+        for row in grid
+        if isinstance(row.get("information_ratio"), float) and row["information_ratio"] > 0
+    }
+    start = (s_idx[best["short_window"]], l_idx[best["long_window"]])
+    seen = {start}
+    stack = [start]
+    irs = [cells[start]]
+    while stack:
+        si, li = stack.pop()
+        for neighbor in ((si - 1, li), (si + 1, li), (si, li - 1), (si, li + 1)):
+            if neighbor in cells and neighbor not in seen:
+                seen.add(neighbor)
+                stack.append(neighbor)
+                irs.append(cells[neighbor])
+    return {
+        "best_short": best["short_window"],
+        "best_long": best["long_window"],
+        "component_size": len(irs),
+        "component_ir_mean": round(sum(irs) / len(irs), 4),
+        "grid_positive_count": sum(1 for ir in cells.values() if ir > 0),
+    }
+
+
 def new_high_strategy(trade_date: date, portfolio: dict, data: pd.DataFrame) -> list[Signal]:
     signals: list[Signal] = []
     if len(data) < 20:
@@ -882,7 +925,8 @@ class BacktestEngine:
         Returns:
             {"stock_code", "start_date", "end_date", "grid": [...按 IR 降序...],
              "best": 首项或 None(含 tear sheet 字段: monthly_returns/skewness/kurtosis,
-             立项 1 借鉴 quantstats,仅 best 附带以免网格条目膨胀)}
+             立项 1 借鉴 quantstats,仅 best 附带以免网格条目膨胀),
+             "plateau": 正 IR 连通域高原识别(启发式,无正 IR 最优时为 None)}
         """
         if short_windows is None:
             short_windows = range(3, 12)
@@ -957,4 +1001,5 @@ class BacktestEngine:
             "end_date": end_date,
             "grid": grid,
             "best": best,
+            "plateau": _analyze_plateau(grid),
         }
