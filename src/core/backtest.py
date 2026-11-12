@@ -34,6 +34,7 @@ class BacktestResult:
     sortino_ratio: float = 0.0  # Sortino 比率:只惩罚下行波动(下行标准差)
     calmar_ratio: float = 0.0   # Calmar 比率:年化收益/最大回撤
     volatility: float = 0.0     # 年化波动率:daily_returns.std * sqrt(252)
+    information_ratio: float = 0.0  # 信息比率:相对买入持有基准的超额收益/跟踪误差
 
 
 def _calc_sortino_ratio(returns: list[float], risk_free: float = _RISK_FREE_RATE) -> float:
@@ -107,6 +108,36 @@ def _calc_volatility(returns: list[float]) -> float:
     arr = np.array(returns, dtype=float)
     # P3-6 修复(2026-07-30):统一 ddof=1(样本标准差),与 Sharpe/Sortino 保持一致
     return float(np.std(arr, ddof=1) * np.sqrt(_TRADING_DAYS_PER_YEAR)) if len(arr) > 1 else 0.0
+
+
+def _calc_information_ratio(
+    strategy_returns: list[float],
+    benchmark_returns: Optional[list[float]] = None,
+) -> float:
+    """信息比率 IR = E[Rp-Rb] / σ(Rp-Rb),年化。
+
+    基准取同标的"买入持有"(不做任何调仓),衡量策略相对躺平是否值得:
+    IR > 0 策略跑赢持有不动,IR < 0 策略反而不如躺平。
+
+    Args:
+        strategy_returns: 策略日收益率序列
+        benchmark_returns: 基准日收益率序列(与策略序列按日对齐)
+
+    Returns:
+        年化信息比率;序列为空/长度不足/长度不一致/跟踪误差为 0 时返回 0.0
+    """
+    if not strategy_returns or not benchmark_returns:
+        return 0.0
+    if len(strategy_returns) != len(benchmark_returns) or len(strategy_returns) < 2:
+        return 0.0
+    strat = np.array(strategy_returns, dtype=float)
+    bench = np.array(benchmark_returns, dtype=float)
+    excess = strat - bench
+    # ddof=1 与 Sharpe/Sortino 口径统一;跟踪误差为 0 时返回 0.0(JSON 安全,不返回 inf)
+    tracking_error = float(np.std(excess, ddof=1))
+    if tracking_error <= 0:
+        return 0.0
+    return float(np.mean(excess) * _TRADING_DAYS_PER_YEAR / (tracking_error * np.sqrt(_TRADING_DAYS_PER_YEAR)))
 
 
 StrategyFunc = Callable[[date, dict, pd.DataFrame], list[Signal]]
@@ -315,6 +346,62 @@ def long_value_strategy(trade_date: date, portfolio: dict, data: pd.DataFrame) -
     return signals
 
 
+def make_ma_cross_strategy(short_window: int = 5, long_window: int = 20, name: str = "ma_cross") -> StrategyFunc:
+    """MA 金叉/死叉趋势策略工厂(视频"量化对轰"链路 STEP 09/12 的经典教学策略)。
+
+    状态判定(非交叉瞬间):MA_short > MA_long → 满仓持有;MA_short < MA_long → 空仓观望。
+    工厂形式支持参数网格优化(optimize_ma_cross 为每组 (short, long) 生成独立策略实例)。
+
+    Args:
+        short_window: 短期均线窗口,如 5
+        long_window: 长期均线窗口,如 20
+        name: 信号上的策略标识
+
+    Returns:
+        与其它策略同签名的策略函数
+    """
+    def ma_cross_strategy(trade_date: date, portfolio: dict, data: pd.DataFrame) -> list[Signal]:
+        signals: list[Signal] = []
+        if len(data) < long_window:
+            return signals
+
+        symbol = portfolio.get("symbol", "")
+        close = data["收盘"].astype(float)
+        current_price = float(close.iloc[-1])
+        short_ma = float(close.iloc[-short_window:].mean())
+        long_ma = float(close.iloc[-long_window:].mean())
+        has_position = symbol in portfolio.get("positions", {})
+
+        if not has_position and short_ma > long_ma:
+            quantity = int(portfolio["cash"] / current_price / 100) * 100
+            if quantity >= 100:
+                signals.append(Signal(
+                    symbol=symbol,
+                    side=OrderSide.BUY,
+                    price=current_price,
+                    quantity=float(quantity),
+                    strategy=name,
+                    reason=f"金叉 MA{short_window}>MA{long_window} 满仓买入",
+                ))
+        elif has_position and short_ma < long_ma:
+            sell_qty = portfolio["positions"][symbol]["quantity"]
+            if sell_qty > 0:
+                signals.append(Signal(
+                    symbol=symbol,
+                    side=OrderSide.SELL,
+                    price=current_price,
+                    quantity=float(sell_qty),
+                    strategy=name,
+                    reason=f"死叉 MA{short_window}<MA{long_window} 空仓观望",
+                ))
+
+        return signals
+    return ma_cross_strategy
+
+
+ma_cross_strategy = make_ma_cross_strategy()
+
+
 class BacktestEngine:
     def __init__(self, data_manager: Optional[DataSourceManager] = None):
         self._data_manager = data_manager or DataSourceManager()
@@ -348,6 +435,18 @@ class BacktestEngine:
                 trade_count=0, equity_curve=[initial_capital], trades=[],
             )
 
+        return self._simulate(strategy_func, df, start_date, end_date, initial_capital, stock_code=stock_code)
+
+    def _simulate(
+        self,
+        strategy_func: StrategyFunc,
+        df: pd.DataFrame,
+        start_date: str,
+        end_date: str,
+        initial_capital: float,
+        stock_code: str = "",
+    ) -> BacktestResult:
+        """在给定K线数据上模拟策略(不重新取数),供 run 与 optimize_ma_cross 复用。"""
         portfolio: dict = {
             "cash": initial_capital,
             "positions": {},
@@ -359,6 +458,7 @@ class BacktestEngine:
         trades: list[dict] = []
         peak_equity = initial_capital
         max_drawdown = 0.0
+        valid_rows = 0
 
         for idx in range(len(df)):
             row = df.iloc[idx]
@@ -366,6 +466,7 @@ class BacktestEngine:
                 current_date = pd.Timestamp(row["日期"]).date()
             except Exception:
                 continue
+            valid_rows += 1
             current_price = float(row["收盘"])
 
             for sym in portfolio["positions"]:
@@ -401,7 +502,17 @@ class BacktestEngine:
             if dd > max_drawdown:
                 max_drawdown = dd
 
-        return self._calc_metrics(equity_curve, trades, initial_capital, start_date, end_date, max_drawdown)
+        # 买入持有基准:只在每行日期都有效时收益序列才能与权益曲线逐日对齐
+        benchmark_returns: Optional[list[float]] = None
+        closes = df["收盘"].astype(float).tolist()
+        if valid_rows == len(df) and len(closes) >= 2 and closes[0] > 0:
+            padded = [closes[0]] + closes[:-1]
+            benchmark_returns = ((np.array(closes) - np.array(padded)) / np.array(padded)).tolist()
+
+        return self._calc_metrics(
+            equity_curve, trades, initial_capital, start_date, end_date, max_drawdown,
+            benchmark_returns=benchmark_returns,
+        )
 
     def _execute_signal(
         self,
@@ -487,6 +598,7 @@ class BacktestEngine:
         start_date: str,
         end_date: str,
         max_drawdown: float,
+        benchmark_returns: Optional[list[float]] = None,
     ) -> BacktestResult:
         total_return = (equity_curve[-1] - initial_capital) / initial_capital if initial_capital > 0 else 0.0
 
@@ -513,6 +625,7 @@ class BacktestEngine:
         sortino = _calc_sortino_ratio(daily_returns_list, _RISK_FREE_RATE)
         calmar = _calc_calmar_ratio(annual_return, max_drawdown)
         volatility = _calc_volatility(daily_returns_list)
+        information_ratio = _calc_information_ratio(daily_returns_list, benchmark_returns)
 
         sell_trades = [t for t in trades if t["side"] == "sell"]
         win_trades = [t for t in sell_trades if t.get("profit", 0) > 0]
@@ -537,6 +650,7 @@ class BacktestEngine:
             sortino_ratio=round(sortino, 4) if sortino != float("inf") else float("inf"),
             calmar_ratio=round(calmar, 4),
             volatility=round(volatility, 4),
+            information_ratio=round(information_ratio, 4),
         )
 
     def run_all_strategies(
@@ -551,6 +665,7 @@ class BacktestEngine:
             "limit_up": limit_up_strategy,
             "cb_t0": cb_t0_strategy,
             "long_value": long_value_strategy,
+            "ma_cross": ma_cross_strategy,
         }
         results: dict[str, BacktestResult] = {}
         for name, func in strategies.items():
@@ -561,3 +676,71 @@ class BacktestEngine:
             except Exception as e:
                 logger.error(f"Backtest failed for {name}: {e}")
         return results
+
+    def optimize_ma_cross(
+        self,
+        stock_code: str,
+        start_date: str,
+        end_date: str,
+        initial_capital: float = 1_000_000.0,
+        short_windows: Optional[range] = None,
+        long_windows: Optional[range] = None,
+    ) -> dict:
+        """MA 金叉策略参数网格优化(视频"量化对轰"链路 STEP 15:参数优化与迭代)。
+
+        K线只取一次,对每组 (short_window, long_window) 复用同一份数据模拟,
+        按信息比率(IR)降序输出网格,便于前端画 MA_short × MA_long 热力图。
+        仅评估 short < long 的组合。
+
+        Args:
+            short_windows: 短期均线窗口候选,默认 range(3, 12)
+            long_windows: 长期均线窗口候选,默认 range(10, 41, 5)
+
+        Returns:
+            {"stock_code", "start_date", "end_date", "grid": [...按 IR 降序...], "best": 首项或 None}
+        """
+        if short_windows is None:
+            short_windows = range(3, 12)
+        if long_windows is None:
+            long_windows = range(10, 41, 5)
+
+        try:
+            kline_result = self._data_manager.get_history_kline(stock_code, start_date, end_date)
+            df = kline_result.data.copy()
+        except Exception as e:
+            logger.error(f"Failed to get kline data for {stock_code}: {e}")
+            df = None
+
+        grid: list[dict] = []
+        if df is not None and not df.empty:
+            for short in short_windows:
+                for long in long_windows:
+                    if short >= long:
+                        continue
+                    strategy = make_ma_cross_strategy(short, long)
+                    try:
+                        result = self._simulate(
+                            strategy, df, start_date, end_date, initial_capital, stock_code=stock_code,
+                        )
+                    except Exception as e:
+                        logger.warning(f"optimize_ma_cross failed for ({short},{long}): {e}")
+                        continue
+                    grid.append({
+                        "short_window": short,
+                        "long_window": long,
+                        "total_return": result.total_return,
+                        "annual_return": result.annual_return,
+                        "max_drawdown": result.max_drawdown,
+                        "sharpe_ratio": result.sharpe_ratio,
+                        "information_ratio": result.information_ratio,
+                        "trade_count": result.trade_count,
+                    })
+
+        grid.sort(key=lambda item: item["information_ratio"], reverse=True)
+        return {
+            "stock_code": stock_code,
+            "start_date": start_date,
+            "end_date": end_date,
+            "grid": grid,
+            "best": grid[0] if grid else None,
+        }

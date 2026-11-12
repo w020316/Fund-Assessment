@@ -790,8 +790,8 @@ class TestCalcMetricsWithTrades:
 class TestRunAllStrategies:
     """run_all_strategies 批量回测"""
 
-    def test_returns_all_four_strategies(self):
-        """应返回4个策略的结果"""
+    def test_returns_all_five_strategies(self):
+        """应返回5个策略的结果(含 ma_cross 金叉死叉)"""
         mock_dm = MagicMock()
         mock_kline = MagicMock()
         mock_kline.data = pd.DataFrame({
@@ -809,7 +809,7 @@ class TestRunAllStrategies:
             start_date="2025-01-01",
             end_date="2025-03-31",
         )
-        assert set(results.keys()) == {"new_high", "limit_up", "cb_t0", "long_value"}
+        assert set(results.keys()) == {"new_high", "limit_up", "cb_t0", "long_value", "ma_cross"}
         for name, result in results.items():
             assert isinstance(result, BacktestResult)
 
