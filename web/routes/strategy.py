@@ -299,7 +299,7 @@ async def analyze(req: AnalyzeRequest):
             strategy_type=req.strategy_type,
             result=_normalize_analysis(result),
         )
-    except Exception as e:
+    except Exception:
         # P2 修复(2026-07-30):补 logger.exception 保留完整堆栈,便于排查
         logger.exception(f"analyze {req.stock_code} ({req.strategy_type}) failed")
         return AnalyzeResponse(
@@ -457,7 +457,7 @@ async def backtest(req: BacktestRequest):
         # R-06:内部抛出的是有明确语义的 503(如候选池不可用),不要被下面的
         # 通用兜底改写成"回测执行失败",否则真实原因丢失。
         raise
-    except Exception as e:
+    except Exception:
         logger.exception(f"backtest {req.strategy} failed")
         raise HTTPException(status_code=503, detail="回测执行失败，请稍后重试")
 

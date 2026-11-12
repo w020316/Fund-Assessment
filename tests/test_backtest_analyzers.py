@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import math
 from datetime import date
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 
 import numpy as np
 import pandas as pd

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Callable, Optional
 
@@ -9,7 +9,7 @@ import pandas as pd
 from loguru import logger
 
 from .data_source import DataSourceManager
-from .executor import OrderSide, OrderType, Signal
+from .executor import OrderSide, Signal
 
 _COMMISSION_RATE = 0.0003
 _STAMP_TAX_RATE = 0.001
@@ -247,13 +247,9 @@ def cb_t0_strategy(trade_date: date, portfolio: dict, data: pd.DataFrame) -> lis
     symbol = portfolio.get("symbol", "")
     close = data["收盘"].astype(float)
     open_prices = data["开盘"].astype(float)
-    low_prices = data["最低"].astype(float)
-    high_prices = data["最高"].astype(float)
 
     current_close = float(close.iloc[-1])
     current_open = float(open_prices.iloc[-1])
-    current_low = float(low_prices.iloc[-1])
-    current_high = float(high_prices.iloc[-1])
     prev_close = float(close.iloc[-2])
     ma5 = float(close.iloc[-5:].mean())
 
