@@ -132,6 +132,11 @@
     const longs = [...new Set(grid.map((row) => row.long_window))].sort((a, b) => a - b);
     const lookup = new Map(grid.map((row) => [`${row.short_window}:${row.long_window}`, row]));
     const maxAbs = Math.max(...grid.map((row) => Math.abs(row.information_ratio)).filter(finite), 0.0001);
+    // 高原连片高亮: 最优组合所在正 IR 连通域成员(服务端 _analyze_plateau)
+    const plateauCells = new Set(
+      (Array.isArray(data.plateau?.component_cells) ? data.plateau.component_cells : [])
+        .map((pair) => `${pair[0]}:${pair[1]}`),
+    );
 
     const table = byId('heatmap');
     table.replaceChildren();
@@ -149,6 +154,7 @@
         else {
           td.className = 'cell';
           if (best && row.short_window === best.short_window && row.long_window === best.long_window) td.classList.add('best');
+          if (plateauCells.has(`${row.short_window}:${row.long_window}`)) td.classList.add('plateau');
           td.style.background = irColor(row.information_ratio, maxAbs);
           td.textContent = number(row.information_ratio, 2);
           td.title = cellTitle(row);

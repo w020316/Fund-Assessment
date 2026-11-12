@@ -51,6 +51,7 @@
     th { color: var(--qf-text-secondary); font-weight: 500; background: var(--qf-bg-elev); }
     td.axis, th.axis { color: var(--qf-text-secondary); background: var(--qf-bg-elev); font-family: var(--qf-font-mono); font-size: 12px; }
     td.cell { font-family: var(--qf-font-mono); font-size: 12px; cursor: default; }
+    td.cell.plateau { outline: 1px dashed var(--qf-neon-cyan); outline-offset: -4px; }
     td.cell.best { outline: 2px solid var(--qf-neon-cyan); outline-offset: -2px; font-weight: 700; }
     td.cell.empty { color: var(--qf-text-secondary); background: var(--qf-bg-elev2); }
     footer { margin-top: 40px; color: var(--qf-text-secondary); font-size: 13px; }
@@ -112,7 +113,7 @@
       <span>跑赢（IR&gt;0）</span>
     </div>
     <div class="table-wrap" tabindex="0"><table id="heatmap"></table></div>
-    <p class="muted" id="heatmapNote">单元格数值为年化信息比率；灰色空格为无效组合（短窗口 ≥ 长窗口）。悬停查看年化收益/回撤/夏普/交易次数。</p>
+    <p class="muted" id="heatmapNote">单元格数值为年化信息比率；虚线框为最优组合所在的正 IR 连片区域（实线框 = 最优）；灰色空格为无效组合（短窗口 ≥ 长窗口）。悬停查看年化收益/回撤/夏普/交易次数。</p>
   </section>
   <footer>方法对照「量化对轰」科普视频链路（数据 → 指标 → 信号 → 回测 → 参数优化）。仅参考方法，不采信视频中任何收益数字；结果不构成投资建议。</footer>
 </main>

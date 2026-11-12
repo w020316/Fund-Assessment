@@ -232,6 +232,10 @@ def _analyze_plateau(grid: list[dict]) -> Optional[dict]:
         "component_size": len(irs),
         "component_ir_mean": round(sum(irs) / len(irs), 4),
         "grid_positive_count": sum(1 for ir in cells.values() if ir > 0),
+        # 连通域成员(供前端高亮); 仅正 IR 节点, 规模受网格上限约束
+        "component_cells": sorted(
+            (shorts[si], longs[li]) for si, li in seen
+        ),
     }
 
 

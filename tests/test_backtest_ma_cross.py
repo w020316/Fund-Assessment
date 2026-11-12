@@ -353,6 +353,8 @@ class TestPlateauDetection:
         assert plateau["component_size"] == 3
         assert plateau["component_ir_mean"] == pytest.approx((1.2 + 0.8 + 0.5) / 3, abs=1e-4)
         assert plateau["grid_positive_count"] == 3
+        # 连通域成员仅含正 IR 节点(负 IR 不进), 供前端高亮
+        assert plateau["component_cells"] == [(3, 10), (3, 20), (4, 10)]
 
     def test_isolated_spike(self):
         # 最优正 IR, 但所有邻居负 IR → 连通域只有自己
