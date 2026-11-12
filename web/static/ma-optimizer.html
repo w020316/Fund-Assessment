@@ -52,6 +52,11 @@
     td.cell.best { outline: 2px solid var(--qf-neon-cyan); outline-offset: -2px; font-weight: 700; }
     td.cell.empty { color: var(--qf-text-secondary); background: var(--qf-bg-elev2); }
     footer { margin-top: 40px; color: var(--qf-text-secondary); font-size: 13px; }
+    /* F-3(2026-11-12): 移动端触摸目标 ≥44px(实测按钮 42 / 输入 43.x / nav 链接 24) */
+    @media (max-width: 640px) {
+      input, button { min-height: 44px; }
+      nav a { display: inline-flex; align-items: center; min-height: 44px; }
+    }
   </style>
 </head>
 <body>
