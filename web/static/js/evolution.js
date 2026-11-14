@@ -228,6 +228,13 @@
   function renderCompare(data) {
     const box = $('evoCompareBody');
     if (!box) return;
+    // api() 失败时返回 null(不抛),404 NO_ACTIVE_GENERATION 即此情形;
+    // 不能直接读 data.active,否则 TypeError 盖掉真实原因。
+    if (!data || !data.active) {
+      renderStatus(box, 'empty', '暂无激活代，无法对比',
+        '点击「开始进化」产生并激活一代后,这里会显示与当前激活代的指标/参数差异');
+      return;
+    }
     const a = data.active || {};
     const c = data.candidate || {};
     const md = data.metric_diff || {};
@@ -306,6 +313,12 @@
     const box = $('evoCompareBody');
     if (!box) return;
     if (!hasToken()) { box.innerHTML = tokenGateHTML('代际对比'); return; }
+    // 无激活代时后端必然 404 NO_ACTIVE_GENERATION;预先显示空状态,避免走错误卡。
+    if (!genId && state.lineage && !state.lineage.active_generation_id) {
+      renderStatus(box, 'empty', '暂无激活代，无法对比',
+        '点击「开始进化」产生并激活一代后,这里会显示与当前激活代的指标/参数差异');
+      return;
+    }
     const input = $('evoCompareGenInput');
     if (!genId && input && input.value) genId = parseInt(input.value, 10);
     renderStatus(box, 'loading');
@@ -356,7 +369,6 @@
         showToast(res.message || '进化完成', 'success');
         state.detailId = null;
         Evolution.loadAll();
-        showCompare();
       })
       .catch(function (e) {
         if (e && e.status === 401) { $('evoBody').innerHTML = tokenGateHTML('策略进化'); return; }
@@ -373,8 +385,34 @@
   /** 激活前先拉 diff 展示, 再二次确认(customConfirm 自带 ESC/遮罩关闭) */
   function activate(genId) {
     if (!hasToken()) { gateOr('evoBody', '策略进化'); return; }
+    const doActivate = function () {
+      callApi(`${BASE}/activate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ generation_id: parseInt(genId, 10) }),
+      }).then(function (res) {
+        showToast(`已激活第 ${res.generation_id} 代, 参数写入 strategies.yaml`, 'success');
+        state.detailId = null;
+        Evolution.loadAll();
+      }).catch(function (e) {
+        if (e && e.status === 401) { gateOr('evoBody', '策略进化'); return; }
+        showStatusLine(errText(e), true);
+        showToast(errText(e), 'error');
+      });
+    };
+    const confirmAndActivate = function (msg) {
+      return customConfirm(`激活第 ${genId} 代`, msg).then(function (ok) {
+        if (ok) doActivate();
+      });
+    };
+    // 首次激活:无激活代时 /compare 必 404,但 /activate 本身支持从出厂参数激活。
+    if (state.lineage && !state.lineage.active_generation_id) {
+      confirmAndActivate('当前无激活代(出厂参数)。激活将把该代参数写入 strategies.yaml(参数真源)并立即生效于下一次分析。确认激活?');
+      return;
+    }
     callApi(`${BASE}/compare?gen=${parseInt(genId, 10)}`)
       .then(function (data) {
+        if (!data) { showStatusLine('未取到对比数据,已中止激活', true); return; }
         renderCompare(data);
         const c = data.candidate || {};
         const changed = Object.keys(data.param_diff || {}).some(function (sec) {
@@ -383,31 +421,13 @@
             return String(item.active) !== String(item.candidate);
           });
         });
-        return customConfirm(
-          `激活第 ${c.generation_id} 代`,
+        return confirmAndActivate(
           `该代 fitness ${num((c.metrics || {}).fitness, 4)}。激活将把参数写入 strategies.yaml(参数真源)并立即生效于下一次分析。` +
           (changed ? '存在与当前激活代的参数差异(已在下方对比面板高亮)。' : '与当前激活代参数无差异。') +
           '确认激活?'
-        ).then(function (ok) {
-          if (!ok) return;
-          callApi(`${BASE}/activate`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ generation_id: parseInt(genId, 10) }),
-          }).then(function (res) {
-            showToast(`已激活第 ${res.generation_id} 代, 参数写入 strategies.yaml`, 'success');
-            state.detailId = null;
-            Evolution.loadAll();
-            showCompare();
-          }).catch(function (e) {
-            if (e && e.status === 401) { gateOr('evoBody', '策略进化'); return; }
-            showStatusLine(errText(e), true);
-            showToast(errText(e), 'error');
-          });
-        });
+        );
       })
       .catch(function (e) {
-        if (e && e.status === 404) { showStatusLine(errText(e), true); return; }
         showStatusLine(errText(e), true);
       });
   }
@@ -437,14 +457,14 @@
     loadAll: function () {
       if (!gateOr('evoBody', '策略进化')) return;
       renderStatus($('evoBody'), 'loading');
+      // 先拿谱系再刷对比: showCompare 依赖 state.lineage 判断有无激活代,
+      // 否则首次进入会以空状态去请求 /compare 并触发 404 错误卡。
       callApi(`${BASE}/lineage`)
-        .then(function (data) { renderLineage(data); })
+        .then(function (data) { renderLineage(data); showCompare(); })
         .catch(function (e) {
           if (e && e.status === 401) { $('evoBody').innerHTML = tokenGateHTML('策略进化'); return; }
           renderStatus($('evoBody'), 'error', '谱系加载失败', errText(e));
         });
-      // 对比面板随页刷新(无激活代时显示结构化 404 提示)
-      showCompare();
     },
 
     showDetail: function (genId) {

@@ -8549,6 +8549,65 @@ function _setStrategyPath(target, path, value) {
   });
 }
 
+/* 参数中文释义: path → [中文名, 单位/说明]; 未列出的 path 原样显示 */
+const STRATEGY_PARAM_META = {
+  'trading_quant.weights.technical': ['权重·技术面', '五项权重之和建议为 1.00'],
+  'trading_quant.weights.capital': ['权重·资金面', '同上'],
+  'trading_quant.weights.fundamental': ['权重·基本面', '同上'],
+  'trading_quant.weights.news': ['权重·消息面', '同上'],
+  'trading_quant.weights.sentiment': ['权重·情绪面', '同上'],
+  'trading_quant.signals.strong_buy': ['阈值·强烈买入', '综合分 ≥ 该值(0-100)'],
+  'trading_quant.signals.buy': ['阈值·买入', '综合分 ≥ 该值'],
+  'trading_quant.signals.watch': ['阈值·观察', '综合分 ≥ 该值'],
+  'trading_quant.signals.hold': ['阈值·持有', '综合分 ≥ 该值, 低于买入档'],
+  'trading_quant.signals.sell': ['阈值·卖出', '综合分 < 该值视为卖出'],
+  'cb_t0_sniper.max_premium_rate': ['最大溢价率', '0.30 = 30%, 超过则不介入'],
+  'cb_t0_sniper.stop_loss': ['止损线', '-0.03 = 亏损 3% 离场'],
+  'cb_t0_sniper.scan_interval': ['扫描间隔', '单位: 秒'],
+  'cb_t0_sniper.max_positions': ['最大同时持仓', '单位: 只'],
+  'limit_up.min_quality_score': ['最低质量分', '0-100, 低于该分不入选'],
+  'stock_monitor.rules.price_surge_daily': ['日涨幅异动阈值', '0.15 = 15%'],
+  'stock_monitor.rules.price_surge_weekly': ['周涨幅异动阈值', '0.12 = 12%'],
+  'stock_monitor.rules.eps_surprise': ['EPS 超预期幅度', '0.04 = 4%'],
+  'stock_monitor.rules.eps_beat': ['EPS 小幅超预期', '0.02 = 2%'],
+  'stock_monitor.rules.volume_price_diverge_vol': ['量价背离·放量', '0.24 = 24%'],
+  'stock_monitor.rules.volume_price_diverge_price': ['量价背离·价格', '0.0056 ≈ 0.56%'],
+  'stock_monitor.rules.rsi_overbought': ['RSI 超买线', '默认 70'],
+  'stock_monitor.rules.rsi_oversold': ['RSI 超卖线', '默认 30'],
+  'stock_monitor.rules.northbound_flow_1d': ['北向资金·1日阈值', '口径: 净流入金额'],
+  'stock_monitor.rules.northbound_flow_5d': ['北向资金·5日阈值', '口径: 净流入金额'],
+  'stock_monitor.rules.sector_flow': ['板块资金流入阈值', '口径: 净流入金额'],
+  'stock_monitor.rules.stock_flow': ['个股资金流入阈值', '口径: 净流入金额'],
+  'strategies.new_high.max_position': ['单票仓位上限', '0.20 = 20%'],
+  'strategies.new_high.max_stocks': ['最多持仓只数', '单位: 只'],
+  'strategies.new_high.total_position': ['总仓位上限', '0.80 = 80%'],
+  'strategies.new_high.stop_loss': ['止损线', '-0.08 = 亏损 8% 离场'],
+  'strategies.new_high.use_atr': ['ATR 动态止损', 'true/false'],
+  'strategies.new_high.execute': ['执行时点', 'market_close=收盘前 / immediate=立即'],
+  'strategies.limit_up_board.max_position': ['单票仓位上限', '0.10 = 10%'],
+  'strategies.limit_up_board.max_stocks': ['最多持仓只数', '单位: 只'],
+  'strategies.limit_up_board.total_position': ['总仓位上限', '0.30 = 30%'],
+  'strategies.limit_up_board.stop_loss': ['止损线', '-0.05 = 亏损 5% 离场'],
+  'strategies.limit_up_board.execute': ['执行时点', 'market_close=收盘前 / immediate=立即'],
+  'strategies.cb_t0.max_positions': ['最大同时持仓', '单位: 只'],
+  'strategies.cb_t0.total_position': ['总仓位上限', '1.00 = 100%'],
+  'strategies.cb_t0.stop_loss': ['止损线', '-0.03 = 亏损 3% 离场'],
+  'strategies.cb_t0.execute': ['执行时点', 'market_close=收盘前 / immediate=立即'],
+  'strategies.long_value.max_position': ['单票仓位上限', '0.30 = 30%'],
+  'strategies.long_value.max_stocks': ['最多持仓只数', '单位: 只'],
+  'strategies.long_value.total_position': ['总仓位上限', '0.90 = 90%'],
+  'strategies.long_value.stop_loss': ['止损线', '-0.15 = 亏损 15% 离场'],
+  'strategies.long_value.execute': ['执行时点', 'market_close=收盘前 / immediate=立即']
+};
+/* 分组标题 + 是否真的被代码读取(其余段当前仅记录, 改了对决策无影响) */
+const STRATEGY_GROUP_META = {
+  trading_quant: ['交易量化评分', true],
+  cb_t0_sniper: ['可转债 T+0 狙击', false],
+  limit_up: ['涨停板筛选', false],
+  stock_monitor: ['个股监控阈值', false],
+  strategies: ['分策略仓位与止损', false]
+};
+
 async function loadStrategyParams() {
   const form = document.getElementById('strategyParamsForm');
   if (!form) return;
@@ -8576,9 +8635,19 @@ async function loadStrategyParams() {
     const group = path.split('.')[0];
     (groups[group] = groups[group] || []).push([path, value]);
   });
-  form.innerHTML = Object.keys(groups).map(group => `
+  const note = '<div style="font-size:11px;color:var(--text-muted);line-height:1.6;margin-bottom:10px;">' +
+    '小数为比例(0.20 即 20%); 负数是止损(亏损比例); 分数/RSI 为 0-100 分制。<br>' +
+    '标「生效中」的分组会参与实时分析; 标「仅记录」的分组当前版本未被代码读取, 修改不影响决策。</div>';
+  form.innerHTML = note + Object.keys(groups).map(group => {
+    const gmeta = STRATEGY_GROUP_META[group] || [group, false];
+    const badge = gmeta[1]
+      ? '<span style="font-size:10px;color:#34D399;border:1px solid rgba(52,211,153,.4);border-radius:4px;padding:0 5px;margin-left:6px;">生效中</span>'
+      : '<span style="font-size:10px;color:var(--text-muted);border:1px solid var(--border);border-radius:4px;padding:0 5px;margin-left:6px;">仅记录</span>';
+    return `
     <div style="margin-bottom:12px;">
-      <div style="font-weight:600;color:var(--text-primary);margin-bottom:6px;">${escapeHtml(group)}</div>
+      <div style="font-weight:600;color:var(--text-primary);margin-bottom:6px;">${escapeHtml(gmeta[0])}${badge}
+        <span style="font-weight:400;font-size:10px;color:var(--text-muted);margin-left:4px;font-family:monospace;">${escapeHtml(group)}</span>
+      </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
         ${groups[group].map(([path, value]) => {
           const type = typeof value === 'boolean' ? 'boolean' : (typeof value === 'number' ? 'number' : 'text');
@@ -8588,10 +8657,14 @@ async function loadStrategyParams() {
                 <option value="false" ${value === false ? 'selected' : ''}>false</option>
               </select>`
             : `<input class="input" data-skey="${escapeHtml(path)}" data-stype="${type}" type="${type === 'number' ? 'number' : 'text'}" step="any" value="${escapeHtml(value == null ? '' : value)}">`;
-          return `<div><label style="font-size:11px;color:var(--text-muted);">${escapeHtml(path)}</label>${input}</div>`;
+          const pmeta = STRATEGY_PARAM_META[path] || [];
+          const label = pmeta[0] || path;
+          const hint = pmeta[1] || '';
+          return `<div><label style="font-size:11px;color:var(--text-muted);" title="${escapeHtml(path)}">${escapeHtml(label)}</label>${input}${hint ? `<div style="font-size:10px;color:var(--text-muted);opacity:.75;margin-top:2px;">${escapeHtml(hint)}</div>` : ''}</div>`;
         }).join('')}
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 async function saveStrategyParams() {
