@@ -2528,10 +2528,11 @@ def get_market_wide_stats() -> dict:
     cached = _cache_get("market_wide_stats")
     if cached is not None:
         return cached
+    # 缺省 None = 上游未取到; 0 只表示"确实为 0", 两者不能混同(前端据此显示「—」)
     result: dict = {
-        "margin_balance": 0.0,
-        "block_trades_count": 0,
-        "avg_shareholder_change_pct": 0.0,
+        "margin_balance": None,
+        "block_trades_count": None,
+        "avg_shareholder_change_pct": None,
     }
 
     def _fetch_margin():
@@ -2547,12 +2548,12 @@ def get_market_wide_stats() -> dict:
             }
             resp = em_get(url, params=params)
             data = resp.json()
-            items = data.get("result", {}).get("data", [])
+            items = (data.get("result") or {}).get("data") or []
             if items:
                 return _safe_float(items[0].get("RZRQYE", 0))
         except Exception as e:
             logger.warning(f"get_market_wide_stats margin failed: {e}")
-        return 0.0
+        return None
 
     def _fetch_block_trades():
         try:
@@ -2569,11 +2570,13 @@ def get_market_wide_stats() -> dict:
             }
             resp = em_get(url, params=params)
             data = resp.json()
-            total = data.get("result", {}).get("count", 0)
-            return _safe_int(total)
+            res = data.get("result")
+            if res is None:
+                return None
+            return _safe_int(res.get("count", 0))
         except Exception as e:
             logger.warning(f"get_market_wide_stats block_trades failed: {e}")
-        return 0
+        return None
 
     def _fetch_shareholder():
         try:
@@ -2602,16 +2605,16 @@ def get_market_wide_stats() -> dict:
                     return round(sum(changes) / len(changes), 2)
         except Exception as e:
             logger.warning(f"get_market_wide_stats shareholder failed: {e}")
-        return 0.0
+        return None
 
     fetched = _parallel_fetch([
         ("margin", _fetch_margin),
         ("block_trades", _fetch_block_trades),
         ("shareholder", _fetch_shareholder),
     ])
-    result["margin_balance"] = max(fetched.get("margin", 0.0), 0.0)
-    result["block_trades_count"] = max(fetched.get("block_trades", 0), 0)
-    result["avg_shareholder_change_pct"] = fetched.get("shareholder", 0.0)
+    result["margin_balance"] = fetched.get("margin")
+    result["block_trades_count"] = fetched.get("block_trades")
+    result["avg_shareholder_change_pct"] = fetched.get("shareholder")
     _cache_set("market_wide_stats", result, 60)
     return result
 

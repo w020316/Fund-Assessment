@@ -514,6 +514,19 @@ class TestDetailAndSentiment:
         stats = client.get("/api/market/market_wide_stats").json()["data"]
         assert stats["block_trades_count"] == 3
 
+    def test_wide_stats_missing_values_stay_none(self, client, monkeypatch):
+        """上游不可达时三项都保持 None(前端显示「—/数据缺失」), 不得落成 0 冒充真实值。"""
+        market.cache.clear()
+        monkeypatch.setattr(
+            market.ds2,
+            "get_market_wide_stats",
+            lambda: {"margin_balance": None, "block_trades_count": None, "avg_shareholder_change_pct": None},
+        )
+        stats = client.get("/api/market/market_wide_stats").json()["data"]
+        assert stats["margin_balance"] is None
+        assert stats["block_trades_count"] is None
+        assert stats["avg_shareholder_change_pct"] is None
+
 
 # ===== 聚合端点(温度计 / 资金流 / 综合研判 / 数据质量) =====
 

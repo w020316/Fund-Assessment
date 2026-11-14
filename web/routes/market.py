@@ -19,7 +19,7 @@ from src.analysis.ddx_streak import build_ddx_streak, fetch_flow_streak
 from src.core import data_source_v2 as ds2
 from src.core.cache import DataCache
 from src.core.data_validator import get_data_validator
-from src.utils.convert import safe_float as _safe_float, safe_str as _safe_str
+from src.utils.convert import opt_float, safe_float as _safe_float, safe_str as _safe_str
 
 router = APIRouter()
 
@@ -1418,9 +1418,10 @@ async def stock_kline_summary(code: str = Query(..., description="股票代码")
 
 
 class MarketWideStatsResponse(BaseModel):
-    margin_balance: float
-    block_trades_count: int
-    avg_shareholder_change_pct: float
+    # 上游不可达时为 None(前端渲染「—/数据缺失」), 不再用 0 冒充"确实为 0"
+    margin_balance: float | None = None
+    block_trades_count: int | None = None
+    avg_shareholder_change_pct: float | None = None
 
 
 class NorthboundFlowItem(BaseModel):
@@ -1470,15 +1471,18 @@ async def market_wide_stats():
     cache_key = "market:market_wide_stats"
     cached = cache.get(cache_key)
     if cached is not None:
-        return {"data": cached, "_meta": _build_meta("mixed", cached=True)}
+        q = 80.0 if any(v is not None for v in cached.values()) else 0.0
+        return {"data": cached, "_meta": _build_meta("mixed", cached=True, quality_score=q)}
     data = await asyncio.to_thread(ds2.get_market_wide_stats)
     result = MarketWideStatsResponse(
-        margin_balance=_safe_float(data.get("margin_balance", 0)),
-        block_trades_count=int(_safe_float(data.get("block_trades_count", 0))),
-        avg_shareholder_change_pct=_safe_float(data.get("avg_shareholder_change_pct", 0)),
+        margin_balance=opt_float(data.get("margin_balance")),
+        block_trades_count=(int(v) if (v := opt_float(data.get("block_trades_count"))) is not None else None),
+        avg_shareholder_change_pct=opt_float(data.get("avg_shareholder_change_pct")),
     )
-    cache.set(cache_key, result.model_dump(), ttl=300)
-    return {"data": result.model_dump(), "_meta": _build_meta("mixed", cached=False)}
+    payload = result.model_dump()
+    cache.set(cache_key, payload, ttl=300)
+    q = 80.0 if any(v is not None for v in payload.values()) else 0.0
+    return {"data": payload, "_meta": _build_meta("mixed", cached=False, quality_score=q)}
 
 
 # ===== P1-3: 大盘研判增强 =====
