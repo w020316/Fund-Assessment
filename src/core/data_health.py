@@ -24,6 +24,11 @@ SOURCE_LABELS: dict[str, str] = {
     "global_news": "全球财经快讯",
     "fund_realtime": "基金实时估值",
     "fund_history": "基金历史净值",
+    "ddx_em": "资金连增·东财直连",
+    "ddx_akshare": "资金连增·akshare",
+    "ddx_sina": "资金连增·新浪快照",
+    "stock_ranking_sina": "股票排行·新浪兜底",
+    "hot_stocks_ths": "涨停池·同花顺",
 }
 
 #: 连续失败达到该次数即判定 down(前 1~2 次视为瞬时抖动 → degraded)

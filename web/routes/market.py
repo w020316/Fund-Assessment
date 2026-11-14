@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -14,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from loguru import logger
 
+from src.analysis.ddx_streak import build_ddx_streak, fetch_flow_streak
 from src.core import data_source_v2 as ds2
 from src.core.cache import DataCache
 from src.core.data_validator import get_data_validator
@@ -460,6 +462,239 @@ async def hot_stocks():
     except Exception as e:
         logger.warning(f"hot_stocks failed: {e}")
         return {"data": HotStocksResponse(top_gainers=[], top_losers=[], top_volume=[]).model_dump(), "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
+
+
+class DdxStreakItem(BaseModel):
+    code: str
+    name: str
+    price: float | None = None
+    change_pct: float | None = None
+    streak: int
+    net_today: float | None = None
+    net_sum: float | None = None
+    ratio_today: float | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    source: str | None = None
+
+
+class StockFlowStreak(BaseModel):
+    code: str
+    streak: int | None = None
+    net_today: float | None = None
+    net_sum: float | None = None
+    ratio_today: float | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    source: str = "unavailable"
+    history_available: bool = False
+
+
+_DDX_CANDIDATES = 12
+_DDX_WORKERS = 3
+_DDX_TTL = 300
+# 上游（东财个股资金流）对突发请求敏感：一轮全部失败后冷却 2 分钟，
+# 避免工作台每分钟重试把 IP 打进限流，反而拖垮其他东财接口。
+_DDX_FAIL_COOLDOWN = 120
+_ddx_failed_at: float = 0.0
+_ddx_refreshing: set[str] = set()
+
+
+async def _ddx_candidates(limit: int = _DDX_CANDIDATES) -> list[dict]:
+    """候选池：东财涨幅/成交额 TOP10，不足时用同花顺涨停池补齐。
+
+    两个来源互相兜底：东财排行被限流时，同花顺仍能给出当日强势股，
+    避免资金连增面板直接空掉。
+    """
+    payload = cache.get("market:hot_stocks")
+    if payload is None:
+        payload = await _fetch_hot_stocks()
+        cache.set("market:hot_stocks", payload)
+    seen: set[str] = set()
+    out: list[dict] = []
+    for bucket in ("top_gainers", "top_volume"):
+        for row in payload.get(bucket) or []:
+            code = _safe_str(row.get("code"))
+            if not code or code in seen:
+                continue
+            seen.add(code)
+            out.append({
+                "code": code,
+                "name": _safe_str(row.get("name")),
+                "price": _safe_float(row.get("price")),
+                "change_pct": _safe_float(row.get("change_pct")),
+            })
+            if len(out) >= limit:
+                return out
+    if len(out) < limit:
+        try:
+            ths = await asyncio.wait_for(asyncio.to_thread(ds2.get_hot_stocks_ths), timeout=2.5)
+        except Exception as e:
+            logger.warning(f"ddx candidates ths fallback skipped: {type(e).__name__}: {e}")
+            ths = []
+        for row in ths or []:
+            code = _safe_str(row.get("code"))
+            if not code or code in seen:
+                continue
+            seen.add(code)
+            out.append({
+                "code": code,
+                "name": _safe_str(row.get("name")),
+                "price": _safe_float(row.get("price")),
+                "change_pct": _safe_float(row.get("change_pct")),
+            })
+            if len(out) >= limit:
+                break
+    return out
+
+
+async def _build_ddx_payload(limit: int, min_days: int) -> tuple[dict, float]:
+    """拉取候选池资金流并生成响应体；返回 (payload, quality_score)。"""
+    candidates = await _ddx_candidates()
+    empty = {"items": [], "sampled": 0, "failed": 0, "sources": {}, "min_days": min_days, "trade_date": None}
+    if not candidates:
+        return empty, 0.0
+
+    result = await asyncio.to_thread(build_ddx_streak, candidates, min_days, _DDX_WORKERS, 10.0)
+    rows = result["items"][:limit]
+    payload = {
+        "items": [DdxStreakItem(**row).model_dump() for row in rows],
+        "sampled": result["sampled"],
+        "failed": result["failed"],
+        "sources": result.get("sources") or {},
+        "min_days": min_days,
+        "trade_date": rows[0]["end_date"] if rows else None,
+    }
+    sampled, failed = result["sampled"], result["failed"]
+    quality = 0.0 if sampled == 0 or failed >= sampled else (60.0 if failed else 100.0)
+    return payload, quality
+
+
+def _schedule_ddx_refresh(cache_key: str, limit: int, min_days: int) -> None:
+    """SWR：旧快照仍可读时后台补一轮，避免用户等到取数完成。"""
+    if cache_key in _ddx_refreshing:
+        return
+    _ddx_refreshing.add(cache_key)
+
+    async def _run() -> None:
+        try:
+            payload, quality = await _build_ddx_payload(limit, min_days)
+            cache.set(cache_key, payload, ttl=_DDX_TTL if quality > 0 else 60)
+        except Exception as e:
+            logger.warning(f"SWR 后台刷新失败 ddx_streak: {type(e).__name__}: {e}")
+        finally:
+            _ddx_refreshing.discard(cache_key)
+
+    try:
+        asyncio.create_task(_run())
+    except RuntimeError as e:
+        _ddx_refreshing.discard(cache_key)
+        logger.warning(f"SWR 无法投递后台任务 ddx_streak: {e}")
+
+
+@router.get("/ddx_streak")
+async def ddx_streak(
+    limit: int = Query(12, ge=1, le=30, description="返回条数"),
+    min_days: int = Query(2, ge=1, le=10, description="最少连增交易日数"),
+):
+    """资金连增：候选池内连续主力净流入的个股。
+
+    口径为"从最近交易日起主力净流入额连续为正的交易日数"，不是通达信
+    DDX 大单净量；前端按"资金连增"展示。失败股票计入 failed，不用 0 顶替。
+    """
+    global _ddx_failed_at
+    cache_key = f"market:ddx_streak:{limit}:{min_days}"
+    cached, is_stale = cache.get_with_stale(cache_key, max_stale=3600)
+    if cached is not None:
+        if is_stale:
+            _schedule_ddx_refresh(cache_key, limit, min_days)
+        return {
+            "data": cached,
+            "_meta": _build_meta(
+                "eastmoney", cached=True, stale=is_stale,
+                extra={"sources": cached.get("sources") or {}},
+            ),
+        }
+
+    empty = {"items": [], "sampled": 0, "failed": 0, "sources": {}, "min_days": min_days, "trade_date": None}
+    if _ddx_failed_at and time.monotonic() - _ddx_failed_at < _DDX_FAIL_COOLDOWN:
+        # 冷却期不是"候选池为空"：显式标记，前端据此区分限流与筛选无结果
+        return {
+            "data": dict(empty, cooldown=True),
+            "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0, extra={"sources": {}}),
+        }
+
+    try:
+        payload, quality = await _build_ddx_payload(limit, min_days)
+        sampled, failed = payload["sampled"], payload["failed"]
+        all_failed = sampled == 0 or failed >= sampled
+        _ddx_failed_at = time.monotonic() if all_failed else 0.0
+        # 全失败也短缓存，配合冷却把重试间隔压到分钟级
+        cache.set(cache_key, payload, ttl=60 if all_failed else _DDX_TTL)
+        return {
+            "data": payload,
+            "_meta": _build_meta(
+                "eastmoney", cached=False, quality_score=quality,
+                extra={"sources": payload.get("sources") or {}},
+            ),
+        }
+    except Exception as e:
+        _ddx_failed_at = time.monotonic()
+        logger.warning(f"ddx_streak failed: {e}")
+        return {
+            "data": empty,
+            "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0, extra={"sources": {}}),
+        }
+
+
+@router.get("/stock_flow_streak")
+async def stock_flow_streak(
+    code: str = Query(..., min_length=6, max_length=6, pattern=r"^\d{6}$", description="6 位股票代码"),
+):
+    """单只个股资金流连增（个股详情用）。
+
+    与 /ddx_streak 的口径一致；历史源不可用时退到新浪当日快照，并在
+    ``history_available`` 中明确标出"只有今日、没有连增"。
+    """
+    cache_key = f"market:stock_flow_streak:{code}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        quality = 100.0 if cached.get("history_available") else (60.0 if cached.get("source") != "unavailable" else 0.0)
+        return {
+            "data": cached,
+            "_meta": _build_meta(
+                "mixed", cached=True, quality_score=quality,
+                extra={"source": cached.get("source")},
+            ),
+        }
+
+    try:
+        stats = await asyncio.to_thread(fetch_flow_streak, code)
+    except Exception as e:
+        logger.warning(f"stock_flow_streak {code} failed: {e}")
+        stats = None
+
+    if not stats:
+        payload = StockFlowStreak(code=code).model_dump()
+        cache.set(cache_key, payload, ttl=60)
+        return {
+            "data": payload,
+            "_meta": _build_meta(
+                "mixed", cached=False, quality_score=0.0,
+                extra={"source": "unavailable", "reason": "历史资金流与当日快照均未取到"},
+            ),
+        }
+
+    payload = StockFlowStreak(code=code, **stats).model_dump()
+    quality = 100.0 if payload["history_available"] else 60.0
+    cache.set(cache_key, payload, ttl=300)
+    return {
+        "data": payload,
+        "_meta": _build_meta(
+            "mixed", cached=False, quality_score=quality,
+            extra={"source": payload.get("source")},
+        ),
+    }
 
 
 @router.get("/sector_flow")

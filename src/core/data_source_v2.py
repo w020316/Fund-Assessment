@@ -638,9 +638,14 @@ def _get_stock_ranking_sina(sort_field: str = "f3", sort_order: int = 0, count: 
                 "open": _safe_float(item.get("open", 0)),
                 "prev_close": _safe_float(item.get("settlement", 0)),
             })
+        if result:
+            data_health.record_success("stock_ranking_sina", len(result))
+        else:
+            data_health.record_failure("stock_ranking_sina", "empty result")
         return result
     except Exception as e:
         logger.warning(f"_get_stock_ranking_sina failed: {e}")
+        data_health.record_failure("stock_ranking_sina", str(e))
         return []
 
 
@@ -717,9 +722,14 @@ def get_hot_stocks_ths() -> list[dict]:
                 "open_times": _safe_int(item.get("open_limit_up_times", item.get("开板次数", 0))),
             })
         _cache_set("hot_stocks_ths", result, 30)
+        if result:
+            data_health.record_success("hot_stocks_ths", len(result))
+        else:
+            data_health.record_failure("hot_stocks_ths", "empty result")
         return result
     except Exception as e:
         logger.warning(f"get_hot_stocks_ths failed: {e}")
+        data_health.record_failure("hot_stocks_ths", str(e))
         return []
 
 
