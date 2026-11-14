@@ -268,6 +268,45 @@ class TestIndexAndRanking:
 # ===== 研报 / 龙虎榜 / 两融 / 大宗 / 股东 / 新闻 =====
 
 
+class TestMetaSourceHonesty:
+    """_meta.data_source 必须反映实际上游，兜底生效时不能硬编码 eastmoney。"""
+
+    def test_sector_flow_uses_last_source(self, client, monkeypatch):
+        market.cache.clear()
+        monkeypatch.setattr(
+            market.ds2, "get_sector_ranking",
+            lambda: [{"name": "半导体", "change_pct": 2.0, "main_net_inflow": 1e8, "main_inflow_pct": 3.0}],
+        )
+        monkeypatch.setattr(market.ds2, "get_last_source", lambda name, default="": "sina")
+
+        first = client.get("/api/market/sector_flow").json()["_meta"]
+        assert first["data_source"] == "sina"
+        # 资金字段来自新浪真实数据，不应被判降级
+        assert first["degraded"] is False
+
+        second = client.get("/api/market/sector_flow").json()["_meta"]
+        assert second["cached"] is True
+        assert second["data_source"] == "sina"
+        market.cache.clear()
+
+    def test_sector_ranking_reports_missing_breakdown_fields(self, client, monkeypatch):
+        market.cache.clear()
+        row = {
+            "code": "hangye_A", "name": "半导体", "change_pct": 2.0, "price": 10.0,
+            "main_net_inflow": 1e8, "main_inflow_pct": 3.0,
+            "super_large_net": 0, "super_large_pct": 0, "large_net": 0, "large_pct": 0,
+            "medium_net": 0, "medium_pct": 0, "small_net": 0, "small_pct": 0,
+        }
+        monkeypatch.setattr(market.ds2, "get_sector_ranking", lambda: [row])
+        monkeypatch.setattr(market.ds2, "get_last_source", lambda name, default="": "sina")
+
+        meta = client.get("/api/market/sector_ranking").json()["_meta"]
+        assert meta["data_source"] == "sina"
+        assert "super_large_net" in meta["unavailable_fields"]
+        assert "source_note" in meta
+        market.cache.clear()
+
+
 class TestResearchAndFlows:
     def test_research_reports_success_and_error(self, client, monkeypatch):
         item = {"title": "深度报告", "rating": "买入", "eps_predict": 1.2,

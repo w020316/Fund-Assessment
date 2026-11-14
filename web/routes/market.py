@@ -63,6 +63,14 @@ def _build_meta(
     return meta
 
 
+def _meta_source(name: str, default: str = "eastmoney") -> str:
+    """数据源模块最近一次实际使用的上游（兜底生效时不谎报 eastmoney）。"""
+    try:
+        return ds2.get_last_source(name, default)
+    except Exception:
+        return default
+
+
 def _flow_field_quality(rows, field: str) -> tuple[float | None, dict]:
     """板块资金流字段完整度 → 需要覆盖的质量分与附加元信息。
 
@@ -399,7 +407,7 @@ async def index_realtime():
     cache_key = "market:index_realtime"
     cached = cache.get(cache_key)
     if cached is not None:
-        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
+        return {"data": cached, "_meta": _build_meta("tencent", cached=True)}
     # P1 修复(2026-07-31):整个函数体包裹,确保模型构造/cache.set 异常也返回空数据而非 500
     try:
         data = await asyncio.to_thread(ds2.get_index_realtime)
@@ -415,10 +423,13 @@ async def index_realtime():
                 amount=_safe_float(item.get("amount")),
             ))
         cache.set(cache_key, result)
-        return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
+        return {"data": result, "_meta": _build_meta("tencent", cached=False)}
     except Exception as e:
         logger.warning(f"index_realtime failed: {e}")
-        return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
+        return {"data": [], "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
+
+
+_HOT_STOCKS_SOURCE_KEY = "market:hot_stocks:source"
 
 
 async def _fetch_hot_stocks() -> dict:
@@ -439,11 +450,19 @@ async def _fetch_hot_stocks() -> dict:
             amount=_safe_float(item.get("amount")),
         )
 
-    return HotStocksResponse(
+    payload = HotStocksResponse(
         top_gainers=[_to_item(i) for i in top_gainers_data],
         top_losers=[_to_item(i) for i in top_losers_data],
         top_volume=[_to_item(i) for i in top_volume_data],
     ).model_dump()
+    # 三个榜各自走"东财→新浪"兜底，记下实际来源，供缓存命中时也能如实标注
+    marks = {
+        ds2.get_last_source(f"stock_ranking:{field}:{order}", "")
+        for field, order in (("f3", 0), ("f3", 1), ("f6", 0))
+    } - {""}
+    source = marks.pop() if len(marks) == 1 else ("mixed" if marks else "eastmoney")
+    cache.set(_HOT_STOCKS_SOURCE_KEY, source, ttl=660)
+    return payload
 
 
 @router.get("/hot_stocks")
@@ -453,12 +472,14 @@ async def hot_stocks():
     if cached is not None:
         if is_stale:
             _schedule_refresh(cache_key, _fetch_hot_stocks, "hot_stocks")
-        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True, stale=is_stale)}
+        source = cache.get(_HOT_STOCKS_SOURCE_KEY) or "eastmoney"
+        return {"data": cached, "_meta": _build_meta(source, cached=True, stale=is_stale)}
     # P1 修复(2026-07-31):整个函数体包裹,确保模型构造/cache.set 异常也返回空数据而非 500
     try:
         payload = await _fetch_hot_stocks()
         cache.set(cache_key, payload)
-        return {"data": payload, "_meta": _build_meta("eastmoney", cached=False)}
+        source = cache.get(_HOT_STOCKS_SOURCE_KEY) or "eastmoney"
+        return {"data": payload, "_meta": _build_meta(source, cached=False)}
     except Exception as e:
         logger.warning(f"hot_stocks failed: {e}")
         return {"data": HotStocksResponse(top_gainers=[], top_losers=[], top_volume=[]).model_dump(), "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
@@ -548,6 +569,21 @@ async def _ddx_candidates(limit: int = _DDX_CANDIDATES) -> list[dict]:
     return out
 
 
+def _ddx_quality(payload: dict) -> float:
+    """按候选池成败数推导质量分；缓存命中与新鲜取数共用同一口径。"""
+    sampled = int(payload.get("sampled") or 0)
+    failed = int(payload.get("failed") or 0)
+    return 0.0 if sampled == 0 or failed >= sampled else (60.0 if failed else 100.0)
+
+
+def _ddx_source(sources: dict) -> str:
+    """meta.data_source 反映实际取数来源；多源混合时标 multi。"""
+    keys = [k for k in (sources or {}) if k]
+    if not keys:
+        return "eastmoney"
+    return keys[0] if len(keys) == 1 else "multi"
+
+
 async def _build_ddx_payload(limit: int, min_days: int) -> tuple[dict, float]:
     """拉取候选池资金流并生成响应体；返回 (payload, quality_score)。"""
     candidates = await _ddx_candidates()
@@ -565,9 +601,7 @@ async def _build_ddx_payload(limit: int, min_days: int) -> tuple[dict, float]:
         "min_days": min_days,
         "trade_date": rows[0]["end_date"] if rows else None,
     }
-    sampled, failed = result["sampled"], result["failed"]
-    quality = 0.0 if sampled == 0 or failed >= sampled else (60.0 if failed else 100.0)
-    return payload, quality
+    return payload, _ddx_quality(payload)
 
 
 def _schedule_ddx_refresh(cache_key: str, limit: int, min_days: int) -> None:
@@ -611,7 +645,8 @@ async def ddx_streak(
         return {
             "data": cached,
             "_meta": _build_meta(
-                "eastmoney", cached=True, stale=is_stale,
+                _ddx_source(cached.get("sources") or {}), cached=True, stale=is_stale,
+                quality_score=_ddx_quality(cached),
                 extra={"sources": cached.get("sources") or {}},
             ),
         }
@@ -634,7 +669,7 @@ async def ddx_streak(
         return {
             "data": payload,
             "_meta": _build_meta(
-                "eastmoney", cached=False, quality_score=quality,
+                _ddx_source(payload.get("sources") or {}), cached=False, quality_score=quality,
                 extra={"sources": payload.get("sources") or {}},
             ),
         }
@@ -700,10 +735,12 @@ async def stock_flow_streak(
 @router.get("/sector_flow")
 async def sector_flow():
     cache_key = "market:sector_flow"
+    source_key = f"{cache_key}:source"
     cached = cache.get(cache_key)
     if cached is not None:
         q, extra = _flow_fields_quality(cached, ("main_net_inflow", "large_order_ratio"))
-        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True, quality_score=q, extra=extra)}
+        source = cache.get(source_key) or "eastmoney"
+        return {"data": cached, "_meta": _build_meta(source, cached=True, quality_score=q, extra=extra)}
     # P1 修复(2026-07-31):整个函数体包裹,确保模型构造/cache.set 异常也返回空数据而非 500
     try:
         data = await asyncio.to_thread(ds2.get_sector_ranking)
@@ -716,8 +753,10 @@ async def sector_flow():
                 large_order_ratio=_safe_float(item.get("main_inflow_pct")),
             ))
         cache.set(cache_key, result)
+        source = _meta_source("sector_ranking")
+        cache.set(source_key, source, ttl=660)
         q, extra = _flow_fields_quality(result, ("main_net_inflow", "large_order_ratio"))
-        return {"data": result, "_meta": _build_meta("eastmoney", cached=False, quality_score=q, extra=extra)}
+        return {"data": result, "_meta": _build_meta(source, cached=False, quality_score=q, extra=extra)}
     except Exception as e:
         logger.warning(f"sector_flow failed: {e}")
         return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
@@ -909,18 +948,22 @@ async def news(
     page_size: int = Query(10, ge=1, le=50, description="每页条数"),
 ):
     cache_key = f"market:news:{code}:{page}:{page_size}"
+    source_key = f"{cache_key}:source"
     cached = cache.get(cache_key)
     if cached is not None:
-        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
+        return {"data": cached, "_meta": _build_meta(cache.get(source_key) or "eastmoney", cached=True)}
     try:
         if not code:
             data = await asyncio.to_thread(ds2.get_global_news)
             result = [NewsItem(**item) for item in data]
+            source = _meta_source("global_news")
         else:
             data = await asyncio.to_thread(ds2.get_stock_news, code, page=page, page_size=page_size)
             result = [NewsItem(**item) for item in data]
+            source = _meta_source("news")
         cache.set(cache_key, result, ttl=120)
-        return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
+        cache.set(source_key, source, ttl=660)
+        return {"data": result, "_meta": _build_meta(source, cached=False)}
     except Exception as e:
         logger.warning(f"news failed: {e}")
         return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
@@ -929,14 +972,17 @@ async def news(
 @router.get("/global_news")
 async def global_news():
     cache_key = "market:global_news"
+    source_key = f"{cache_key}:source"
     cached = cache.get(cache_key)
     if cached is not None:
-        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
+        return {"data": cached, "_meta": _build_meta(cache.get(source_key) or "eastmoney", cached=True)}
     try:
         data = await asyncio.to_thread(ds2.get_global_news)
         result = [NewsItem(**item) for item in data]
         cache.set(cache_key, result, ttl=120)
-        return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
+        source = _meta_source("global_news")
+        cache.set(source_key, source, ttl=660)
+        return {"data": result, "_meta": _build_meta(source, cached=False)}
     except Exception as e:
         logger.warning(f"global_news failed: {e}")
         return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
@@ -964,8 +1010,29 @@ async def hot_stocks_signal():
         return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
 
 
+_SECTOR_RANKING_SOURCE_KEY = "market:sector_ranking:source"
+# 新浪板块资金只给主力净流入/占比，没有超大/大/中/小单拆分
+_SINA_MISSING_FLOW_FIELDS = (
+    "super_large_net", "large_net", "medium_net", "small_net",
+    "super_large_pct", "large_pct", "medium_pct", "small_pct",
+)
+
+
+def _sector_flow_extra(source: str, q: float | None, extra: dict) -> tuple[float | None, dict]:
+    """板块资金 _meta 附加信息：来源为新浪时点明缺失的拆分子字段。"""
+    if source == "sina":
+        merged = dict(extra)
+        unavailable = list(merged.get("unavailable_fields") or [])
+        unavailable.extend(f for f in _SINA_MISSING_FLOW_FIELDS if f not in unavailable)
+        merged["unavailable_fields"] = unavailable
+        merged["source_note"] = "东财不可用，已切换新浪板块资金（仅主力净流入/占比）"
+        extra = merged
+    return q, extra
+
+
 async def _fetch_sector_ranking() -> list:
     data = await asyncio.to_thread(ds2.get_sector_ranking)
+    cache.set(_SECTOR_RANKING_SOURCE_KEY, _meta_source("sector_ranking"), ttl=660)
     return [SectorRankingItem(**item) for item in data]
 
 
@@ -974,15 +1041,19 @@ async def sector_ranking():
     cache_key = "market:sector_ranking"
     cached, is_stale = cache.get_with_stale(cache_key, max_stale=600)
     if cached is not None:
+        source = cache.get(_SECTOR_RANKING_SOURCE_KEY) or "eastmoney"
         q, extra = _flow_field_quality(cached, "main_net_inflow")
+        q, extra = _sector_flow_extra(source, q, extra)
         if is_stale:
             _schedule_refresh(cache_key, _fetch_sector_ranking, "sector_ranking")
-        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True, quality_score=q, stale=is_stale, extra=extra)}
+        return {"data": cached, "_meta": _build_meta(source, cached=True, quality_score=q, stale=is_stale, extra=extra)}
     try:
         result = await _fetch_sector_ranking()
         cache.set(cache_key, result)
+        source = cache.get(_SECTOR_RANKING_SOURCE_KEY) or "eastmoney"
         q, extra = _flow_field_quality(result, "main_net_inflow")
-        return {"data": result, "_meta": _build_meta("eastmoney", cached=False, quality_score=q, extra=extra)}
+        q, extra = _sector_flow_extra(source, q, extra)
+        return {"data": result, "_meta": _build_meta(source, cached=False, quality_score=q, extra=extra)}
     except Exception as e:
         logger.warning(f"sector_ranking failed: {e}")
         return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
@@ -1094,9 +1165,10 @@ def _anomaly_meta(payload: dict, cached_hit: bool) -> dict:
 @router.get("/heatmap")
 async def market_heatmap():
     cache_key = "market:heatmap"
+    source_key = f"{cache_key}:source"
     cached = cache.get(cache_key)
     if cached is not None:
-        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
+        return {"data": cached, "_meta": _build_meta(cache.get(source_key) or "eastmoney", cached=True)}
     try:
         data = await asyncio.to_thread(ds2.get_sector_ranking)
         result: list[HeatmapItem] = []
@@ -1116,7 +1188,9 @@ async def market_heatmap():
                 color=color,
             ))
         cache.set(cache_key, result)
-        return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
+        source = _meta_source("sector_ranking")
+        cache.set(source_key, source, ttl=660)
+        return {"data": result, "_meta": _build_meta(source, cached=False)}
     except Exception:
         return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
 

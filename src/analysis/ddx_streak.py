@@ -3,7 +3,9 @@
 数据源（按优先级）：
 1. 东方财富 ``push2his`` 资金流历史直连（走 data_source_v2 的共享限速器）；
 2. akshare ``stock_individual_fund_flow``（同源，作为解析兼容兜底）；
-3. 新浪 ``MoneyFlow.ssi_ssfx_flzjtj`` 当日快照（只给当日净流入，算不出连增，
+3. 新浪 ``MoneyFlow.ssl_qsfx_zjlrqs`` 多日历史（部分网络环境会拦掉 push2his，
+   新浪是独立可用源，仍能算出真实连增）；
+4. 新浪 ``MoneyFlow.ssi_ssfx_flzjtj`` 当日快照（只给当日净流入，算不出连增，
    用于个股详情在历史源不可用时仍能展示"今日主力净流入"）。
 
 口径说明：本项目把"连增"定义为——从最近一个交易日起，主力净流入额
@@ -17,6 +19,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, wait
+from datetime import date, datetime
 
 import akshare as ak
 import pandas as pd
@@ -32,6 +35,10 @@ _MAX_ROWS = 60
 
 _EM_FLOW_URL = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get"
 _SINA_FLOW_URL = "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/MoneyFlow.ssi_ssfx_flzjtj"
+_SINA_HIST_URL = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/MoneyFlow.ssl_qsfx_zjlrqs"
+# 新浪历史对部分北交所标的会返回一年前的旧快照，超过该天数视为不可用，
+# 宁可判缺失也不把旧数据当"最近连增"。
+_SINA_HIST_MAX_AGE_DAYS = 15
 _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 
 
@@ -169,6 +176,60 @@ def _fetch_akshare_history(code: str) -> pd.DataFrame | None:
         return None
 
 
+def _fetch_sina_history(code: str) -> pd.DataFrame | None:
+    """新浪多日资金流历史（升序），字段对齐东财历史口径。
+
+    ``netamount`` 为主力（超大单+大单）净流入额，单位元；``ratioamount``
+    是净占比的小数，这里换算成百分比，与东财 ``主力净流入-净占比`` 一致。
+    """
+    symbol = f"{market_of(code)}{code}"
+    try:
+        resp = requests.get(
+            _SINA_HIST_URL,
+            params={"page": 1, "num": _MAX_ROWS, "sort": "opendate", "asc": 0, "daima": symbol},
+            timeout=6,
+            headers={"User-Agent": _UA, "Referer": "https://finance.sina.com.cn/"},
+        )
+        data = resp.json()
+        if not isinstance(data, list) or not data:
+            raise ValueError("empty payload")
+    except Exception as e:
+        logger.warning(f"ddx_streak {code} sina history failed: {type(e).__name__}: {e}")
+        data_health.record_failure("ddx_sina_hist", str(e))
+        return None
+
+    rows: list[dict] = []
+    for item in data:
+        try:
+            rows.append({
+                _DATE_COL: str(item.get("opendate") or "")[:10],
+                "主力净流入-净额": float(item.get("netamount") or 0),
+                "主力净流入-净占比": round(float(item.get("ratioamount") or 0) * 100, 4),
+            })
+        except (TypeError, ValueError):
+            continue
+    rows.sort(key=lambda r: r[_DATE_COL])
+    if not rows:
+        data_health.record_failure("ddx_sina_hist", "unparsable rows")
+        return None
+
+    try:
+        latest = datetime.strptime(rows[-1][_DATE_COL], "%Y-%m-%d").date()
+    except ValueError:
+        data_health.record_failure("ddx_sina_hist", "bad date")
+        return None
+    if (date.today() - latest).days > _SINA_HIST_MAX_AGE_DAYS:
+        data_health.record_failure("ddx_sina_hist", f"stale history {rows[-1][_DATE_COL]}")
+        return None
+    if not any(r["主力净流入-净额"] for r in rows):
+        # 全 0 通常意味着上游没有该标的的资金数据，不能当成"净流入 0 元"
+        data_health.record_failure("ddx_sina_hist", "empty history")
+        return None
+
+    data_health.record_success("ddx_sina_hist", len(rows))
+    return pd.DataFrame(rows)
+
+
 def _fetch_sina_snapshot(code: str) -> dict | None:
     """新浪当日资金快照。字段 netamount 为主力（超大单+大单）净流入，单位元。"""
     symbol = f"{market_of(code)}{code}"
@@ -223,7 +284,10 @@ def fetch_flow_streak(code: str) -> dict | None:
             data_health.record_success("ddx_akshare", len(df))
         else:
             data_health.record_failure("ddx_akshare", "empty or unreachable")
-            return _fetch_sina_snapshot(code)
+            df = _fetch_sina_history(code)
+            source = "sina_history"
+            if df is None or df.empty:
+                return _fetch_sina_snapshot(code)
 
     stats = compute_streak(df)
     if stats:
@@ -239,11 +303,13 @@ def fetch_flow_streak(code: str) -> dict | None:
 
 
 def fetch_streak(code: str) -> dict | None:
-    """候选池用：只接受真实历史连增，快照兜底不算连增。"""
+    """候选池用：只接受真实历史数据，快照兜底不算连增。
+
+    取数成功但当日主力净流出时返回 streak=0 的统计，而不是 None —— 否则
+    调用方会把"筛不出连增"误报成"取数失败"。
+    """
     stats = fetch_flow_streak(code)
     if not stats or not stats.get("history_available"):
-        return None
-    if int(stats.get("streak") or 0) <= 0:
         return None
     return stats
 

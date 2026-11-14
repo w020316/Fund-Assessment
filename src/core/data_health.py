@@ -27,6 +27,7 @@ SOURCE_LABELS: dict[str, str] = {
     "ddx_em": "资金连增·东财直连",
     "ddx_akshare": "资金连增·akshare",
     "ddx_sina": "资金连增·新浪快照",
+    "ddx_sina_hist": "资金连增·新浪历史",
     "stock_ranking_sina": "股票排行·新浪兜底",
     "hot_stocks_ths": "涨停池·同花顺",
 }

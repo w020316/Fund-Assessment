@@ -33,6 +33,10 @@ _last_em_request_time: float = 0.0
 _em_next_slot: float = 0.0
 _EM_MIN_INTERVAL: float = 0.3
 _EM_AVAILABLE: bool | None = None
+# 探测失败不能永久生效：启动瞬间网络未就绪会把 push2 一票否决到进程结束
+# （板块资金流整条链路因此降级成新浪兜底、资金字段全 0）。失败后按间隔重探。
+_EM_LAST_CHECK: float = 0.0
+_EM_RECHECK_INTERVAL: float = 60.0
 # P2 修复(2026-07-29):原 _check_em_available 无锁保护,多线程并发首次调用时
 # 每个线程都会读到 _EM_AVAILABLE=None 并发起探测请求(2s 超时 × N 线程 = N 个探测)
 # 改为:double-checked locking 模式,仅首个线程发起探测,其他线程等待锁后读取结果
@@ -84,6 +88,24 @@ def _cache_set(key: str, val: Any, ttl: float) -> None:
         _cache[key] = {"val": val, "ts": time.monotonic(), "ttl": ttl}
 
 
+# 每个逻辑数据集最近一次实际使用的上游（如 stock_ranking: eastmoney/sina）。
+# 路由层据此填写 _meta.data_source —— 硬编码 "eastmoney" 会在兜底生效时谎报来源，
+# 前端与排查都会被误导。键名是稳定的逻辑名，不随具体函数名变化。
+_LAST_SOURCES: dict[str, str] = {}
+_source_lock = threading.Lock()
+
+
+def _mark_source(name: str, source: str) -> None:
+    with _source_lock:
+        _LAST_SOURCES[name] = source
+
+
+def get_last_source(name: str, default: str = "") -> str:
+    """返回某逻辑数据集最近一次实际使用的上游；未记录时返回 default。"""
+    with _source_lock:
+        return _LAST_SOURCES.get(name) or default
+
+
 def _parallel_fetch(funcs: list[tuple[str, Any]], deadline: float | None = None) -> dict[str, Any]:
     """并发执行多个抓取函数，返回 {名称: 结果}。
 
@@ -130,38 +152,52 @@ def _check_em_available() -> bool:
     - 首次调用:N 个线程并发时仅 1 个发起探测请求(原为 N 个)
     - 后续调用:直接返回缓存值,无锁竞争
     """
-    global _EM_AVAILABLE
-    # Fast path:已探测过,直接返回
-    if _EM_AVAILABLE is not None:
-        return _EM_AVAILABLE
+    global _EM_AVAILABLE, _EM_LAST_CHECK
+    # Fast path:探测可用则直接返回
+    if _EM_AVAILABLE is True:
+        return True
+    # 失败结果只在间隔内生效，超时后重探（网络恢复能自动接回来）
+    if _EM_AVAILABLE is False and time.monotonic() - _EM_LAST_CHECK < _EM_RECHECK_INTERVAL:
+        return False
     # Slow path:加锁后再次检查(double-checked locking)
     with _em_check_lock:
-        if _EM_AVAILABLE is not None:
-            return _EM_AVAILABLE
+        if _EM_AVAILABLE is True:
+            return True
+        if _EM_AVAILABLE is False and time.monotonic() - _EM_LAST_CHECK < _EM_RECHECK_INTERVAL:
+            return False
         try:
+            # 2026-11-14: 只请求 f12 时上游返回 200 + data:{}，会被误判为不可用，
+            # 导致 push2 全量降级到新浪兜底（板块资金流因此全是 0）。带上 f43(cur)
+            # 才能拿到非空 data。
             resp = _EM_SESSION.get(
                 "https://push2.eastmoney.com/api/qt/stock/get",
-                params={"secid": "1.000001", "fields": "f12"},
-                timeout=2,
+                params={"secid": "1.000001", "fields": "f12,f43"},
+                timeout=3,
             )
             if resp.status_code == 200:
                 try:
                     data = resp.json()
                     _EM_AVAILABLE = bool(data.get("data"))
-                except Exception:
+                except Exception as e:
                     _EM_AVAILABLE = False
+                    logger.info(f"EastMoney push2 probe bad json: {type(e).__name__}: {e}")
             else:
                 _EM_AVAILABLE = False
-        except Exception:
+                logger.info(f"EastMoney push2 probe HTTP {resp.status_code}")
+        except Exception as e:
             _EM_AVAILABLE = False
+            logger.info(f"EastMoney push2 probe failed: {type(e).__name__}: {e}")
+        _EM_LAST_CHECK = time.monotonic()
         if not _EM_AVAILABLE:
             logger.info("EastMoney push2 API unavailable, using fallback data sources")
         return _EM_AVAILABLE
 
 
-def _ensure_em_checked():
-    if _EM_AVAILABLE is None:
-        _check_em_available()
+def _ensure_em_checked() -> bool:
+    # 2026-11-14: 原实现只在 _EM_AVAILABLE is None 时探测、且不返回结果，
+    # 调用方 `not _ensure_em_checked()` 永远为真 —— push2 被无条件判死，
+    # 排行/板块资金流整条链路静默降级到新浪（资金字段全 0）。
+    return _check_em_available()
 
 
 def _safe_float(val: Any, default: float = 0.0) -> float:
@@ -569,7 +605,10 @@ def get_stock_ranking_em(sort_field: str = "f3", sort_order: int = 0, count: int
     params = {
         "pn": 1,
         "pz": count,
-        "po": sort_order,
+        # 2026-11-14: 东财 clist 的 po=1 是降序、po=0 是升序，而本模块沿用新浪
+        # 约定 sort_order=0 表示降序。原样透传会得到"涨幅最低/成交额最低"（含退市股），
+        # 之前 push2 被误判不可用、总走新浪兜底所以没暴露。
+        "po": 0 if sort_order else 1,
         "np": 1,
         "fltt": 2,
         "invt": 2,
@@ -596,12 +635,18 @@ def get_stock_ranking_em(sort_field: str = "f3", sort_order: int = 0, count: int
                 "open": _safe_float(item.get("f17", 0)),
                 "prev_close": _safe_float(item.get("f18", 0)),
             })
-        _cache_set(cache_key, result, 15)
-        return result
+        if result:
+            _cache_set(cache_key, result, 15)
+            _mark_source("stock_ranking", "eastmoney")
+            _mark_source(f"stock_ranking:{sort_field}:{sort_order}", "eastmoney")
+            return result
     except Exception as e:
         logger.warning(f"get_stock_ranking_em failed: {e}")
     result = _get_stock_ranking_sina(sort_field, sort_order, count)
     _cache_set(cache_key, result, 15)
+    source = "sina" if result else "unavailable"
+    _mark_source("stock_ranking", source)
+    _mark_source(f"stock_ranking:{sort_field}:{sort_order}", source)
     return result
 
 
@@ -688,15 +733,24 @@ def get_research_reports(stock_code: str = "", page: int = 1, page_size: int = 1
         return []
 
 
+def _ths_time(value: Any) -> str:
+    """同花顺封板时间是 unix 秒（新版）或 HH:MM:SS 字符串（旧版）。"""
+    try:
+        return datetime.fromtimestamp(int(value)).strftime("%H:%M:%S")
+    except (TypeError, ValueError, OSError):
+        return _safe_str(value)
+
+
 def get_hot_stocks_ths() -> list[dict]:
     cached = _cache_get("hot_stocks_ths")
     if cached is not None:
         return cached
     url = "https://data.10jqka.com.cn/dataapi/limit_up/limit_up_pool"
-    today = datetime.now().strftime("%Y%m%d")
     params = {
         "field": "199112,10,9001,330323,330324,330325,9002,330329,133971,133970,1968584,3475914",
-        "filter": f"GHS3A_{today}",
+        # 2026-11-14: 上游把 filter 从日期式 GHS3A_YYYYMMDD 改成了市场集合式，
+        # 旧参数直接返回 "filter参数不合法"，涨停池因此长期为空。
+        "filter": "HS,GEM2STAR",
         "page": 1,
         "limit": 30,
         "order_field": "330324",
@@ -708,18 +762,22 @@ def get_hot_stocks_ths() -> list[dict]:
             "Referer": "https://data.10jqka.com.cn/",
         })
         data = resp.json()
-        items = data.get("data", {}).get("list", [])
+        if data.get("status_code") not in (0, None):
+            raise ValueError(f"status_code={data.get('status_code')} {data.get('status_msg', '')}")
+        body = data.get("data") or {}
+        items = body.get("info") or body.get("list") or []
         result: list[dict] = []
         for item in items:
             result.append({
                 "code": _safe_str(item.get("code", item.get("股票代码", ""))),
                 "name": _safe_str(item.get("name", item.get("股票简称", ""))),
-                "price": _safe_float(item.get("latest_price", item.get("最新价", 0))),
-                "change_pct": _safe_float(item.get("change_pct", item.get("涨跌幅", 0))),
+                "price": _safe_float(item.get("latest", item.get("latest_price", item.get("最新价", 0)))),
+                "change_pct": _safe_float(item.get("change_rate", item.get("change_pct", item.get("涨跌幅", 0)))),
+                # 新版响应不再给成交额，保持 0 并在前端按缺失处理，不拿封单额冒充
                 "volume": _safe_float(item.get("volume", item.get("成交额", 0))),
-                "reason": _safe_str(item.get("reason", item.get("涨停原因", ""))),
-                "limit_up_time": _safe_str(item.get("first_limit_up_time", item.get("首次封板时间", ""))),
-                "open_times": _safe_int(item.get("open_limit_up_times", item.get("开板次数", 0))),
+                "reason": _safe_str(item.get("reason_type", item.get("reason", item.get("涨停原因", "")))),
+                "limit_up_time": _ths_time(item.get("first_limit_up_time", item.get("首次封板时间", ""))),
+                "open_times": _safe_int(item.get("open_num", item.get("open_limit_up_times", item.get("开板次数", 0)))),
             })
         _cache_set("hot_stocks_ths", result, 30)
         if result:
@@ -1154,6 +1212,7 @@ def get_sector_ranking() -> list[dict]:
         if result:
             data_health.record_success("sector_ranking", len(result))
             _cache_set("sector_ranking", result, 30)
+            _mark_source("sector_ranking", "eastmoney")
             return result
     except Exception as e:
         logger.warning(f"get_sector_ranking industry failed: {e}")
@@ -1185,16 +1244,72 @@ def get_sector_ranking() -> list[dict]:
         if result2:
             data_health.record_success("sector_ranking", len(result2))
             _cache_set("sector_ranking", result2, 30)
+            _mark_source("sector_ranking", "eastmoney")
             return result2
     except Exception as e:
         logger.warning(f"get_sector_ranking concept fallback failed: {e}")
-    result = _get_sector_ranking_sina()
+    result = _get_sector_ranking_sina_fund()
+    if not result:
+        result = _get_sector_ranking_sina()
     if result:
         data_health.record_success("sector_ranking", len(result))
+        _mark_source("sector_ranking", "sina")
     else:
         data_health.record_failure("sector_ranking", "all sources empty")
     _cache_set("sector_ranking", result, 30)
     return result
+
+
+def _get_sector_ranking_sina_fund() -> list[dict]:
+    """新浪板块资金流（东财 clist 不可用时的真实资金兜底）。
+
+    上游 ``MoneyFlow.ssl_bkzj_bk`` 与东财行业板块口径接近（fenlei=2 为行业），
+    返回 netamount/ratioamount，可填 main_net_inflow / main_inflow_pct，
+    不再是"50 行资金全 0"的假数据。超大/大/中/小单拆分明细上游不给，保持 0
+    并由路由层记入 unavailable_fields，避免被读成"真的为 0"。
+    """
+    url = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/MoneyFlow.ssl_bkzj_bk"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://finance.sina.com.cn/",
+    }
+    for fenlei in (2, 0):  # 2=行业(首选, 对齐东财 m:90+t:2) 0=申万一级(兜底)
+        try:
+            resp = requests.get(url, params={
+                "page": 1, "num": 100, "sort": "netamount", "asc": 0, "fenlei": fenlei,
+            }, timeout=6, headers=headers)
+            items = resp.json()
+            if not isinstance(items, list) or not items:
+                continue
+            result: list[dict] = []
+            for item in items:
+                code = _safe_str(item.get("category"))
+                name = _safe_str(item.get("name"))
+                if not code or not name:
+                    continue
+                result.append({
+                    "code": code,
+                    "name": name,
+                    "change_pct": round(_safe_float(item.get("avg_changeratio")) * 100, 2),
+                    "price": round(_safe_float(item.get("avg_price")), 2),
+                    "main_net_inflow": _safe_float(item.get("netamount")),
+                    "main_inflow_pct": round(_safe_float(item.get("ratioamount")) * 100, 2),
+                    "super_large_net": 0,
+                    "super_large_pct": 0,
+                    "large_net": 0,
+                    "large_pct": 0,
+                    "medium_net": 0,
+                    "medium_pct": 0,
+                    "small_net": 0,
+                    "small_pct": 0,
+                })
+            if result:
+                # 与东财口径对齐：按涨跌幅降序，而非上游的净流入排序
+                result.sort(key=lambda x: x["change_pct"], reverse=True)
+                return result[:50]
+        except Exception as e:
+            logger.warning(f"_get_sector_ranking_sina_fund fenlei={fenlei} failed: {e}")
+    return []
 
 
 def _get_sector_ranking_sina() -> list[dict]:
@@ -1542,10 +1657,14 @@ def get_stock_news(stock_code: str, page: int = 1, page_size: int = 10) -> list[
                 "publish_time": _safe_str(art.get("date", "")),
             })
         if result:
+            _mark_source("news", "eastmoney")
             return result
     except Exception as e:
         logger.warning(f"get_stock_news failed: {e}")
-    return _get_stock_news_sina(stock_code, page, page_size)
+    result = _get_stock_news_sina(stock_code, page, page_size)
+    if result:
+        _mark_source("news", "sina")
+    return result
 
 
 def _get_stock_news_sina(stock_code: str, page: int = 1, page_size: int = 10) -> list[dict]:
@@ -1628,12 +1747,14 @@ def get_global_news() -> list[dict]:
             })
         if result:
             data_health.record_success("global_news", len(result))
+            _mark_source("global_news", "eastmoney")
             return result
     except Exception as e:
         logger.warning(f"get_global_news failed: {e}")
     result = _get_global_news_sina()
     if result:
         data_health.record_success("global_news", len(result))
+        _mark_source("global_news", "sina")
     else:
         data_health.record_failure("global_news", "all sources empty")
     _cache_set("global_news", result, 120)

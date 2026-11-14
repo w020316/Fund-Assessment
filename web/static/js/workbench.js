@@ -32,6 +32,7 @@
   var SOURCE_TEXT = {
     eastmoney: '东财',
     akshare: 'akshare',
+    sina_history: '新浪历史',
     sina: '新浪快照',
     unknown: '来源未标'
   };

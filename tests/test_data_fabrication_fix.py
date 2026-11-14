@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -240,10 +241,12 @@ class TestCheckEmAvailableLocking:
     def setup_method(self):
         """每个测试前重置全局 _EM_AVAILABLE 状态,避免测试间污染"""
         ds2._EM_AVAILABLE = None
+        ds2._EM_LAST_CHECK = 0.0
 
     def teardown_method(self):
         """测试后再次清理,防止状态泄漏到其他测试"""
         ds2._EM_AVAILABLE = None
+        ds2._EM_LAST_CHECK = 0.0
 
     def test_returns_cached_value_without_network_call(self):
         """已探测过(_EM_AVAILABLE 非 None)时直接返回,不发网络请求"""
@@ -252,12 +255,25 @@ class TestCheckEmAvailableLocking:
             assert ds2._check_em_available() is True
             mock_get.assert_not_called()
 
-    def test_cached_false_skips_network_call(self):
-        """缓存值为 False 时同样不发网络请求"""
+    def test_cached_false_skips_network_call_within_cooldown(self):
+        """失败结果在冷却窗口内直接复用，不重复打上游"""
         ds2._EM_AVAILABLE = False
+        ds2._EM_LAST_CHECK = time.monotonic()
         with patch.object(ds2._EM_SESSION, "get") as mock_get:
             assert ds2._check_em_available() is False
             mock_get.assert_not_called()
+
+    def test_failed_probe_is_retried_after_cooldown(self):
+        """失败不能永久生效：网络恢复后应能自动接回 push2。"""
+        ds2._EM_AVAILABLE = False
+        ds2._EM_LAST_CHECK = time.monotonic() - ds2._EM_RECHECK_INTERVAL - 1
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"data": {"f12": "000001", "f43": 363435}}
+        with patch.object(ds2._EM_SESSION, "get", return_value=mock_resp) as mock_get:
+            assert ds2._check_em_available() is True
+            assert mock_get.call_count == 1
+        assert ds2._EM_AVAILABLE is True
 
     def test_concurrent_calls_single_network_request(self):
         """N 个线程并发首次调用时仅发起 1 次探测请求
@@ -310,6 +326,17 @@ class TestCheckEmAvailableLocking:
             assert ds2._check_em_available() is True
         assert ds2._EM_AVAILABLE is True
 
+    def test_probe_requests_fields_that_return_data(self):
+        """探测必须带 f43：实测单请求 f12 时上游返回 200 + data:{}，
+        会把可用的 push2 误判为不可用，整条链路降级到新浪兜底。"""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"data": {"f12": "000001", "f43": 363435}}
+        with patch.object(ds2._EM_SESSION, "get", return_value=mock_resp) as mock_get:
+            assert ds2._check_em_available() is True
+        params = mock_get.call_args.kwargs.get("params") or {}
+        assert "f43" in str(params.get("fields", ""))
+
     def test_empty_data_sets_false(self):
         """API 200 但 data 为空 → _EM_AVAILABLE=False"""
         mock_resp = MagicMock()
@@ -343,20 +370,28 @@ class TestCheckEmAvailableLocking:
         assert ds2._EM_AVAILABLE is False
 
     def test_ensure_em_checked_triggers_probe_when_none(self):
-        """_EM_AVAILABLE=None 时 _ensure_em_checked 应触发探测"""
+        """_EM_AVAILABLE=None 时 _ensure_em_checked 应触发探测并返回结果"""
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"data": {"f12": "000001"}}
         with patch.object(ds2._EM_SESSION, "get", return_value=mock_resp) as mock_get:
-            ds2._ensure_em_checked()
+            assert ds2._ensure_em_checked() is True
             mock_get.assert_called_once()
         assert ds2._EM_AVAILABLE is True
+
+    def test_ensure_em_checked_reports_blocked(self):
+        """不可用时必须返回 False：调用方靠返回值决定是否降级。"""
+        ds2._EM_AVAILABLE = False
+        ds2._EM_LAST_CHECK = time.monotonic()
+        with patch.object(ds2._EM_SESSION, "get") as mock_get:
+            assert ds2._ensure_em_checked() is False
+            mock_get.assert_not_called()
 
     def test_ensure_em_checked_skips_when_cached(self):
         """_EM_AVAILABLE 已有值时 _ensure_em_checked 不应触发探测"""
         ds2._EM_AVAILABLE = True
         with patch.object(ds2._EM_SESSION, "get") as mock_get:
-            ds2._ensure_em_checked()
+            assert ds2._ensure_em_checked() is True
             mock_get.assert_not_called()
 
 
@@ -403,3 +438,120 @@ class TestCacheSizeLimit:
         # 更新已存在的 key
         ds2._cache_set("existing", "v2", ttl=60)
         assert ds2._cache_get("existing") == "v2"
+
+
+class TestStockRankingEmSortOrder:
+    """东财 clist 的 po 与新浪 asc 语义相反(po=1 降序),必须显式转换。
+
+    原样透传 sort_order 会得到"涨幅最低/成交额最低"榜单（含退市股），
+    此前 push2 被误判不可用、总走新浪兜底，所以没有暴露。
+    """
+
+    def _capture(self, monkeypatch):
+        captured: dict = {}
+
+        class _Resp:
+            def json(self):
+                return {"data": {"diff": []}}
+
+        def fake_em_get(url, params=None, **_kwargs):
+            captured.clear()
+            captured.update(params or {})
+            return _Resp()
+
+        monkeypatch.setattr(ds2, "em_get", fake_em_get)
+        monkeypatch.setattr(ds2, "_cache_get", lambda _key: None)
+        monkeypatch.setattr(ds2, "_cache_set", lambda *_a, **_k: None)
+        monkeypatch.setattr(ds2, "_get_stock_ranking_sina", lambda *a, **k: [])
+        return captured
+
+    def test_sort_order_zero_means_descending(self, monkeypatch):
+        captured = self._capture(monkeypatch)
+        ds2.get_stock_ranking_em("f3", 0, 5)
+        assert captured["po"] == 1
+
+    def test_sort_order_one_means_ascending(self, monkeypatch):
+        captured = self._capture(monkeypatch)
+        ds2.get_stock_ranking_em("f3", 1, 5)
+        assert captured["po"] == 0
+
+
+class TestSectorFlowSinaFallback:
+    """东财 clist 不可用时，板块资金必须走新浪真实资金兜底，而不是 50 行全 0。
+
+    背景(2026-11-14):本机网络层阻断 push2 clist（quote 可通、clist 断连），
+    旧兜底只有新浪涨跌幅（资金字段全 0）。新增新浪 `MoneyFlow.ssl_bkzj_bk`
+    兜底后，主力净流入/占比是真实值，质量分不再被判 0。
+    """
+
+    def setup_method(self):
+        ds2._cache.clear()
+        ds2._LAST_SOURCES.clear()
+
+    def teardown_method(self):
+        ds2._cache.clear()
+        ds2._LAST_SOURCES.clear()
+
+    @staticmethod
+    def _sina_payload():
+        return [
+            {"category": "hangye_A", "name": "行业A", "avg_price": "10.0",
+             "avg_changeratio": "0.0123", "netamount": "123450000.0",
+             "ratioamount": "0.0456"},
+            {"category": "hangye_B", "name": "行业B", "avg_price": "20.0",
+             "avg_changeratio": "0.0500", "netamount": "-98760000.0",
+             "ratioamount": "-0.0321"},
+        ]
+
+    def test_parses_real_fund_fields_and_sorts_by_change(self, monkeypatch):
+        resp = MagicMock()
+        resp.json.return_value = self._sina_payload()
+        monkeypatch.setattr(ds2.requests, "get", lambda *_a, **_k: resp)
+
+        rows = ds2._get_sector_ranking_sina_fund()
+        assert len(rows) == 2
+        # 按涨跌幅降序（对齐东财 fid=f3 口径），而不是上游净流入排序
+        assert rows[0]["name"] == "行业B"
+        assert rows[0]["change_pct"] == 5.0
+        assert rows[0]["main_net_inflow"] == -98760000.0
+        assert rows[0]["main_inflow_pct"] == -3.21
+        assert rows[1]["main_net_inflow"] == 123450000.0
+        # 拆分明细上游不给，保持 0 且由路由层记入 unavailable_fields
+        assert rows[1]["super_large_net"] == 0
+
+    def test_marks_source_sina_when_em_unreachable(self, monkeypatch):
+        monkeypatch.setattr(ds2, "em_get", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("blocked")))
+        monkeypatch.setattr(ds2, "_get_sector_ranking_sina_fund",
+                            lambda: [{"code": "hangye_A", "name": "行业A", "change_pct": 1.0,
+                                      "price": 10.0, "main_net_inflow": 1.0, "main_inflow_pct": 1.0,
+                                      "super_large_net": 0, "super_large_pct": 0,
+                                      "large_net": 0, "large_pct": 0,
+                                      "medium_net": 0, "medium_pct": 0,
+                                      "small_net": 0, "small_pct": 0}])
+        rows = ds2.get_sector_ranking()
+        assert rows and rows[0]["name"] == "行业A"
+        assert ds2.get_last_source("sector_ranking") == "sina"
+
+    def test_marks_source_eastmoney_on_em_success(self, monkeypatch):
+        class _Resp:
+            def json(self):
+                return {"data": {"diff": [{
+                    "f12": "BK001", "f14": "行业X", "f3": 1.2, "f2": 10.0,
+                    "f62": 1000.0, "f184": 1.1, "f66": 0, "f69": 0,
+                    "f72": 0, "f75": 0, "f78": 0, "f81": 0, "f84": 0, "f87": 0,
+                }]}}
+
+        monkeypatch.setattr(ds2, "em_get", lambda *_a, **_k: _Resp())
+        ds2.get_sector_ranking()
+        assert ds2.get_last_source("sector_ranking") == "eastmoney"
+
+    def test_ranking_source_marked_for_route_meta(self, monkeypatch):
+        class _Resp:
+            def json(self):
+                return {"data": {"diff": []}}
+
+        monkeypatch.setattr(ds2, "em_get", lambda *_a, **_k: _Resp())
+        monkeypatch.setattr(ds2, "_get_stock_ranking_sina", lambda *a, **k: [{"code": "000001"}])
+        ds2.get_stock_ranking_em("f3", 0, 5)
+        assert ds2.get_last_source("stock_ranking") == "sina"
+        assert ds2.get_last_source("stock_ranking:f3:0") == "sina"

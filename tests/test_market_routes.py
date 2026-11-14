@@ -151,7 +151,7 @@ class TestIndexRealtime:
         assert len(data["data"]) == 1
         assert data["data"][0]["code"] == "000001"
         assert data["data"][0]["name"] == "上证指数"
-        assert data["_meta"]["data_source"] == "eastmoney"
+        assert data["_meta"]["data_source"] == "tencent"
 
 
 class TestHotStocks:

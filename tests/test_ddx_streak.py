@@ -8,6 +8,8 @@
 """
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
@@ -107,6 +109,17 @@ class TestBuildDdxStreak:
     def test_empty_candidates(self):
         assert build_ddx_streak([], min_days=2) == {"items": [], "sampled": 0, "failed": 0}
 
+    def test_zero_streak_is_not_a_fetch_failure(self):
+        """取数成功但没有连增 → 属于筛选结果，failed 不应增加。"""
+        candidates = [{"code": "600519", "name": "贵州茅台"}]
+        stats = {"streak": 0, "net_today": -1e7, "net_sum": 0.0, "ratio_today": -1.0,
+                 "source": "sina_history", "history_available": True}
+        with patch.object(ddx, "fetch_streak", return_value=stats):
+            out = build_ddx_streak(candidates, min_days=2)
+        assert out["items"] == []
+        assert out["failed"] == 0
+        assert out["sampled"] == 1
+
     def test_counts_sources_for_successful_items(self):
         candidates = [
             {"code": "600519", "name": "贵州茅台"},
@@ -139,9 +152,20 @@ class TestFlowSources:
         assert out["source"] == "akshare"
         assert out["streak"] == 2
 
+    def test_sina_history_wins_when_em_and_akshare_unavailable(self, monkeypatch):
+        """push2his 被网络环境拦截时，新浪多日历史仍能给出真实连增。"""
+        monkeypatch.setattr(ddx, "_fetch_em_history", lambda code: None)
+        monkeypatch.setattr(ddx, "_fetch_akshare_history", lambda code: None)
+        monkeypatch.setattr(ddx, "_fetch_sina_history", lambda code: _make_df([1e7, 2e7]))
+        out = ddx.fetch_flow_streak("600519")
+        assert out["source"] == "sina_history"
+        assert out["streak"] == 2
+        assert ddx.fetch_streak("600519")["source"] == "sina_history"
+
     def test_sina_snapshot_used_when_history_unavailable(self, monkeypatch):
         monkeypatch.setattr(ddx, "_fetch_em_history", lambda code: None)
         monkeypatch.setattr(ddx, "_fetch_akshare_history", lambda code: None)
+        monkeypatch.setattr(ddx, "_fetch_sina_history", lambda code: None)
         monkeypatch.setattr(ddx, "_fetch_sina_snapshot", lambda code: {
             "streak": None, "net_today": 7.4e8, "net_sum": None, "ratio_today": None,
             "start_date": None, "end_date": None, "source": "sina", "history_available": False,
@@ -159,7 +183,8 @@ class TestFlowSources:
         assert out["streak"] == 0
         assert out["history_available"] is True
         assert out["net_today"] == pytest.approx(-2e7)
-        assert ddx.fetch_streak("600519") is None
+        # 取数成功但当日净流出：候选池拿到 streak=0，而不是被当成取数失败
+        assert ddx.fetch_streak("600519")["streak"] == 0
 
     def test_sina_snapshot_parses_netamount(self, monkeypatch):
         class _Resp:
@@ -178,6 +203,53 @@ class TestFlowSources:
 
         monkeypatch.setattr(ddx.requests, "get", lambda *a, **k: _Resp())
         assert ddx._fetch_sina_snapshot("600519") is None
+
+
+class TestSinaHistory:
+    """新浪多日资金流：升序、单位换算、陈旧/空数据拒绝。"""
+
+    @staticmethod
+    def _rows(days_ago: list[int], values: list[float], ratios: list[float] | None = None):
+        base = date.today()
+        ratios = ratios or [0.01] * len(days_ago)
+        return [
+            {
+                "opendate": (base - timedelta(days=d)).isoformat(),
+                "netamount": str(v),
+                "ratioamount": str(r),
+            }
+            for d, v, r in zip(days_ago, values, ratios)
+        ]
+
+    @staticmethod
+    def _patch(monkeypatch, payload):
+        class _Resp:
+            def json(self):
+                return payload
+
+        monkeypatch.setattr(ddx.requests, "get", lambda *a, **k: _Resp())
+
+    def test_parses_newest_first_payload_into_streak(self, monkeypatch):
+        # 新浪返回新→旧；compute_streak 依赖升序，由 _fetch_sina_history 负责排序
+        self._patch(monkeypatch, self._rows([1, 2, 3], [3e7, 2e7, -1e7], [0.05, 0.02, -0.01]))
+        df = ddx._fetch_sina_history("600519")
+        assert df is not None
+        assert list(df["主力净流入-净额"]) == [pytest.approx(-1e7), pytest.approx(2e7), pytest.approx(3e7)]
+        out = compute_streak(df)
+        assert out["streak"] == 2
+        assert out["ratio_today"] == pytest.approx(5.0)
+
+    def test_stale_history_is_rejected(self, monkeypatch):
+        self._patch(monkeypatch, self._rows([400, 401, 402], [1e7, 2e7, 3e7]))
+        assert ddx._fetch_sina_history("830799") is None
+
+    def test_all_zero_history_is_rejected(self, monkeypatch):
+        self._patch(monkeypatch, self._rows([1, 2], [0.0, 0.0]))
+        assert ddx._fetch_sina_history("830799") is None
+
+    def test_unparsable_payload_is_rejected(self, monkeypatch):
+        self._patch(monkeypatch, {"unexpected": True})
+        assert ddx._fetch_sina_history("600519") is None
 
 
 @pytest.fixture
@@ -294,6 +366,57 @@ def test_endpoint_serves_stale_snapshot_while_refreshing(client, monkeypatch):
     assert body["data"]["items"][0]["streak"] == 3
     assert body["_meta"]["stale"] is True
     assert refreshed, "过期快照应触发后台刷新"
+
+
+def test_cached_all_failed_snapshot_is_not_reported_healthy(client, monkeypatch):
+    """缓存命中不能默认质量 100：全失败的旧快照必须仍标降级。"""
+    import web.routes.market as market_route
+
+    cached = {"items": [], "sampled": 12, "failed": 12, "sources": {}, "min_days": 2, "trade_date": None}
+    monkeypatch.setattr(market_route.cache, "get_with_stale",
+                        lambda key, max_stale=300: (cached, False))
+
+    body = client.get("/api/market/ddx_streak?limit=5&min_days=2").json()
+    assert body["_meta"]["cached"] is True
+    assert body["_meta"]["quality_score"] == 0
+    assert body["_meta"]["degraded"] is True
+
+
+def test_cached_snapshot_source_reflects_partial_failure(client, monkeypatch):
+    import web.routes.market as market_route
+
+    cached = {
+        "items": [{"code": "600519", "name": "贵州茅台", "streak": 2,
+                   "net_today": 1e8, "net_sum": 2e8, "ratio_today": 1.0,
+                   "start_date": "2026-11-12", "end_date": "2026-11-13",
+                   "source": "sina_history"}],
+        "sampled": 12, "failed": 2, "sources": {"sina_history": 10},
+        "min_days": 2, "trade_date": "2026-11-13",
+    }
+    monkeypatch.setattr(market_route.cache, "get_with_stale",
+                        lambda key, max_stale=300: (cached, False))
+
+    body = client.get("/api/market/ddx_streak").json()
+    assert body["_meta"]["quality_score"] == 60
+    assert body["_meta"]["degraded"] is True
+    assert body["_meta"]["data_source"] == "sina_history"
+    assert body["_meta"]["sources"] == {"sina_history": 10}
+
+
+def test_cached_snapshot_mixed_sources_mark_multi(client, monkeypatch):
+    import web.routes.market as market_route
+
+    cached = {
+        "items": [], "sampled": 2, "failed": 0,
+        "sources": {"eastmoney": 1, "sina_history": 1},
+        "min_days": 2, "trade_date": None,
+    }
+    monkeypatch.setattr(market_route.cache, "get_with_stale",
+                        lambda key, max_stale=300: (cached, False))
+
+    body = client.get("/api/market/ddx_streak").json()
+    assert body["_meta"]["data_source"] == "multi"
+    assert body["_meta"]["quality_score"] == 100
 
 
 class TestStockFlowStreakEndpoint:

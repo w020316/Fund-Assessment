@@ -87,8 +87,10 @@
         + (ratioUnavailable ? '大单占比' : '') + '列暂不可用（不是 0）</div>'
       : '';
     const asOf = (r.body && r.body._meta && r.body._meta.timestamp) ? String(r.body._meta.timestamp).slice(11, 19) : '';
+    const sourceNote = meta.data_source === 'sina' ? '新浪板块资金'
+      : (meta.data_source === 'eastmoney' ? '东财板块行情' : (meta.data_source || '板块行情'));
     if (badge) {
-      badge.innerHTML = Freshness.html({ asOf: asOf, note: '东财板块行情' });
+      badge.innerHTML = Freshness.html({ asOf: asOf, note: sourceNote });
     }
     const rows = sorted.map(function (it, i) { return rowHTML(it, i, flowUnavailable, ratioUnavailable); }).join('');
     el.innerHTML = flowBanner
