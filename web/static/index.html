@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#04070E">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2322e3ff'/%3E%3Ctext x='16' y='21.5' font-family='Arial,sans-serif' font-size='13' font-weight='700' fill='%2304070e' text-anchor='middle'%3EQF%3C/text%3E%3C/svg%3E">
@@ -1217,7 +1218,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
           </div>
 
           <div class="wb-foot">
-            <span>规则引擎输出，<b>非投资建议</b>；数据来自东方财富公开接口与本地涨停池，缺失字段以「—」标注原因。</span>
+            <span>规则引擎输出，<b>非投资建议</b>；数据来自东方财富、新浪、腾讯等公开接口与本地涨停池，实际来源见各面板标注，缺失字段以「—」标注原因。</span>
             <span class="wb-src-strip" id="wbSourceStrip"></span>
             <span>最近刷新 <b id="wbFootTime">—</b> · 上游 <b id="wbUpstreamTime">—</b></span>
           </div>
@@ -3180,6 +3181,13 @@ function changeSign(val) {
   return '';
 }
 
+// 带符号的百分比文本(负号由数值自带, 只额外补正号)
+function signedPct(val, digits) {
+  const n = Number(val);
+  if (!isFinite(n)) return '—';
+  return changeSign(n) + n.toFixed(digits == null ? 2 : digits) + '%';
+}
+
 // 信号/决策中文标签映射(内部逻辑保留英文,仅展示层转中文)
 const SIGNAL_LABELS = {BULLISH:'看多', BEARISH:'看空', NEUTRAL:'中性'};
 const DECISION_LABELS = {BUY:'买入', SELL:'卖出', HOLD:'持有'};
@@ -3205,6 +3213,7 @@ const API_TIMEOUT_MS = (url) => {
   if (url.startsWith('/api/market/outlook') || url.startsWith('/api/scripts/ai-generate')) return 30000;
   if (url.startsWith('/api/holdings/upload')) return 60000; // 图片OCR识别需调用AI视觉模型,后端30s超时,前端给60s余量
   if (url.startsWith('/api/portfolio/risk') || url.startsWith('/api/portfolio/attribution')) return 30000; // 多基金历史净值聚合,冷启动需拉多源
+  if (url.startsWith('/api/strategy/scan/')) return 25000; // 后端扫描上限 15s, 留余量以接收明确的 503 原因
   return 15000; // 默认 15s
 };
 
@@ -5419,6 +5428,11 @@ async function runScan(type) {
   if (type === 'new_high') url = '/api/strategy/scan/new_high';
   if (type === 'convertible') url = '/api/strategy/scan/cb';
 
+  const card = document.getElementById('scanResultCard');
+  const body = document.getElementById('scanResultBody');
+  // 失败时不能让上一轮的"暂无扫描结果"继续挂在页面上冒充本次结果
+  if (card) card.style.display = 'none';
+
   let data;
   try {
     data = await api(url);
@@ -5426,8 +5440,9 @@ async function runScan(type) {
     // api() 已展示持久错误卡(含重试按钮), 这里不再渲染“暂无信号”误导用户
     return;
   }
-  const card = document.getElementById('scanResultCard');
-  const body = document.getElementById('scanResultBody');
+  // api() 对 HTTP 错误/超时返回 null 而不抛异常; 此时错误卡已说明原因,
+  // 不能再往下渲染“暂无扫描结果”, 否则用户会把"数据源不可用"读成"今天没有机会"。
+  if (!data) return;
   card.style.display = 'block';
 
   // 阶段二 R-13:删除 defaultResults 假标的; 空数组就是“暂无扫描结果”, 不伪造涨停/新高
@@ -7290,20 +7305,21 @@ async function loadGlobalOverview() {
   if (idxStats.empty) {
     html += `<div style="padding:12px;background:var(--bg-card);border-radius:6px;border-left:3px solid var(--border);"><div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">国际指数</div><div style="font-size:13px;color:var(--text-muted);text-align:center;padding:12px 0;">暂无数据</div></div>`;
   } else {
-  const idxAvgColor = idxStats.avg >= 0 ? 'var(--color-down)' : 'var(--color-up)';
+  const idxAvgColor = changeColor(idxStats.avg);
   html += `<div style="padding:12px;background:var(--bg-card);border-radius:6px;border-left:3px solid ${idxAvgColor};">
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">国际指数</div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
       <span style="font-size:14px;font-weight:600;">${indices.length} 个指数</span>
-      <span style="color:${idxAvgColor};font-weight:600;">${idxStats.avg >= 0 ? '+' : ''}${idxStats.avg.toFixed(2)}%</span>
+      <span style="color:${idxAvgColor};font-weight:600;">${signedPct(idxStats.avg)}</span>
     </div>
     <div style="font-size:11px;color:var(--text-muted);">
-      <span style="color:var(--color-down);">▲${idxStats.gain}</span>
-      <span style="color:var(--color-up);margin-left:6px;">▼${idxStats.fall}</span>
+      <span style="color:var(--color-up);">▲${idxStats.gain}</span>
+      <span style="color:var(--color-down);margin-left:6px;">▼${idxStats.fall}</span>
       <span style="margin-left:6px;">平${idxStats.flat}</span>
     </div>`;
   if (idxStats.max) {
-    html += `<div style="margin-top:6px;font-size:11px;color:var(--text-secondary);">领涨: ${idxStats.max.name || ''} <span style="color:var(--color-down);">+${Number(idxStats.max.change_pct||0).toFixed(2)}%</span></div>`;
+    const v = Number(idxStats.max.change_pct || 0);
+    html += `<div style="margin-top:6px;font-size:11px;color:var(--text-secondary);">领涨: ${escapeHtml(idxStats.max.name || '')} <span style="color:${changeColor(v)};">${signedPct(v)}</span></div>`;
   }
   html += '</div>';
   }
@@ -7313,20 +7329,21 @@ async function loadGlobalOverview() {
   if (usStats.empty) {
     html += `<div style="padding:12px;background:var(--bg-card);border-radius:6px;border-left:3px solid var(--border);"><div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">美股热门</div><div style="font-size:13px;color:var(--text-muted);text-align:center;padding:12px 0;">暂无数据</div></div>`;
   } else {
-  const usAvgColor = usStats.avg >= 0 ? 'var(--color-down)' : 'var(--color-up)';
+  const usAvgColor = changeColor(usStats.avg);
   html += `<div style="padding:12px;background:var(--bg-card);border-radius:6px;border-left:3px solid ${usAvgColor};">
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">美股热门</div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
       <span style="font-size:14px;font-weight:600;">${usHot.length} 只</span>
-      <span style="color:${usAvgColor};font-weight:600;">${usStats.avg >= 0 ? '+' : ''}${usStats.avg.toFixed(2)}%</span>
+      <span style="color:${usAvgColor};font-weight:600;">${signedPct(usStats.avg)}</span>
     </div>
     <div style="font-size:11px;color:var(--text-muted);">
-      <span style="color:var(--color-down);">▲${usStats.gain}</span>
-      <span style="color:var(--color-up);margin-left:6px;">▼${usStats.fall}</span>
+      <span style="color:var(--color-up);">▲${usStats.gain}</span>
+      <span style="color:var(--color-down);margin-left:6px;">▼${usStats.fall}</span>
       <span style="margin-left:6px;">平${usStats.flat}</span>
     </div>`;
   if (usStats.max) {
-    html += `<div style="margin-top:6px;font-size:11px;color:var(--text-secondary);">领涨: ${usStats.max.name || usStats.max.code || ''} <span style="color:var(--color-down);">+${Number(usStats.max.change_pct||0).toFixed(2)}%</span></div>`;
+    const v = Number(usStats.max.change_pct || 0);
+    html += `<div style="margin-top:6px;font-size:11px;color:var(--text-secondary);">领涨: ${escapeHtml(usStats.max.name || usStats.max.code || '')} <span style="color:${changeColor(v)};">${signedPct(v)}</span></div>`;
   }
   html += '</div>';
   }
@@ -7336,20 +7353,21 @@ async function loadGlobalOverview() {
   if (hkStats.empty) {
     html += `<div style="padding:12px;background:var(--bg-card);border-radius:6px;border-left:3px solid var(--border);"><div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">港股热门</div><div style="font-size:13px;color:var(--text-muted);text-align:center;padding:12px 0;">暂无数据</div></div>`;
   } else {
-  const hkAvgColor = hkStats.avg >= 0 ? 'var(--color-down)' : 'var(--color-up)';
+  const hkAvgColor = changeColor(hkStats.avg);
   html += `<div style="padding:12px;background:var(--bg-card);border-radius:6px;border-left:3px solid ${hkAvgColor};">
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">港股热门</div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
       <span style="font-size:14px;font-weight:600;">${hkHot.length} 只</span>
-      <span style="color:${hkAvgColor};font-weight:600;">${hkStats.avg >= 0 ? '+' : ''}${hkStats.avg.toFixed(2)}%</span>
+      <span style="color:${hkAvgColor};font-weight:600;">${signedPct(hkStats.avg)}</span>
     </div>
     <div style="font-size:11px;color:var(--text-muted);">
-      <span style="color:var(--color-down);">▲${hkStats.gain}</span>
-      <span style="color:var(--color-up);margin-left:6px;">▼${hkStats.fall}</span>
+      <span style="color:var(--color-up);">▲${hkStats.gain}</span>
+      <span style="color:var(--color-down);margin-left:6px;">▼${hkStats.fall}</span>
       <span style="margin-left:6px;">平${hkStats.flat}</span>
     </div>`;
   if (hkStats.max) {
-    html += `<div style="margin-top:6px;font-size:11px;color:var(--text-secondary);">领涨: ${hkStats.max.name || hkStats.max.code || ''} <span style="color:var(--color-down);">+${Number(hkStats.max.change_pct||0).toFixed(2)}%</span></div>`;
+    const v = Number(hkStats.max.change_pct || 0);
+    html += `<div style="margin-top:6px;font-size:11px;color:var(--text-secondary);">领涨: ${escapeHtml(hkStats.max.name || hkStats.max.code || '')} <span style="color:${changeColor(v)};">${signedPct(v)}</span></div>`;
   }
   html += '</div>';
   }

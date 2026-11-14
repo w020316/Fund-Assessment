@@ -15,7 +15,7 @@
  * - 判读文案标注「规则引擎，非投资建议」；
  * - 所有上游字符串进入 innerHTML 前 escapeHtml。
  */
-/* global escapeHtml, switchPage */
+/* global escapeHtml, switchPage, sourceLabel */
 (function () {
   'use strict';
 
@@ -233,7 +233,13 @@
   }
 
   /* ================= 渲染：统计条 ================= */
-  function renderStats(board, thermo) {
+  function sourceLabelOf(meta) {
+    var src = meta && meta.data_source;
+    if (!src) return '';
+    return (typeof sourceLabel === 'function') ? sourceLabel(src) : String(src);
+  }
+
+  function renderStats(board, thermo, sectorMeta) {
     var el = $id('wbStatStrip');
     if (!el) return;
     var m = (board && board.market) || {};
@@ -271,7 +277,7 @@
       {
         k: '板块涨 / 跌',
         v: (isNum(sr.gain_count) ? sr.gain_count : '—') + ' / ' + (isNum(sr.fall_count) ? sr.fall_count : '—'),
-        s: '东方财富行业板块',
+        s: sourceLabelOf(sectorMeta) + '行业板块',
         cls: isNum(sr.gain_count) && isNum(sr.fall_count) ? clsOf(sr.gain_count - sr.fall_count) : ''
       },
       {
@@ -635,7 +641,9 @@
     var metaEl = $id('wbSectorMeta');
     var unavailable = (meta && meta.unavailable_fields) || [];
     if (metaEl) {
-      metaEl.textContent = unavailable.length ? '资金流字段缺失（仅涨跌幅可用）' : '主力资金字段可用';
+      var srcLabel = sourceLabelOf(meta);
+      metaEl.textContent = (srcLabel ? srcLabel + ' · ' : '')
+        + (unavailable.length ? '资金流分项缺失（仅主力净流入）' : '主力资金字段可用');
     }
     if (!Array.isArray(items) || !items.length) {
       el.innerHTML = '<div class="wb-empty"><b>板块数据暂不可用</b><br>上游未返回行业板块行情，请稍后刷新。</div>';
@@ -859,7 +867,7 @@
       ]);
       renderHead(board, thermo);
       renderIndices(indices);
-      renderStats(board, thermo);
+      renderStats(board, thermo, sectorMeta);
       renderHold(board, thermo);
       renderRadar(board, thermo);
       renderPhase(board);
