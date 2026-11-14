@@ -45,7 +45,32 @@ def test_cb_failure_returns_503():
     assert resp.json()["detail"]["code"] == "SCAN_DATA_UNAVAILABLE"
 
 
+def test_scan_upstream_hang_returns_503():
+    """上游(akshare)无超时挂起时, 扫描必须在 _SCAN_TIMEOUT_S 后 503, 不能无限阻塞。"""
+    import time
+
+    class SlowAnalyzer:
+        def scan_limit_up(self):
+            time.sleep(0.3)
+            return []
+
+    with patch("web.routes.strategy._HAS_STRATEGIES", True), \
+         patch("web.routes.strategy.LimitUpAnalyzer", SlowAnalyzer), \
+         patch("web.routes.strategy._SCAN_TIMEOUT_S", 0.05):
+        resp = client.get("/api/strategy/scan/limit_up")
+    assert resp.status_code == 503
+    assert resp.json()["detail"]["code"] == "SCAN_DATA_UNAVAILABLE"
+
+
 def test_frontend_has_no_default_scan_results():
     text = INDEX.read_text(encoding="utf-8")
     assert "const defaultResults" not in text
     assert "暂无扫描结果" in text
+
+
+def test_frontend_scan_error_does_not_render_empty_state():
+    """api() 对 HTTP 错误返回 null(不抛异常), 扫描失败时不得继续渲染“暂无扫描结果”。"""
+    text = INDEX.read_text(encoding="utf-8")
+    assert "if (!data) return;" in text
+    # 客户端超时必须长于后端 _SCAN_TIMEOUT_S(15s), 否则用户只能看到笼统的超时提示
+    assert "url.startsWith('/api/strategy/scan/')) return 25000" in text

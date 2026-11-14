@@ -321,6 +321,20 @@ def _scan_unavailable(operation: str) -> HTTPException:
     )
 
 
+# akshare 的东财接口不设超时, 网络半挂起时会一直阻塞线程。
+# 全流程探测实测 scan_limit_up 超过 60s 未返回, 前端与 Render Free 30s 都会先超时,
+# 因此给扫描加上限: 超时即按"数据源不可用"返回 503, 而不是无限等待。
+_SCAN_TIMEOUT_S = 15.0
+
+
+async def _run_scan(operation: str, fn):
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(fn), timeout=_SCAN_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        logger.warning(f"{operation} timeout({_SCAN_TIMEOUT_S}s)")
+        raise _scan_unavailable(operation)
+
+
 @router.get("/scan/new_high", response_model=list[NewHighItem])
 async def scan_new_high():
     if not _HAS_STRATEGIES:
@@ -355,7 +369,7 @@ async def scan_new_high():
         import akshare as ak
         items: list[NewHighItem] = []
         # P1 修复(2026-07-30):akshare 同步调用包裹到线程池
-        df = await asyncio.to_thread(ak.stock_zh_a_spot_em)
+        df = await _run_scan("新高扫描", ak.stock_zh_a_spot_em)
         if df is not None and not df.empty:
             df["涨跌幅"] = df["涨跌幅"].astype(float)
             df["成交额"] = df["成交额"].astype(float)
@@ -382,7 +396,7 @@ async def scan_limit_up():
     try:
         analyzer = LimitUpAnalyzer()
         # P1 修复(2026-07-30):同步方法包裹到线程池
-        results = await asyncio.to_thread(analyzer.scan_limit_up)
+        results = await _run_scan("涨停扫描", analyzer.scan_limit_up)
         return [LimitUpItem(
             stock_code=r.stock_code, stock_name=r.stock_name, level=r.level.value,
             reason=r.reason.value, seal_time=r.seal_time, open_count=r.open_count,
@@ -401,7 +415,7 @@ async def scan_cb():
     try:
         sniper = CBT0Sniper()
         # P1 修复(2026-07-30):同步方法包裹到线程池
-        results = await asyncio.to_thread(sniper.scan_cb_opportunities)
+        results = await _run_scan("可转债扫描", sniper.scan_cb_opportunities)
         return [CBItem(
             cb_code=r.cb_code, cb_name=r.cb_name, stock_code=r.stock_code,
             stock_name=r.stock_name, cb_price=r.cb_price, stock_price=r.stock_price,
