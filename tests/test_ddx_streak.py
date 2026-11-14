@@ -29,6 +29,14 @@ def _make_df(main_values: list[float], ratios: list[float] | None = None) -> pd.
     })
 
 
+@pytest.fixture(autouse=True)
+def _reset_data_health():
+    """各用例共享进程内健康状态, 进入/退出时清空, 避免 down 判定互相污染。"""
+    ddx.data_health.reset()
+    yield
+    ddx.data_health.reset()
+
+
 class TestComputeStreak:
     def test_counts_trailing_positive_days(self):
         df = _make_df([1e7, -2e7, 3e7, 4e7])
@@ -176,6 +184,34 @@ class TestFlowSources:
         assert out["streak"] is None
         # 快照只能说明当日，绝不能当成连增进入候选榜
         assert ddx.fetch_streak("600519") is None
+
+    def test_down_source_is_paused_and_skipped(self, monkeypatch):
+        """东财已连续失败 3 次 → 本轮直接跳过, 不再逐只等 5s 超时。"""
+        for _ in range(3):
+            ddx.data_health.record_failure("ddx_em", "blocked")
+        monkeypatch.setattr(
+            ddx, "_fetch_em_history",
+            lambda code: pytest.fail("ddx_em 已判定 down, 不应再调用"),
+        )
+        monkeypatch.setattr(ddx, "_fetch_akshare_history", lambda code: None)
+        monkeypatch.setattr(ddx, "_fetch_sina_history", lambda code: _make_df([1e7, 2e7]))
+        out = ddx.fetch_flow_streak("600519")
+        assert out["source"] == "sina_history"
+        assert out["streak"] == 2
+
+    def test_down_source_is_retried_after_cooldown(self, monkeypatch):
+        """冷却到期后仍要重新探测一次, 否则该源永远无法恢复。"""
+        for _ in range(3):
+            ddx.data_health.record_failure("ddx_em", "blocked")
+        monkeypatch.setattr(ddx.data_health, "seconds_since_attempt", lambda name: 9999.0)
+        called = []
+        monkeypatch.setattr(
+            ddx, "_fetch_em_history",
+            lambda code: called.append(code) or _make_df([1e7, 2e7]),
+        )
+        out = ddx.fetch_flow_streak("600519")
+        assert called == ["600519"]
+        assert out["source"] == "eastmoney"
 
     def test_latest_negative_returns_zero_streak_not_fake(self, monkeypatch):
         monkeypatch.setattr(ddx, "_fetch_em_history", lambda code: _make_df([1e7, -2e7]))

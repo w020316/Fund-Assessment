@@ -8960,6 +8960,9 @@ function loadHealthStatus() {
           <span style="color:var(--text-muted);font-size:12px;">${textMap[s.status] || ''} · ${detail}</span>
         </div>`;
       }).join('');
+      html += '<div style="margin-top:8px;font-size:11px;color:var(--text-muted);line-height:1.5;">'
+        + '「未探测」= 本进程还没用到该源，不代表故障；带兜底的源中断（如资金连增·东财/akshare 中断但新浪历史正常）不影响对应功能。'
+        + '</div>';
     }
     container.innerHTML = html;
   });

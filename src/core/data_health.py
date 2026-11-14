@@ -109,6 +109,22 @@ def _status(entry: dict[str, Any]) -> str:
     return "down" if entry["consecutive_failures"] >= DOWN_THRESHOLD else "degraded"
 
 
+def is_down(name: str) -> bool:
+    """该源是否已判定 down(连续失败 ≥ DOWN_THRESHOLD)。调用方可据此暂停重试。"""
+    with _lock:
+        entry = _state.get(name)
+        return entry is not None and _status(entry) == "down"
+
+
+def seconds_since_attempt(name: str) -> float | None:
+    """距离上次尝试的秒数;从未尝试返回 None。用于冷却到期后的重新探测。"""
+    with _lock:
+        entry = _state.get(name)
+        if entry is None or entry["last_attempt_ts"] is None:
+            return None
+        return time.time() - entry["last_attempt_ts"]
+
+
 def _blank_source(name: str) -> dict[str, Any]:
     """已登记但本进程从未上报过的源(重启后/未使用时的诚实状态)。"""
     return {

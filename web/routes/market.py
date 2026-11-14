@@ -591,7 +591,7 @@ async def _build_ddx_payload(limit: int, min_days: int) -> tuple[dict, float]:
     if not candidates:
         return empty, 0.0
 
-    result = await asyncio.to_thread(build_ddx_streak, candidates, min_days, _DDX_WORKERS, 10.0)
+    result = await asyncio.to_thread(build_ddx_streak, candidates, min_days, _DDX_WORKERS, 15.0)
     rows = result["items"][:limit]
     payload = {
         "items": [DdxStreakItem(**row).model_dump() for row in rows],

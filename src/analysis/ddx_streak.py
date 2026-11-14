@@ -266,28 +266,46 @@ def _fetch_sina_snapshot(code: str) -> dict | None:
     }
 
 
+# 已知 down 的源暂停重试的时长(秒): 12 只候选逐只等同一个 5s 超时,
+# 会把整轮取数拖过 deadline, 连可用的新浪兜底都轮不到。
+_SOURCE_RETRY_AFTER = 600.0
+
+
+def _paused(name: str) -> bool:
+    """该源近期已判定 down → 本轮跳过, 不产生新的失败计数。"""
+    age = data_health.seconds_since_attempt(name)
+    return bool(data_health.is_down(name) and age is not None and age < _SOURCE_RETRY_AFTER)
+
+
 def fetch_flow_streak(code: str) -> dict | None:
     """个股资金流详情：优先历史连增，失败时退到当日快照。
 
     返回字典中 ``history_available`` 明确区分"算出了连增"与"只有今日快照"；
     两者都不可用时返回 None，由调用方按缺失处理。
     """
-    df = _fetch_em_history(code)
+    df = None
     source = "eastmoney"
-    if df is not None and not df.empty:
-        data_health.record_success("ddx_em", len(df))
-    else:
-        data_health.record_failure("ddx_em", "empty or unreachable")
-        df = _fetch_akshare_history(code)
-        source = "akshare"
+    if not _paused("ddx_em"):
+        df = _fetch_em_history(code)
         if df is not None and not df.empty:
-            data_health.record_success("ddx_akshare", len(df))
+            data_health.record_success("ddx_em", len(df))
         else:
-            data_health.record_failure("ddx_akshare", "empty or unreachable")
-            df = _fetch_sina_history(code)
-            source = "sina_history"
-            if df is None or df.empty:
-                return _fetch_sina_snapshot(code)
+            data_health.record_failure("ddx_em", "empty or unreachable")
+
+    if df is None or df.empty:
+        source = "akshare"
+        if not _paused("ddx_akshare"):
+            df = _fetch_akshare_history(code)
+            if df is not None and not df.empty:
+                data_health.record_success("ddx_akshare", len(df))
+            else:
+                data_health.record_failure("ddx_akshare", "empty or unreachable")
+
+    if df is None or df.empty:
+        source = "sina_history"
+        df = _fetch_sina_history(code)
+        if df is None or df.empty:
+            return _fetch_sina_snapshot(code)
 
     stats = compute_streak(df)
     if stats:
