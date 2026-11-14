@@ -24,8 +24,9 @@
      min-width:0 让 1fr 回到正常等分; ticker 视觉由自身 overflow:hidden 裁剪,
      不受影响。 */
   #page-market.active > .card { min-width: 0; }
-  /* 显式跨双列：标题行、指数卡组、内部已双列的热门+热力块 */
+  /* 显式跨双列：标题行、页头、指数卡组、内部已双列的热门+热力块 */
   #page-market.active > .flex-between,
+  #page-market.active > .qf-page-head,
   #page-market.active > #indexCards,
   #page-market.active > .grid-2 { grid-column: 1 / -1; }
 }

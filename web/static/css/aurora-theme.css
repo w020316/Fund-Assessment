@@ -350,6 +350,10 @@ body.hud-theme textarea:focus-visible{box-shadow:0 0 0 3px rgba(34,227,255,.14),
   body.hud-theme .hud-subtabs{overflow-x:auto;scrollbar-width:none}
   body.hud-theme .hud-subtabs::-webkit-scrollbar{display:none}
   body.hud-theme .tab,body.hud-theme .hud-subtab{flex:1;min-width:0;height:44px;padding:0 8px;font-size:14px}
+  /* 二级导航项多于 6 个时，flex:1 会把 nowrap 文字压到互相重叠（实测 390px 下
+     "行情总览/短线复盘/国际市场…" 叠成一团）；改为按内容宽度排列，溢出交由
+     上方的 .hud-subtabs 横向滚动承接。 */
+  body.hud-theme .hud-subtabs > .hud-subtab{flex:0 0 auto}
   body.hud-theme .toast-container{top:64px;left:12px;right:12px}
   body.hud-theme .toast{width:100%}
 }

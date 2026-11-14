@@ -239,6 +239,7 @@ th {
   letter-spacing:0.3px;
   border-bottom:1px solid var(--border);
   position:sticky; top:0;
+  white-space:nowrap;
 }
 td {
   padding:12px 12px;
@@ -1014,6 +1015,8 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
      必须排在 hud.css / stage6.css 之后：只覆盖视觉 token 与组件状态，
      不改布局结构；移除 body 的 hud-theme 类即整体回退。 -->
 <link rel="stylesheet" href="/static/css/aurora-theme.css">
+<!-- ===== STAGE7: workbench ===== 工作台终端风格(全部作用域限定 #page-workbench) -->
+<link rel="stylesheet" href="/static/css/workbench.css">
 <!-- 性能优化:lightweight-charts 改为懒加载(仅在用户点击"走势"时加载),避免阻塞首屏 -->
 <link rel="preconnect" href="https://unpkg.com" crossorigin>
 <link rel="dns-prefetch" href="https://unpkg.com">
@@ -1075,7 +1078,9 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
       <div class="page active" id="page-hud-market">
         <div class="hud-group-header">
           <div class="hud-subtabs" role="group" aria-label="行情二级导航">
-            <span class="hud-subtab active" data-page="market" role="button" tabindex="0" onclick="switchPage('market')">行情总览</span>
+            <!-- ===== STAGE7: workbench ===== 工作台为行情默认落地页(一屏判读) -->
+            <span class="hud-subtab active" data-page="workbench" role="button" tabindex="0" onclick="switchPage('workbench')">工作台</span>
+            <span class="hud-subtab" data-page="market" role="button" tabindex="0" onclick="switchPage('market')">行情总览</span>
             <span class="hud-subtab" data-page="review" role="button" tabindex="0" onclick="switchPage('review')">短线复盘</span>
             <span class="hud-subtab" data-page="global" role="button" tabindex="0" onclick="switchPage('global')">国际市场</span>
             <span class="hud-subtab" data-page="data" role="button" tabindex="0" onclick="switchPage('data')">深度数据</span>
@@ -1085,15 +1090,155 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
         </div>
       </div>
 
+      <!-- ===== STAGE7: workbench ===== 工作台(一屏判读)。
+           参考深色多面板交易终端：页头指标 → 指数卡 → 统计条 → 承接/雷达/相位/梯队/热度/资金连增/纪律/持仓。
+           数据复用既有端点 + 一个资金连增聚合端点，渲染与降级规则见 workbench.js；本块只放容器。 -->
+      <div class="page active" id="page-workbench">
+        <div class="wb-shell">
+          <div class="wb-head">
+            <div class="wb-head-left">
+              <span class="wb-title">工作台</span>
+              <span class="wb-tag" id="wbSessionTag">交易时段 —</span>
+              <span class="wb-tag" id="wbPhaseTag">相位 —</span>
+              <span class="wb-tag" id="wbTempTag">大盘温度 —</span>
+              <span class="wb-date" id="wbDate">—</span>
+            </div>
+            <div class="wb-head-right">
+              <span class="wb-live" id="wbLiveWrap"><i id="wbLiveDot"></i><span id="wbRefreshHint">盘中刷新 60s</span></span>
+              <button type="button" class="wb-btn is-on" id="wbAutoBtn" aria-pressed="true" onclick="Workbench.toggleAuto()">自动刷新:开</button>
+              <button type="button" class="wb-btn wb-btn-primary" id="wbRefreshBtn" onclick="Workbench.load(true)">刷新</button>
+            </div>
+          </div>
+
+          <div class="wb-index-grid" id="wbIndexCards" aria-live="polite">
+            <div class="wb-skel"></div><div class="wb-skel"></div><div class="wb-skel"></div><div class="wb-skel"></div>
+          </div>
+
+          <div class="wb-stats" id="wbStatStrip">
+            <div class="wb-skel"></div><div class="wb-skel"></div><div class="wb-skel"></div>
+            <div class="wb-skel"></div><div class="wb-skel"></div><div class="wb-skel"></div>
+          </div>
+
+          <div class="wb-grid">
+            <!-- 承接分析 -->
+            <section class="wb-panel wb-span-5" aria-label="承接分析">
+              <div class="wb-ph">
+                <span class="wb-ph-icon"></span>
+                <span class="wb-ph-title">承接分析</span>
+                <span class="wb-ph-sub">指数 / 封板 / 板块</span>
+                <span class="wb-ph-meta"><button type="button" class="wb-link" onclick="switchPage('review')">复盘 →</button></span>
+              </div>
+              <div class="wb-pb" id="wbHoldBody"><div class="wb-empty">加载中…</div></div>
+            </section>
+
+            <!-- 情绪雷达 -->
+            <section class="wb-panel wb-span-7" aria-label="情绪雷达">
+              <div class="wb-ph">
+                <span class="wb-ph-icon"></span>
+                <span class="wb-ph-title">情绪雷达</span>
+                <span class="wb-ph-sub">六维评分 · 缺失维度不计入结论</span>
+              </div>
+              <div class="wb-pb" id="wbRadarBody"><div class="wb-empty">加载中…</div></div>
+            </section>
+
+            <!-- 分歧 → 一致 相位 -->
+            <section class="wb-panel wb-span-5" aria-label="分歧转一致相位">
+              <div class="wb-ph">
+                <span class="wb-ph-icon"></span>
+                <span class="wb-ph-title">分歧 → 一致</span>
+                <span class="wb-ph-sub">昨日 vs 今日封板质量</span>
+              </div>
+              <div class="wb-pb" id="wbPhaseBody"><div class="wb-empty">加载中…</div></div>
+            </section>
+
+            <!-- 涨停梯队 -->
+            <section class="wb-panel wb-span-7" aria-label="涨停梯队">
+              <div class="wb-ph">
+                <span class="wb-ph-icon"></span>
+                <span class="wb-ph-title">涨停梯队</span>
+                <span class="wb-ph-sub">连板分布 · 涨停集中板块</span>
+                <span class="wb-ph-meta"><span id="wbLadderMeta">—</span></span>
+              </div>
+              <div class="wb-pb" id="wbLadderBody"><div class="wb-empty">加载中…</div></div>
+            </section>
+
+            <!-- 行业热度 -->
+            <section class="wb-panel wb-span-7" aria-label="行业热度">
+              <div class="wb-ph">
+                <span class="wb-ph-icon"></span>
+                <span class="wb-ph-title">行业热度</span>
+                <span class="wb-ph-sub">涨跌幅前 6 / 后 6</span>
+                <span class="wb-ph-meta"><span id="wbSectorMeta">—</span><button type="button" class="wb-link" onclick="switchPage('sector-board')">板块 →</button></span>
+              </div>
+              <div class="wb-pb" id="wbSectorBody"><div class="wb-empty">加载中…</div></div>
+            </section>
+
+            <!-- 热门股 -->
+            <section class="wb-panel wb-span-5" aria-label="热门个股">
+              <div class="wb-ph">
+                <span class="wb-ph-icon"></span>
+                <span class="wb-ph-title">热门个股</span>
+                <span class="wb-ph-sub">涨幅 / 成交额 TOP5</span>
+              </div>
+              <div class="wb-pb" id="wbHotBody"><div class="wb-empty">加载中…</div></div>
+            </section>
+
+            <!-- 资金连增（DDX 连增口径） -->
+            <section class="wb-panel wb-span-7" aria-label="资金连增">
+              <div class="wb-ph">
+                <span class="wb-ph-icon"></span>
+                <span class="wb-ph-title">资金连增</span>
+                <span class="wb-ph-sub">连续主力净流入 · 热点候选池</span>
+                <span class="wb-ph-meta"><span id="wbDdxMeta">—</span></span>
+              </div>
+              <div class="wb-pb" id="wbDdxBody"><div class="wb-empty">加载中…</div></div>
+            </section>
+
+            <!-- 开仓纪律 -->
+            <section class="wb-panel wb-span-5" aria-label="开仓纪律">
+              <div class="wb-ph">
+                <span class="wb-ph-icon"></span>
+                <span class="wb-ph-title">开仓纪律</span>
+                <span class="wb-ph-sub">5 项检查 · 缺失项不计入</span>
+              </div>
+              <div class="wb-pb" id="wbDisciplineBody"><div class="wb-empty">加载中…</div></div>
+            </section>
+
+            <!-- 持仓快照 -->
+            <section class="wb-panel wb-span-12" aria-label="持仓盘中估算">
+              <div class="wb-ph">
+                <span class="wb-ph-icon"></span>
+                <span class="wb-ph-title">持仓快照</span>
+                <span class="wb-ph-sub">盘中估算盈亏（估算≠净值）</span>
+                <span class="wb-ph-meta"><span id="wbPortfolioMeta">—</span><button type="button" class="wb-link" onclick="switchPage('position')">持仓管理 →</button></span>
+              </div>
+              <div class="wb-pb" id="wbPortfolioBody"><div class="wb-empty">加载中…</div></div>
+            </section>
+          </div>
+
+          <div class="wb-foot">
+            <span>规则引擎输出，<b>非投资建议</b>；数据来自东方财富公开接口与本地涨停池，缺失字段以「—」标注原因。</span>
+            <span class="wb-src-strip" id="wbSourceStrip"></span>
+            <span>最近刷新 <b id="wbFootTime">—</b> · 上游 <b id="wbUpstreamTime">—</b></span>
+          </div>
+        </div>
+      </div>
+
       <!-- ===== STAGE6-PRED: market-sector-board ===== 板块二级页(R2.1;内容由 sector-board.js 渲染, 复用既有 /api/market/sector_flow) -->
       <div class="page" id="page-sector-board">
+        <div class="qf-page-head">
+          <div class="qf-page-head-main">
+            <div class="qf-page-title">板块行情</div>
+            <div class="qf-page-sub">行业板块涨跌与资金流排名；点击板块可下钻成分股，数据为盘中快照。</div>
+          </div>
+          <div class="qf-page-actions">
+            <button class="btn btn-sm btn-primary" onclick="SectorBoard.load(true)">刷新</button>
+          </div>
+        </div>
         <div class="card mb-16">
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
             <span>板块涨跌榜</span>
-            <div style="display:flex;align-items:center;gap:8px;">
-              <span id="predSectorFreshness"></span>
-              <button class="btn btn-sm btn-primary" style="min-height:36px;" onclick="SectorBoard.load(true)">刷新</button>
-            </div>
+            <span id="predSectorFreshness"></span>
           </div>
           <div id="predSectorBoardBody">
             <div class="pred-empty">切换到本页自动加载板块行情</div>
@@ -1280,7 +1425,16 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
       </div>
 
       <!-- ==================== 1. 行情总览 ==================== -->
-      <div class="page active" id="page-market">
+      <div class="page" id="page-market">
+        <div class="qf-page-head">
+          <div class="qf-page-head-main">
+            <div class="qf-page-title">行情总览</div>
+            <div class="qf-page-sub">指数强弱、热门股票、板块热力与资金面一屏判读；资金连增可点进个股详情，缺失字段显示「—」而不是 0。</div>
+          </div>
+          <div class="qf-page-actions">
+            <button class="btn btn-sm btn-outline" type="button" onclick="loadMarketData()">刷新行情</button>
+          </div>
+        </div>
         <!-- ===== STAGE6: onboarding ===== 首次使用指引(4 步;进度只存本机浏览器,不写服务端) -->
         <div class="card mb-16 st6-onb-card" id="onboardingCard" role="region" aria-labelledby="onboardingTitle">
           <div class="flex-between" style="flex-wrap:wrap;gap:8px;">
@@ -1330,7 +1484,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 
         <!-- 指数卡片 -->
         <div class="flex-between mb-12">
-          <div style="font-size:18px;font-weight:600;letter-spacing:.01em;">指数行情</div>
+          <div class="qf-section-title">指数行情</div>
           <div style="display:flex;align-items:center;gap:12px;">
             <div class="data-freshness" id="marketFreshness"><span class="freshness-icon"></span><span>—</span></div>
             <button class="btn btn-sm btn-outline" style="min-height:32px;" onclick="openIndicatorHelp()"
@@ -1397,37 +1551,39 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 
       <!-- ==================== 1.1 短线复盘 ==================== -->
       <div class="page" id="page-review">
-        <div class="flex-between mb-16" style="flex-wrap:wrap;gap:8px;">
-          <div>
-            <div style="font-size:18px;font-weight:600;letter-spacing:.01em;">短线复盘看板</div>
-            <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">盘面数据由涨停池/行情接口换算,次日判断为规则引擎输出,不构成投资建议</div>
+        <div class="qf-page-head">
+          <div class="qf-page-head-main">
+            <div class="qf-page-title">短线复盘看板</div>
+            <div class="qf-page-sub">盘面数据由涨停池/行情接口换算，次日判断为规则引擎输出，不构成投资建议；纪律缺失项只标注、不计入判定。</div>
           </div>
-          <button class="btn btn-sm btn-primary" onclick="ReviewDesk.loadAll(true)">刷新复盘</button>
+          <div class="qf-page-actions">
+            <button class="btn btn-sm btn-primary" onclick="ReviewDesk.loadAll(true)">刷新复盘</button>
+          </div>
         </div>
 
-        <div class="grid-4 mb-16">
-          <div class="card">
-            <div class="card-title">情绪温度</div>
-            <div style="display:flex;align-items:baseline;gap:8px;">
-              <div id="reviewTempScore" style="font-size:32px;font-weight:700;color:var(--text-muted);">—</div>
-              <span class="signal" id="reviewTempLevel" style="background:rgba(148,163,184,0.15);color:var(--color-flat);">待加载</span>
+        <div class="qf-kpi-grid mb-16">
+          <div class="qf-kpi">
+            <div class="qf-kpi-label">情绪温度</div>
+            <div style="display:flex;align-items:baseline;gap:8px;margin-top:2px;">
+              <div id="reviewTempScore" class="qf-kpi-value" style="color:var(--text-muted);">—</div>
+              <span class="signal" id="reviewTempLevel" style="background:var(--qf-neutral-soft);color:var(--color-flat);">待加载</span>
             </div>
-            <div id="reviewTempBars" style="margin-top:10px;"></div>
+            <div id="reviewTempBars" style="margin-top:8px;"></div>
           </div>
-          <div class="card">
-            <div class="card-title">涨停 / 跌停</div>
-            <div id="reviewLimitCount" style="font-size:28px;font-weight:700;color:var(--text-muted);">—</div>
-            <div id="reviewLimitSub" style="font-size:12px;color:var(--text-muted);margin-top:6px;">—</div>
+          <div class="qf-kpi">
+            <div class="qf-kpi-label">涨停 / 跌停</div>
+            <div id="reviewLimitCount" class="qf-kpi-value" style="color:var(--text-muted);">—</div>
+            <div id="reviewLimitSub" class="qf-kpi-note">—</div>
           </div>
-          <div class="card">
-            <div class="card-title">炸板率 / 最高板</div>
-            <div id="reviewBrokenRate" style="font-size:28px;font-weight:700;color:var(--text-muted);">—</div>
-            <div id="reviewBrokenSub" style="font-size:12px;color:var(--text-muted);margin-top:6px;">—</div>
+          <div class="qf-kpi">
+            <div class="qf-kpi-label">炸板率 / 最高板</div>
+            <div id="reviewBrokenRate" class="qf-kpi-value" style="color:var(--text-muted);">—</div>
+            <div id="reviewBrokenSub" class="qf-kpi-note">—</div>
           </div>
-          <div class="card">
-            <div class="card-title">市场广度</div>
-            <div id="reviewBreadth" style="font-size:28px;font-weight:700;color:var(--text-muted);">—</div>
-            <div id="reviewBreadthSub" style="font-size:12px;color:var(--text-muted);margin-top:6px;">—</div>
+          <div class="qf-kpi">
+            <div class="qf-kpi-label">市场广度</div>
+            <div id="reviewBreadth" class="qf-kpi-value" style="color:var(--text-muted);">—</div>
+            <div id="reviewBreadthSub" class="qf-kpi-note">—</div>
           </div>
         </div>
 
@@ -1440,6 +1596,15 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
           <div id="marketAssessmentBody">
             <div style="color:var(--text-muted);font-size:12px;padding:8px 0;">加载中...</div>
           </div>
+        </div>
+
+        <!-- 开仓纪律：与工作台共用同一套规则（Workbench.disciplineChecks） -->
+        <div class="card mb-16" role="region" aria-labelledby="reviewDisciplineTitle">
+          <div class="card-title" id="reviewDisciplineTitle" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span>开仓纪律（与工作台同源）</span>
+            <button class="btn btn-outline" style="padding:4px 12px;font-size:12px;" onclick="loadReviewDiscipline()">刷新</button>
+          </div>
+          <div id="reviewDisciplineBody"><div class="qf-flow-empty">等待复盘看板数据…</div></div>
         </div>
 
         <div class="grid-2 mb-16">
@@ -1543,6 +1708,12 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 
       <!-- ==================== 2. 智能分析 ==================== -->
       <div class="page" id="page-ai">
+        <div class="qf-page-head">
+          <div class="qf-page-head-main">
+            <div class="qf-page-title">智能分析</div>
+            <div class="qf-page-sub">多智能体个股解读与大盘展望；LLM 输出为辅助参考，需结合数据质量与风险约束判断。</div>
+          </div>
+        </div>
         <!-- 分析引擎状态 -->
         <div class="llm-provider-bar" id="llmProviderBar">
           <span class="llm-provider-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/></svg></span>
@@ -1700,14 +1871,27 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 
       <!-- ==================== 2.1 出手三问 ==================== -->
       <div class="page" id="page-gate">
-        <div class="card mb-16">
-          <div class="card-title">三问全过才出手,一问不过直接放弃</div>
-          <div style="font-size:13px;color:var(--text-secondary);line-height:1.9;">
-            ① <b>什么身份</b>:是不是热点板块的龙头票,能不能带动板块<br>
-            ② <b>什么断板</b>:断板当天收盘价是否高于前一日收盘价<br>
-            ③ <b>什么竞价</b>:次日集合竞价是否高开<br>
-            <span style="color:var(--color-warning);">任一问数据缺失,按“不通过”处理(fail-closed),不用不确定的数据下单。</span>
+        <div class="qf-page-head">
+          <div class="qf-page-head-main">
+            <div class="qf-page-title">出手三问</div>
+            <div class="qf-page-sub">三问全过才出手，一问不过直接放弃；任一问数据缺失按「不通过」处理（fail-closed），不用不确定的数据下单。</div>
           </div>
+          <div class="qf-page-actions">
+            <button class="btn btn-sm btn-outline" type="button" onclick="switchPage('review')">先看复盘</button>
+          </div>
+        </div>
+        <div class="qf-callout mb-16">
+          ① <b>什么身份</b>：是不是热点板块的龙头票，能不能带动板块<br>
+          ② <b>什么断板</b>：断板当天收盘价是否高于前一日收盘价<br>
+          ③ <b>什么竞价</b>：次日集合竞价是否高开<br>
+          <span class="is-warn">任一问数据缺失，按“不通过”处理（fail-closed），不用不确定的数据下单。</span>
+        </div>
+        <div class="card mb-16" role="region" aria-labelledby="gateDisciplineTitle">
+          <div class="card-title" id="gateDisciplineTitle" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span>今日纪律门槛（开仓前先看大盘）</span>
+            <button class="btn btn-outline" style="padding:4px 12px;font-size:12px;" onclick="loadGateDiscipline()">刷新</button>
+          </div>
+          <div id="gateDisciplineBody"><div class="qf-flow-empty">加载中…</div></div>
         </div>
         <div class="grid-2">
           <div class="card">
@@ -1770,6 +1954,12 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 
       <!-- ==================== 2.2 一句话调度 ==================== -->
       <div class="page" id="page-dispatch">
+        <div class="qf-page-head">
+          <div class="qf-page-head-main">
+            <div class="qf-page-title">一句话调度</div>
+            <div class="qf-page-sub">用一句自然语言描述任务，系统匹配技能库并按顺序给出执行步骤；只生成方案，不自动下单。</div>
+          </div>
+        </div>
         <div class="card mb-16">
           <div class="card-title">一句话调度 AI 投研团队</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -1800,6 +1990,12 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 
       <!-- ==================== 3. 策略中心 ==================== -->
       <div class="page" id="page-strategy">
+        <div class="qf-page-head">
+          <div class="qf-page-head-main">
+            <div class="qf-page-title">策略中心</div>
+            <div class="qf-page-sub">五维评估、K 线走势与条件扫描；评分与信号由规则引擎输出，仅供参考，不构成投资建议。</div>
+          </div>
+        </div>
         <div class="grid-2 mb-16">
           <!-- 雷达图 -->
           <div class="card">
@@ -1984,28 +2180,35 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 
       <!-- ==================== 5. 持仓管理 ==================== -->
       <div class="page" id="page-position">
-        <!-- ===== STAGE5-R2: scope ===== 模拟股票账户与真实基金持仓口径 -->
-        <div class="notice-info mb-16" id="positionScopeNote">
-          当前「持仓管理」为模拟股票账户（初始资金 100 万元），不代表真实资产；真实基金持仓请到
-          <a href="#" onclick="switchPage('fund');return false;">「基金管理」</a> 查看。
+        <div class="qf-page-head">
+          <div class="qf-page-head-main">
+            <div class="qf-page-title">持仓管理</div>
+            <div class="qf-page-sub">模拟股票账户口径（初始资金 100 万元），不代表真实资产；真实基金持仓请看
+              <a href="#" onclick="switchPage('fund');return false;">「基金管理」</a>。
+            </div>
+          </div>
+          <div class="qf-page-actions">
+            <button class="btn btn-sm btn-primary" onclick="loadPositions()">刷新持仓</button>
+            <button class="btn btn-sm btn-outline" onclick="toggleAddStockForm()">+ 添加股票</button>
+          </div>
         </div>
         <!-- 账户概览 -->
-        <div class="grid-4 mb-16" id="accountCards">
-          <div class="card" style="text-align:center;">
-            <div style="color:var(--text-muted);font-size:12px;margin-bottom:4px;">总资产</div>
-            <div style="font-size:24px;font-weight:700;" id="totalAsset">—</div>
+        <div class="qf-kpi-grid mb-16" id="accountCards">
+          <div class="qf-kpi">
+            <div class="qf-kpi-label">总资产</div>
+            <div class="qf-kpi-value is-lg" id="totalAsset">—</div>
           </div>
-          <div class="card" style="text-align:center;">
-            <div style="color:var(--text-muted);font-size:12px;margin-bottom:4px;">可用资金</div>
-            <div style="font-size:24px;font-weight:700;" id="availableCash">—</div>
+          <div class="qf-kpi">
+            <div class="qf-kpi-label">可用资金</div>
+            <div class="qf-kpi-value is-lg" id="availableCash">—</div>
           </div>
-          <div class="card" style="text-align:center;">
-            <div style="color:var(--text-muted);font-size:12px;margin-bottom:4px;">持仓市值</div>
-            <div style="font-size:24px;font-weight:700;" id="marketValue">—</div>
+          <div class="qf-kpi">
+            <div class="qf-kpi-label">持仓市值</div>
+            <div class="qf-kpi-value is-lg" id="marketValue">—</div>
           </div>
-          <div class="card" style="text-align:center;">
-            <div style="color:var(--text-muted);font-size:12px;margin-bottom:4px;">今日盈亏</div>
-            <div style="font-size:24px;font-weight:700;" id="todayPnl">—</div>
+          <div class="qf-kpi">
+            <div class="qf-kpi-label">今日盈亏</div>
+            <div class="qf-kpi-value is-lg" id="todayPnl">—</div>
           </div>
         </div>
 
@@ -2015,7 +2218,6 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
             <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
               <span>持仓列表</span>
               <span style="display:flex;gap:8px;flex-wrap:wrap;">
-                <button class="btn btn-outline" style="padding:4px 12px;font-size:12px;" onclick="toggleAddStockForm()">+ 添加股票</button>
                 <button class="btn btn-outline" style="padding:4px 12px;font-size:12px;" onclick="loadPortfolioAdvice()">组合 AI 建议</button>
               </span>
             </div>
@@ -2110,31 +2312,34 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
       <!-- ==================== 6. 基金管理 ==================== -->
       <div class="page" id="page-fund">
         <!-- 基金概览 -->
-        <div class="flex-between mb-12 fund-head">
-          <div style="font-size:18px;font-weight:600;letter-spacing:.01em;display:flex;align-items:center;gap:8px;white-space:nowrap;flex-shrink:0;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg> 我的基金</div>
-          <div class="fund-head-actions" style="display:flex;gap:8px;flex-wrap:wrap;">
+        <div class="qf-page-head">
+          <div class="qf-page-head-main">
+            <div class="qf-page-title">我的基金</div>
+            <div class="qf-page-sub">真实基金持仓口径：市值、成本与盈亏按最新净值折算；净值缺失显示「—」并标注原因，不做估算填充。</div>
+          </div>
+          <div class="qf-page-actions">
             <button class="btn btn-sm btn-primary" onclick="loadFundData()">刷新持仓</button>
             <button class="btn btn-sm" onclick="loadMarketThermometer()">大盘温度</button>
             <button class="btn btn-sm" onclick="loadNewsFeed()">消息面</button>
             <button class="btn btn-sm" onclick="loadFundAdviceV2()">五信号建议</button>
           </div>
         </div>
-        <div class="grid-4 mb-16">
-          <div class="card" style="text-align:center;">
-            <div style="color:var(--text-muted);font-size:12px;margin-bottom:4px;">持仓市值</div>
-            <div style="font-size:22px;font-weight:700;" id="fundTotalValue">—</div>
+        <div class="qf-kpi-grid mb-16">
+          <div class="qf-kpi">
+            <div class="qf-kpi-label">持仓市值</div>
+            <div class="qf-kpi-value is-lg" id="fundTotalValue">—</div>
           </div>
-          <div class="card" style="text-align:center;">
-            <div style="color:var(--text-muted);font-size:12px;margin-bottom:4px;">总成本</div>
-            <div style="font-size:22px;font-weight:700;" id="fundTotalCost">—</div>
+          <div class="qf-kpi">
+            <div class="qf-kpi-label">总成本</div>
+            <div class="qf-kpi-value is-lg" id="fundTotalCost">—</div>
           </div>
-          <div class="card" style="text-align:center;">
-            <div style="color:var(--text-muted);font-size:12px;margin-bottom:4px;">累计盈亏</div>
-            <div style="font-size:22px;font-weight:700;" id="fundTotalPnl">—</div>
+          <div class="qf-kpi">
+            <div class="qf-kpi-label">累计盈亏</div>
+            <div class="qf-kpi-value is-lg" id="fundTotalPnl">—</div>
           </div>
-          <div class="card" style="text-align:center;">
-            <div style="color:var(--text-muted);font-size:12px;margin-bottom:4px;">持仓数量</div>
-            <div style="font-size:22px;font-weight:700;" id="fundCount">—</div>
+          <div class="qf-kpi">
+            <div class="qf-kpi-label">持仓数量</div>
+            <div class="qf-kpi-value is-lg" id="fundCount">—</div>
           </div>
         </div>
         <!-- 阶段四:净值数据质量提示(仅在缺失时显示,不改变既有配色) -->
@@ -2366,6 +2571,12 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 
       <!-- ==================== 7. 国际市场 ==================== -->
       <div class="page" id="page-global">
+        <div class="qf-page-head">
+          <div class="qf-page-head-main">
+            <div class="qf-page-title">国际市场</div>
+            <div class="qf-page-sub">全球指数、美股与港股热门标的；跨境行情可能延迟，以卡片上的数据源与更新时间标注为准。</div>
+          </div>
+        </div>
         <!-- 全球市场总览（P1：使用 /api/global/overview 一次性获取） -->
         <div class="card mb-16" id="globalOverviewCard">
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
@@ -2379,7 +2590,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 
         <!-- 国际指数卡片 -->
         <div class="flex-between mb-12">
-          <div style="font-size:18px;font-weight:600;letter-spacing:.01em;display:flex;align-items:center;gap:8px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18"/><path d="M12 3a15 15 0 0 0 0 18"/></svg> 国际指数</div>
+          <div class="qf-section-title">国际指数</div>
           <button class="btn btn-sm btn-primary" onclick="loadGlobalData()">刷新</button>
         </div>
         <div class="grid-3 mb-16" id="globalIndexCards">
@@ -2430,6 +2641,12 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 
       <!-- ==================== 8. 数据中心 ==================== -->
       <div class="page" id="page-data">
+        <div class="qf-page-head">
+          <div class="qf-page-head-main">
+            <div class="qf-page-title">深度数据</div>
+            <div class="qf-page-sub">研报、龙虎榜、融资融券、大宗交易与股东户数；按标的查询，缺失字段显示「—」并标注原因。</div>
+          </div>
+        </div>
         <div class="card mb-16">
           <div class="tabs" id="dataTabs">
             <!-- (2026-07-31) P2-2 无障碍: tab 添加 role/tabindex/aria-label -->
@@ -2454,6 +2671,15 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 
       <!-- ==================== 7. 监控预警 ==================== -->
       <div class="page" id="page-monitor">
+        <div class="qf-page-head">
+          <div class="qf-page-head-main">
+            <div class="qf-page-title">监控预警</div>
+            <div class="qf-page-sub">预警、自选股与资金面信号；全部由规则引擎计算，触发条件与阈值见各卡片说明，非投资建议。</div>
+          </div>
+          <div class="qf-page-actions">
+            <button class="btn btn-sm btn-primary" onclick="loadAlerts()">刷新预警</button>
+          </div>
+        </div>
         <div class="grid-2 mb-16">
           <!-- 预警列表 -->
           <div class="card">
@@ -2530,10 +2756,16 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 
       <!-- ==================== 8. 系统配置 ==================== -->
       <div class="page" id="page-config">
+        <div class="qf-page-head">
+          <div class="qf-page-head-main">
+            <div class="qf-page-title">系统配置</div>
+            <div class="qf-page-sub">交易模式、通知渠道与风控参数；保存后写入服务端配置，管理员 Token 仅保存在本机浏览器。</div>
+          </div>
+        </div>
         <div class="grid-2 mb-16">
           <!-- 配置表单 -->
           <div class="card">
-            <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg> 系统配置</div>
+            <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg> 基础配置</div>
             <div id="configForm"></div>
             <button class="btn btn-primary mt-16" onclick="saveConfig()" style="width:100%;">保存配置</button>
           </div>
@@ -3175,6 +3407,8 @@ function switchPage(name) {
      旧 10 个 pageId → 所属一级聚合容器;二级 tab 高亮直接用旧 pageId。
      主理人拍板:trade 并入「持仓」聚合容器(hud-holdings)。 */
   const STAGE5_PAGE_MAP = {
+    // ===== STAGE7 ===== 工作台(行情默认落地页)
+    workbench: { parent: 'hud-market' },
     market:   { parent: 'hud-market' },
     review:   { parent: 'hud-market' },
     global:   { parent: 'hud-market' },
@@ -3194,7 +3428,7 @@ function switchPage(name) {
   };
   // 一级聚合容器 id 翻译为其默认子页(容器本身只承载二级 tab 栏)
   const STAGE5_GROUP_DEFAULT = {
-    'hud-market': 'market',
+    'hud-market': 'workbench',
     'hud-holdings': 'position',
     'hud-strategy': 'strategy',
     'hud-monitor': 'monitor',
@@ -3268,6 +3502,12 @@ function switchPage(name) {
     if (subtab) subtab.classList.add('active');
   }
   refreshTokenBanner();
+  /* ===== STAGE7: workbench ===== 深链：刷新/分享保持在当前子页。
+     replaceState 不新增历史记录，不与浏览器返回键互相抢占。 */
+  try {
+    const hash = '#' + name;
+    if (window.location.hash !== hash) window.history.replaceState(null, '', hash);
+  } catch (e) { /* 非 http(s) 环境忽略 */ }
 }
 
 /* ========== 短线复盘 / 出手三问 / 一句话调度 ========== */
@@ -3350,6 +3590,8 @@ const ReviewDesk = {
       });
       return;
     }
+    window._lastReviewBoard = d;
+    loadReviewDiscipline();
     const limit = d.limit || {};
     const market = d.market || {};
     const temp = d.temperature || {};
@@ -3639,6 +3881,7 @@ const ReviewDesk = {
 
   initGate() {
     this.toggleGateMode();
+    loadGateDiscipline();
   },
 
   _numOrNull(id) {
@@ -4032,6 +4275,128 @@ function _ratioOrDash(v) {
   return v.toFixed(2);
 }
 
+/** 资金流金额：带方向，按亿/万收敛；null 显示 —（绝不拿 0 顶替）。 */
+function _fmtFlowYuan(v) {
+  if (v == null || typeof v !== 'number' || !isFinite(v)) return '—';
+  const abs = Math.abs(v);
+  const sign = v > 0 ? '+' : (v < 0 ? '-' : '');
+  if (abs >= 1e8) return sign + (abs / 1e8).toFixed(2) + '亿';
+  if (abs >= 1e4) return sign + (abs / 1e4).toFixed(1) + '万';
+  return sign + abs.toFixed(0) + '元';
+}
+
+const _FLOW_SOURCE_TEXT = {
+  eastmoney: '东财历史',
+  akshare: 'akshare 历史',
+  sina: '新浪当日快照',
+  unavailable: '不可用'
+};
+
+let _flowStreakSeq = 0;
+/** 个股资金连增：只有 history_available 才谈"连增"，新浪快照只能说明当日。 */
+async function loadStockFlowStreak(code) {
+  if (!code) return;
+  const seq = ++_flowStreakSeq;
+  const slot = () => document.getElementById('stockFlowStreak');
+  const paint = (html) => { const el = slot(); if (el) el.innerHTML = html; };
+  paint('连续净流入：加载中…');
+
+  let resp;
+  try {
+    resp = await api('/api/market/stock_flow_streak?code=' + encodeURIComponent(code));
+  } catch (e) {
+    resp = null;
+  }
+  if (seq !== _flowStreakSeq || _lastStockDetailCode !== code) return;
+  const d = (resp && resp.data) || null;
+  if (!d) {
+    paint('<span style="color:var(--color-warning);">连续净流入：取数失败（上游限流或断连），不是"没有净流入"</span>');
+    return;
+  }
+
+  const source = _FLOW_SOURCE_TEXT[d.source] || _FLOW_SOURCE_TEXT.unavailable;
+  if (d.history_available && typeof d.streak === 'number' && d.streak > 0) {
+    const range = (d.start_date || '—') + ' ~ ' + (d.end_date || '—');
+    const ratio = (typeof d.ratio_today === 'number') ? ' · 今日占比 ' + _pctOrDash(d.ratio_today) : '';
+    paint('连续净流入：<b style="color:var(--color-up);">' + d.streak + ' 日</b>（' + escapeHtml(range) + '）'
+      + ' · 累计 <b>' + escapeHtml(_fmtFlowYuan(d.net_sum)) + '</b>' + escapeHtml(ratio)
+      + '<span style="color:var(--text-muted);"> · 来源 ' + escapeHtml(source) + '</span>');
+    return;
+  }
+  if (d.source === 'sina' && d.history_available === false) {
+    paint('连续净流入：<span style="color:var(--color-warning);">历史不可用</span> · 今日主力 '
+      + '<b style="color:' + changeColor(d.net_today) + ';">' + escapeHtml(_fmtFlowYuan(d.net_today)) + '</b>'
+      + '<span style="color:var(--text-muted);">（新浪快照只有当日，不能据此计算连增）</span>');
+    return;
+  }
+  paint('连续净流入：<span style="color:var(--text-muted);">暂无连续净流入（最新交易日主力为净流出）</span>');
+}
+
+/**
+ * 开仓纪律紧凑版：复盘 / 出手三问页复用工作台同一套规则
+ * （Workbench.disciplineChecks / disciplineVerdict），避免两处阈值漂移。
+ */
+function renderDisciplineCompact(containerId, board, thermo, noteText) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  if (!board || !window.Workbench || typeof Workbench.disciplineChecks !== 'function') {
+    el.innerHTML = '<div class="qf-flow-empty"><b>纪律数据暂不可用</b><br>复盘与温度接口未返回，无法做开仓检查。</div>';
+    return;
+  }
+  const checks = Workbench.disciplineChecks(board, thermo);
+  const verdict = Workbench.disciplineVerdict(checks);
+  const checkHTML = checks.map(c => {
+    const cls = c.pass === null ? 'is-miss' : (c.pass ? 'is-pass' : 'is-fail');
+    const ico = c.pass === null ? '—' : (c.pass ? '✓' : '!');
+    const stateText = c.pass === null ? '缺失' : (c.pass ? '通过' : '未通过');
+    return '<span class="qf-disc-chip ' + cls + '" title="' + escapeHtml(c.hint + ' · ' + stateText) + '">'
+      + '<i aria-hidden="true">' + ico + '</i><b>' + escapeHtml(c.name) + '</b> '
+      + escapeHtml(c.val == null ? '缺失' : String(c.val)) + '</span>';
+  }).join('');
+  el.innerHTML = '<div class="qf-disc">'
+    + '<div class="qf-disc-head">'
+    + '<div><div class="qf-disc-label">今日开仓纪律（规则引擎）</div>'
+    + '<div class="qf-disc-verdict ' + verdict.cls + '">' + escapeHtml(verdict.verdict) + '</div></div>'
+    + '<div class="qf-disc-score">命中 ' + verdict.passed + ' / ' + verdict.available
+    + '<br>缺失 ' + (checks.length - verdict.available) + ' 项</div>'
+    + '</div>'
+    + '<div class="qf-disc-chips" role="list">' + checkHTML + '</div>'
+    + '<div class="qf-disc-note">' + escapeHtml(noteText || '')
+    + '命中 ≥ 75% → 正常参与；40%~74% → 降级参与（降低仓位、只做低吸）；&lt; 40% → 空仓等待。缺失项只标注、不计入判定。规则引擎，非投资建议。</div>'
+    + '</div>';
+}
+
+/** 复盘页开仓纪律：board 已由 loadBoard 取到，这里只补温度计。 */
+async function loadReviewDiscipline() {
+  const body = document.getElementById('reviewDisciplineBody');
+  if (!body) return;
+  if (!window._lastReviewBoard) {
+    body.innerHTML = '<div class="qf-flow-empty">等待复盘看板数据…</div>';
+    return;
+  }
+  const thermoResp = await api('/api/market/thermometer').catch(() => null);
+  const thermo = (thermoResp && thermoResp.data) || null;
+  renderDisciplineCompact('reviewDisciplineBody', window._lastReviewBoard, thermo, '');
+}
+
+/** 出手三问页开仓纪律：独立取复盘 + 温度，不依赖是否先打开过复盘页。 */
+async function loadGateDiscipline() {
+  const body = document.getElementById('gateDisciplineBody');
+  if (!body) return;
+  body.innerHTML = '<div class="qf-flow-empty">加载中…</div>';
+  const [boardResp, thermoResp] = await Promise.all([
+    api('/api/review/board').catch(() => null),
+    api('/api/market/thermometer').catch(() => null)
+  ]);
+  const board = (boardResp && boardResp.data) || null;
+  const thermo = (thermoResp && thermoResp.data) || null;
+  if (!board && !thermo) {
+    body.innerHTML = '<div class="qf-flow-empty">开仓纪律暂不可用（复盘与温度接口均未返回）。</div>';
+    return;
+  }
+  renderDisciplineCompact('gateDisciplineBody', board, thermo, '大盘环境不达标时，三问全过的个股也应降低仓位或放弃。');
+}
+
 async function searchStocks() {
   const input = document.getElementById('stockSearchInput');
   const body = document.getElementById('stockSearchResults');
@@ -4148,6 +4513,7 @@ function renderStockDetail(d, meta) {
         <div>主力占比：${_pctOrDash(c.main_inflow_pct)}</div>
         <div>超大单：${_numOrDash(c.super_large_net_inflow)} / 大单：${_numOrDash(c.large_net_inflow)}</div>
         <div>中单：${_numOrDash(c.medium_net_inflow)} / 小单：${_numOrDash(c.small_net_inflow)}</div>
+        <div id="stockFlowStreak" style="margin-top:4px;color:var(--text-muted);">连续净流入：加载中…</div>
       </div>
       <div class="card" style="padding:12px;font-size:12px;color:var(--text-secondary);" id="stockRangeCard">
         <div style="font-weight:600;margin-bottom:6px;">近期区间</div>
@@ -4163,6 +4529,7 @@ function renderStockDetail(d, meta) {
 
   // 区间摘要后端只等 1 秒，超时就不阻塞主响应；这里异步补拉一次。
   if (!k || !Object.keys(k).length) loadStockRangeSummary(d.code);
+  loadStockFlowStreak(d.code);
 }
 
 function _stockRangeHTML(k) {
@@ -4247,14 +4614,67 @@ async function loadMarketCapitalFlow() {
       <div class="card" style="text-align:center;padding:12px;"><div style="font-size:11px;color:var(--text-muted);">沪股通(亿)</div><div style="font-size:16px;font-weight:600;">${_numOrDash(nb.sh_net_inflow)}</div></div>
       <div class="card" style="text-align:center;padding:12px;"><div style="font-size:11px;color:var(--text-muted);">深股通(亿)</div><div style="font-size:16px;font-weight:600;">${_numOrDash(nb.sz_net_inflow)}</div></div>
     </div>
-    <div class="grid-2" style="gap:8px;">
+    <div class="grid-2" style="gap:8px;margin-bottom:10px;">
       <div class="card" style="padding:12px;font-size:12px;color:var(--text-secondary);">
         <div style="font-weight:600;margin-bottom:6px;">板块主力净流入 Top5</div>${top(sf.top_inflow)}
       </div>
       <div class="card" style="padding:12px;font-size:12px;color:var(--text-secondary);">
         <div style="font-weight:600;margin-bottom:6px;">板块主力净流出 Top5</div>${top(sf.top_outflow)}
       </div>
+    </div>
+    <div class="card" style="padding:12px;font-size:12px;color:var(--text-secondary);">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+        <span style="font-weight:600;">个股资金连增 Top5</span>
+        <span style="font-size:11px;color:var(--text-muted);">涨幅/成交额热门 + 同花顺涨停池 · 连续主力净流入</span>
+      </div>
+      <div id="capitalDdxBody" class="qf-flow-list"><div class="qf-flow-empty">加载中…</div></div>
     </div>`;
+  loadCapitalDdx();
+}
+
+/** 行情总览资金面：复用 /ddx_streak，失败时明确说失败而不是空榜。 */
+async function loadCapitalDdx() {
+  const body = document.getElementById('capitalDdxBody');
+  if (!body) return;
+  let resp;
+  try {
+    resp = await api('/api/market/ddx_streak?limit=5');
+  } catch (e) {
+    body.innerHTML = '<div class="qf-flow-empty">资金连增暂不可用（接口异常），不影响上方北向与板块资金面。</div>';
+    return;
+  }
+  const d = (resp && resp.data) || {};
+  const items = Array.isArray(d.items) ? d.items : [];
+  if ((d.cooldown || d.sampled === 0 || (typeof d.failed === 'number' && d.sampled > 0 && d.failed >= d.sampled)) && !items.length) {
+    body.innerHTML = '<div class="qf-flow-empty">个股资金流取数失败（上游限流或断连）——这是取数问题，不是"没有连增标的"。</div>';
+    return;
+  }
+  if (!items.length) {
+    body.innerHTML = '<div class="qf-flow-empty">候选池内暂无连续 ' + escapeHtml(String(d.min_days || 2)) + ' 个交易日主力净流入的个股（筛选结果，不是数据缺失）。</div>';
+    return;
+  }
+  body.innerHTML = items.map(it => {
+    const streak = Number(it.streak) || 0;
+    const net = Number(it.net_today);
+    const cls = (isFinite(net) && net > 0) ? 'var(--color-up)' : ((isFinite(net) && net < 0) ? 'var(--color-down)' : 'var(--text-muted)');
+    return `<button type="button" class="qf-flow-row" data-flow-code="${escapeHtml(it.code || '')}" title="${escapeHtml((it.name || it.code || '') + ' · 连续 ' + streak + ' 日 · 截至 ' + (it.end_date || '—'))}">
+      <span class="qf-flow-name">${escapeHtml(it.name || '—')}<span>${escapeHtml(it.code || '')}</span></span>
+      <span class="qf-flow-streak">${streak}日</span>
+      <span class="qf-flow-net" style="color:${cls};">${escapeHtml(_fmtFlowYuan(net))}</span>
+    </button>`;
+  }).join('') + (() => {
+    // 多源取数透明化：这一榜可能同时来自东财历史与 akshare，失败样本数也要可见
+    const sources = Object.keys(d.sources || {}).map(k => (_FLOW_SOURCE_TEXT[k] || k) + ' ' + d.sources[k]).join(' · ');
+    const parts = ['样本 ' + (d.sampled ?? '—') + ' 只', '失败 ' + (d.failed ?? '—') + ' 只'];
+    if (sources) parts.push('来源 ' + sources);
+    return '<div class="qf-flow-empty" style="padding-top:6px;">' + escapeHtml(parts.join(' · ')) + '</div>';
+  })();
+  body.querySelectorAll('.qf-flow-row').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const code = btn.getAttribute('data-flow-code');
+      if (code) loadStockDetail(code);
+    });
+  });
 }
 
 // 热门股票
@@ -8672,11 +9092,20 @@ const Onboarding = {
 
 document.addEventListener('DOMContentLoaded', () => {
   _renderSkeletons(); // 立即填充骨架屏(0ms)
-  /* ===== STAGE5: motion (R3) ===== 首屏即总览页：播放首屏卡片 stagger 入场 */
-  qfPlayStagger(document.getElementById('page-market'));
+  /* ===== STAGE7: workbench ===== 首屏落地工作台(行情默认页);由 workbench.js 拉取数据 */
+  qfPlayStagger(document.getElementById('page-workbench'));
   refreshTokenBanner(); // 阶段四 U2：未配置管理员 Token 时主动提示，不等用户点按钮
   Onboarding.init();   // 首次使用指引(仅首次显示,状态存本机)
-  loadMarketData();   // 后台加载数据(覆盖骨架屏)
+  /* ===== STAGE7: workbench ===== 深链还原：刷新/分享回落到当前子页，未知页面回工作台 */
+  const deepLink = (window.location.hash || '').replace(/^#/, '');
+  if (!deepLink || !document.getElementById('page-' + deepLink)) switchPage('workbench');
+  else switchPage(deepLink);
+  window.addEventListener('hashchange', () => {
+    const h = (window.location.hash || '').replace(/^#/, '');
+    if (h && document.getElementById('page-' + h)) switchPage(h);
+  });
+  /* 顶栏指数条与工作台共用一次请求：工作台落地时仍需填充 topbar */
+  loadIndexData();
   loadLlmProvider();
   updateFreshness();
   // ===== STAGE5: status ===== 统一状态组件挂载(T05):空态显式提示,不显示 0.00%
@@ -8724,5 +9153,7 @@ document.addEventListener('DOMContentLoaded', () => {
 <script src="/static/js/sector-board.js"></script>
 <!-- ===== STAGE6-PRED: 今日推荐 + 持仓份额行内编辑 + 北向/QDII 口径说明 ===== -->
 <script src="/static/js/recommendations.js"></script>
+<!-- ===== STAGE7: workbench ===== 工作台一屏判读(复用既有端点;包装 switchPage 接入) ===== -->
+<script src="/static/js/workbench.js"></script>
 </body>
 </html>

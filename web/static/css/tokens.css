@@ -103,4 +103,27 @@
   --qf-z-overlay:60;
   --qf-z-modal:90;
   --qf-z-toast:100;
+
+  /* ---------- 12. 通用终端面板（工作台 / 行情子页共享） ----------
+     这些值原先只写死在 #page-workbench 作用域里，导致复盘、三问等页面
+     无法复用同一套面板语言。现上收为全局 token，页面内不再重复定义色值。 */
+  --qf-panel-bg:#0B111B;
+  --qf-panel-bg-2:#101827;
+  --qf-panel-bg-3:#152033;
+  --qf-panel-line:#1B2637;
+  --qf-panel-line-hi:#2B3D57;
+  --qf-panel-line-soft:rgba(148,163,184,.22);
+  --qf-panel-line-dash:rgba(148,163,184,.16);
+  --qf-panel-accent:#7C86FF;
+  --qf-panel-accent-soft:rgba(124,134,255,.14);
+  --qf-panel-hover:rgba(124,134,255,.07);
+  --qf-panel-tint:rgba(255,255,255,.02);
+  --qf-panel-tint-hi:rgba(255,255,255,.05);
+  --qf-neutral-soft:rgba(148,163,184,.12);
+  --qf-cyan-soft:rgba(34,227,255,.12);
+  --qf-cyan-line:rgba(34,227,255,.32);
+  --qf-warn-soft:rgba(245,165,36,.12);
+  --qf-warn-line:rgba(245,165,36,.38);
+  --qf-panel-faint:#7A8CA6;
+  --qf-glow-panel:inset 0 1px 0 rgba(255,255,255,.04),0 10px 30px rgba(0,0,0,.28);
 }

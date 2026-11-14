@@ -269,22 +269,6 @@
    第二轮阶段 5 增量样式（并入本文件，避免额外渲染阻塞请求）
    仅新增类，不改既有选择器；断点与主样式一致（<=768px 移动形态）。
    =================================================================== */
-/* ===== STAGE5-R2: fund head ===== 375px 下标题与操作区分两段，按钮单行不换行 */
-@media (max-width: 768px) {
-  .fund-head {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
-  }
-  .fund-head-actions {
-    /* 阶段5: 原为 nowrap + overflow-x:auto(隐藏滚动条)。实测 375px 下
-       「五信号建议」被切在视口外(右缘 384 > 375), 而隐藏滚动条让用户
-       无从发现还能横向滑 —— 按钮看起来像丢了。改为换行, 全部可达。 */
-    flex-wrap: wrap !important;
-  }
-  .fund-head-actions > .btn { flex: 0 0 auto; }
-}
-
 /* ===== STAGE5-R2: scope ===== 模拟股票账户与真实基金持仓的口径说明 */
 .notice-info {
   padding: 10px 12px;
