@@ -860,6 +860,8 @@ async def research_reports(
     try:
         data = await asyncio.to_thread(ds2.get_research_reports, code, page=page, page_size=page_size)
         result = [ResearchReportItem(**item) for item in data]
+        if not result:
+            return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
         cache.set(cache_key, result, ttl=300)
         return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
     except Exception as e:
@@ -876,6 +878,8 @@ async def dragon_tiger():
     try:
         data = await asyncio.to_thread(ds2.get_dragon_tiger)
         result = [DragonTigerItem(**item) for item in data]
+        if not result:
+            return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
         cache.set(cache_key, result, ttl=300)
         return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
     except Exception as e:
@@ -886,7 +890,7 @@ async def dragon_tiger():
 @router.get("/margin")
 async def margin(code: str = Query("", description="股票代码")):
     if not code:
-        return {"data": MarginTradingItem(code="", trade_date="", margin_buy=0, margin_balance=0, short_sell=0, short_balance=0, total_balance=0).model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
+        return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
     cache_key = f"market:margin:{code}"
     cached = cache.get(cache_key)
     if cached is not None:
@@ -894,19 +898,19 @@ async def margin(code: str = Query("", description="股票代码")):
     try:
         data = await asyncio.to_thread(ds2.get_margin_trading, code)
         if not data:
-            return {"data": MarginTradingItem(code=code, trade_date="", margin_buy=0, margin_balance=0, short_sell=0, short_balance=0, total_balance=0).model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
+            return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
         result = MarginTradingItem(**data)
         cache.set(cache_key, result.model_dump(), ttl=300)
         return {"data": result.model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
     except Exception as e:
         logger.warning(f"margin failed: {e}")
-        return {"data": MarginTradingItem(code=code, trade_date="", margin_buy=0, margin_balance=0, short_sell=0, short_balance=0, total_balance=0).model_dump(), "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
+        return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
 
 
 @router.get("/block_trades")
 async def block_trades(code: str = Query("", description="股票代码")):
     if not code:
-        return {"data": [], "_meta": _build_meta("eastmoney", cached=False)}
+        return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
     cache_key = f"market:block_trades:{code}"
     cached = cache.get(cache_key)
     if cached is not None:
@@ -914,6 +918,8 @@ async def block_trades(code: str = Query("", description="股票代码")):
     try:
         data = await asyncio.to_thread(ds2.get_block_trades, code)
         result = [BlockTradeItem(**item) for item in data]
+        if not result:
+            return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
         cache.set(cache_key, result, ttl=300)
         return {"data": result, "_meta": _build_meta("eastmoney", cached=False)}
     except Exception as e:
@@ -924,7 +930,7 @@ async def block_trades(code: str = Query("", description="股票代码")):
 @router.get("/shareholder")
 async def shareholder(code: str = Query("", description="股票代码")):
     if not code:
-        return {"data": ShareholderItem(code="", end_date="", holder_num=0, change_pct=0.0).model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
+        return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
     cache_key = f"market:shareholder:{code}"
     cached = cache.get(cache_key)
     if cached is not None:
@@ -932,13 +938,13 @@ async def shareholder(code: str = Query("", description="股票代码")):
     try:
         data = await asyncio.to_thread(ds2.get_shareholder_count, code)
         if not data:
-            return {"data": ShareholderItem(code=code, end_date="", holder_num=0, change_pct=0.0).model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
+            return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
         result = ShareholderItem(**data)
         cache.set(cache_key, result.model_dump(), ttl=300)
         return {"data": result.model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
     except Exception as e:
         logger.warning(f"shareholder failed: {e}")
-        return {"data": ShareholderItem(code=code, end_date="", holder_num=0, change_pct=0.0).model_dump(), "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
+        return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
 
 
 @router.get("/news")

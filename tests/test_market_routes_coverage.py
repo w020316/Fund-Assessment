@@ -332,7 +332,8 @@ class TestResearchAndFlows:
 
     def test_margin_empty_code(self, client):
         resp = client.get("/api/market/margin")
-        assert resp.json()["data"]["code"] == ""
+        assert resp.json()["data"] == []
+        assert resp.json()["_meta"]["degraded"] is True
 
     def test_margin_success_none_and_error(self, client, monkeypatch):
         item = {"code": "600519", "trade_date": "2026-10-28", "margin_buy": 1.0,
@@ -343,14 +344,18 @@ class TestResearchAndFlows:
         market.cache.clear()
         monkeypatch.setattr(market.ds2, "get_margin_trading", lambda code: {})
         resp = client.get("/api/market/margin", params={"code": "600519"})
-        assert resp.json()["data"]["margin_buy"] == 0
+        # 上游无数据 → 空列表 + 降级, 不再伪造全 0 对象
+        assert resp.json()["data"] == []
+        assert resp.json()["_meta"]["degraded"] is True
 
         market.cache.clear()
         monkeypatch.setattr(market.ds2, "get_margin_trading", _raise)
         assert client.get("/api/market/margin", params={"code": "600519"}).json()["_meta"]["degraded"] is True
 
     def test_block_trades_empty_success_error(self, client, monkeypatch):
-        assert client.get("/api/market/block_trades").json()["data"] == []
+        resp = client.get("/api/market/block_trades")
+        assert resp.json()["data"] == []
+        assert resp.json()["_meta"]["degraded"] is True
 
         item = {"code": "600519", "name": "贵州茅台", "trade_date": "2026-10-28", "price": 1680.0,
                 "volume": 100.0, "amount": 168000.0, "premium_pct": 1.0, "buyer": "A", "seller": "B"}
@@ -358,11 +363,19 @@ class TestResearchAndFlows:
         assert client.get("/api/market/block_trades", params={"code": "600519"}).json()["data"][0]["buyer"] == "A"
 
         market.cache.clear()
+        monkeypatch.setattr(market.ds2, "get_block_trades", lambda code: [])
+        resp = client.get("/api/market/block_trades", params={"code": "600519"})
+        assert resp.json()["data"] == []
+        assert resp.json()["_meta"]["degraded"] is True
+
+        market.cache.clear()
         monkeypatch.setattr(market.ds2, "get_block_trades", _raise)
         assert client.get("/api/market/block_trades", params={"code": "600519"}).json()["data"] == []
 
     def test_shareholder_empty_success_none_error(self, client, monkeypatch):
-        assert client.get("/api/market/shareholder").json()["data"]["holder_num"] == 0
+        resp = client.get("/api/market/shareholder")
+        assert resp.json()["data"] == []
+        assert resp.json()["_meta"]["degraded"] is True
 
         item = {"code": "600519", "end_date": "2026-09-30", "holder_num": 100000, "change_pct": -2.0}
         monkeypatch.setattr(market.ds2, "get_shareholder_count", lambda code: item)
@@ -370,7 +383,10 @@ class TestResearchAndFlows:
 
         market.cache.clear()
         monkeypatch.setattr(market.ds2, "get_shareholder_count", lambda code: {})
-        assert client.get("/api/market/shareholder", params={"code": "600519"}).json()["data"]["holder_num"] == 0
+        resp = client.get("/api/market/shareholder", params={"code": "600519"})
+        # 上游无数据 → 空列表 + 降级, 不再伪造 holder_num=0
+        assert resp.json()["data"] == []
+        assert resp.json()["_meta"]["degraded"] is True
 
         market.cache.clear()
         monkeypatch.setattr(market.ds2, "get_shareholder_count", _raise)
