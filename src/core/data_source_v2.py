@@ -4,6 +4,7 @@ import atexit
 import math
 import random
 import re
+import statistics
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, wait
@@ -1111,20 +1112,42 @@ def get_stock_detail(code: str) -> dict:
     return result
 
 
+def _em_latest_trade_date(report_name: str, sort_column: str = "TRADE_DATE") -> str:
+    """取东财报表里最近一条记录的交易日(YYYY-MM-DD),用于周末/节假日兜底。"""
+    try:
+        resp = em_get("https://datacenter-web.eastmoney.com/api/data/v1/get", params={
+            "reportName": report_name,
+            "columns": sort_column,
+            "pageSize": 1,
+            "pageNumber": 1,
+            "sortColumns": sort_column,
+            "sortTypes": -1,
+        })
+        items = (resp.json().get("result") or {}).get("data") or []
+        return _safe_str(items[0].get(sort_column, ""))[:10] if items else ""
+    except Exception as e:
+        logger.warning(f"_em_latest_trade_date({report_name}) failed: {e}")
+        return ""
+
+
 def get_dragon_tiger() -> list[dict]:
     cached = _cache_get("dragon_tiger")
     if cached is not None:
         return cached
+    # 2026-11-15 实测:旧报表 RPT_DAILYBOARDDETAILSNEW 已下线;改用按股票汇总的
+    # RPT_BILLBOARD_DAILYDETAILS。交易日不能写死"今天"(周末必空),取报表最近交易日。
     url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
-    today = datetime.now().strftime("%Y%m%d")
+    trade_date = _em_latest_trade_date("RPT_BILLBOARD_DAILYDETAILS")
+    if not trade_date:
+        trade_date = datetime.now().strftime("%Y-%m-%d")
     params = {
         "sortColumns": "TRADE_DATE",
         "sortTypes": -1,
         "pageSize": 30,
         "pageNumber": 1,
-        "reportName": "RPT_DAILYBOARDDETAILSNEW",
+        "reportName": "RPT_BILLBOARD_DAILYDETAILS",
         "columns": "ALL",
-        "filter": f'(TRADE_DATE="{today}")',
+        "filter": f"(TRADE_DATE='{trade_date}')",
     }
     try:
         resp = em_get(url, params=params)
@@ -1137,10 +1160,10 @@ def get_dragon_tiger() -> list[dict]:
                 "name": _safe_str(item.get("SECURITY_NAME_ABBR", "")),
                 "price": _safe_float(item.get("CLOSE_PRICE", 0)),
                 "change_pct": _safe_float(item.get("CHANGE_RATE", 0)),
-                "reason": _safe_str(item.get("EXPLAIN", "")),
-                "buy_amount": _safe_float(item.get("BUY_AMOUNT", 0)),
-                "sell_amount": _safe_float(item.get("SELL_AMOUNT", 0)),
-                "net_amount": _safe_float(item.get("NET_AMOUNT", 0)),
+                "reason": _safe_str(item.get("EXPLANATION", "")),
+                "buy_amount": _safe_float(item.get("TOTAL_BUY", 0)),
+                "sell_amount": _safe_float(item.get("TOTAL_SELL", 0)),
+                "net_amount": _safe_float(item.get("TOTAL_NET", 0)),
                 "trade_date": _safe_str(item.get("TRADE_DATE", ""))[:10],
             })
         if result:
@@ -1495,15 +1518,17 @@ def get_capital_flow_detail(stock_code: str) -> dict:
 
 
 def get_margin_trading(stock_code: str) -> dict:
+    # 2026-11-15 实测:旧报表 RPT_RZRQ_LSHJ 已下线("报表配置不存在"),
+    # 东财现用 RPTA_WEB_RZRQ_GGMX(融资融券个股明细),筛选列/日期列均换了名字。
     url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
     params = {
-        "sortColumns": "TRADE_DATE",
+        "sortColumns": "DATE",
         "sortTypes": -1,
         "pageSize": 10,
         "pageNumber": 1,
-        "reportName": "RPT_RZRQ_LSHJ",
+        "reportName": "RPTA_WEB_RZRQ_GGMX",
         "columns": "ALL",
-        "filter": f'(SECURITY_CODE="{stock_code}")',
+        "filter": f'(SCODE="{stock_code}")',
     }
     try:
         resp = em_get(url, params=params)
@@ -1513,12 +1538,12 @@ def get_margin_trading(stock_code: str) -> dict:
             return _get_margin_trading_fallback(stock_code)
         item = items[0]
         return {
-            "code": _safe_str(item.get("SECURITY_CODE", "")),
-            "trade_date": _safe_str(item.get("TRADE_DATE", ""))[:10],
-            "margin_buy": _safe_float(item.get("RZYE", 0)),
-            "margin_balance": _safe_float(item.get("RZMJE", 0)),
-            "short_sell": _safe_float(item.get("RQYE", 0)),
-            "short_balance": _safe_float(item.get("RQMJE", 0)),
+            "code": _safe_str(item.get("SCODE", "")),
+            "trade_date": _safe_str(item.get("DATE", ""))[:10],
+            "margin_buy": _safe_float(item.get("RZMRE", 0)),
+            "margin_balance": _safe_float(item.get("RZYE", 0)),
+            "short_sell": _safe_float(item.get("RQMCL", 0)),
+            "short_balance": _safe_float(item.get("RQYE", 0)),
             "total_balance": _safe_float(item.get("RZRQYE", 0)),
         }
     except Exception as e:
@@ -1538,13 +1563,15 @@ def _get_margin_trading_fallback(stock_code: str) -> dict:
 
 
 def get_block_trades(stock_code: str) -> list[dict]:
+    # 2026-11-15 实测:旧报表 RPT_DABLOCKTRADE 已下线;现用 RPT_DATA_BLOCKTRADE,
+    # 成交量/溢价字段改名为 DEAL_VOLUME / PREMIUM_RATIO。
     url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
     params = {
         "sortColumns": "TRADE_DATE",
         "sortTypes": -1,
         "pageSize": 20,
         "pageNumber": 1,
-        "reportName": "RPT_DABLOCKTRADE",
+        "reportName": "RPT_DATA_BLOCKTRADE",
         "columns": "ALL",
         "filter": f'(SECURITY_CODE="{stock_code}")',
     }
@@ -1559,9 +1586,9 @@ def get_block_trades(stock_code: str) -> list[dict]:
                 "name": _safe_str(item.get("SECURITY_NAME_ABBR", "")),
                 "trade_date": _safe_str(item.get("TRADE_DATE", ""))[:10],
                 "price": _safe_float(item.get("DEAL_PRICE", 0)),
-                "volume": _safe_float(item.get("DEAL_VOL", 0)),
+                "volume": _safe_float(item.get("DEAL_VOLUME", 0)),
                 "amount": _safe_float(item.get("DEAL_AMT", 0)),
-                "premium_pct": _safe_float(item.get("PREMIUM", 0)),
+                "premium_pct": _safe_float(item.get("PREMIUM_RATIO", 0)),
                 "buyer": _safe_str(item.get("BUYER_NAME", "")),
                 "seller": _safe_str(item.get("SELLER_NAME", "")),
             })
@@ -1607,16 +1634,20 @@ def get_shareholder_count(stock_code: str) -> dict:
         if not items:
             return _get_shareholder_count_fallback(stock_code)
         item = items[0]
-        curr_count = _safe_float(item.get("HOLDER_NUM", 0))
+        # 2026-11-15 实测:东财股东户数字段已由 HOLDER_NUM 改名 HOLDER_TOTAL_NUM,
+        # 环比也直接给出 TOTAL_NUM_RATIO(%),无需再比上期计算。
+        curr_count = _safe_float(item.get("HOLDER_TOTAL_NUM", 0))
         if curr_count <= 0:
             return _get_shareholder_count_fallback(stock_code)
-        prev_count = _safe_float(items[1].get("HOLDER_NUM", 0)) if len(items) > 1 else 0
-        change_pct = ((curr_count - prev_count) / prev_count * 100) if prev_count else 0.0
+        change_pct = item.get("TOTAL_NUM_RATIO")
+        if change_pct is None:
+            prev_count = _safe_float(items[1].get("HOLDER_TOTAL_NUM", 0)) if len(items) > 1 else 0
+            change_pct = ((curr_count - prev_count) / prev_count * 100) if prev_count else 0.0
         return {
             "code": _safe_str(item.get("SECURITY_CODE", "")),
             "end_date": _safe_str(item.get("END_DATE", ""))[:10],
-            "holder_num": _safe_int(item.get("HOLDER_NUM", 0)),
-            "change_pct": round(change_pct, 2),
+            "holder_num": _safe_int(curr_count),
+            "change_pct": round(_safe_float(change_pct), 2),
         }
     except Exception as e:
         logger.warning(f"get_shareholder_count failed: {e}")
@@ -2535,38 +2566,22 @@ def get_market_wide_stats() -> dict:
         "avg_shareholder_change_pct": None,
     }
 
-    def _fetch_margin():
-        try:
-            url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
-            params = {
-                "sortColumns": "TRADE_DATE",
-                "sortTypes": -1,
-                "pageSize": 1,
-                "pageNumber": 1,
-                "reportName": "RPT_RZRQ_LSHJ",
-                "columns": "ALL",
-            }
-            resp = em_get(url, params=params)
-            data = resp.json()
-            items = (data.get("result") or {}).get("data") or []
-            if items:
-                return _safe_float(items[0].get("RZRQYE", 0))
-        except Exception as e:
-            logger.warning(f"get_market_wide_stats margin failed: {e}")
-        return None
-
     def _fetch_block_trades():
         try:
             url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
-            today = datetime.now().strftime("%Y%m%d")
+            # 报表名已由 RPT_DABLOCKTRADE 改为 RPT_DATA_BLOCKTRADE;日期取报表最近交易日,
+            # 否则周末/节假日过滤"今天"必然为空。
+            trade_date = _em_latest_trade_date("RPT_DATA_BLOCKTRADE")
+            if not trade_date:
+                return None
             params = {
                 "sortColumns": "TRADE_DATE",
                 "sortTypes": -1,
                 "pageSize": 1,
                 "pageNumber": 1,
-                "reportName": "RPT_DABLOCKTRADE",
+                "reportName": "RPT_DATA_BLOCKTRADE",
                 "columns": "ALL",
-                "filter": f'(TRADE_DATE="{today}")',
+                "filter": f"(TRADE_DATE='{trade_date}')",
             }
             resp = em_get(url, params=params)
             data = resp.json()
@@ -2584,7 +2599,7 @@ def get_market_wide_stats() -> dict:
             params = {
                 "sortColumns": "END_DATE",
                 "sortTypes": -1,
-                "pageSize": 50,
+                "pageSize": 200,
                 "pageNumber": 1,
                 "reportName": "RPT_F10_EH_HOLDERNUM",
                 "columns": "ALL",
@@ -2593,26 +2608,27 @@ def get_market_wide_stats() -> dict:
             data = resp.json()
             items = data.get("result", {}).get("data", [])
             if items:
-                changes = []
-                for item in items:
-                    curr = _safe_float(item.get("HOLDER_NUM", 0))
-                    if curr <= 0:
-                        continue
-                    prev = _safe_float(item.get("HOLDER_NUM_PRE", 0))
-                    if prev > 0:
-                        changes.append((curr - prev) / prev * 100)
+                # 东财已直接给出户数环比 TOTAL_NUM_RATIO(%);旧字段 HOLDER_NUM 已不存在。
+                # 用中位数而非均值:次新股户数从几千跳到几万(+46000%)会把均值拉到几百,
+                # 中位数才能代表全市场户数变化方向。
+                changes = [
+                    _safe_float(item.get("TOTAL_NUM_RATIO"))
+                    for item in items
+                    if _safe_float(item.get("HOLDER_TOTAL_NUM", 0)) > 0
+                    and item.get("TOTAL_NUM_RATIO") is not None
+                ]
                 if changes:
-                    return round(sum(changes) / len(changes), 2)
+                    return round(statistics.median(changes), 2)
         except Exception as e:
             logger.warning(f"get_market_wide_stats shareholder failed: {e}")
         return None
 
+    # 全市场融资融券余额:东财原报表 RPT_RZRQ_LSHJ 已下线,无公开市场级替代,
+    # 保持 None(前端显示「—」),不用个股余额冒充全市场。
     fetched = _parallel_fetch([
-        ("margin", _fetch_margin),
         ("block_trades", _fetch_block_trades),
         ("shareholder", _fetch_shareholder),
     ])
-    result["margin_balance"] = fetched.get("margin")
     result["block_trades_count"] = fetched.get("block_trades")
     result["avg_shareholder_change_pct"] = fetched.get("shareholder")
     _cache_set("market_wide_stats", result, 60)
