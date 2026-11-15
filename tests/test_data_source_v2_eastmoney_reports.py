@@ -158,9 +158,115 @@ def test_market_wide_stats_shareholder_uses_median(monkeypatch):
     monkeypatch.setattr(ds2, "_cache_get", lambda key: None)
     monkeypatch.setattr(ds2, "_cache_set", lambda key, val, ttl: None)
     monkeypatch.setattr(ds2, "em_get", fake_em_get)
+    monkeypatch.setattr(
+        ds2, "_fetch_market_margin",
+        lambda: {"trade_date": "2026-11-12", "margin_balance": 2.29e12},
+    )
 
     result = ds2.get_market_wide_stats()
 
     assert result["block_trades_count"] == 72
     assert result["avg_shareholder_change_pct"] == 1.0
+    assert result["margin_balance"] == 2.29e12
+    assert result["margin_trade_date"] == "2026-11-12"
+
+
+def test_market_wide_stats_margin_none_when_exchanges_unavailable(monkeypatch):
+    monkeypatch.setattr(ds2, "_cache_get", lambda key: None)
+    monkeypatch.setattr(ds2, "_cache_set", lambda key, val, ttl: None)
+    monkeypatch.setattr(ds2, "em_get", lambda *a, **k: _ok([]))
+    monkeypatch.setattr(ds2, "_fetch_market_margin", lambda: None)
+
+    result = ds2.get_market_wide_stats()
+
     assert result["margin_balance"] is None
+    assert result["margin_trade_date"] is None
+
+
+class _MarketMarginFakeGet:
+    """按 URL 分派沪深交易所两融接口;szse_dates 之外的日期返回空数据。"""
+
+    def __init__(self, sse_rows, szse_by_date):
+        self.sse_rows = sse_rows
+        self.szse_by_date = szse_by_date
+        self.szse_queries: list[str] = []
+
+    def __call__(self, url, params=None, **kwargs):
+        if url == ds2._SSE_MARGIN_URL:
+            return _FakeResp({"pageHelp": {"data": self.sse_rows}})
+        if url == ds2._SZSE_MARGIN_URL:
+            date = (params or {}).get("txtDate")
+            self.szse_queries.append(date)
+            row = self.szse_by_date.get(date)
+            return _FakeResp([{"data": [row] if row else []}])
+        raise AssertionError(f"unexpected url {url}")
+
+
+def test_market_margin_aligns_latest_common_trade_date(monkeypatch):
+    """深交所晚一天发布:必须退到两市都有数据的 11-12,而不是把 11-13 的沪市加 11-12 的深市。"""
+    fake = _MarketMarginFakeGet(
+        sse_rows=[
+            {"opDate": "20261113", "rzrqjyzl": 1.0e12, "rzye": 9.9e11, "rqylje": 1.0e10},
+            {"opDate": "20261112", "rzrqjyzl": 0.9e12, "rzye": 8.9e11, "rqylje": 1.0e10},
+        ],
+        szse_by_date={"2026-11-12": {"jrrzrjye": "10.00"}},
+    )
+    monkeypatch.setattr(ds2.requests, "get", fake)
+
+    result = ds2._fetch_market_margin()
+
+    assert fake.szse_queries == ["2026-11-13", "2026-11-12"]
+    assert result == {"trade_date": "2026-11-12", "margin_balance": 901_000_000_000.0}
+
+
+def test_market_margin_uses_same_day_when_szse_published(monkeypatch):
+    fake = _MarketMarginFakeGet(
+        sse_rows=[{"opDate": "20261113", "rzrqjyzl": 1.0e12}],
+        szse_by_date={"2026-11-13": {"jrrzrjye": "5.00"}},
+    )
+    monkeypatch.setattr(ds2.requests, "get", fake)
+
+    assert ds2._fetch_market_margin() == {
+        "trade_date": "2026-11-13",
+        "margin_balance": 1.0005e12,  # 5.00 亿元 = 5e8 元
+    }
+
+
+def test_market_margin_none_without_common_date(monkeypatch):
+    fake = _MarketMarginFakeGet(
+        sse_rows=[{"opDate": "20261113", "rzrqjyzl": 1.0e12},
+                  {"opDate": "20261112", "rzrqjyzl": 0.9e12}],
+        szse_by_date={},
+    )
+    monkeypatch.setattr(ds2.requests, "get", fake)
+
+    assert ds2._fetch_market_margin() is None
+
+
+def test_northbound_net_discontinued_returns_empty(monkeypatch):
+    """报表只有成交额、净额字段为 None 时返回空,不得把 None 当 0 净流入卖出去。"""
+    monkeypatch.setattr(ds2, "_cache_get", lambda key: None)
+    monkeypatch.setattr(ds2, "_cache_set", lambda key, val, ttl: None)
+    monkeypatch.setattr(ds2, "em_get", lambda *a, **k: _FakeResp({"result": {"data": [{
+        "TRADE_DATE": "2026-11-13 00:00:00", "DEAL_AMT": 111733.79,
+        "NET_DEAL_AMT": None, "FUND_INFLOW": None,
+        "BUY_AMT": None, "SELL_AMT": None,
+    }]}}))
+
+    assert ds2.get_northbound_flow_realtime() == {}
+
+
+def test_northbound_resumes_with_total_only(monkeypatch):
+    """上游若恢复净额但无沪深拆分, 返回合计并把 sh_sz_split_available 标 False。"""
+    monkeypatch.setattr(ds2, "_cache_get", lambda key: None)
+    monkeypatch.setattr(ds2, "_cache_set", lambda key, val, ttl: None)
+    monkeypatch.setattr(ds2, "em_get", lambda *a, **k: _FakeResp({"result": {"data": [{
+        "TRADE_DATE": "2026-11-13 00:00:00", "DEAL_AMT": 111733.79,
+        "NET_DEAL_AMT": 5.0e9, "FUND_INFLOW": None,
+    }]}}))
+
+    result = ds2.get_northbound_flow_realtime()
+
+    assert result["total_net_inflow"] == 5.0e9
+    assert result["date"] == "2026-11-13"
+    assert result["sh_sz_split_available"] is False

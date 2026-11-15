@@ -95,7 +95,10 @@ def _calc_capital_flow_score(northbound: dict, sector_ranking: list[dict]) -> di
     综合北向资金净流入 + 板块主力净流入
     """
     # 北向资金(单位: 元,通常为亿级别)
-    nb_net = float(northbound.get("total_net_inflow", 0) or 0) if northbound else 0
+    # 2026-11-15: 停更后 total_net_inflow 缺失, 评分按中性 50 处理;
+    # northbound_net 输出 None 而不是 0.0, 避免把"没数据"读成"净流入恰为 0"。
+    nb_available = bool(northbound) and northbound.get("total_net_inflow") is not None
+    nb_net = float(northbound.get("total_net_inflow") or 0) if nb_available else 0.0
     # 北向资金评分: 净流入100亿 → 100, 0 → 50, -100亿 → 0
     # 1亿 = 100000000 元
     nb_score = max(0, min(100, 50 + nb_net / 1_0000_0000 * 0.5))
@@ -110,7 +113,8 @@ def _calc_capital_flow_score(northbound: dict, sector_ranking: list[dict]) -> di
 
     return {
         "score": round(score, 1),
-        "northbound_net": round(nb_net / 1_0000_0000, 2),  # 转为亿元
+        "northbound_net": round(nb_net / 1_0000_0000, 2) if nb_available else None,  # 亿元
+        "northbound_available": nb_available,
         "sector_main_net": round(sector_main_net / 1_0000_0000, 2),
         "northbound_score": round(nb_score, 1),
         "sector_score": round(sector_score, 1),
@@ -241,11 +245,24 @@ async def get_capital_flow_overview() -> dict[str, Any]:
 
     total_sector_main_net = sum(float(s.get("main_net_inflow", 0) or 0) for s in sector_ranking)
 
+    # 北向净流入自 2024-08 停止披露: 缺失时输出 None 而不是 0, 前端据此显示「—」,
+    # 也避免把"没数据"读成"净流入恰为 0"。
+    nb_ok = bool(northbound)
     return {
         "northbound": {
-            "total_net_inflow": round(float(northbound.get("total_net_inflow", 0) or 0) / 1_0000_0000, 2),
-            "sh_net_inflow": round(float(northbound.get("sh_net_inflow", 0) or 0) / 1_0000_0000, 2),
-            "sz_net_inflow": round(float(northbound.get("sz_net_inflow", 0) or 0) / 1_0000_0000, 2),
+            "available": nb_ok,
+            "total_net_inflow": (
+                round(float(northbound.get("total_net_inflow", 0) or 0) / 1_0000_0000, 2)
+                if nb_ok else None
+            ),
+            "sh_net_inflow": (
+                round(float(northbound.get("sh_net_inflow", 0) or 0) / 1_0000_0000, 2)
+                if nb_ok else None
+            ),
+            "sz_net_inflow": (
+                round(float(northbound.get("sz_net_inflow", 0) or 0) / 1_0000_0000, 2)
+                if nb_ok else None
+            ),
             "date": northbound.get("date", ""),
         },
         "sector_main_flow": {
@@ -307,8 +324,12 @@ async def get_market_assessment() -> dict[str, Any]:
         sector_signal = "板块分化"
 
     # 资金信号
-    nb_net = capital_overview.get("northbound", {}).get("total_net_inflow", 0)
-    if nb_net > 50:
+    nb_info = capital_overview.get("northbound") or {}
+    nb_net = nb_info.get("total_net_inflow")
+    if nb_net is None:
+        # 上游不再披露净流入,不能把缺失写成"小幅净流出"
+        capital_signal = "北向净流入已停止披露"
+    elif nb_net > 50:
         capital_signal = "北向资金大幅净流入"
     elif nb_net > 0:
         capital_signal = "北向资金小幅净流入"

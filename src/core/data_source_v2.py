@@ -2457,103 +2457,138 @@ def get_market_sentiment() -> dict:
     return result
 
 
+# 2026-11-15 核实：2024-08 监管调整后，沪深港通不再披露日度净买入，
+# 东财 RPT_MUTUAL_FUND_NORTHBOUND / push2 kamtbs / 腾讯 sh_hk2shsz 全部失效；
+# RPT_MUTUAL_DEAL_HISTORY 仅 DEAL_AMT(成交额)有值，净额字段全为 None。
+# 这是上游永久停更，不是临时不可达 —— 前端提示文案必须据此区分。
+NORTHBOUND_NET_NOTE = (
+    "北向资金净流入自 2024 年 8 月起停止日度披露（沪深港通规则调整），"
+    "无公开数据可补；北向成交额仍可查，但不能当作资金方向"
+)
+
+
 def get_northbound_flow_realtime() -> dict:
+    """北向资金净流入（已停止披露，仅在数据源恢复时才有值）。
+
+    原实现依次尝试三个失效接口，每次都要等满超时。净流入字段上游已全部停更，
+    保留一次轻量查询作为"上游恢复时自动接回"的探针，失败结果缓存 5 分钟，
+    避免每个页面访问都去打三个死接口。
+    """
     cached = _cache_get("northbound_flow")
     if cached is not None:
         return cached
+    result: dict = {}
     try:
-        url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
-        params = {
+        resp = em_get("https://datacenter-web.eastmoney.com/api/data/v1/get", params={
             "sortColumns": "TRADE_DATE",
             "sortTypes": -1,
             "pageSize": 1,
             "pageNumber": 1,
-            "reportName": "RPT_MUTUAL_FUND_NORTHBOUND",
+            "reportName": "RPT_MUTUAL_DEAL_HISTORY",
             "columns": "ALL",
-        }
-        resp = em_get(url, params=params)
-        data = resp.json()
-        result_data = data.get("result") or {}
-        items = result_data.get("data") or []
+        })
+        items = ((resp.json().get("result") or {}).get("data")) or []
         if items:
             item = items[0]
-            total_net = _safe_float(item.get("NET_INFLOW", 0))
-            sh_net = _safe_float(item.get("SH_NET_INFLOW", 0))
-            sz_net = _safe_float(item.get("SZ_NET_INFLOW", 0))
-            trade_date = _safe_str(item.get("TRADE_DATE", ""))[:10]
-            if total_net != 0 or sh_net != 0 or sz_net != 0:
+            # 字段名为 None 时 _opt_float 返回 None, 区别于"真实净额为 0"
+            total_net = _opt_float(item.get("NET_DEAL_AMT"))
+            if total_net is None:
+                total_net = _opt_float(item.get("FUND_INFLOW"))
+            if total_net:
                 result = {
-                    "date": trade_date or datetime.now().strftime("%Y-%m-%d"),
-                    "sh_net_inflow": sh_net,
-                    "sz_net_inflow": sz_net,
+                    "date": _safe_str(item.get("TRADE_DATE", ""))[:10]
+                    or datetime.now().strftime("%Y-%m-%d"),
+                    "sh_net_inflow": 0.0,
+                    "sz_net_inflow": 0.0,
                     "total_net_inflow": total_net,
+                    "sh_sz_split_available": False,
                 }
-                _cache_set("northbound_flow", result, 30)
-                return result
     except Exception as e:
-        logger.warning(f"get_northbound_flow_realtime eastmoney datacenter failed: {e}")
-    try:
-        url = "https://push2.eastmoney.com/api/qt/kamtbs.wss/get"
-        params = {
-            "fields1": "f1,f2,f3,f4",
-            "fields2": "f51,f52,f53,f54,f55,f56",
-        }
-        resp = em_get(url, params=params)
-        data = resp.json()
-        kamt_data = data.get("data", {})
-        if kamt_data:
-            s2n = kamt_data.get("s2n", [])
-            n2s = kamt_data.get("n2s", [])
-            if s2n and len(s2n) >= 2:
-                sh_net = _safe_float(s2n[1]) if len(s2n) > 1 else 0
-                sz_net = _safe_float(n2s[1]) if n2s and len(n2s) > 1 else 0
-                total_net = sh_net + sz_net
-                if total_net != 0 or sh_net != 0 or sz_net != 0:
-                    result = {
-                        "date": datetime.now().strftime("%Y-%m-%d"),
-                        "sh_net_inflow": sh_net,
-                        "sz_net_inflow": sz_net,
-                        "total_net_inflow": total_net,
-                    }
-                    _cache_set("northbound_flow", result, 30)
-                    return result
-    except Exception as e:
-        logger.warning(f"get_northbound_flow_realtime push2 failed: {e}")
-    try:
-        url = "https://qt.gtimg.cn/q=sh_hk2shsz"
-        resp = requests.get(url, timeout=5, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://gu.qq.com/",
-        })
-        resp.encoding = "gbk"
-        text = resp.text
-        for segment in text.split(";"):
-            segment = segment.strip()
-            if not segment or "=" not in segment:
-                continue
-            eq_idx = segment.index("=")
-            val = segment[eq_idx + 1:].strip().strip('"').strip("'")
-            if "~" not in val or val.startswith("v_pv_none_match"):
-                continue
-            parts = val.split("~")
-            if len(parts) >= 6:
-                total_net = _safe_float(parts[3]) if len(parts) > 3 else 0
-                sh_net = _safe_float(parts[4]) if len(parts) > 4 else 0
-                sz_net = _safe_float(parts[5]) if len(parts) > 5 else 0
-                if total_net != 0 or sh_net != 0 or sz_net != 0:
-                    result = {
-                        "date": datetime.now().strftime("%Y-%m-%d"),
-                        "sh_net_inflow": sh_net,
-                        "sz_net_inflow": sz_net,
-                        "total_net_inflow": total_net,
-                    }
-                    _cache_set("northbound_flow", result, 30)
-                    return result
-    except Exception as e:
-        logger.warning(f"get_northbound_flow_realtime tencent failed: {e}")
-    result = {}
-    _cache_set("northbound_flow", result, 30)
+        logger.info(f"get_northbound_flow_realtime upstream check failed: {type(e).__name__}: {e}")
+    _cache_set("northbound_flow", result, 300)
     return result
+
+
+# ──────────────────────────────────────────────
+# 全市场两融余额（沪深交易所官方日报）
+# ──────────────────────────────────────────────
+# 东财市场级报表 RPT_RZRQ_LSHJ 已下线（剩余 5 个候选报表名全部"报表配置不存在"），
+# 改用交易所官方"融资融券交易总量"：
+#   上交所 query.sse.com.cn 当日发布，金额单位 元；
+#   深交所 www.szse.cn/api 延迟一个交易日发布，金额单位 亿元。
+# 两市必须对齐同一交易日再合计，否则是把不同日期的余额硬加在一起。
+_SSE_MARGIN_URL = "https://query.sse.com.cn/marketdata/tradedata/queryMargin.do"
+_SZSE_MARGIN_URL = "https://www.szse.cn/api/report/ShowReport/data"
+_EXCHANGE_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+
+
+def _fetch_szse_margin_total(trade_date: str) -> float | None:
+    """深交所指定交易日的两融余额（元）；当日尚未发布返回 None。"""
+    try:
+        resp = requests.get(
+            _SZSE_MARGIN_URL,
+            params={
+                "SHOWTYPE": "JSON",
+                "CATALOGID": "1837_xxpl",
+                "txtDate": trade_date,
+                "tab1PAGENO": "1",
+            },
+            headers={"User-Agent": _EXCHANGE_UA, "Referer": "https://www.szse.cn/"},
+            timeout=6,
+        )
+        payload = resp.json()
+        rows = (payload[0].get("data") or []) if isinstance(payload, list) and payload else []
+        if not rows:
+            return None
+        # jrrzrjye = 本日融资融券余额，单位亿元（带千分位逗号）
+        yi = _safe_float(_safe_str(rows[0].get("jrrzrjye", "")).replace(",", ""))
+        return yi * 1e8 if yi > 0 else None
+    except Exception as e:
+        logger.warning(f"_fetch_szse_margin_total({trade_date}) failed: {type(e).__name__}: {e}")
+        return None
+
+
+def _fetch_market_margin() -> dict | None:
+    """沪深两市两融余额合计（元），取两市都有数据的最近交易日。
+
+    返回 {"trade_date": "YYYY-MM-DD", "margin_balance": 元}；无法对齐返回 None。
+    """
+    try:
+        resp = requests.get(
+            _SSE_MARGIN_URL,
+            params={
+                "opDate": "", "rzmre": "", "rzye": "", "rqylje": "",
+                "rqyl": "", "rqmcl": "", "rzrqjyzl": "",
+            },
+            headers={"User-Agent": _EXCHANGE_UA, "Referer": "https://www.sse.com.cn/"},
+            timeout=6,
+        )
+        rows = ((resp.json() or {}).get("pageHelp") or {}).get("data") or []
+    except Exception as e:
+        logger.warning(f"_fetch_market_margin sse failed: {type(e).__name__}: {e}")
+        return None
+
+    sse_by_date: dict[str, float] = {}
+    for row in rows:
+        raw = _safe_str(row.get("opDate", ""))
+        if len(raw) != 8 or not raw.isdigit():
+            continue
+        total = _safe_float(row.get("rzrqjyzl"))
+        if total <= 0:
+            total = _safe_float(row.get("rzye")) + _safe_float(row.get("rqylje"))
+        if total > 0:
+            sse_by_date[f"{raw[:4]}-{raw[4:6]}-{raw[6:]}"] = total
+
+    # 深交所晚一天发布：从上交所最近两个交易日里找两市都有的日期
+    for trade_date in sorted(sse_by_date, reverse=True)[:2]:
+        szse_total = _fetch_szse_margin_total(trade_date)
+        if szse_total is None:
+            continue
+        return {
+            "trade_date": trade_date,
+            "margin_balance": round(sse_by_date[trade_date] + szse_total, 2),
+        }
+    return None
 
 
 def get_market_wide_stats() -> dict:
@@ -2563,6 +2598,7 @@ def get_market_wide_stats() -> dict:
     # 缺省 None = 上游未取到; 0 只表示"确实为 0", 两者不能混同(前端据此显示「—」)
     result: dict = {
         "margin_balance": None,
+        "margin_trade_date": None,
         "block_trades_count": None,
         "avg_shareholder_change_pct": None,
     }
@@ -2624,12 +2660,14 @@ def get_market_wide_stats() -> dict:
             logger.warning(f"get_market_wide_stats shareholder failed: {e}")
         return None
 
-    # 全市场融资融券余额:东财原报表 RPT_RZRQ_LSHJ 已下线,无公开市场级替代,
-    # 保持 None(前端显示「—」),不用个股余额冒充全市场。
     fetched = _parallel_fetch([
+        ("margin", _fetch_market_margin),
         ("block_trades", _fetch_block_trades),
         ("shareholder", _fetch_shareholder),
     ])
+    margin = fetched.get("margin") or {}
+    result["margin_balance"] = margin.get("margin_balance")
+    result["margin_trade_date"] = margin.get("trade_date")
     result["block_trades_count"] = fetched.get("block_trades")
     result["avg_shareholder_change_pct"] = fetched.get("shareholder")
     _cache_set("market_wide_stats", result, 60)

@@ -1426,6 +1426,8 @@ async def stock_kline_summary(code: str = Query(..., description="股票代码")
 class MarketWideStatsResponse(BaseModel):
     # 上游不可达时为 None(前端渲染「—/数据缺失」), 不再用 0 冒充"确实为 0"
     margin_balance: float | None = None
+    # 两融日报的归属交易日: 深交所晚一天发布, 沪深对齐后的日期可能不是"今天"
+    margin_trade_date: str | None = None
     block_trades_count: int | None = None
     avg_shareholder_change_pct: float | None = None
 
@@ -1435,6 +1437,8 @@ class NorthboundFlowItem(BaseModel):
     total_net_inflow: float = 0.0
     sh_net_inflow: float = 0.0
     sz_net_inflow: float = 0.0
+    # False 表示只有合计、没有沪深拆分明细(上游净额字段已停更时的恢复路径)
+    sh_sz_split_available: bool = True
 
 
 @router.get("/northbound")
@@ -1447,18 +1451,31 @@ async def northbound():
     try:
         data = await asyncio.to_thread(ds2.get_northbound_flow_realtime)
         if not data:
-            return {"data": NorthboundFlowItem().model_dump(), "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
+            return {
+                "data": NorthboundFlowItem().model_dump(),
+                "_meta": _build_meta(
+                    "eastmoney", cached=False, quality_score=0.0,
+                    extra={"unavailable_reason": ds2.NORTHBOUND_NET_NOTE},
+                ),
+            }
         result = NorthboundFlowItem(
             date=_safe_str(data.get("date", "")),
             total_net_inflow=_safe_float(data.get("total_net_inflow", 0)),
             sh_net_inflow=_safe_float(data.get("sh_net_inflow", 0)),
             sz_net_inflow=_safe_float(data.get("sz_net_inflow", 0)),
+            sh_sz_split_available=bool(data.get("sh_sz_split_available", True)),
         )
         cache.set(cache_key, result.model_dump())
         return {"data": result.model_dump(), "_meta": _build_meta("eastmoney", cached=False)}
     except Exception as e:
         logger.warning(f"northbound failed: {e}")
-        return {"data": NorthboundFlowItem().model_dump(), "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
+        return {
+            "data": NorthboundFlowItem().model_dump(),
+            "_meta": _build_meta(
+                "eastmoney", cached=False, quality_score=0.0,
+                extra={"unavailable_reason": ds2.NORTHBOUND_NET_NOTE},
+            ),
+        }
 
 
 @router.get("/market_sentiment")
@@ -1482,6 +1499,7 @@ async def market_wide_stats():
     data = await asyncio.to_thread(ds2.get_market_wide_stats)
     result = MarketWideStatsResponse(
         margin_balance=opt_float(data.get("margin_balance")),
+        margin_trade_date=_safe_str(data.get("margin_trade_date") or "") or None,
         block_trades_count=(int(v) if (v := opt_float(data.get("block_trades_count"))) is not None else None),
         avg_shareholder_change_pct=opt_float(data.get("avg_shareholder_change_pct")),
     )

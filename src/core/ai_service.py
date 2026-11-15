@@ -298,9 +298,12 @@ def _build_analysis_prompt(stock_code: str, stock_data: dict[str, Any], search_n
             for d in dragon_tiger[:10]
         )
 
-    northbound_summary = "  缺失(无北向资金数据)"
+    northbound_summary = "  缺失(北向净流入自 2024-08 起停止披露)"
     if northbound_flow:
-        northbound_summary = f"  沪股通净流入: {northbound_flow.get('sh_net_inflow', 0)}  深股通净流入: {northbound_flow.get('sz_net_inflow', 0)}  北向合计净流入: {northbound_flow.get('total_net_inflow', 0)}"
+        if northbound_flow.get("sh_sz_split_available") is False:
+            northbound_summary = f"  北向合计净流入: {northbound_flow.get('total_net_inflow', 0)}（无沪深拆分）"
+        else:
+            northbound_summary = f"  沪股通净流入: {northbound_flow.get('sh_net_inflow', 0)}  深股通净流入: {northbound_flow.get('sz_net_inflow', 0)}  北向合计净流入: {northbound_flow.get('total_net_inflow', 0)}"
 
     global_news_summary = "  缺失(无全球新闻数据)"
     if global_news:

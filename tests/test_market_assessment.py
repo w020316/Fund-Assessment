@@ -109,6 +109,9 @@ class TestCapitalFlowScore:
     def test_empty_data_neutral(self):
         result = _calc_capital_flow_score({}, [])
         assert result["score"] == 50
+        # 北向停更: net 必须为 None(缺失), 不能是 0(净流入恰为 0)
+        assert result["northbound_net"] is None
+        assert result["northbound_available"] is False
 
     def test_northbound_big_inflow(self):
         """北向大幅净流入100亿 → 100分"""
@@ -259,11 +262,38 @@ class TestMarketThermometerEndToEnd:
                 result = await get_capital_flow_overview()
 
         assert result["northbound"]["total_net_inflow"] == 80.0
+        assert result["northbound"]["available"] is True
         # 3个板块全部进入top_inflow(top5切片,实际只有3个)
         assert len(result["sector_main_flow"]["top_inflow"]) == 3
         # 按净流入降序: 白酒(15) > 半导体(10) > 房地产(-8)
         assert result["sector_main_flow"]["top_inflow"][0]["name"] == "白酒"
         assert result["sector_main_flow"]["top_inflow"][1]["name"] == "半导体"
+
+    @pytest.mark.asyncio
+    async def test_capital_flow_overview_northbound_unavailable_keeps_none(self):
+        """北向停更时三项输出 None(前端显示「—」),不得落成 0 冒充"净流入 0"。"""
+        with patch.object(market_assessment.ds2, "get_northbound_flow_realtime", return_value={}):
+            with patch.object(market_assessment.ds2, "get_sector_ranking", return_value=[]):
+                result = await get_capital_flow_overview()
+
+        nb = result["northbound"]
+        assert nb["available"] is False
+        assert nb["total_net_inflow"] is None
+        assert nb["sh_net_inflow"] is None
+        assert nb["sz_net_inflow"] is None
+
+    @pytest.mark.asyncio
+    async def test_market_assessment_signal_when_northbound_missing(self):
+        """北向缺失时资金信号必须说明"已停止披露",不能写成小幅净流出。"""
+        mock_sectors = [{"change_pct": 2.0, "main_net_inflow": 20 * 1_0000_0000, "name": "白酒"}] * 8 + \
+                       [{"change_pct": -1.0, "main_net_inflow": -5 * 1_0000_0000, "name": "房地产"}] * 2
+        with patch.object(market_assessment.ds2, "get_index_realtime", return_value=[{"change_pct": 1.0}]):
+            with patch.object(market_assessment.ds2, "get_sector_ranking", return_value=mock_sectors):
+                with patch.object(market_assessment.ds2, "get_northbound_flow_realtime", return_value={}):
+                    with patch.object(market_assessment.ds2, "get_market_sentiment", return_value={"rise_count": 3000, "fall_count": 2000}):
+                        result = await get_market_assessment()
+
+        assert result["capital_signal"] == "北向净流入已停止披露"
 
     @pytest.mark.asyncio
     async def test_market_assessment_integration(self):

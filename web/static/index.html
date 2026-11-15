@@ -3552,6 +3552,9 @@ async function loadMarketAssessment() {
   const margin = (typeof wide.margin_balance === 'number' && wide.margin_balance > 0)
     ? (wide.margin_balance / 1e8).toFixed(2) + ' 亿'
     : '数据缺失';
+  const marginLabel = (wide.margin_trade_date && typeof wide.margin_trade_date === 'string')
+    ? `两融余额 · ${wide.margin_trade_date.slice(5)}`
+    : '两融余额';
   const blockCount = (typeof wide.block_trades_count === 'number') ? wide.block_trades_count + ' 笔' : '—';
   const holderChange = (typeof wide.avg_shareholder_change_pct === 'number' && wide.avg_shareholder_change_pct !== 0)
     ? _pctOrDash(wide.avg_shareholder_change_pct)
@@ -3568,7 +3571,7 @@ async function loadMarketAssessment() {
       <div class="card" style="text-align:center;padding:12px;"><div style="font-size:11px;color:var(--text-muted);">情绪</div><div style="font-size:16px;font-weight:600;">${escapeHtml(sentimentLabel)}</div></div>
     </div>
     <div class="grid-3" style="gap:8px;margin-bottom:10px;">
-      <div class="card" style="text-align:center;padding:12px;"><div style="font-size:11px;color:var(--text-muted);">融资余额</div><div style="font-size:16px;font-weight:600;">${margin}</div></div>
+      <div class="card" style="text-align:center;padding:12px;"><div style="font-size:11px;color:var(--text-muted);">${escapeHtml(marginLabel)}</div><div style="font-size:16px;font-weight:600;">${margin}</div></div>
       <div class="card" style="text-align:center;padding:12px;"><div style="font-size:11px;color:var(--text-muted);">大宗交易</div><div style="font-size:16px;font-weight:600;">${blockCount}</div></div>
       <div class="card" style="text-align:center;padding:12px;"><div style="font-size:11px;color:var(--text-muted);">股东户数变化</div><div style="font-size:16px;font-weight:600;">${holderChange}</div></div>
     </div>
@@ -4627,6 +4630,7 @@ async function loadMarketCapitalFlow() {
     </div>`).join('') || '<div style="color:var(--text-muted);">数据缺失</div>';
 
   body.innerHTML = `
+    ${nb.available === false ? '<div style="font-size:11px;color:var(--accent-blue);margin-bottom:8px;">⚠ 北向净流入自 2024-08 起停止披露，此处以「—」表示缺失</div>' : ''}
     <div class="grid-3" style="gap:8px;margin-bottom:10px;">
       <div class="card" style="text-align:center;padding:12px;"><div style="font-size:11px;color:var(--text-muted);">北向合计(亿)</div><div style="font-size:16px;font-weight:600;">${_numOrDash(nb.total_net_inflow)}</div></div>
       <div class="card" style="text-align:center;padding:12px;"><div style="font-size:11px;color:var(--text-muted);">沪股通(亿)</div><div style="font-size:16px;font-weight:600;">${_numOrDash(nb.sh_net_inflow)}</div></div>
@@ -8430,12 +8434,18 @@ async function loadNorthbound() {
   // 用户一直看到兜底的 0.00亿。现改为优先读 _meta.degraded。
   const nbDegraded = !!(data && data._meta && data._meta.degraded);
   const nbDq = nbDegraded ? 'degraded' : ((data && data.data && data.data.data_quality) || 'normal');
+  // 2026-11-15: 净流入是监管层面停止披露(上游永久停更),不是"稍后重试就能恢复"。
+  // 文案优先用后端返回的 unavailable_reason,避免把永久缺失说成临时故障。
+  const nbReason = (data && data._meta && data._meta.unavailable_reason)
+    || '北向资金净流入已停止披露,无法提供';
   const nbBanner = nbDq === 'degraded'
-    ? `<div style="margin-bottom:12px;padding:8px 12px;font-size:11px;color:var(--accent-blue);border:1px solid var(--accent-blue);border-radius:4px;background:rgba(245,158,11,0.06);">⚠ 北向资金数据源不可达,数值不可用,请稍后重试</div>`
+    ? `<div style="margin-bottom:12px;padding:8px 12px;font-size:11px;color:var(--accent-blue);border:1px solid var(--accent-blue);border-radius:4px;background:rgba(245,158,11,0.06);">⚠ ${escapeHtml(nbReason)}</div>`
     : '';
   // 降级时不再渲染 0.00 —— 0 会被读成"今日无净流入",与"没拿到数据"是两件事。
   const nbText = (v) => (nbDegraded ? '—' : `${changeSign(v)}${fmtNum(v)}亿`);
   const nbColor = (v) => (nbDegraded ? 'var(--text-muted)' : changeColor(v));
+  // 上游恢复后可能只有合计、没有沪深拆分,此时不能用 0.00 冒充两市的净流入
+  const nbSplitOk = !nbDegraded && d.sh_sz_split_available !== false;
   container.innerHTML = `
     ${nbBanner}
     <div style="display:flex;gap:24px;margin-bottom:16px;">
@@ -8445,11 +8455,11 @@ async function loadNorthbound() {
       </div>
       <div style="text-align:center;">
         <div style="color:var(--text-muted);font-size:12px;">沪股通</div>
-        <div style="font-size:18px;font-weight:600;color:${nbColor(nb.today_sh)};">${nbText(nb.today_sh)}</div>
+        <div style="font-size:18px;font-weight:600;color:${nbColor(nb.today_sh)};">${nbSplitOk ? nbText(nb.today_sh) : '—'}</div>
       </div>
       <div style="text-align:center;">
         <div style="color:var(--text-muted);font-size:12px;">深股通</div>
-        <div style="font-size:18px;font-weight:600;color:${nbColor(nb.today_sz)};">${nbText(nb.today_sz)}</div>
+        <div style="font-size:18px;font-weight:600;color:${nbColor(nb.today_sz)};">${nbSplitOk ? nbText(nb.today_sz) : '—'}</div>
       </div>
     </div>
     <svg width="100%" height="120" viewBox="0 0 400 120" id="northboundChart"></svg>

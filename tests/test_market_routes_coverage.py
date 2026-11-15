@@ -510,7 +510,11 @@ class TestDetailAndSentiment:
 
         market.cache.clear()
         monkeypatch.setattr(market.ds2, "get_northbound_flow_realtime", lambda: {})
-        assert client.get("/api/market/northbound").json()["data"]["total_net_inflow"] == 0.0
+        body = client.get("/api/market/northbound").json()
+        assert body["data"]["total_net_inflow"] == 0.0
+        # 净流入是监管停更,不能只说"稍后重试";必须带上停更原因供前端展示
+        assert body["_meta"]["degraded"] is True
+        assert "停止日度披露" in body["_meta"]["unavailable_reason"]
 
         market.cache.clear()
         monkeypatch.setattr(market.ds2, "get_northbound_flow_realtime", _raise)
@@ -523,12 +527,14 @@ class TestDetailAndSentiment:
         monkeypatch.setattr(
             market.ds2,
             "get_market_wide_stats",
-            lambda: {"margin_balance": 1.0, "block_trades_count": "3", "avg_shareholder_change_pct": -1.0},
+            lambda: {"margin_balance": 1.0, "margin_trade_date": "2026-11-12",
+                     "block_trades_count": "3", "avg_shareholder_change_pct": -1.0},
         )
         assert client.get("/api/market/market_sentiment").json()["data"]["score"] == 60
         assert client.get("/api/market/market_sentiment").json()["_meta"]["cached"] is True
         stats = client.get("/api/market/market_wide_stats").json()["data"]
         assert stats["block_trades_count"] == 3
+        assert stats["margin_trade_date"] == "2026-11-12"
 
     def test_wide_stats_missing_values_stay_none(self, client, monkeypatch):
         """上游不可达时三项都保持 None(前端显示「—/数据缺失」), 不得落成 0 冒充真实值。"""
