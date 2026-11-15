@@ -113,47 +113,72 @@ def _fetch_fund_holdings_em(fund_code: str, topline: int = 10) -> list[dict]:
         html = content_m.group(1)
         # 反转义
         html = html.replace("\\/", "/").replace('\\"', '"').replace("\\\\", "\\")
-        # 解析HTML表格
+        # 2026-11-15 实测:东财表格新增「最新价/涨跌幅/相关资讯」列, 且不再逐行带
+        # 「季报/持仓变化」列(季度改到每张表的 h4 标题里), 固定下标解析全部失败。
+        # 改为按 quarter 分块 + 按「百分号列」定位比例/持股/市值。
         result: list[dict] = []
-        # 匹配每行: <tr>...<td>1</td>...<td>600519</td>...<td>贵州茅台</td>...<td>9.85%</td>...</tr>
-        rows = re.findall(r'<tr[^>]*>(.*?)</tr>', html, re.DOTALL)
-        for row in rows:
-            cells = re.findall(r'<td[^>]*>(.*?)</td>', row, re.DOTALL)
-            if len(cells) < 8:
-                continue
-            # 去除HTML标签
-            cells = [re.sub(r'<[^>]+>', '', c).strip() for c in cells]
-            try:
-                # 序号 | 股票代码 | 股票名称 | 占净值比例 | 持股数 | 持仓市值 | 季报 | 持仓变化
-                code = cells[1]
-                name = cells[2]
-                weight_str = cells[3].replace('%', '')
-                weight = float(weight_str) if weight_str else 0.0
-                hold_amount = float(cells[4].replace(',', '').replace('--', '0')) if cells[4] else 0.0
-                hold_value = float(cells[5].replace(',', '').replace('--', '0')) if cells[5] else 0.0
-                quarter = cells[6] if len(cells) > 6 else ""
-                change_str = cells[7] if len(cells) > 7 else ""
-                # 变化: 新进/增持/减持/不变
-                change = "不变"
-                if "新进" in change_str:
-                    change = "新进"
-                elif "增持" in change_str:
-                    change = "增持"
-                elif "减持" in change_str:
-                    change = "减持"
-                result.append({
-                    "code": code,
-                    "name": name,
-                    "weight": round(weight, 3),
-                    "hold_amount": hold_amount,
-                    "hold_value": hold_value,
-                    "quarter": quarter,
-                    "change": change,
-                })
-            except (ValueError, IndexError) as e:
-                logger.debug(f"fund_holdings_em: 解析行失败: {e}, cells={cells}")
-                continue
-        return result
+        blocks = re.findall(
+            r"<div class='boxitem[^']*'>(.*?)(?=<div class='boxitem|$)",
+            html, re.DOTALL,
+        )
+        if not blocks:
+            blocks = [html]
+        for block in blocks:
+            qm = re.search(r"(\d{4}年\d季度)", block)
+            quarter = qm.group(1) if qm else ""
+            rows = re.findall(r'<tr[^>]*>(.*?)</tr>', block, re.DOTALL)
+            for row in rows:
+                cells = re.findall(r'<td[^>]*>(.*?)</td>', row, re.DOTALL)
+                if len(cells) < 5:
+                    continue
+                cells = [re.sub(r'<[^>]+>', '', c).strip() for c in cells]
+                try:
+                    code, name = cells[1], cells[2]
+                    weight_idx = next(
+                        (i for i, c in enumerate(cells) if c.endswith("%")), -1
+                    )
+                    if weight_idx < 0:
+                        # 旧版列序(序号|代码|名称|比例|持股|市值),比例为空时靠它兜底
+                        weight_idx = 3
+                    if weight_idx + 2 >= len(cells):
+                        continue
+                    if not quarter:
+                        for c in cells:
+                            if re.search(r"\d{4}年\d季度|\d{4}Q\d", c):
+                                quarter = c
+                                break
+                    weight = float(cells[weight_idx].replace("%", "") or 0)
+                    hold_amount = float(cells[weight_idx + 1].replace(",", "").replace("--", "0") or 0)
+                    hold_value = float(cells[weight_idx + 2].replace(",", "").replace("--", "0") or 0)
+                    change = "不变"
+                    for c in cells:
+                        if "新进" in c:
+                            change = "新进"
+                            break
+                        if "增持" in c:
+                            change = "增持"
+                            break
+                        if "减持" in c:
+                            change = "减持"
+                            break
+                    result.append({
+                        "code": code,
+                        "name": name,
+                        "weight": round(weight, 3),
+                        "hold_amount": hold_amount,
+                        "hold_value": hold_value,
+                        "quarter": quarter,
+                        "change": change,
+                    })
+                except (ValueError, IndexError) as e:
+                    logger.debug(f"fund_holdings_em: 解析行失败: {e}, cells={cells}")
+                    continue
+        if result:
+            # 接口一次返回本年度多个季度,只保留最新一期(分块顺序由新到旧)
+            latest = result[0]["quarter"]
+            if latest:
+                result = [r for r in result if r["quarter"] == latest]
+        return result[:topline]
     except Exception as e:
         _set_fetch_reason(fund_code, f"em接口请求异常: {e}")
         logger.warning(f"fund_holdings_em failed fund_code={fund_code}: {e}")

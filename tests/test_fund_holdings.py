@@ -1028,3 +1028,46 @@ class TestAnalyzeFundHoldingsExtended:
         reason = fund_holdings._get_fetch_reason("161725")
         assert reason  # 非空
         assert "em接口" in reason
+
+
+class TestFetchFundHoldingsEmNewTableLayout:
+    """2026-11 东财表格列结构变更:新增最新价/涨跌幅/相关资讯列,季度移到表头"""
+
+    @staticmethod
+    def _row(idx, code, name, price, chg, weight, amount, value):
+        return (
+            f"<tr><td>{idx}</td><td><a href='x'>{code}</a></td><td><a>{name}</a></td>"
+            f"<td><span>{price}</span></td><td><span>{chg}</span></td><td>股吧行情</td>"
+            f"<td>{weight}%</td><td>{amount}</td><td>{value}</td></tr>"
+        )
+
+    def test_parses_new_column_layout(self):
+        html = (
+            "<div class='boxitem w790'><h4>2026年3季度股票投资明细</h4><table><tbody>"
+            + self._row(1, "00883", "中国海洋石油", "--", "--", "9.55", "3,102.90", "63,819.65")
+            + self._row(2, "600519", "贵州茅台", "1435.26", "1.77", "6.92", "36.76", "46,266.87")
+            + "</tbody></table></div>"
+        )
+        with patch.object(fund_holdings._EM_FUND_SESSION, "get", _mock_em_get(_em_text(html))):
+            result = _fetch_fund_holdings_em("110011")
+        assert len(result) == 2
+        assert result[0]["code"] == "00883"
+        assert result[0]["weight"] == 9.55
+        assert result[0]["hold_amount"] == 3102.90
+        assert result[0]["hold_value"] == 63819.65
+        assert result[0]["quarter"] == "2026年3季度"
+
+    def test_keeps_only_latest_quarter(self):
+        html = (
+            "<div class='boxitem w790'><h4>2026年3季度股票投资明细</h4><table><tbody>"
+            + self._row(1, "00883", "中国海洋石油", "--", "--", "9.55", "1", "2")
+            + "</tbody></table></div>"
+            "<div class='boxitem w790'><h4>2026年2季度股票投资明细</h4><table><tbody>"
+            + self._row(1, "600519", "贵州茅台", "--", "--", "9.23", "3", "4")
+            + "</tbody></table></div>"
+        )
+        with patch.object(fund_holdings._EM_FUND_SESSION, "get", _mock_em_get(_em_text(html))):
+            result = _fetch_fund_holdings_em("110011")
+        assert len(result) == 1
+        assert result[0]["code"] == "00883"
+        assert result[0]["quarter"] == "2026年3季度"
