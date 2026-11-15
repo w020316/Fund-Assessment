@@ -1135,24 +1135,25 @@ def get_dragon_tiger() -> list[dict]:
     if cached is not None:
         return cached
     # 2026-11-15 实测:旧报表 RPT_DAILYBOARDDETAILSNEW 已下线;改用按股票汇总的
-    # RPT_BILLBOARD_DAILYDETAILS。交易日不能写死"今天"(周末必空),取报表最近交易日。
+    # RPT_BILLBOARD_DAILYDETAILS。交易日不能写死"今天"(周末必空),取返回集里的
+    # 最近交易日。只发一次请求:Render 上"先查日期再按日期过滤"两次往返会叠加
+    # 超时(em_get 单请求 5s),实测线上因此整条降级为空。
     url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
-    trade_date = _em_latest_trade_date("RPT_BILLBOARD_DAILYDETAILS")
-    if not trade_date:
-        trade_date = datetime.now().strftime("%Y-%m-%d")
     params = {
         "sortColumns": "TRADE_DATE",
         "sortTypes": -1,
-        "pageSize": 30,
+        "pageSize": 100,
         "pageNumber": 1,
         "reportName": "RPT_BILLBOARD_DAILYDETAILS",
         "columns": "ALL",
-        "filter": f"(TRADE_DATE='{trade_date}')",
     }
     try:
         resp = em_get(url, params=params)
         data = resp.json()
         items = data.get("result", {}).get("data", [])
+        if items:
+            latest = _safe_str(items[0].get("TRADE_DATE", ""))[:10]
+            items = [it for it in items if _safe_str(it.get("TRADE_DATE", ""))[:10] == latest][:30]
         result: list[dict] = []
         for item in items:
             result.append({

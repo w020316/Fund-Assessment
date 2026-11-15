@@ -95,20 +95,24 @@ def test_shareholder_count_uses_renamed_fields(monkeypatch):
     }
 
 
-def test_dragon_tiger_uses_latest_trade_date(monkeypatch):
+def test_dragon_tiger_single_request_and_latest_date(monkeypatch):
+    """只发一次请求(避免 Render 上两次往返超时),并按返回集里的最近交易日截取。"""
     calls = []
 
     def fake_em_get(url, params=None, **kwargs):
         calls.append(dict(params or {}))
-        if "filter" not in (params or {}):
-            return _ok([{"TRADE_DATE": "2026-11-13 00:00:00"}])
-        return _ok([{
-            "SECURITY_CODE": "600519", "SECURITY_NAME_ABBR": "贵州茅台",
-            "CLOSE_PRICE": 1435.26, "CHANGE_RATE": 1.77,
-            "EXPLANATION": "日涨幅偏离值达到7%的前5只证券",
-            "TOTAL_BUY": 1.2e8, "TOTAL_SELL": 9.1e7, "TOTAL_NET": 2.9e7,
-            "TRADE_DATE": "2026-11-13 00:00:00",
-        }])
+        return _ok([
+            {"SECURITY_CODE": "600519", "SECURITY_NAME_ABBR": "贵州茅台",
+             "CLOSE_PRICE": 1435.26, "CHANGE_RATE": 1.77,
+             "EXPLANATION": "日涨幅偏离值达到7%的前5只证券",
+             "TOTAL_BUY": 1.2e8, "TOTAL_SELL": 9.1e7, "TOTAL_NET": 2.9e7,
+             "TRADE_DATE": "2026-11-13 00:00:00"},
+            {"SECURITY_CODE": "000858", "SECURITY_NAME_ABBR": "五粮液",
+             "CLOSE_PRICE": 130.0, "CHANGE_RATE": 0.5,
+             "EXPLANATION": "旧交易日数据",
+             "TOTAL_BUY": 1.0, "TOTAL_SELL": 1.0, "TOTAL_NET": 0.0,
+             "TRADE_DATE": "2026-11-12 00:00:00"},
+        ])
 
     monkeypatch.setattr(ds2, "_cache_get", lambda key: None)
     monkeypatch.setattr(ds2, "_cache_set", lambda key, val, ttl: None)
@@ -116,11 +120,10 @@ def test_dragon_tiger_uses_latest_trade_date(monkeypatch):
 
     result = ds2.get_dragon_tiger()
 
-    assert len(calls) == 2
+    assert len(calls) == 1
     assert calls[0]["reportName"] == "RPT_BILLBOARD_DAILYDETAILS"
-    assert "filter" not in calls[0], "第一次请求应取最近交易日, 不带日期过滤"
-    assert calls[1]["reportName"] == "RPT_BILLBOARD_DAILYDETAILS"
-    assert calls[1]["filter"] == "(TRADE_DATE='2026-11-13')"
+    assert "filter" not in calls[0]
+    assert len(result) == 1, "应只保留最近交易日(2026-11-13)的行"
     assert result == [{
         "code": "600519",
         "name": "贵州茅台",
