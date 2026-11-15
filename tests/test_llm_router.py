@@ -341,6 +341,7 @@ class TestFreeProviderLoading:
             "DEEPSEEK_API_KEY", "DEEPSEEK_API_KEYS", "DEEPSEEK_MODEL", "DEEPSEEK_BASE_URL",
             "CF_ACCOUNT_ID", "CF_API_TOKEN", "CF_MODEL",
             "LY77625_API_KEY", "LY77625_BASE_URL", "LY77625_MODEL", "LY77625_TIMEOUT",
+            "LY77625_PROTOCOL", "LY77625_GEMINI_BASE_URL",
         ]
         for k in llm_envs:
             os.environ.pop(k, None)
@@ -548,6 +549,77 @@ class TestLy77625Provider:
         assert captured["url"] == "https://ly.77625.xyz/v1/chat/completions"
         assert captured["headers"].get("Authorization", "").startswith("Bearer ")
         assert captured["json"]["model"] == "gemini-3.8-flash"
+
+    def test_gemini_protocol_loading(self):
+        """LY77625_PROTOCOL=gemini 切换到原生协议:类型/默认 base_url/模型"""
+        with patch.dict("os.environ",
+                        {"LY77625_API_KEY": "ly-test-key",
+                         "LY77625_PROTOCOL": "gemini"},
+                        clear=True):
+            router = LLMRouter()
+        ly = [p for p in router._providers if p.name == "ly77625"][0]
+        assert ly.provider_type == ProviderType.GEMINI
+        assert ly.base_url == "https://ly.77625.xyz/v1beta"
+        assert ly.model == "gemini-3.8-flash"
+        assert ly.priority == 95
+
+    def test_gemini_protocol_chat_uses_native_endpoint(self):
+        """原生协议命中 /v1beta/models/{m}:generateContent,鉴权走 x-goog-api-key"""
+        with patch.dict("os.environ",
+                        {"LY77625_API_KEY": "ly-test-key",
+                         "LY77625_PROTOCOL": "gemini"},
+                        clear=True):
+            router = LLMRouter()
+
+        captured = {}
+
+        def mock_post(url, **kwargs):
+            captured["url"] = url
+            captured["headers"] = kwargs.get("headers") or {}
+            captured["json"] = kwargs.get("json") or {}
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.json.return_value = {
+                "candidates": [{"content": {"parts": [{"text": "ok-native-gemini"}]}}],
+            }
+            return resp
+
+        with patch("requests.post", side_effect=mock_post):
+            result = router.chat(
+                [{"role": "user", "content": "ping"}], json_mode=True,
+            )
+
+        assert result.content == "ok-native-gemini"
+        assert captured["url"] == (
+            "https://ly.77625.xyz/v1beta/models/gemini-3.8-flash:generateContent"
+        )
+        assert captured["headers"]["x-goog-api-key"] == "ly-test-key"
+        assert captured["json"]["generationConfig"]["responseMimeType"] == "application/json"
+
+    def test_gemini_thought_parts_excluded(self):
+        """思考型模型的 thought 片段不得混入业务回答"""
+        with patch.dict("os.environ",
+                        {"LY77625_API_KEY": "ly-test-key",
+                         "LY77625_PROTOCOL": "gemini",
+                         "LY77625_MODEL": "gemini-4-h"},
+                        clear=True):
+            router = LLMRouter()
+
+        def mock_post(url, **kwargs):
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.json.return_value = {
+                "candidates": [{"content": {"parts": [
+                    {"text": "internal reasoning", "thought": True},
+                    {"text": "final answer"},
+                ]}}],
+            }
+            return resp
+
+        with patch("requests.post", side_effect=mock_post):
+            result = router.chat([{"role": "user", "content": "ping"}])
+
+        assert result.content == "final answer"
 
     def test_failure_is_reported_not_faked(self):
         """上游失败时 chat 抛错(由上层转 503),不返回伪造成功"""

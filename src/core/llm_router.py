@@ -559,15 +559,20 @@ class LLMRouter:
                 priority=65,
             ))
 
-        # ly.77625.xyz(第三方免费模型站,OpenAI 兼容;可用性不保证)
-        # 实测:GET /v1/models 200、gemini-3.8-flash 对话可用(~15s);
-        # x-deepseek-v4.1-flash 返回 502。仅作最后一档兜底,不改变既有优先级。
+        # ly.77625.xyz(第三方免费模型站;可用性不保证)
+        # 实测:OpenAI 兼容层频繁 502(Cloudflare 约 95s),而原生 Gemini 协议
+        # (/v1beta/models/{m}:generateContent) 可稳定路由到同一批模型,
+        # 故提供 LY77625_PROTOCOL=gemini 协议开关(默认 openai,保持既有行为)。
         ly_key = os.getenv("LY77625_API_KEY", "")
         if ly_key:
+            ly_gemini = os.getenv("LY77625_PROTOCOL", "openai").strip().lower() == "gemini"
             self.add_provider(LLMProvider(
                 name="ly77625",
-                provider_type=ProviderType.OPENAI,
-                base_url=os.getenv("LY77625_BASE_URL", "https://ly.77625.xyz/v1"),
+                provider_type=ProviderType.GEMINI if ly_gemini else ProviderType.OPENAI,
+                base_url=os.getenv(
+                    "LY77625_GEMINI_BASE_URL" if ly_gemini else "LY77625_BASE_URL",
+                    "https://ly.77625.xyz/v1beta" if ly_gemini else "https://ly.77625.xyz/v1",
+                ),
                 api_key=ly_key,
                 model=os.getenv("LY77625_MODEL", "gemini-3.8-flash"),
                 priority=95,
@@ -963,7 +968,10 @@ class LLMRouter:
         resp.raise_for_status()
 
         data = resp.json()
-        content = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+        parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+        # 思考型模型(如 gemini-4-h)会把思维链作为 thought=True 的独立 part 返回,
+        # 拼进 content 会污染业务回答,只取非思考片段。
+        content = "".join(p.get("text", "") for p in parts if not p.get("thought"))
 
         if not content:
             raise ValueError(f"Provider [{provider.name}] 返回空内容")
