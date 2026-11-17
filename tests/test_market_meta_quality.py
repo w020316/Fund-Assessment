@@ -224,3 +224,92 @@ class TestMissingQuoteFieldsStayNone:
         assert resp.status_code == 200
         rows = resp.json()
         assert [r["stock_code"] for r in rows] == ["600519"]
+
+
+# ===== C-02 收尾(2026-11-17):stock_realtime / index_realtime / sector_flow /
+# heatmap 四处 `_safe_float(change_pct)` 改 opt_float, 缺失 → None =====
+
+class TestFourQuoteEndpointsKeepNone:
+    """批次 C(8c3d835)只打通了热点榜链; 本类收尾剩下 4 条链。
+
+    上游是腾讯/新浪/交易所, 未见 `-` 占位, 但空串/缺失字段同样存在 ——
+    `_safe_float(item.get("change_pct"))` 一律兜 0 会把"没拿到"画成"0.00%"。
+    口径与 TestMissingQuoteFieldsStayNone 一致: 缺失 → None, 正常数值不变。"""
+
+    def test_stock_realtime_missing_fields_stay_none(self, monkeypatch):
+        """个股行情: 缺失字段 → None; 正常行回归保护; 涨跌额缺失但价/昨收齐全时如实推导。"""
+        rows = [
+            {"code": "000001", "name": "PT金田A", "price": "", "change": None,
+             "change_pct": "-", "volume": None, "amount": "", "high": None,
+             "low": "", "open": None, "prev_close": ""},
+            {"code": "600519", "name": "贵州茅台", "price": 1688.0, "change": None,
+             "change_pct": 1.77, "volume": 1000, "amount": 1.4e9, "high": 1690.0,
+             "low": 1670.0, "open": 1680.0, "prev_close": 1658.6},
+        ]
+        monkeypatch.setattr(market.ds2, "get_realtime_quote_tencent", lambda codes: rows)
+
+        market.cache.clear()
+        data = client.get("/api/market/stock_realtime", params={"codes": "000001,600519"}).json()["data"]
+
+        missing = data[0]
+        assert missing["price"] is None, "空串价格被兜成了 0.0"
+        assert missing["change_pct"] is None, "`-` 被兜成了 0.0"
+        assert missing["change"] is None, "价/昨收也缺失时涨跌额不得伪造成 0"
+        assert missing["volume"] is None and missing["amount"] is None
+        assert missing["high"] is None and missing["low"] is None
+        # 正常行数值不变(回归保护); 涨跌额缺失但价/昨收齐全 → 用真实数据推导
+        ok = data[1]
+        assert ok["price"] == 1688.0 and ok["change_pct"] == 1.77
+        assert ok["change"] == round(1688.0 - 1658.6, 2)
+
+    def test_index_realtime_missing_fields_stay_none(self, monkeypatch):
+        monkeypatch.setattr(market.ds2, "get_index_realtime", lambda: [
+            {"code": "000001", "name": "上证指数", "price": None, "change": "",
+             "change_pct": None, "volume": None, "amount": None},
+            {"code": "399001", "name": "深证成指", "price": 10800.5, "change": 35.2,
+             "change_pct": 0.33, "volume": 1.2e8, "amount": 9.8e11},
+        ])
+
+        market.cache.clear()
+        data = client.get("/api/market/index_realtime").json()["data"]
+
+        assert data[0]["price"] is None and data[0]["change_pct"] is None
+        assert data[0]["change"] is None and data[0]["volume"] is None
+        assert data[1]["price"] == 10800.5 and data[1]["change_pct"] == 0.33
+
+    def test_sector_flow_missing_fields_stay_none(self, monkeypatch):
+        """板块资金流缺失 → None; None 同时被 _flow_field_quality 如实计入完整度。"""
+        monkeypatch.setattr(market.ds2, "get_sector_ranking", lambda: [
+            {"name": "缺失板块", "change_pct": None, "main_net_inflow": None,
+             "main_inflow_pct": None},
+            {"name": "正常板块", "change_pct": 1.2, "main_net_inflow": 5.6e8,
+             "main_inflow_pct": 12.5},
+        ])
+
+        market.cache.clear()
+        payload = client.get("/api/market/sector_flow").json()
+        data = payload["data"]
+
+        assert data[0]["change_pct"] is None
+        assert data[0]["main_net_inflow"] is None
+        assert data[0]["large_order_ratio"] is None
+        assert data[1]["change_pct"] == 1.2 and data[1]["main_net_inflow"] == 5.6e8
+        # None 行不算 non-zero → 完整度 0.5, 字段降级信息必须下发(不许静默);
+        # extra 由 _build_meta 平铺进 _meta(而非嵌套)
+        meta = payload["_meta"]
+        assert meta["field_completeness"]["main_net_inflow"] == 0.5
+
+    def test_heatmap_missing_change_pct_neutral_and_null(self, monkeypatch):
+        """缺失涨跌幅: color 显式降级为中性灰(与"持平"同色), change_pct 保持 null,
+        不冒充"0.00% 持平"。"""
+        monkeypatch.setattr(market.ds2, "get_sector_ranking", lambda: [
+            {"name": "涨", "change_pct": 2.0},
+            {"name": "缺", "change_pct": None},
+        ])
+
+        market.cache.clear()
+        data = client.get("/api/market/heatmap").json()["data"]
+
+        assert data[0]["change_pct"] == 2.0 and data[0]["color"] == "rgb(51,0,0)"
+        assert data[1]["change_pct"] is None
+        assert data[1]["color"] == "rgb(128,128,128)"

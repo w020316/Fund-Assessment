@@ -4149,13 +4149,16 @@ async function loadIndexData() {
   }
 
   // 顶部栏
+  // C-02 收尾(2026-11-17):指数行情字段可能为 null(上游缺失), 不再 Number() 归一。
+  // fmtNum/changeColor 对 null 已渲染「—」/中性色; 涨跌幅缺失时不拼「—%」残渣。
   bar.innerHTML = indices.map(idx => {
     const color = changeColor(idx.change_pct);
     const sign = changeSign(idx.change_pct);
+    const pctKnown = idx.change_pct != null && isFinite(idx.change_pct);
     return `<div class="index-item">
       <span class="index-name">${escapeHtml(idx.name)}</span>
       <span class="index-price" style="color:${color}">${fmtNum(idx.price)}</span>
-      <span class="index-change" style="color:${color}">${sign}${fmtNum(idx.change)} ${sign}${fmtNum(idx.change_pct)}%</span>
+      <span class="index-change" style="color:${color}">${sign}${fmtNum(idx.change)} ${pctKnown ? sign + fmtNum(idx.change_pct) + '%' : '—'}</span>
     </div>`;
   }).join('');
 
@@ -4163,18 +4166,22 @@ async function loadIndexData() {
   container.innerHTML = indices.map(idx => {
     const color = changeColor(idx.change_pct);
     const sign = changeSign(idx.change_pct);
+    // C-02 收尾:缺失(price/change_pct 为 null)不归一成 0 —— 价格缺失不进数字
+    // 滚动(否则 Number("null")/Number("") 会被当成真值), 涨跌幅缺失不拼「%」。
+    const pctKnown = idx.change_pct != null && isFinite(idx.change_pct);
+    const priceKnown = idx.price != null && isFinite(idx.price);
     const svgId = 'spark-' + idx.code.replace(/\./g, '_').replace(/[^\w]/g, '_');
     return `<div class="card">
       <div class="flex-between mb-12">
         <div>
           <div style="font-size:12px;color:var(--text-muted);">${escapeHtml(idx.name)}</div>
-          <div class="qf-count" data-countup="${idx.price}" style="font-size:28px;font-weight:700;color:${color};">—</div>
+          <div class="qf-count" ${priceKnown ? `data-countup="${idx.price}"` : ''} style="font-size:28px;font-weight:700;color:${color};">—</div>
         </div>
         <svg id="${svgId}" class="sparkline" width="100" height="40" viewBox="0 0 100 40"></svg>
       </div>
       <div style="display:flex;gap:16px;font-size:13px;">
         <span style="color:${color};">${sign}${fmtNum(idx.change)}</span>
-        <span style="color:${color};">${sign}${fmtNum(idx.change_pct)}%</span>
+        <span style="color:${color};">${pctKnown ? sign + fmtNum(idx.change_pct) + '%' : '—'}</span>
       </div>
       <!-- ===== STAGE5: freshness ===== K6:数值卡"截至 HH:mm"标识(统一组件) -->
       <div style="margin-top:8px;">${Freshness.html({ asOf: new Date().toTimeString().slice(0,5) })}</div>
@@ -4184,7 +4191,8 @@ async function loadIndexData() {
   // 生成模拟迷你走势线
   indices.forEach(idx => {
     const svgId = 'spark-' + idx.code.replace(/\./g, '_').replace(/[^\w]/g, '_');
-    drawSparkline(svgId, idx.change_pct >= 0, idx.code);
+    // C-02 收尾:JS 里 `null >= 0` 为 true(null 被强转为 0), 缺失涨跌幅不得画成"上涨"走势
+    drawSparkline(svgId, idx.change_pct != null && idx.change_pct >= 0, idx.code);
   });
 
   // 阶段5 signature #2: 首次渲染播放数字滚动; 后续刷新直接写真值
@@ -8379,8 +8387,10 @@ async function loadWatchlist() {
         return {
           code: w.stock_code,
           name: q.name || w.stock_code,
-          price: q.price || 0,
-          change_pct: q.change_pct || 0,
+          // C-02 收尾(2026-11-17):行情缺失保持 null(渲染「—」),
+          // `|| 0` 会把"没拿到行情"伪造成"价格 0.00 / 涨幅 0.00%"
+          price: q.price ?? null,
+          change_pct: q.change_pct ?? null,
           rules: w.rules || []
         };
       });
@@ -8388,8 +8398,9 @@ async function loadWatchlist() {
       list = data.map(w => ({
         code: w.stock_code,
         name: w.stock_code,
-        price: 0,
-        change_pct: 0,
+        // 行情整体获取失败同样如实为 null, 不画 0.00
+        price: null,
+        change_pct: null,
         rules: w.rules || []
       }));
     }

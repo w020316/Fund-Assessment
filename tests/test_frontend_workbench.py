@@ -779,3 +779,56 @@ def test_index_escape_helper_covers_html_metachars():
     for pat, name in ((r"&/g", "&"), (r"</g", "<"), (r">/g", ">"),
                       ('"/g', '"'), (r"'/g", "'")):
         assert pat in body, f"escapeHtml 未处理 {name}"
+
+
+# ===== C-02 收尾(2026-11-17):stock_realtime / index_realtime / sector_flow /
+# heatmap 四端点数值改 nullable 后, 前端消费点不得把 null 归一成 0 =====
+
+def test_render_indices_keeps_null_change_pct():
+    """workbench 指数卡: change_pct 保持原值交给 isNum 系 helper,
+    `Number(null)===0` 会把"没拿到涨跌幅"画成 0.00%(M-04 同款缺陷)。"""
+    js = _js()
+    assert "var pct = Number(it.change_pct);" not in js, "renderIndices 仍在 Number() 归一 change_pct"
+    assert "var pct = it.change_pct;" in js
+
+
+def test_index_bar_and_cards_do_not_render_dash_percent():
+    """指数栏/卡片: 涨跌幅缺失(null)不得拼出「—%」残渣, 价格缺失不得进数字滚动
+    (data-countup="null" → Number("null")=NaN 靠侥幸落「—」, 必须显式守卫)。"""
+    html = _index()
+    # 只锁定 loadIndexData 函数体(消费 /api/market/index_realtime);
+    # loadGlobalIndexBar 消费 /api/global/indices, 属另一条链, 不在本轮范围。
+    start = html.index("async function loadIndexData()")
+    end = html.index("async function loadGlobalIndexBar()")
+    body = html[start:end]
+    assert '${sign}${fmtNum(idx.change_pct)}%' not in body, "指数栏/卡片仍无条件拼接「%」"
+    assert 'class="qf-count" data-countup="${idx.price}"' not in body, "价格缺失时仍无条件进数字滚动"
+    # 新守卫必须存在
+    assert "pctKnown" in body
+    assert "priceKnown" in body
+
+
+def test_index_sparkline_guards_null_change_pct():
+    """`null >= 0` 在 JS 里为 true(null 被强转为 0), 缺失涨跌幅不得画成"上涨"走势。"""
+    html = _index()
+    assert "drawSparkline(svgId, idx.change_pct >= 0" not in html, "sparkline 仍在裸比较 null >= 0"
+    assert "drawSparkline(svgId, idx.change_pct != null && idx.change_pct >= 0" in html
+
+
+def test_watchlist_does_not_coerce_missing_quote_to_zero():
+    """自选股行情缺失不得 `|| 0`(会画成"价格 0.00 / 涨幅 0.00%"), 必须保持 null 渲染「—」。"""
+    html = _index()
+    assert "price: q.price || 0," not in html
+    assert "change_pct: q.change_pct || 0," not in html
+    assert "price: q.price ?? null," in html
+    assert "change_pct: q.change_pct ?? null," in html
+
+
+def test_sector_board_sort_puts_missing_last_and_fmtYi_guards_null():
+    """板块二级页: 缺失涨跌幅不得 `Number(x || 0)` 归一后参与排序(会被排进中段/
+    领跌区, 口径与 workbench renderSectors 的 M-04 一致); fmtYi 对 null 不得经
+    Number(null)===0 画成 "0.00 亿"。"""
+    js = (ROOT / "web/static/js/sector-board.js").read_text(encoding="utf-8")
+    assert "Number(b.change_pct || 0)" not in js, "排序仍把缺失涨跌幅当 0"
+    assert ".concat(noPct);" in js
+    assert "if (v == null || !isFinite(n)) return '—';" in js

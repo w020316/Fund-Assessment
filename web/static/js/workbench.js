@@ -265,7 +265,10 @@
       });
     }
     el.innerHTML = picked.map(function (it) {
-      var pct = Number(it.change_pct);
+      /* C-02 收尾(2026-11-17):change_pct 保持原值, 不再 Number() 归一 ——
+         Number(null)===0 会把"没拿到涨跌幅"画成 0.00%;
+         isNum 系 helper(pctText/clsOf/num)对 null 已渲染「—」/中性色。 */
+      var pct = it.change_pct;
       var c = clsOf(pct);
       return '<div class="wb-idx ' + c + '">'
         + '<div class="wb-idx-top"><span class="wb-idx-name">' + esc(it.name || '—') + '</span></div>'

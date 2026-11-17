@@ -203,17 +203,20 @@ def _schedule_refresh(cache_key: str, fetcher, describe: str) -> None:
 
 
 class StockRealtimeItem(BaseModel):
+    """个股实时行情(C-02 收尾 2026-11-17)。数值字段可为 None —— 上游(腾讯/新浪)
+    对停牌/退市/异常行可能返回空串或缺失字段, 缺失必须如实为空(前端渲染「—」),
+    不能强制成 0 冒充"0.00 / 0.00%"。与 HotStocksItem(M-04)同一口径。"""
     code: str
     name: str
-    price: float
-    change: float
-    change_pct: float
-    volume: float
-    amount: float
-    high: float
-    low: float
-    open: float
-    prev_close: float
+    price: float | None = None
+    change: float | None = None
+    change_pct: float | None = None
+    volume: float | None = None
+    amount: float | None = None
+    high: float | None = None
+    low: float | None = None
+    open: float | None = None
+    prev_close: float | None = None
 
 
 class KlineItem(BaseModel):
@@ -244,13 +247,14 @@ class FundHistoryItem(BaseModel):
 
 
 class IndexRealtimeItem(BaseModel):
+    """指数实时行情(C-02 收尾 2026-11-17)。数值字段可为 None, 缺失渲染「—」。"""
     code: str
     name: str
-    price: float
-    change: float
-    change_pct: float
-    volume: float
-    amount: float
+    price: float | None = None
+    change: float | None = None
+    change_pct: float | None = None
+    volume: float | None = None
+    amount: float | None = None
 
 
 class HotStocksItem(BaseModel):
@@ -271,10 +275,14 @@ class HotStocksResponse(BaseModel):
 
 
 class SectorFlowItem(BaseModel):
+    """板块资金流(C-02 收尾 2026-11-17)。数值字段可为 None:
+    "主力净流入 0" 与 "没拿到资金流" 是两件事, 缺失不得伪造成 0;
+    完整度由 _flow_field_quality 如实计入(None 不算 non-zero), 前端按
+    unavailable_fields / 「—」区分。"""
     sector: str
-    change_pct: float
-    main_net_inflow: float
-    large_order_ratio: float
+    change_pct: float | None = None
+    main_net_inflow: float | None = None
+    large_order_ratio: float | None = None
 
 
 @router.get("/stock_realtime")
@@ -292,22 +300,25 @@ async def stock_realtime(codes: str = Query(..., max_length=200, description="�
         data = await asyncio.to_thread(ds2.get_realtime_quote_tencent, code_list)
         result: list[StockRealtimeItem] = []
         for item in data:
-            price = _safe_float(item.get("price"))
-            prev_close = _safe_float(item.get("prev_close"))
-            change = _safe_float(item.get("change"))
-            if change == 0.0 and price != 0.0 and prev_close != 0.0:
+            # C-02 收尾(2026-11-17):数值字段缺失 → None, 不再 _safe_float 兜 0。
+            # 涨跌额缺失或为 0 且价/昨收齐全时, 用真实数据推导(与旧口径一致);
+            # 价/昨收也缺失时保持 None, 绝不静默当 0。
+            price = opt_float(item.get("price"))
+            prev_close = opt_float(item.get("prev_close"))
+            change = opt_float(item.get("change"))
+            if change in (None, 0.0) and price is not None and prev_close not in (None, 0.0):
                 change = round(price - prev_close, 2)
             result.append(StockRealtimeItem(
                 code=_safe_str(item.get("code")),
                 name=_safe_str(item.get("name")),
                 price=price,
                 change=change,
-                change_pct=_safe_float(item.get("change_pct")),
-                volume=_safe_float(item.get("volume")),
-                amount=_safe_float(item.get("amount")),
-                high=_safe_float(item.get("high")),
-                low=_safe_float(item.get("low")),
-                open=_safe_float(item.get("open")),
+                change_pct=opt_float(item.get("change_pct")),
+                volume=opt_float(item.get("volume")),
+                amount=opt_float(item.get("amount")),
+                high=opt_float(item.get("high")),
+                low=opt_float(item.get("low")),
+                open=opt_float(item.get("open")),
                 prev_close=prev_close,
             ))
         cache.set(cache_key, result)
@@ -465,14 +476,15 @@ async def index_realtime():
         data = await asyncio.to_thread(ds2.get_index_realtime)
         result: list[IndexRealtimeItem] = []
         for item in data:
+            # C-02 收尾(2026-11-17):缺失 → None, 前端渲染「—」, 不伪造成 0。
             result.append(IndexRealtimeItem(
                 code=_safe_str(item.get("code")),
                 name=_safe_str(item.get("name")),
-                price=_safe_float(item.get("price")),
-                change=_safe_float(item.get("change")),
-                change_pct=_safe_float(item.get("change_pct")),
-                volume=_safe_float(item.get("volume")),
-                amount=_safe_float(item.get("amount")),
+                price=opt_float(item.get("price")),
+                change=opt_float(item.get("change")),
+                change_pct=opt_float(item.get("change_pct")),
+                volume=opt_float(item.get("volume")),
+                amount=opt_float(item.get("amount")),
             ))
         cache.set(cache_key, result)
         return {"data": result, "_meta": _build_meta("tencent", cached=False)}
@@ -849,11 +861,12 @@ async def sector_flow():
         data = await asyncio.to_thread(ds2.get_sector_ranking)
         result: list[SectorFlowItem] = []
         for item in data:
+            # C-02 收尾(2026-11-17):缺失 → None, 完整度由 _flow_field_quality 如实计入。
             result.append(SectorFlowItem(
                 sector=_safe_str(item.get("name")),
-                change_pct=_safe_float(item.get("change_pct")),
-                main_net_inflow=_safe_float(item.get("main_net_inflow")),
-                large_order_ratio=_safe_float(item.get("main_inflow_pct")),
+                change_pct=opt_float(item.get("change_pct")),
+                main_net_inflow=opt_float(item.get("main_net_inflow")),
+                large_order_ratio=opt_float(item.get("main_inflow_pct")),
             ))
         cache.set(cache_key, result)
         source = _meta_source("sector_ranking")
@@ -1201,8 +1214,11 @@ async def sector_ranking():
 
 
 class HeatmapItem(BaseModel):
+    """板块热力图条目(C-02 收尾 2026-11-17)。change_pct 可为 None: 缺失时
+    color 显式降级为中性灰(与"持平"同色), change_pct 字段仍如实为 null,
+    不冒充"0.00% 持平"。"""
     name: str
-    change_pct: float
+    change_pct: float | None = None
     color: str
 
 
@@ -1314,8 +1330,12 @@ async def market_heatmap():
         data = await asyncio.to_thread(ds2.get_sector_ranking)
         result: list[HeatmapItem] = []
         for item in data:
-            change_pct = _safe_float(item.get("change_pct"))
-            if change_pct > 0:
+            # C-02 收尾(2026-11-17):缺失涨跌幅不给红/绿色阶(两者都暗示有真值),
+            # 显式降级为中性灰; change_pct 字段仍如实为 null, 不冒充"0.00% 持平"。
+            change_pct = opt_float(item.get("change_pct"))
+            if change_pct is None:
+                color = "rgb(128,128,128)"
+            elif change_pct > 0:
                 intensity = min(int(change_pct * 25.5), 255)
                 color = f"rgb({intensity},0,0)"
             elif change_pct < 0:

@@ -14,8 +14,9 @@
   function esc(s) { return (typeof escapeHtml === 'function') ? escapeHtml(s == null ? '' : String(s)) : ''; }
 
   function fmtYi(v) {
+    // C-02 收尾(2026-11-17):null(上游缺失)不得经 Number(null)===0 画成 "0.00 亿"。
     const n = Number(v);
-    if (!isFinite(n)) return '—';
+    if (v == null || !isFinite(n)) return '—';
     return (n / 1e8).toFixed(2) + ' 亿';
   }
 
@@ -39,7 +40,9 @@
       : '<td class="' + pctCls(Number(item.main_net_inflow)) + '">' + esc(fmtYi(item.main_net_inflow)) + '</td>';
     const ratioCell = ratioUnavailable
       ? '<td>—</td>'
-      : '<td>' + esc(isFinite(Number(item.large_order_ratio)) ? Number(item.large_order_ratio).toFixed(2) : '—') + '</td>';
+      : '<td>' + esc(item.large_order_ratio == null || !isFinite(Number(item.large_order_ratio))
+          ? '—'
+          : Number(item.large_order_ratio).toFixed(2)) + '</td>';
     return '<tr><td>' + esc(idx + 1) + '</td>'
       + '<td>' + esc(item.sector) + '</td>'
       + '<td class="' + pctCls(pct) + '">' + (pctKnown ? esc(sign + pct.toFixed(2) + '%') : '—') + '</td>'
@@ -78,7 +81,15 @@
       if (badge) badge.innerHTML = '';
       return;
     }
-    const sorted = items.slice().sort(function (a, b) { return Number(b.change_pct || 0) - Number(a.change_pct || 0); });
+    /* C-02 收尾(2026-11-17):缺失涨跌幅不得按 0 参与排序(Number(null||0)===0
+       会把"没拿到"排进榜单中段/领跌区)。口径与 workbench.js renderSectors 的
+       M-04 一致: 有值按涨跌幅降序在前, 缺失固定排末尾。 */
+    const hasPct = items.filter(function (it) {
+      return it.change_pct !== null && it.change_pct !== undefined && isFinite(Number(it.change_pct));
+    });
+    const noPct = items.filter(function (it) { return hasPct.indexOf(it) < 0; });
+    const sorted = hasPct.slice().sort(function (a, b) { return b.change_pct - a.change_pct; })
+      .concat(noPct);
     const meta = (r.body && r.body._meta) || {};
     // 后端在资金流字段全 0 时会下发 degraded + unavailable_fields（2026-11-08 起），
     // 据此把整列渲染成 '—' 并给出说明，而不是让 50 行数据一起"说谎"。
