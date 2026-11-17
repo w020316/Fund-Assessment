@@ -1156,3 +1156,129 @@ class TestHoldingChangeHonesty:
         assert result[1]["change"] == "不变"
         assert result[0]["weight"] == 9.85
         assert result[1]["hold_value"] == 2000000.0
+
+
+# ===== C-02(2026-11-17):列名定位 + 季度口径统一 =====
+
+class TestHeaderBasedColumnParsing:
+    """旧解析器用"第一个以 % 结尾的 cell 就是占净值比例"这个启发式 —— 它只因为
+    真实页面「涨跌幅」列为空才成立。一旦上游把涨跌幅渲染成 `1.77%`(服务端格式化),
+    weight_idx 会命中涨跌幅, weight/hold_amount/hold_value **三字段整体错位**,
+    而错位后的数值仍然"看起来合理", 极难发现。"""
+
+    THEAD = (
+        "<thead><tr>"
+        "<th>序号</th><th>股票代码</th><th>股票名称</th><th>最新价</th>"
+        "<th>涨跌幅</th><th>相关资讯</th><th>占净值比例</th>"
+        "<th>持股数（万股）</th><th>持仓市值（万元）</th>"
+        "</tr></thead>"
+    )
+
+    def _html(self, chg_text: str) -> str:
+        row = (
+            "<tr><td>1</td><td><a>600519</a></td><td><a>贵州茅台</a></td>"
+            f"<td>1435.26</td><td>{chg_text}</td><td>股吧行情</td>"
+            "<td>6.92%</td><td>36.76</td><td>46,266.87</td></tr>"
+        )
+        return (
+            "<div class='boxitem w790'><h4>2026年3季度股票投资明细</h4>"
+            f"<table>{self.THEAD}<tbody>{row}</tbody></table></div>"
+        )
+
+    def test_percent_suffixed_change_rate_does_not_shift_columns(self):
+        """涨跌幅带 `%` 时三字段仍必须正确(改前会命中涨跌幅列 → 全错位)。"""
+        html = self._html("1.77%")
+        with patch.object(fund_holdings._EM_FUND_SESSION, "get", _mock_em_get(_em_text(html))):
+            result = _fetch_fund_holdings_em("110011")
+
+        assert len(result) == 1
+        assert result[0]["code"] == "600519"
+        assert result[0]["name"] == "贵州茅台"
+        assert result[0]["weight"] == pytest.approx(6.92, abs=1e-6)
+        assert result[0]["hold_amount"] == pytest.approx(36.76, abs=1e-6)
+        assert result[0]["hold_value"] == pytest.approx(46266.87, abs=1e-6)
+
+    def test_empty_change_rate_same_result(self):
+        """涨跌幅为空(旧 fixture 的形态)与带 % 的解析结果必须一致。"""
+        with patch.object(fund_holdings._EM_FUND_SESSION, "get", _mock_em_get(_em_text(self._html("--")))):
+            a = _fetch_fund_holdings_em("110011")
+        with patch.object(fund_holdings._EM_FUND_SESSION, "get", _mock_em_get(_em_text(self._html("1.77%")))):
+            b = _fetch_fund_holdings_em("110011")
+
+        assert [(r["weight"], r["hold_amount"], r["hold_value"]) for r in a] == \
+               [(r["weight"], r["hold_amount"], r["hold_value"]) for r in b]
+
+    def test_resolve_columns_maps_by_header_text(self):
+        header = ["序号", "股票代码", "股票名称", "最新价", "涨跌幅", "相关资讯",
+                  "占净值比例", "持股数（万股）", "持仓市值（万元）"]
+        cols = fund_holdings._resolve_columns(header)
+
+        assert cols == {"code": 1, "name": 2, "weight": 6, "hold_amount": 7, "hold_value": 8}
+
+    def test_resolve_columns_returns_empty_when_incomplete(self):
+        """表头不全时返回 {} → 调用方退回旧版定位(不猜错列)。"""
+        assert fund_holdings._resolve_columns(["序号", "股票代码"]) == {}
+
+
+class TestQuarterCaliber:
+    """C-02: em 源固定取"今年"、1~4 月当年 Q1 未披露 → 空 → [], 而失败文案写成
+    "基金可能无持仓披露"; akshare 兜底却映射到 {year-1}4 —— 两源口径不一致。"""
+
+    @pytest.mark.parametrize("month,expected", [
+        (1, (2025, 4)), (3, (2025, 4)),      # 年初: 最新已披露是上一年年报
+        (4, (2026, 1)), (6, (2026, 1)),
+        (7, (2026, 2)), (9, (2026, 2)),
+        (10, (2026, 3)), (12, (2026, 3)),
+    ])
+    def test_latest_disclosed_quarter(self, month, expected):
+        from datetime import datetime as _dt
+        assert fund_holdings._latest_disclosed_quarter(_dt(2026, month, 15)) == expected
+
+    def test_fetch_retries_previous_year_when_current_year_empty(self):
+        """当年返回空(1~4 月的典型情形)时必须退一年再请求, 而不是直接 []。"""
+        calls: list[str] = []
+        good_html = (
+            "<div class='boxitem w790'><h4>2025年4季度股票投资明细</h4><table><tbody>"
+            + _em_row(1, "600519", "贵州茅台", "6.92", "36.76", "46,266.87", "2025年4季度", "--")
+            + "</tbody></table></div>"
+        )
+
+        def fake_get(url, params=None, **kwargs):
+            calls.append((params or {}).get("year"))
+            resp = MagicMock()
+            resp.text = _em_text(good_html) if len(calls) > 1 else _em_text("")
+            return resp
+
+        with patch.object(fund_holdings._EM_FUND_SESSION, "get", fake_get), \
+             patch.object(fund_holdings, "_latest_disclosed_quarter", lambda now=None: (2026, 1)):
+            result = _fetch_fund_holdings_em("110011")
+
+        assert calls == ["2026", "2025"], f"未按'当年空→上一年'重试, 实际={calls}"
+        assert len(result) == 1 and result[0]["code"] == "600519"
+
+    def test_empty_result_is_cached_briefly(self, monkeypatch):
+        """空结果只缓存 10 分钟(旧实现 12 小时 → 用户一上午看到空重仓股)。"""
+        ttls: list[float] = []
+        monkeypatch.setattr(fund_holdings.ds2, "_cache_get", lambda key: None)
+        monkeypatch.setattr(fund_holdings.ds2, "_cache_set",
+                            lambda key, val, ttl: ttls.append(ttl))
+        monkeypatch.setattr(fund_holdings, "_fetch_fund_holdings_em", lambda code, topline=10: [])
+        monkeypatch.setattr(fund_holdings, "_fetch_fund_holdings_ak", lambda code: [])
+
+        fund_holdings.get_fund_holdings("110011")
+
+        assert ttls == [600], f"空结果缓存时长不对: {ttls}"
+
+    def test_non_empty_result_cached_long(self, monkeypatch):
+        """有数据仍按季报节奏长缓存(回归保护)。"""
+        ttls: list[float] = []
+        monkeypatch.setattr(fund_holdings.ds2, "_cache_get", lambda key: None)
+        monkeypatch.setattr(fund_holdings.ds2, "_cache_set",
+                            lambda key, val, ttl: ttls.append(ttl))
+        monkeypatch.setattr(fund_holdings, "_fetch_fund_holdings_em",
+                            lambda code, topline=10: [{"code": "600519"}])
+        monkeypatch.setattr(fund_holdings, "_fetch_fund_holdings_ak", lambda code: [])
+
+        fund_holdings.get_fund_holdings("110011")
+
+        assert ttls == [12 * 3600]

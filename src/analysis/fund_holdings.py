@@ -72,6 +72,62 @@ def _current_year_month() -> tuple[str, str]:
     return str(now.year), f"{now.month:02d}"
 
 
+# C-02(2026-11-17):"最近一个**已披露**的报告期"的唯一口径。
+# 旧实现两条链路各算一套: em 源固定取"今年"(`year=<今年> month=""`), 1~4 月时
+# 当年的 Q1 还没披露、上游直接返回空 → `[]`, 而失败文案还写成"基金可能无持仓披露"
+# (把口径问题说成基金问题); akshare 兜底却把 1~3 月映射到 `{year-1}4`。两源不一致。
+# 这里按披露节奏给出保守映射(与 akshare 兜底原有映射一致), 两源共用。
+_QUARTER_LABEL = {1: "1季度", 2: "2季度", 3: "3季度", 4: "4季度"}
+
+
+def _latest_disclosed_quarter(now: datetime | None = None) -> tuple[int, int]:
+    """返回 (年, 季) —— 当前时点**最近一个已披露**的定期报告期。
+
+    披露节奏(法定截止日): Q1 4/30、Q2 8/31、Q3 10/31、Q4(年报) 次年 4/30。
+    用保守的月份分档(与 akshare 兜底一致), 保证两条链路取同一个报告期。
+    """
+    today = now or datetime.now()
+    month = today.month
+    if month <= 3:
+        return today.year - 1, 4
+    if month <= 6:
+        return today.year, 1
+    if month <= 9:
+        return today.year, 2
+    return today.year, 3
+
+
+def _quarter_text(year: int, quarter: int) -> str:
+    return f"{year}年{_QUARTER_LABEL[quarter]}"
+
+
+# C-02:按**表头文字**定位列, 不再用"第一个以 % 结尾的 cell 就是占净值比例"。
+# 那个启发式只因为真实页面「涨跌幅」列为空才成立;一旦上游把涨跌幅渲染成 `1.77%`,
+# weight_idx 会命中涨跌幅 → weight/hold_amount/hold_value 三字段整体错位,
+# 而且错位后的数值仍然"看起来合理", 极难发现。
+_HEADER_KEYS: dict[str, tuple[str, ...]] = {
+    "code": ("股票代码", "代码"),
+    "name": ("股票名称", "名称"),
+    "weight": ("占净值比例", "占净值", "净值比例"),
+    "hold_amount": ("持股数", "持股数量", "持股"),
+    "hold_value": ("持仓市值", "市值"),
+}
+
+
+def _resolve_columns(header_cells: list[str]) -> dict[str, int]:
+    """按表头文字解析列下标;任一必需列缺失则返回 {} (调用方退回旧版定位)。"""
+    resolved: dict[str, int] = {}
+    for field, keys in _HEADER_KEYS.items():
+        for index, raw in enumerate(header_cells):
+            text = raw.replace(" ", "").replace("\u3000", "")
+            if any(key in text for key in keys):
+                resolved[field] = index
+                break
+    if len(resolved) < len(_HEADER_KEYS):
+        return {}
+    return resolved
+
+
 def _fetch_fund_holdings_em(fund_code: str, topline: int = 10) -> list[dict]:
     """东方财富基金重仓股抓取
 
@@ -82,18 +138,23 @@ def _fetch_fund_holdings_em(fund_code: str, topline: int = 10) -> list[dict]:
     Returns:
         [{"code", "name", "weight", "hold_amount", "hold_value", "quarter", "change"}, ...]
     """
-    year, month = _current_year_month()
     url = "https://fundf10.eastmoney.com/FundArchivesDatas.aspx"
-    params = {
-        "type": "jjcc",
-        "code": fund_code,
-        "topline": topline,
-        "year": year,
-        "month": "",
-    }
+    # C-02: 先按"最近已披露报告期的年份"取;该年为空再退一年。
+    # 旧实现无条件取"今年", 1~4 月（当年 Q1 尚未披露）必然拿到空 → []。
+    target_year, _target_quarter = _latest_disclosed_quarter()
     try:
-        resp = _EM_FUND_SESSION.get(url, params=params, timeout=8)
-        text = resp.text
+        text = ""
+        for year in (target_year, target_year - 1):
+            resp = _EM_FUND_SESSION.get(url, params={
+                "type": "jjcc",
+                "code": fund_code,
+                "topline": topline,
+                "year": str(year),
+                "month": "",
+            }, timeout=8)
+            text = resp.text
+            if "apidata" in text and "content" in text and re.search(r'boxitem|<tr', text):
+                break
         # 接口返回 var apidata={ content:"<html>...</html>",arryear:[...],... };
         m = re.search(r'apidata\s*=\s*({.*?})\s*;', text, re.DOTALL)
         if not m:
@@ -108,7 +169,11 @@ def _fetch_fund_holdings_em(fund_code: str, topline: int = 10) -> list[dict]:
         # 提取content字段(HTML)
         content_m = re.search(r'content\s*:\s*"(.*?)"\s*,', js_obj, re.DOTALL)
         if not content_m:
-            _set_fetch_reason(fund_code, "em接口返回但无content字段(基金可能无持仓披露)")
+            _set_fetch_reason(
+                fund_code,
+                "em接口返回但无content字段(已按最近披露报告期 "
+                f"{_quarter_text(target_year, _target_quarter)} 及上一年各请求一次)",
+            )
             return []
         html = content_m.group(1)
         # 反转义
@@ -126,6 +191,12 @@ def _fetch_fund_holdings_em(fund_code: str, topline: int = 10) -> list[dict]:
         for block in blocks:
             qm = re.search(r"(\d{4}年\d季度)", block)
             quarter = qm.group(1) if qm else ""
+            # C-02: 有表头就按列名定位(权威); 老版/无表头响应退回旧启发式, 保持兼容
+            header = [
+                re.sub(r"<[^>]+>", "", c).strip()
+                for c in re.findall(r"<th[^>]*>(.*?)</th>", block, re.DOTALL)
+            ]
+            columns = _resolve_columns(header)
             rows = re.findall(r'<tr[^>]*>(.*?)</tr>', block, re.DOTALL)
             for row in rows:
                 cells = re.findall(r'<td[^>]*>(.*?)</td>', row, re.DOTALL)
@@ -133,23 +204,30 @@ def _fetch_fund_holdings_em(fund_code: str, topline: int = 10) -> list[dict]:
                     continue
                 cells = [re.sub(r'<[^>]+>', '', c).strip() for c in cells]
                 try:
-                    code, name = cells[1], cells[2]
-                    weight_idx = next(
-                        (i for i, c in enumerate(cells) if c.endswith("%")), -1
-                    )
-                    if weight_idx < 0:
-                        # 旧版列序(序号|代码|名称|比例|持股|市值),比例为空时靠它兜底
-                        weight_idx = 3
-                    if weight_idx + 2 >= len(cells):
+                    if columns:
+                        code_idx, name_idx = columns["code"], columns["name"]
+                        weight_idx = columns["weight"]
+                        amount_idx, value_idx = columns["hold_amount"], columns["hold_value"]
+                    else:
+                        code_idx, name_idx = 1, 2
+                        # 旧版列序(序号|代码|名称|比例|持股|市值);无表头时才用 % 猜
+                        weight_idx = next(
+                            (i for i, c in enumerate(cells) if c.endswith("%")), -1
+                        )
+                        if weight_idx < 0:
+                            weight_idx = 3
+                        amount_idx, value_idx = weight_idx + 1, weight_idx + 2
+                    if max(code_idx, name_idx, weight_idx, amount_idx, value_idx) >= len(cells):
                         continue
+                    code, name = cells[code_idx], cells[name_idx]
                     if not quarter:
                         for c in cells:
                             if re.search(r"\d{4}年\d季度|\d{4}Q\d", c):
                                 quarter = c
                                 break
                     weight = float(cells[weight_idx].replace("%", "") or 0)
-                    hold_amount = float(cells[weight_idx + 1].replace(",", "").replace("--", "0") or 0)
-                    hold_value = float(cells[weight_idx + 2].replace(",", "").replace("--", "0") or 0)
+                    hold_amount = float(cells[amount_idx].replace(",", "").replace("--", "0") or 0)
+                    hold_value = float(cells[value_idx].replace(",", "").replace("--", "0") or 0)
                     # D-05(2026-11-17):东财改版后「持仓变化」不再是逐行文本列, 而是
                     # 「相关资讯」列里的一个 `变动详情` 链接;旧实现匹配不到
                     # 新进/增持/减持 就**无条件落到 "不变"** —— 把"无法判定"写成了
@@ -187,10 +265,15 @@ def _fetch_fund_holdings_em(fund_code: str, topline: int = 10) -> list[dict]:
                     logger.debug(f"fund_holdings_em: 解析行失败: {e}, cells={cells}")
                     continue
         if result:
-            # 接口一次返回本年度多个季度,只保留最新一期(分块顺序由新到旧)
-            latest = result[0]["quarter"]
-            if latest:
-                result = [r for r in result if r["quarter"] == latest]
+            # C-02: 保留最新一期时按 (年, 季) **数值比较**取最大, 不再依赖
+            # "接口分块顺序由新到旧"这个未写进契约的隐式约定。
+            def _quarter_key(text: str) -> tuple[int, int]:
+                matched = re.match(r"(\d{4})年(\d)季度", text or "")
+                return (int(matched.group(1)), int(matched.group(2))) if matched else (0, 0)
+
+            newest = max(_quarter_key(row["quarter"]) for row in result)
+            if newest != (0, 0):
+                result = [row for row in result if _quarter_key(row["quarter"]) == newest]
         return result[:topline]
     except Exception as e:
         _set_fetch_reason(fund_code, f"em接口请求异常: {e}")
@@ -204,19 +287,10 @@ def _fetch_fund_holdings_ak(fund_code: str) -> list[dict]:
         _set_fetch_reason(fund_code, "akshare未安装")
         return []
     try:
-        # 季度日期
-        now = datetime.now()
-        year = now.year
         # akshare 季度参数: 20241, 20242, 20243, 20244
-        quarter_month = now.month
-        if quarter_month <= 3:
-            quarter = f"{year - 1}4"
-        elif quarter_month <= 6:
-            quarter = f"{year}1"
-        elif quarter_month <= 9:
-            quarter = f"{year}2"
-        else:
-            quarter = f"{year}3"
+        # C-02: 与 em 源共用同一个"最近已披露报告期"口径, 不再各算一套。
+        quarter_year, quarter_no = _latest_disclosed_quarter()
+        quarter = f"{quarter_year}{quarter_no}"
         df = ak.fund_portfolio_hold_em(symbol=fund_code, date=quarter)
         if df is None or df.empty:
             return []
@@ -260,8 +334,9 @@ def get_fund_holdings(fund_code: str) -> list[dict]:
     if holdings:
         _set_fetch_reason(fund_code, "")  # 成功:清除失败原因
 
-    # 缓存12小时(季报数据变化慢)
-    ds2._cache_set(cache_key, holdings, ttl=12 * 3600)
+    # C-02: 有数据才按季报节奏长缓存(12h);**空结果只放 10 分钟** ——
+    # 旧实现空结果也缓存 12h, 用户一上午都看到空重仓股(季报本身不会一天变两次)。
+    ds2._cache_set(cache_key, holdings, ttl=12 * 3600 if holdings else 600)
     return holdings
 
 
