@@ -636,3 +636,23 @@ class TestBlockTradePercentSemantics:
         rows = client.get("/api/market/block_trades", params={"code": "300003"}).json()["data"]
         assert len(rows) == 1
         assert rows[0]["premium_pct"] is None
+
+
+class TestNorthboundSplitHonesty:
+    """A-01(2026-11-17):北向只有合计时, 路由层不得把 None 强转成 0.0。"""
+
+    def test_total_only_keeps_null_sh_sz(self, client, monkeypatch):
+        market.cache.clear()
+        monkeypatch.setattr(
+            market.ds2, "get_northbound_flow_realtime",
+            lambda: {"date": "2026-11-16", "total_net_inflow": 5e9,
+                     "sh_net_inflow": None, "sz_net_inflow": None,
+                     "sh_sz_split_available": False},
+        )
+
+        data = client.get("/api/market/northbound").json()["data"]
+
+        assert data["total_net_inflow"] == 5e9
+        assert data["sh_net_inflow"] is None, "拆不出来的沪股通不能显示成 0 元"
+        assert data["sz_net_inflow"] is None
+        assert data["sh_sz_split_available"] is False

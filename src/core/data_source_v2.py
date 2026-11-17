@@ -2518,8 +2518,13 @@ def get_northbound_flow_realtime() -> dict:
                 result = {
                     "date": _safe_str(item.get("TRADE_DATE", ""))[:10]
                     or datetime.now().strftime("%Y-%m-%d"),
-                    "sh_net_inflow": 0.0,
-                    "sz_net_inflow": 0.0,
+                    # 2026-11-17(A-01):上游只恢复"合计净额",没有沪深拆分明细。
+                    # 旧实现把 sh/sz 写成 0.0 + sh_sz_split_available=False, 但下游
+                    # (market_assessment)只看 bool(northbound), 把 0.0 原样输出成
+                    # "沪股通净流入 0 亿", 前端据此显示真实的 0.00亿 —— 伪造数据。
+                    # 现在拆不出来的部分一律 None(不可得), 由消费方按「—」渲染。
+                    "sh_net_inflow": None,
+                    "sz_net_inflow": None,
                     "total_net_inflow": total_net,
                     "sh_sz_split_available": False,
                 }

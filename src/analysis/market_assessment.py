@@ -248,6 +248,11 @@ async def get_capital_flow_overview() -> dict[str, Any]:
     # 北向净流入自 2024-08 停止披露: 缺失时输出 None 而不是 0, 前端据此显示「—」,
     # 也避免把"没数据"读成"净流入恰为 0"。
     nb_ok = bool(northbound)
+    # A-01(2026-11-17):上游可能"只恢复合计、没有沪深拆分"(数据源侧标记
+    # sh_sz_split_available=False)。旧实现只判 nb_ok, 把数据源写死的 0.0 原样
+    # 输出成"沪股通净流入 0 亿" —— 与"没拿到拆分"不是一回事。这里必须把 flag
+    # 一路带到输出, 并对 sh/sz 单独判可拆性。
+    nb_split_ok = nb_ok and northbound.get("sh_sz_split_available") is not False
     return {
         "northbound": {
             "available": nb_ok,
@@ -257,12 +262,14 @@ async def get_capital_flow_overview() -> dict[str, Any]:
             ),
             "sh_net_inflow": (
                 round(float(northbound.get("sh_net_inflow", 0) or 0) / 1_0000_0000, 2)
-                if nb_ok else None
+                if nb_split_ok else None
             ),
             "sz_net_inflow": (
                 round(float(northbound.get("sz_net_inflow", 0) or 0) / 1_0000_0000, 2)
-                if nb_ok else None
+                if nb_split_ok else None
             ),
+            # 透传拆分可用性:前端据此决定沪深两格显示数值还是「—」
+            "sh_sz_split_available": nb_split_ok,
             "date": northbound.get("date", ""),
         },
         "sector_main_flow": {

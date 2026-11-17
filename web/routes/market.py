@@ -1443,8 +1443,10 @@ class MarketWideStatsResponse(BaseModel):
 class NorthboundFlowItem(BaseModel):
     date: str = ""
     total_net_inflow: float = 0.0
-    sh_net_inflow: float = 0.0
-    sz_net_inflow: float = 0.0
+    # A-01(2026-11-17):拆不出来时必须是 None(前端渲染「—」),不能用 0.0 冒充
+    # "沪股通净流入 0 元"。
+    sh_net_inflow: float | None = None
+    sz_net_inflow: float | None = None
     # False 表示只有合计、没有沪深拆分明细(上游净额字段已停更时的恢复路径)
     sh_sz_split_available: bool = True
 
@@ -1469,8 +1471,15 @@ async def northbound():
         result = NorthboundFlowItem(
             date=_safe_str(data.get("date", "")),
             total_net_inflow=_safe_float(data.get("total_net_inflow", 0)),
-            sh_net_inflow=_safe_float(data.get("sh_net_inflow", 0)),
-            sz_net_inflow=_safe_float(data.get("sz_net_inflow", 0)),
+            # 只有合计、没有沪深拆分时必须给 None:0.0 会被读成"净流入恰为 0"
+            sh_net_inflow=(
+                _safe_float(data.get("sh_net_inflow", 0))
+                if data.get("sh_sz_split_available", True) is not False else None
+            ),
+            sz_net_inflow=(
+                _safe_float(data.get("sz_net_inflow", 0))
+                if data.get("sh_sz_split_available", True) is not False else None
+            ),
             sh_sz_split_available=bool(data.get("sh_sz_split_available", True)),
         )
         cache.set(cache_key, result.model_dump())

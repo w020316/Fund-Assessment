@@ -347,3 +347,23 @@ def test_northbound_resumes_with_total_only(monkeypatch):
     assert result["total_net_inflow"] == 5.0e9
     assert result["date"] == "2026-11-13"
     assert result["sh_sz_split_available"] is False
+
+def test_northbound_total_only_keeps_split_none(monkeypatch):
+    """A-01(2026-11-17):只有合计净额时, sh/sz 必须是 None 而不是 0.0。
+
+    数据源侧旧实现写死 0.0 + sh_sz_split_available=False, 下游只判 bool(northbound),
+    于是 0.0 一路输出成"沪股通净流入 0 亿"。这里锁死"不可得 = None"。
+    """
+    monkeypatch.setattr(ds2, "_cache_get", lambda key: None)
+    monkeypatch.setattr(ds2, "_cache_set", lambda key, val, ttl: None)
+    monkeypatch.setattr(ds2, "em_get", lambda *a, **k: _FakeResp({"result": {"data": [{
+        "TRADE_DATE": "2026-11-16 00:00:00", "DEAL_AMT": 111733.79,
+        "NET_DEAL_AMT": 5.0e9, "FUND_INFLOW": None,
+    }]}}))
+
+    result = ds2.get_northbound_flow_realtime()
+
+    assert result["total_net_inflow"] == 5.0e9
+    assert result["sh_net_inflow"] is None
+    assert result["sz_net_inflow"] is None
+    assert result["sh_sz_split_available"] is False

@@ -283,6 +283,51 @@ class TestMarketThermometerEndToEnd:
         assert nb["sz_net_inflow"] is None
 
     @pytest.mark.asyncio
+    async def test_capital_flow_overview_total_only_keeps_split_none(self):
+        """A-01(2026-11-17):上游只恢复"合计净额"、没有沪深拆分时,
+        sh/sz 必须是 None 且把 sh_sz_split_available=False 透传给前端。
+
+        旧实现只判 `bool(northbound)`,把数据源写死的 0.0 原样输出成
+        "沪股通净流入 0 亿" —— 用户会把"没拿到拆分数据"读成"两市都没净流入"。
+        """
+        total_only = {
+            "date": "2026-11-16",
+            "total_net_inflow": 50 * 1_0000_0000,
+            "sh_net_inflow": None,
+            "sz_net_inflow": None,
+            "sh_sz_split_available": False,
+        }
+        with patch.object(market_assessment.ds2, "get_northbound_flow_realtime", return_value=total_only):
+            with patch.object(market_assessment.ds2, "get_sector_ranking", return_value=[]):
+                result = await get_capital_flow_overview()
+
+        nb = result["northbound"]
+        assert nb["available"] is True
+        assert nb["total_net_inflow"] == 50.0
+        assert nb["sh_net_inflow"] is None
+        assert nb["sz_net_inflow"] is None
+        assert nb["sh_sz_split_available"] is False
+
+    @pytest.mark.asyncio
+    async def test_capital_flow_overview_split_available_keeps_numbers(self):
+        """拆分可用时(flag 缺省/True)沪深数值照旧输出, 不得因为加 flag 而丢数据。"""
+        with_split = {
+            "date": "2026-11-16",
+            "total_net_inflow": 80 * 1_0000_0000,
+            "sh_net_inflow": 50 * 1_0000_0000,
+            "sz_net_inflow": 30 * 1_0000_0000,
+            "sh_sz_split_available": True,
+        }
+        with patch.object(market_assessment.ds2, "get_northbound_flow_realtime", return_value=with_split):
+            with patch.object(market_assessment.ds2, "get_sector_ranking", return_value=[]):
+                result = await get_capital_flow_overview()
+
+        nb = result["northbound"]
+        assert nb["sh_net_inflow"] == 50.0
+        assert nb["sz_net_inflow"] == 30.0
+        assert nb["sh_sz_split_available"] is True
+
+    @pytest.mark.asyncio
     async def test_market_assessment_signal_when_northbound_missing(self):
         """北向缺失时资金信号必须说明"已停止披露",不能写成小幅净流出。"""
         mock_sectors = [{"change_pct": 2.0, "main_net_inflow": 20 * 1_0000_0000, "name": "白酒"}] * 8 + \
