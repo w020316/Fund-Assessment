@@ -949,7 +949,19 @@
   #page-workbench .wb-title { font-size: 17px; }
   #page-workbench .wb-head { gap: 8px; }
   #page-workbench .wb-head-right { width: 100%; justify-content: flex-end; }
-  #page-workbench .wb-btn { min-height: 40px; }
+  /* C-04(2026-11-17):移动端触摸目标必须 ≥48px。
+     原来 .wb-btn 只提到 40px(低于门槛),而热门股 TOP5 与资金连增的每一行
+     (.wb-hot-row ≈29px)和 .wb-link(≈19px)完全没有移动端放大规则 ——
+     工作台是默认落地页, 这三处正是最高频的点击目标。
+     用 min-height + 垂直 padding 撑高, 不改字号(避免行高塌/文字挤压)。 */
+  #page-workbench .wb-btn { min-height: 48px; }
+  #page-workbench .wb-hot-row { padding: 14px 6px; min-height: 48px; }
+  #page-workbench .wb-link {
+    min-height: 48px;
+    padding: 0 8px;
+    display: inline-flex;
+    align-items: center;
+  }
   #page-workbench .wb-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   #page-workbench .wb-mini-row,
   #page-workbench .wb-phase-metrics { grid-template-columns: 1fr; }

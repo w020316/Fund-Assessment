@@ -327,3 +327,43 @@ def test_render_portfolio_handles_null_pnl():
     assert "total_est_day_pnl || 0" not in body
     assert "pnlKnown ? fmtMoney(Number(p.est_day_pnl)) : '—'" in body
     assert "totalKnown ? fmtMoney(Number(total)) : '—'" in body
+
+
+# ===== C-04(2026-11-17):移动端触摸目标 ≥48px =====
+
+def _media_block(css: str, query: str = "@media (max-width: 640px)") -> str:
+    """按花括号配平截取某个 @media 块的内容(只断言块内规则, 不做全文匹配)。"""
+    start = css.index(query)
+    brace = css.index("{", start)
+    depth = 0
+    for i in range(brace, len(css)):
+        ch = css[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return css[brace:i + 1]
+    raise AssertionError(f"{query} 花括号未配平")
+
+
+def test_mobile_touch_targets_are_at_least_48px():
+    """工作台是默认落地页, 移动端 .wb-btn / .wb-hot-row / .wb-link 必须 ≥48px。
+
+    改前: .wb-btn 只有 40px(低于门槛), .wb-hot-row(≈29px)与 .wb-link(≈19px)
+    完全没有移动端放大规则。
+    """
+    block = _media_block(WB_CSS.read_text(encoding="utf-8"))
+
+    assert "min-height: 48px" in block
+    for selector, extra in (
+        ("#page-workbench .wb-btn", "min-height: 48px"),
+        ("#page-workbench .wb-hot-row", "min-height: 48px"),
+        ("#page-workbench .wb-link", "min-height: 48px"),
+    ):
+        assert selector in block, f"媒体查询块里缺少 {selector}"
+        seg = block[block.index(selector):]
+        seg = seg[:seg.index("}")] if "}" in seg else seg
+        assert extra in seg, f"{selector} 未设 {extra}"
+    # 反向断言: 不得残留旧的低门槛值
+    assert "min-height: 40px" not in block
