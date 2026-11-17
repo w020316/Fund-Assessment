@@ -110,10 +110,24 @@ def _status(entry: dict[str, Any]) -> str:
 
 
 def is_down(name: str) -> bool:
-    """该源是否已判定 down(连续失败 ≥ DOWN_THRESHOLD)。调用方可据此暂停重试。"""
+    """该源是否已判定 down(连续失败 ≥ DOWN_THRESHOLD)。调用方可据此暂停重试。
+
+    A-02(2026-11-17):这里**不能**复用 :func:`_status`。``_status`` 有一条老规则
+    「``last_success_ts is None`` → down」,本意是让前端在"本进程从未成功过"时
+    显示 down;但 ``ddx_streak._paused()`` 把 ``is_down()`` 当作"是否暂停该源"的
+    开关 —— 进程重启后健康度状态是空的,东财只要抖一次
+    (``consecutive_failures=1``,而 ``last_success_ts`` 仍为 None),就会被判 down
+    并被整轮跳过 ``_SOURCE_RETRY_AFTER``(600s),表现为"冷启动首败即放弃整轮"。
+
+    暂停语义只应看"连续失败次数"(``record_failure`` 递增、
+    ``record_success`` 清零),与"历史上是否成功过"无关;
+    展示语义(前端状态徽标)继续走 ``_status``,两者的口径差异是有意的。
+    """
     with _lock:
         entry = _state.get(name)
-        return entry is not None and _status(entry) == "down"
+        if entry is None:
+            return False
+        return entry["consecutive_failures"] >= DOWN_THRESHOLD
 
 
 def seconds_since_attempt(name: str) -> float | None:

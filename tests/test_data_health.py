@@ -199,3 +199,35 @@ class TestRoute:
         for item in body["sources"]:
             assert {"name", "label", "status", "last_error",
                     "consecutive_failures", "last_count"} <= set(item)
+
+
+class TestIsDownGate:
+    """A-02(2026-11-17):`is_down()` 是"是否暂停该源"的开关,口径只认连续失败次数。
+
+    旧实现复用 `_status()`,而 `_status()` 有「last_success_ts is None → down」的老规则;
+    进程刚重启时健康度状态是空的,东财抖一次(consecutive_failures=1)就被判 down,
+    `ddx_streak._paused()` 于是整轮跳过该源 600s —— 冷启动首败即放弃。
+    """
+
+    def test_single_failure_is_not_down(self):
+        data_health.record_failure("ddx_em", "one blip")
+        assert data_health.is_down("ddx_em") is False
+        # 展示语义不变: 从未成功过 → 前端仍标 down(这是给用户看的状态, 不是暂停开关)
+        assert _source("ddx_em")["status"] == "down"
+        assert _source("ddx_em")["consecutive_failures"] == 1
+
+    def test_threshold_failures_is_down(self):
+        for i in range(data_health.DOWN_THRESHOLD):
+            data_health.record_failure("ddx_em", f"fail{i}")
+        assert data_health.is_down("ddx_em") is True
+
+    def test_success_clears_down(self):
+        for i in range(data_health.DOWN_THRESHOLD):
+            data_health.record_failure("ddx_em", f"fail{i}")
+        assert data_health.is_down("ddx_em") is True
+
+        data_health.record_success("ddx_em", 5)
+        assert data_health.is_down("ddx_em") is False
+
+    def test_never_reported_source_is_not_down(self):
+        assert data_health.is_down("never_reported_source") is False
