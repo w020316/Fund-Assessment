@@ -85,7 +85,7 @@ body.hud-theme .topbar{
   -webkit-backdrop-filter:blur(16px) saturate(130%);
   border-bottom:1px solid #1C2A3D;
 }
-body.hud-theme .logo{font-family:var(--qf-font-display);font-size:15px;letter-spacing:.09em}
+body.hud-theme .logo{font-family:var(--qf-font-display);font-size:14px;letter-spacing:.09em}
 body.hud-theme .logo-icon{
   width:32px;height:32px;border-radius:9px;
   background:var(--qf-grad-cyan);color:#04070E;
@@ -126,7 +126,7 @@ body.hud-theme .nav-item.active{
   background:rgba(34,227,255,.08);color:var(--qf-neon-cyan);
   border-left-color:var(--qf-neon-cyan);
 }
-body.hud-theme .nav-icon{width:20px;font-size:15px}
+body.hud-theme .nav-icon{width:20px;font-size:14px}
 body.hud-theme .nav-item .kbd{
   font:500 10px/1 var(--qf-font-mono);color:var(--qf-text-muted);
   border:1px solid #1C2A3D;border-radius:4px;padding:2px 4px;
@@ -284,7 +284,7 @@ body.hud-theme .toast-info{background:rgba(90,200,250,.14);color:#A8E0FF;border-
 body.hud-theme .hud-status{padding:36px 16px}
 body.hud-theme .hud-status .hud-status-icon{
   width:44px;height:44px;margin:0 auto 12px;border-radius:50%;display:grid;place-items:center;
-  font-size:17px;background:rgba(34,227,255,.08);border:1px solid rgba(34,227,255,.22);
+  font-size:16px;background:rgba(34,227,255,.08);border:1px solid rgba(34,227,255,.22);
   color:var(--qf-neon-cyan);opacity:1;
 }
 body.hud-theme .hud-status .hud-status-msg{font:600 14px/1.4 var(--qf-font-body);color:var(--qf-text-primary)}
@@ -338,7 +338,7 @@ body.hud-theme textarea:focus-visible{box-shadow:0 0 0 3px rgba(34,227,255,.14),
   body.hud-theme .topbar{height:56px;min-height:56px;padding:0 16px;gap:12px}
   body.hud-theme .content{padding:16px 16px 72px}
   body.hud-theme .card{padding:16px;border-radius:12px}
-  body.hud-theme .btn{height:48px;min-height:48px;padding:0 16px;font-size:15px}
+  body.hud-theme .btn{height:48px;min-height:48px;padding:0 16px;font-size:14px}
   body.hud-theme .btn-sm{height:40px;min-height:44px;font-size:13px}
   body.hud-theme .input,body.hud-theme .select,body.hud-theme textarea{
     min-height:48px;font-size:16px;   /* 16px 防 iOS 聚焦自动缩放 */

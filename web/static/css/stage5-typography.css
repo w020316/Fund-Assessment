@@ -8,21 +8,19 @@
    - .qf-fs-11 只声明字号；字距是独立语义，用 .qf-track-wide 按需组合（不可合并回字号类）；
    - 正文硬下限 12px：低于 12px 的正文不允许使用本清单之外的字号。
    ============================================================ */
-.qf-fs-11 { font-size: 11px; }                          /* micro 微标签档 */
+.qf-fs-11 { font-size: var(--fs-caption); }         /* micro 微标签档 */
 /* 微标签的字距是独立语义，不随字号捆绑：0.05em 只对"全大写短标签"成立，
    对普通小字正文会明显变散。拆分后调用方按需组合 .qf-fs-11 .qf-track-wide。 */
 .qf-track-wide { letter-spacing: 0.05em; }
-.qf-fs-12 { font-size: 12px; }                          /* caption / 正文下限 */
-.qf-fs-13 { font-size: 13px; }                          /* body-s */
-.qf-fs-14 { font-size: 14px; }                          /* body / data */
-.qf-fs-15 { font-size: 15px; }                          /* 存量档 */
-.qf-fs-16 { font-size: 16px; }                          /* body-l */
-.qf-fs-18 { font-size: 18px; }                          /* h4 */
-.qf-fs-20 { font-size: 20px; }                          /* h3 */
-.qf-fs-22 { font-size: 22px; }                          /* 存量档 */
-.qf-fs-24 { font-size: 24px; }                          /* h2 */
-.qf-fs-28 { font-size: 28px; }                          /* 存量档 */
-.qf-fs-30 { font-size: 30px; }                          /* 存量档 */
-.qf-fs-32 { font-size: 32px; }                          /* h1 / data-xl */
-.qf-fs-40 { font-size: 40px; }                          /* display-2 */
-.qf-fs-56 { font-size: 56px; }                          /* display-1 */
+.qf-fs-12 { font-size: var(--fs-caption-lg); }      /* caption / 正文下限 */
+.qf-fs-13 { font-size: var(--fs-body-s); }          /* body-s */
+.qf-fs-14 { font-size: var(--fs-body); }            /* body / data（吸收原 15px 档） */
+.qf-fs-16 { font-size: var(--fs-body-l); }          /* body-l（吸收原 17px 档） */
+.qf-fs-18 { font-size: var(--fs-title-s); }         /* h4 */
+.qf-fs-20 { font-size: var(--fs-title); }           /* h3（吸收原 21px 档） */
+.qf-fs-22 { font-size: var(--fs-title-lg); }        /* h2-s / KPI 次级 */
+.qf-fs-24 { font-size: var(--fs-kpi); }             /* h2 / KPI（吸收原 26px 档） */
+.qf-fs-32 { font-size: var(--fs-display); }         /* h1 / data-xl */
+/* 阶段五 R1 收口：原 .qf-fs-15/28/30/40/56 属"存量档"，全站零引用（grep 确认），
+   已随字阶收敛删除 —— 22 档随手字号 → 11 档成体系字阶。新代码请只使用上面的档位。 */
+                          /* display-1 */

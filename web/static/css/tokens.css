@@ -85,6 +85,24 @@
   --qf-font-body:'HarmonyOS Sans SC','PingFang SC','Source Han Sans SC','Noto Sans SC','Microsoft YaHei UI','Microsoft YaHei',sans-serif;
   --qf-font-mono:'JetBrains Mono','Cascadia Mono','SF Mono','Consolas',monospace;
 
+  /* ---------- 9b. 字阶（阶段五 R1：把 22 档随手字号收敛成 11 档） ----------
+     之前 font-size 有 22 个不同取值(10.0/10.5/11.0/11.5/12.0/12.5…0.5px 递增),
+     说明是逐处手调的, 不成体系。这里定 11 档单一真源:
+       micro 10 → caption 11/12 → body 13/14/16/18 → 标题 20/22/24 → 数字 32
+     约定: 组件可以直接写字面量(必须落在这 11 档内), 也可以引用 token;
+     `stage5-typography.css` 的 .qf-fs-* 工具类一律引用本组 token。 */
+  --fs-micro:10px;
+  --fs-caption:11px;
+  --fs-caption-lg:12px;
+  --fs-body-s:13px;
+  --fs-body:14px;
+  --fs-body-l:16px;
+  --fs-title-s:18px;
+  --fs-title:20px;
+  --fs-title-lg:22px;
+  --fs-kpi:24px;
+  --fs-display:32px;
+
   /* ---------- 10. 动效（交互动效硬约束 200–500ms） ---------- */
   --qf-dur-1:200ms;
   --qf-dur-2:240ms;

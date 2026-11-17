@@ -16,7 +16,7 @@
   margin-bottom: 14px;
 }
 .st6-summary-big {
-  font-size: 26px; font-weight: 700; line-height: 1.3;
+  font-size: 24px; font-weight: 700; line-height: 1.3;
   font-variant-numeric: tabular-nums;
 }
 /* C-03(2026-11-17):估算不可用时的中性态。不可得 ≠ 0, 不能让一个大号数字
