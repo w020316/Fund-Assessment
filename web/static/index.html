@@ -3212,7 +3212,11 @@ const API_TIMEOUT_MS = (url) => {
   if (url.startsWith('/api/news/search')) return 30000; // 智能检索 30s
   if (url.startsWith('/api/market/outlook') || url.startsWith('/api/scripts/ai-generate')) return 30000;
   if (url.startsWith('/api/holdings/upload')) return 60000; // 图片OCR识别需调用AI视觉模型,后端30s超时,前端给60s余量
-  if (url.startsWith('/api/portfolio/risk') || url.startsWith('/api/portfolio/attribution')) return 30000; // 多基金历史净值聚合,冷启动需拉多源
+  // C-05(2026-11-17): diversification 与 risk/attribution 同源同量级(逐只基金拉
+  // 历史净值 + 信号量并发), 但它此前没进分档、落默认 15s → 持仓 ≥3 只时前端先
+  // abort 报"网络错误", 后端仍在跑, 用户重试反而叠加上游压力。
+  if (url.startsWith('/api/portfolio/risk') || url.startsWith('/api/portfolio/attribution')
+      || url.startsWith('/api/portfolio/diversification')) return 30000; // 多基金历史净值聚合,冷启动需拉多源
   if (url.startsWith('/api/strategy/scan/')) return 25000; // 后端扫描上限 15s, 留余量以接收明确的 503 原因
   return 15000; // 默认 15s
 };
