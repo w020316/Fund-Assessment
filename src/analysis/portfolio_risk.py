@@ -231,25 +231,68 @@ def compute_concentration(
 ) -> dict[str, Any]:
     """权重集中度: HHI 与有效持仓数(=1/HHI,赫芬达尔口径)。
 
-    权重按市值(份额 × 最新净值);市值合计 ≤0 或净值缺失 → None(缺失显示缺失)。
-    effective_holdings 是"若各持仓等权,多少只等权持仓的 HHI 与当前相同"。
+    权重按市值(份额 × 最新净值)。effective_holdings 是"若各持仓等权,多少只等权
+    持仓的 HHI 与当前相同"。
+
+    D-01(2026-11-17):净值缺失的持仓**无法计价**,旧实现把它从分子分母里一起剔掉,
+    `weights` 仍然归一化到 1 → HHI/有效持仓只在"能计价的那几只"上算。
+    3 只里有 1 只拉不到净值时,"有效持仓 2.0"看起来像一个结论,实际只覆盖 2 只;
+    分母缩水还会让集中度系统性偏高。现在额外返回覆盖度,让"覆盖了几只"与
+    "HHI 是多少"同屏可见:
+      weights_covered —— 已计价市值 / 全部持仓市值**估算**;
+      uncovered_codes —— 净值缺失、未能计价的 code 列表;
+      covered_count / nominal_count —— 只数口径的覆盖情况。
+    ⚠ weights_covered 是覆盖度量级,故意不进入 HHI/weights 的计算
+    (缺失部分按"已计价部分的加权平均单位净值"折算份额,不伪造具体净值)。
     """
     mv: dict[str, float] = {}
-    for code, nav in last_nav_map.items():
-        shares = _safe_shares(shares_map.get(code))
-        try:
-            nav_f = float(nav)
-        except (TypeError, ValueError):
+    uncovered_codes: list[str] = []
+    covered_shares = 0.0
+    missing_shares = 0.0
+    nominal_count = 0
+    for code, raw_shares in (shares_map or {}).items():
+        shares = _safe_shares(raw_shares)
+        if shares <= 0:
             continue
-        if shares > 0 and nav_f > 0 and np.isfinite(nav_f):
+        nominal_count += 1
+        nav = (last_nav_map or {}).get(code)
+        try:
+            nav_f = float(nav) if nav is not None else None
+        except (TypeError, ValueError):
+            nav_f = None
+        if nav_f is not None and np.isfinite(nav_f) and nav_f > 0:
             mv[code] = shares * nav_f
+            covered_shares += shares
+        else:
+            uncovered_codes.append(code)
+            missing_shares += shares
     total = sum(mv.values())
+    if nominal_count == 0:
+        # 0 持仓:保持原 fail-closed 语义(全部 None/空),不因新字段抛异常
+        return {
+            "weights": {}, "hhi": None, "effective_holdings": None,
+            "weights_covered": None, "uncovered_codes": [],
+            "covered_count": 0, "nominal_count": 0,
+        }
     if total <= 0:
-        return {"weights": {}, "hhi": None, "effective_holdings": None}
+        # 有持仓但一只都算不出市值:覆盖度为 0(而不是 None —— None 留给"没有持仓")
+        return {
+            "weights": {}, "hhi": None, "effective_holdings": None,
+            "weights_covered": 0.0, "uncovered_codes": uncovered_codes,
+            "covered_count": 0, "nominal_count": nominal_count,
+        }
     weights = {code: mv[code] / total for code in mv}
     hhi = float(sum(w * w for w in weights.values()))
+    # 覆盖度:缺失净值的份额 × 已计价部分的加权平均单位净值 → 估算总市值
+    avg_nav = total / covered_shares if covered_shares > 0 else 0.0
+    total_est = total + missing_shares * avg_nav
+    weights_covered = round(total / total_est, 4) if total_est > 0 else None
     return {
         "weights": {code: round(w, 6) for code, w in weights.items()},
         "hhi": round(hhi, 4),
         "effective_holdings": round(1.0 / hhi, 2) if hhi > 0 else None,
+        "weights_covered": weights_covered,
+        "uncovered_codes": uncovered_codes,
+        "covered_count": len(mv),
+        "nominal_count": nominal_count,
     }

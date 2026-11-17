@@ -7814,7 +7814,7 @@ async function loadPortfolioDiversification() {
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;padding:8px 12px;background:rgba(255,255,255,0.02);border-radius:6px;flex-wrap:wrap;">
         <div style="font-size:11px;color:var(--text-muted);">有效持仓</div>
         <div style="font-size:18px;font-weight:700;color:var(--accent-cyan);">${d.effective_holdings == null ? '—' : d.effective_holdings}</div>
-        <div style="font-size:11px;color:var(--text-muted);">/ 名义 ${d.funds.length} 只 · HHI ${d.hhi == null ? '—' : fmtNum(d.hhi, 3)}</div>
+        <div style="font-size:11px;color:var(--text-muted);">/ 名义 ${d.funds.length} 只 · HHI ${d.hhi == null ? '—' : fmtNum(d.hhi, 3)}${(d.weights_covered != null && d.weights_covered < 1) ? ` · 市值覆盖 ${fmtNum(d.weights_covered * 100, 0)}%(${d.covered_count != null ? d.covered_count : '—'} / ${d.nominal_count != null ? d.nominal_count : d.funds.length} 只)` : ''}</div>
         <div style="font-size:11px;color:var(--text-muted);margin-left:auto;">平均相关 ${d.correlation && d.correlation.avg_correlation != null ? fmtNum(d.correlation.avg_correlation, 2) : '—'}</div>
       </div>
       <div style="margin-top:4px;font-size:12px;color:var(--text-muted);">${escapeHtml(d.note || '')}</div>

@@ -484,6 +484,7 @@ async def get_portfolio_diversification(
     empty = {
         "window": window, "method": "static-shares",
         "funds": [], "effective_holdings": None, "hhi": None,
+        "weights_covered": None, "uncovered_codes": [],
         "correlation": {"codes": [], "matrix": [], "avg_correlation": None,
                         "overlap_points": 0, "valid_pairs": 0},
         "degraded": False, "note": "暂无持仓", "generated_at": _now_iso(),
@@ -551,6 +552,19 @@ async def get_portfolio_diversification(
         avg_corr = correlation["avg_correlation"]
 
         notes: list[str] = []
+        # D-01(2026-11-17):HHI/有效持仓只覆盖"净值可计价"的那几只。分母缩水会让
+        # 集中度系统性偏高,所以必须把覆盖度写在结论同一行里,不能只留个"名义 N 只"。
+        covered_n = int(concentration.get("covered_count") or 0)
+        nominal_n = int(concentration.get("nominal_count") or len(held))
+        uncovered = concentration.get("uncovered_codes") or []
+        covered_ratio = concentration.get("weights_covered")
+        coverage_note = ""
+        if uncovered:
+            ratio_txt = f",按市值估算覆盖 {covered_ratio:.0%}" if isinstance(covered_ratio, float) else ""
+            coverage_note = (
+                f"{nominal_n} 只中 {nominal_n - covered_n} 只净值缺失"
+                f"(HHI 仅覆盖 {covered_n} 只{ratio_txt})"
+            )
         if eff is not None:
             if eff < 1.5:
                 notes.append(f"有效持仓仅 {eff} 只,权重高度集中")
@@ -558,6 +572,8 @@ async def get_portfolio_diversification(
                 notes.append(f"按市值 HHI 折算有效持仓 {eff} 只(名义 {len(held)} 只)")
         else:
             notes.append("净值缺失,集中度无法评估")
+        if coverage_note:
+            notes.append(coverage_note)
         if correlation["valid_pairs"] == 0:
             notes.append(f"净值重叠区间不足 {prisk.MIN_CORR_OVERLAP_RETURNS} 个交易日或零方差,相关性无法评估")
         elif avg_corr is not None:
@@ -576,6 +592,11 @@ async def get_portfolio_diversification(
             "effective_holdings": eff,
             "hhi": concentration["hhi"],
             "weights": concentration["weights"],
+            # D-01:HHI 的覆盖口径必须同屏可见(covered/nominal + 未覆盖 code)
+            "weights_covered": concentration.get("weights_covered"),
+            "uncovered_codes": uncovered,
+            "covered_count": covered_n,
+            "nominal_count": nominal_n,
             "correlation": correlation,
             "degraded": degraded,
             "note": "；".join(notes),

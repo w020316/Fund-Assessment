@@ -464,3 +464,81 @@ class TestDiversificationRoute:
         resp = client.get("/api/portfolio/diversification")
         assert resp.status_code == 200
         assert resp.json()["degraded"] is True
+
+
+# ===== D-01(2026-11-17):净值缺失的基金不能静默从 HHI 分母消失 =====
+
+class TestConcentrationCoverage:
+    """3 只持仓、1 只拉不到净值时, 旧实现把它从分子分母一起剔掉:
+    `weights` 仍归一化到 1, "有效持仓 2.0" 看起来像结论, 实际只覆盖 2 只。
+    分母缩水 → 集中度系统性偏高, 且输出里没有任何覆盖度痕迹。
+    """
+
+    def test_missing_nav_is_exposed_not_swallowed(self):
+        out = prisk.compute_concentration(
+            {"A": 100.0, "B": 100.0, "C": 100.0},
+            {"A": 2.0, "B": 2.0},  # C 净值缺失
+        )
+        assert out["nominal_count"] == 3
+        assert out["covered_count"] == 2
+        assert out["uncovered_codes"] == ["C"]
+        # 未覆盖份额按已计价均价(2.0)折算 → 覆盖 2/3
+        assert out["weights_covered"] == pytest.approx(2 / 3, abs=1e-4)
+        assert out["weights_covered"] < 1.0
+        # HHI 仍是覆盖口径(语义不变), 只是覆盖度现在可见
+        assert out["effective_holdings"] == pytest.approx(2.0, abs=1e-6)
+
+    def test_full_coverage_reports_one(self):
+        out = prisk.compute_concentration(
+            {"A": 100.0, "B": 100.0}, {"A": 2.0, "B": 2.0}
+        )
+        assert out["weights_covered"] == 1.0
+        assert out["uncovered_codes"] == []
+        assert out["covered_count"] == out["nominal_count"] == 2
+
+    def test_zero_positions_fail_closed_without_exception(self):
+        out = prisk.compute_concentration({}, {})
+        assert out["hhi"] is None and out["effective_holdings"] is None
+        assert out["weights"] == {}
+        # 没有持仓 → 覆盖度是"无从谈起"(None), 不是 0
+        assert out["weights_covered"] is None
+        assert out["uncovered_codes"] == []
+
+    def test_all_nav_missing_coverage_is_zero(self):
+        out = prisk.compute_concentration({"A": 100.0, "B": 50.0}, {})
+        assert out["hhi"] is None
+        assert out["weights_covered"] == 0.0
+        assert sorted(out["uncovered_codes"]) == ["A", "B"]
+
+
+class TestDiversificationCoverageSurfaced:
+    """覆盖度必须与 HHI 同屏可见, 不能只活在返回值里。"""
+
+    def test_partial_missing_nav_note_and_fields(self, client, tmp_path):
+        (tmp_path / "positions.json").write_text(
+            '{"positions":['
+            '{"fund_code":"110022","fund_name":"消费","shares":100.0,"cost_nav":2.0},'
+            '{"fund_code":"008984","fund_name":"科技","shares":100.0,"cost_nav":1.5},'
+            '{"fund_code":"519674","fund_name":"混合","shares":100.0,"cost_nav":1.0}]}',
+            encoding="utf-8",
+        )
+        rets = _pattern_returns(27)
+        navs = _navs_from_returns(rets)
+        dates = [f"2026-10-{i:02d}" for i in range(1, 29)]
+        two_funds = [{"date": d, "nav": v, "acc_nav": v} for d, v in zip(dates, navs)]
+        series = {"110022": two_funds, "008984": two_funds, "519674": []}  # 519674 拉不到净值
+
+        with patch("src.core.fund_nav_source.get_fund_nav_history",
+                   side_effect=lambda code, period: series.get(code, [])):
+            resp = client.get("/api/portfolio/diversification")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["degraded"] is True
+        assert data["nominal_count"] == 3
+        assert data["covered_count"] == 2
+        assert data["uncovered_codes"] == ["519674"]
+        assert data["weights_covered"] < 1.0
+        # note 必须写清"3 只中 1 只净值缺失, HHI 仅覆盖 2 只"
+        assert "3 只中 1 只净值缺失" in data["note"]
+        assert "HHI 仅覆盖 2 只" in data["note"]
