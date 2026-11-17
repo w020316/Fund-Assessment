@@ -941,9 +941,20 @@ class LLMRouter:
         # 修复:API key 从 URL query 改为 HTTP Header,避免 access log 泄露
         url = f"{provider.base_url}/models/{model}:generateContent"
 
-        # 转换消息格式
+        # B-01(2026-11-17):Gemini 原生协议的系统提示词是**顶层 systemInstruction**,
+        # 不是 contents 里的一条 user 消息。旧映射只有 assistant → model, 其余
+        # (含 system)**全部**落成 user —— 本仓库大量模板用 {"role": "system"}
+        # (ai_service 的 6 处、复盘/预测等), 于是人格与 JSON 约束被降级成
+        # "用户先说了两句": 不报错, 只在 json_mode 下表现为"偶发解析失败", 极难归因。
+        systems = [
+            str(msg.get("content", ""))
+            for msg in messages
+            if msg.get("role") == "system" and msg.get("content")
+        ]
         contents = []
         for msg in messages:
+            if msg.get("role") == "system":
+                continue
             role = "model" if msg["role"] == "assistant" else "user"
             contents.append({
                 "role": role,
@@ -956,6 +967,9 @@ class LLMRouter:
                 "temperature": temperature,
             },
         }
+        # 没有任何 system 时**不设**该键(发空的 systemInstruction 会被部分版本判 400)
+        if systems:
+            payload["systemInstruction"] = {"parts": [{"text": "\n".join(systems)}]}
         if json_mode:
             payload["generationConfig"]["responseMimeType"] = "application/json"
 

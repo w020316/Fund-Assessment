@@ -1601,3 +1601,86 @@ class TestHopCapEnvKnobB5:
         assert health["hop_cap_env_keys"]["standard"] == "LLM_TIER_HOP_TIMEOUT_STANDARD"
         with patch.dict("os.environ", {"LLM_TIER_HOP_TIMEOUT_LIGHT": "6"}, clear=False):
             assert router.routing_health()["hop_caps_seconds"]["light"] == 6.0
+
+
+# ===== B-01(2026-11-17):Gemini 原生协议的 system 提示词走 systemInstruction =====
+
+class TestGeminiSystemInstruction:
+    """旧映射只有 assistant → model, 其余(含 system)全落 user —— 人格与 JSON 约束
+    退化成"用户先说了两句", 不报错, 只在 json_mode 下偶发解析失败。"""
+
+    @staticmethod
+    def _router():
+        with patch.dict("os.environ",
+                        {"LY77625_API_KEY": "ly-test-key",
+                         "LY77625_PROTOCOL": "gemini"},
+                        clear=True):
+            return LLMRouter()
+
+    @staticmethod
+    def _capture(router, messages, **kwargs):
+        captured = {}
+
+        def mock_post(url, **kw):
+            captured["json"] = kw.get("json") or {}
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.json.return_value = {
+                "candidates": [{"content": {"parts": [{"text": "ok"}]}}],
+            }
+            return resp
+
+        with patch("requests.post", side_effect=mock_post):
+            router.chat(messages, **kwargs)
+        return captured["json"]
+
+    def test_system_goes_to_system_instruction(self):
+        payload = self._capture(self._router(), [
+            {"role": "system", "content": "你是严谨的量化分析师"},
+            {"role": "user", "content": "今天大盘如何"},
+        ])
+
+        assert payload["systemInstruction"] == {
+            "parts": [{"text": "你是严谨的量化分析师"}],
+        }
+        assert len(payload["contents"]) == 1
+        assert payload["contents"][0]["role"] == "user"
+        assert payload["contents"][0]["parts"][0]["text"] == "今天大盘如何"
+
+    def test_multiple_systems_are_joined(self):
+        payload = self._capture(self._router(), [
+            {"role": "system", "content": "规则一"},
+            {"role": "system", "content": "规则二"},
+            {"role": "user", "content": "hi"},
+        ])
+
+        assert payload["systemInstruction"]["parts"][0]["text"] == "规则一\n规则二"
+
+    def test_assistant_maps_to_model_and_order_kept(self):
+        payload = self._capture(self._router(), [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "第一问"},
+            {"role": "assistant", "content": "第一答"},
+            {"role": "user", "content": "第二问"},
+        ])
+
+        assert [c["role"] for c in payload["contents"]] == ["user", "model", "user"]
+        assert [c["parts"][0]["text"] for c in payload["contents"]] == [
+            "第一问", "第一答", "第二问",
+        ]
+        assert payload["systemInstruction"]["parts"][0]["text"] == "sys"
+
+    def test_no_system_means_no_key(self):
+        """没有 system 时不得下发空的 systemInstruction(部分版本会 400)。"""
+        payload = self._capture(self._router(), [{"role": "user", "content": "hi"}])
+
+        assert "systemInstruction" not in payload
+        assert len(payload["contents"]) == 1
+
+    def test_empty_system_content_ignored(self):
+        payload = self._capture(self._router(), [
+            {"role": "system", "content": ""},
+            {"role": "user", "content": "hi"},
+        ])
+
+        assert "systemInstruction" not in payload
