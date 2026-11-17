@@ -911,3 +911,130 @@ class TestNonFiniteRatiosAreSanitized:
         assert data["grid"][0]["information_ratio"] is None
         assert data["grid"][1]["information_ratio"] == 0.4
         assert data["plateau"]["component_ir_mean"] is None
+
+
+# ===== F-03(2026-11-17):compare-ma-cross 的 3 条关键缺口 =====
+# 既有 TestCompareMaCross 覆盖了 422 参数矩阵/鉴权/单飞锁/429/单只失败隔离, 但:
+#   ① inf/NaN 的 best 走端点时的行为(已由 TestNonFiniteRatiosAreSanitized 覆盖);
+#   ② **全部标的失败**(entries 全 best=None)时的排序与响应;
+#   ③ 真实 BacktestEngine 一条没跑 —— 旧用例 patch 的是**整个类**, 于是
+#      `87af155` 加的 `_sanitize_floats` 在 CI 里永远不会被真实路径触发。
+
+class TestCompareMaCrossRealPaths:
+    endpoint = "/api/strategy/compare-ma-cross"
+
+    @pytest.fixture(autouse=True)
+    def _reset_rate_limiter(self):
+        from web.rate_limiter import limiter
+        storage = getattr(limiter, "_storage", None)
+        if storage is not None and hasattr(storage, "reset"):
+            storage.reset()
+        yield
+        if storage is not None and hasattr(storage, "reset"):
+            storage.reset()
+
+    def test_all_targets_failed_is_stable_and_marked(self, client):
+        """全部标的失败 → 200、不崩、失败项有明确标记, 且两次请求顺序完全一致。"""
+        orders: list[list[str]] = []
+        for _ in range(2):
+            with patch("src.core.backtest.BacktestEngine") as engine_cls:
+                engine_cls.return_value.optimize_ma_cross.side_effect = [
+                    RuntimeError("down-1"),
+                    RuntimeError("down-2"),
+                    RuntimeError("down-3"),
+                ]
+                resp = client.post(self.endpoint, json={
+                    "stock_codes": ["600519", "000001", "300750"],
+                })
+            assert resp.status_code == 200
+            body = resp.json()
+            results = body["data"]["results"]
+            assert len(results) == 3
+            assert all(r["best"] is None for r in results)
+            assert all(r.get("error") for r in results), "失败项必须有明确标记"
+            assert all(r["grid"] == [] for r in results)
+            assert "幸存者偏差" in body["warning"]
+            orders.append([r["stock_code"] for r in results])
+
+        assert orders[0] == orders[1], f"全失败时排序不稳定: {orders}"
+
+    def test_real_engine_path_is_exercised(self, client, monkeypatch):
+        """真跑一次 BacktestEngine(只 patch K 线取数) —— 证明消毒逻辑在真实路径上。
+
+        这是 F-03 的核心: 旧用例把 `BacktestEngine` **整类**替换成 MagicMock,
+        `_sanitize_floats` 永远拿不到真实引擎产物, CI 里等于没测。
+        """
+        import pandas as pd
+
+        from src.core.data_source import DataSourceManager
+
+        # 造一段有涨有跌、长度够默认网格(MA 最长 40)的行情
+        closes = [10.0 + (i % 9) * 0.35 + i * 0.02 for i in range(160)]
+        df = pd.DataFrame({
+            "日期": pd.date_range("2025-01-01", periods=len(closes)).strftime("%Y-%m-%d"),
+            "开盘": [c - 0.1 for c in closes],
+            "最高": [c + 0.4 for c in closes],
+            "最低": [c - 0.4 for c in closes],
+            "收盘": closes,
+            "成交量": [10000] * len(closes),
+        })
+
+        class _Kline:
+            data = df
+
+        monkeypatch.setattr(
+            DataSourceManager, "get_history_kline",
+            lambda self, code, start, end: _Kline(),
+        )
+
+        resp = client.post(self.endpoint, json={
+            "stock_codes": ["600519", "000001"],
+            "start_date": "2025-01-01", "end_date": "2025-12-31",
+        })
+
+        assert resp.status_code == 200, resp.text[:300]
+        assert "Infinity" not in resp.text and "NaN" not in resp.text
+        results = resp.json()["data"]["results"]
+        assert len(results) == 2
+        # 真实引擎必须真的产出网格(不是空壳)
+        assert any(r.get("grid") for r in results), "真实引擎未产出网格, 冒烟没走通"
+        # 网格里的数值必须是有限数或 null
+        for row in results[0]["grid"]:
+            for key in ("total_return", "annual_return", "max_drawdown",
+                        "sharpe_ratio", "information_ratio"):
+                value = row.get(key)
+                assert value is None or isinstance(value, (int, float))
+
+    def test_route_return_value_is_finite_before_framework_serialization(self):
+        """直接调路由函数(绕过 FastAPI 序列化) —— 应用层必须自己保证数值有限。
+
+        为什么需要这条: 本环境的 `jsonable_encoder`/`JSONResponse` 会把 inf 悄悄
+        变成 null, 于是"响应文本里没有 Infinity"这条断言**无法区分**消毒逻辑是否
+        真的存在(注释掉 `_sanitize_floats` 它照样绿)。只有在路由返回的 dict 这一层
+        断言, 才能证明消毒是我们的代码在做, 而不是框架兜的。
+        """
+        import asyncio
+
+        from web.routes.strategy import CompareMaCrossRequest, compare_ma_cross
+
+        best = {"short_window": 5, "long_window": 20, "total_return": 0.1,
+                "annual_return": 0.2, "max_drawdown": 0.1, "sharpe_ratio": 1.0,
+                "information_ratio": float("inf"), "trade_count": 6}
+        nan_best = dict(best, information_ratio=float("nan"))
+
+        with patch("src.core.backtest.BacktestEngine") as engine_cls:
+            engine_cls.return_value.optimize_ma_cross.side_effect = [
+                {"stock_code": "600519", "grid": [best], "best": best},
+                {"stock_code": "000001", "grid": [nan_best], "best": nan_best},
+            ]
+            out = asyncio.run(
+                compare_ma_cross.__wrapped__(  # 跳过 slowapi 装饰器, 不经过 FastAPI
+                    None,
+                    CompareMaCrossRequest(stock_codes=["600519", "000001"]),
+                )
+            )
+
+        results = out["data"]["results"]
+        assert results[0]["best"]["information_ratio"] is None
+        assert results[0]["grid"][0]["information_ratio"] is None
+        assert results[1]["best"]["information_ratio"] is None
