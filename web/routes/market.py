@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -11,7 +12,7 @@ try:
 except ImportError:
     _HAS_AKSHARE = False
 import pandas as pd
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from loguru import logger
 
@@ -43,6 +44,30 @@ class ResponseMeta(BaseModel):
 # 本轮**不**把默认值改成 fail-closed(50/0):全文件 60+ 处调用点会一起翻成
 # degraded, 把健康端点误标成降级。已确认这是有意的范围收敛, 记为遗留项。
 _DEFAULT_QUALITY = 80.0
+
+
+_CODE_RE = re.compile(r"^\d{6}$")
+
+
+def _code_or_422(code: str = Query("", description="股票代码(可选,为空时走默认标的)")) -> str:
+    """可选股票代码校验: 空串放行, 非空必须是 6 位数字(A-09, 2026-11-17)。
+
+    根因: `/margin`、`/block_trades`、`/shareholder` 原先把 `code: Query("")` 原样
+    拼进上游 filter(`f'(SCODE="{code}")'`), 攻击者传 `600519")+OR+(1=1` 就能改写
+    东财查询条件;异常又被 `except Exception` 吞成"无数据", 接口成了任意报表探测器。
+    这里不用 `Query(pattern=...)`:那会把空串也判 422, 破坏前端 `code ? code : '600519'`
+    的兜底。data_source_v2 侧另有 `_is_stock_code` 做纵深防御(连请求都不发)。
+    """
+    if code and not _CODE_RE.fullmatch(code):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "INVALID_STOCK_CODE",
+                "message": "股票代码必须是 6 位数字(例如 600519)。",
+                "field": "code",
+            },
+        )
+    return code
 
 
 def _rows_quality(rows: Any, base: float = _DEFAULT_QUALITY) -> float:
@@ -968,7 +993,7 @@ async def dragon_tiger():
 
 
 @router.get("/margin")
-async def margin(code: str = Query("", description="股票代码")):
+async def margin(code: str = Depends(_code_or_422)):
     if not code:
         return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
     cache_key = f"market:margin:{code}"
@@ -988,7 +1013,7 @@ async def margin(code: str = Query("", description="股票代码")):
 
 
 @router.get("/block_trades")
-async def block_trades(code: str = Query("", description="股票代码")):
+async def block_trades(code: str = Depends(_code_or_422)):
     if not code:
         return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
     cache_key = f"market:block_trades:{code}"
@@ -1008,7 +1033,7 @@ async def block_trades(code: str = Query("", description="股票代码")):
 
 
 @router.get("/shareholder")
-async def shareholder(code: str = Query("", description="股票代码")):
+async def shareholder(code: str = Depends(_code_or_422)):
     if not code:
         return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
     cache_key = f"market:shareholder:{code}"

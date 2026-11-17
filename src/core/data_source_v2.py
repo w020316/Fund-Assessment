@@ -249,6 +249,22 @@ def _safe_str(val: Any, default: str = "") -> str:
     return str(val)
 
 
+_STOCK_CODE_RE = re.compile(r"\d{6}")
+
+
+def _is_stock_code(value: Any) -> bool:
+    """A 股 6 位数字代码校验(纵深防御用)。
+
+    A-09(2026-11-17):`get_margin_trading` / `get_block_trades` /
+    `get_shareholder_count` 把入参直接拼进东财 filter:
+    `f'(SECURITY_CODE="{stock_code}")'`、`f'(SCODE="{stock_code}")'`。
+    传入 `600519")+OR+(1=1` 之类的字符串就能改写上游查询条件(报表变探测器),
+    而上层 `except Exception` 会把异常吞成"无数据", 攻击者拿不到报错但也探测到了。
+    路由层已加 422 校验, 这里是纵深防御: 非法代码直接返回空, 且**不发起请求**。
+    """
+    return bool(_STOCK_CODE_RE.fullmatch(str(value or "")))
+
+
 def _safe_int(val: Any, default: int = 0) -> int:
     if val is None:
         return default
@@ -1519,6 +1535,9 @@ def get_capital_flow_detail(stock_code: str) -> dict:
 
 
 def get_margin_trading(stock_code: str) -> dict:
+    if not _is_stock_code(stock_code):
+        logger.warning(f"get_margin_trading 拒绝非法股票代码: {stock_code!r}")
+        return {}
     # 2026-11-15 实测:旧报表 RPT_RZRQ_LSHJ 已下线("报表配置不存在"),
     # 东财现用 RPTA_WEB_RZRQ_GGMX(融资融券个股明细),筛选列/日期列均换了名字。
     url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
@@ -1576,6 +1595,9 @@ def _get_margin_trading_fallback(stock_code: str) -> dict:
 
 
 def get_block_trades(stock_code: str) -> list[dict]:
+    if not _is_stock_code(stock_code):
+        logger.warning(f"get_block_trades 拒绝非法股票代码: {stock_code!r}")
+        return []
     # 2026-11-15 实测:旧报表 RPT_DABLOCKTRADE 已下线;现用 RPT_DATA_BLOCKTRADE,
     # 成交量/溢价字段改名为 DEAL_VOLUME / PREMIUM_RATIO。
     url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
@@ -1638,6 +1660,9 @@ def _get_block_trades_fallback(stock_code: str) -> list[dict]:
 
 
 def get_shareholder_count(stock_code: str) -> dict:
+    if not _is_stock_code(stock_code):
+        logger.warning(f"get_shareholder_count 拒绝非法股票代码: {stock_code!r}")
+        return {}
     url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
     params = {
         "sortColumns": "END_DATE",
