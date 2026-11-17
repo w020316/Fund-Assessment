@@ -124,8 +124,20 @@
     const big = document.getElementById('st6WbSummaryBig');
     const meta = document.getElementById('st6WbSummaryMeta');
     if (big) {
-      big.textContent = (summary.total_est_day_pnl > 0 ? '+' : '') + fmtMoney(summary.total_est_day_pnl) + ' 元';
-      big.className = 'st6-summary-big ' + pctCls(summary.total_est_day_pnl);
+      // C-03(2026-11-17):total 为 null 表示"算不出来", 不是 0 元。
+      // 旧写法 `${total > 0 ? '+' : ''}${fmtMoney(total)} 元` 在 null 时会拼成"— 元",
+      // 且 pctCls(null) 给出中性色, 与"¥0.00"同样容易被当真实值读走。
+      const totalPnl = summary.total_est_day_pnl;
+      const pnlKnown = totalPnl !== null && totalPnl !== undefined && !isNaN(totalPnl);
+      const missingN = summary.pnl_missing_count || 0;
+      if (pnlKnown) {
+        big.textContent = (totalPnl > 0 ? '+' : '') + fmtMoney(totalPnl) + ' 元'
+          + (missingN > 0 ? '(' + missingN + ' 只无法估算)' : '');
+        big.className = 'st6-summary-big ' + pctCls(totalPnl);
+      } else {
+        big.textContent = '估算不可用';
+        big.className = 'st6-summary-big is-muted';
+      }
     }
     if (meta) {
       const counts = summary.confidence_counts || {};
@@ -159,7 +171,10 @@
         '<div class="st6-estimate-grid">' +
           '<span class="st6-kv"><span class="st6-k">估算净值</span><span class="st6-v">' + esc(estNav) + '</span></span>' +
           '<span class="st6-kv"><span class="st6-k">官方净值</span><span class="st6-v">' + (it.nav ? Number(it.nav).toFixed(4) : '—') + (it.nav_date ? ' (' + esc(it.nav_date) + ')' : '') + '</span></span>' +
-          '<span class="st6-kv"><span class="st6-k">估算当日盈亏</span><span class="st6-v ' + pctCls(it.est_day_pnl) + '">' + (it.est_day_pnl > 0 ? '+' : '') + fmtMoney(it.est_day_pnl) + '</span></span>' +
+          '<span class="st6-kv"><span class="st6-k">估算当日盈亏</span><span class="st6-v ' +
+            (it.est_day_pnl == null ? 'is-muted' : pctCls(it.est_day_pnl)) + '">' +
+            (it.est_day_pnl == null ? '—' : ((it.est_day_pnl > 0 ? '+' : '') + fmtMoney(it.est_day_pnl))) +
+          '</span></span>' +
           '<span class="st6-kv"><span class="st6-k">数据来源</span><span class="st6-v">' + esc(it.source || 'none') + '</span></span>' +
         '</div>' +
         '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +

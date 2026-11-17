@@ -81,16 +81,21 @@ def _prev_nav_from_pct(nav: float, pct: float) -> float:
     return nav / (1 + pct / 100)
 
 
-def _estimate_day_pnl(shares: float, nav: float, est_nav: float | None, est_pct: float | None) -> float:
-    """单基金估算当日盈亏(元)。
+def _estimate_day_pnl(
+    shares: float, nav: float, est_nav: float | None, est_pct: float | None,
+) -> float | None:
+    """单基金估算当日盈亏(元)。**无法估算返回 None**(C-03, 2026-11-17)。
 
     est_nav 可用时: shares × (est_nav − 昨日净值);
     仅 est_pct 可用时(备源拟合): shares × nav × pct/100(近似)。
+    缺 est_pct 或官方净值时算不出来 → None。旧实现返回 0.0, 前端 `fmtMoney(0)`
+    渲染成"¥0.00", 与同项 `est_pct: null`(显示「—」)自相矛盾, 更会被当成真实盈亏。
     """
-    if shares <= 0 or nav <= 0:
+    if shares <= 0:
+        # 没有份额 = 确实 0(真实的 0, 不是"算不出来")
         return 0.0
-    if est_pct is None:
-        return 0.0
+    if nav <= 0 or est_pct is None:
+        return None
     if est_nav is not None and est_nav > 0:
         return shares * (est_nav - _prev_nav_from_pct(nav, est_pct))
     return shares * nav * est_pct / 100.0
@@ -148,15 +153,23 @@ def _summarize_watchboard(items: list[dict]) -> dict:
     counts = {"high": 0, "medium": 0, "low": 0}
     total_pnl = 0.0
     stale_count = 0
+    pnl_missing = 0
     for it in items:
         # stale = last-known 回放,不代表当前行情 → 置信度一律按 low 计
         level = "low" if it.get("stale") else it.get("confidence", "low")
         counts[level] = counts.get(level, 0) + 1
         if it.get("stale"):
             stale_count += 1
-        total_pnl += _safe_float(it.get("est_day_pnl"))
+        # C-03: 缺失项不参与求和, 但要计数 —— 否则"部分降级"会被读成"当日盈亏就这么多"
+        if it.get("est_day_pnl") is None:
+            pnl_missing += 1
+        else:
+            total_pnl += _safe_float(it.get("est_day_pnl"))
+    known_pnl = len(items) - pnl_missing
     return {
-        "total_est_day_pnl": round(total_pnl, 2),
+        # 一只都算不出来 → None(不可得);否则是"已知部分的合计",由 pnl_missing_count 标注覆盖
+        "total_est_day_pnl": (round(total_pnl, 2) if (known_pnl or not items) else None),
+        "pnl_missing_count": pnl_missing,
         "count": len(items),
         "confidence_counts": counts,
         "stale_count": stale_count,
@@ -181,15 +194,17 @@ def _watchboard_from_last_known(reason: str) -> dict:
                 "est_pct": None,
                 "nav": 0.0,
                 "nav_date": "",
-                "est_day_pnl": 0.0,
+                # C-03: 没任何数据 → 盈亏不可得(None), 不能填 0 冒充"当日不赚不亏"
+                "est_day_pnl": None,
                 "confidence": "low",
                 "confidence_reason": "数据源暂不可用,且无 last-known 数据",
                 "source": "none",
                 "stale": False,
             }
         items.append(item)
+    # C-03: 全都没数据时 _summarize_watchboard 会给出 None;
+    # 旧实现在这里强制回写 0.0, 前端于是把"估算不可用"渲染成"¥0.00"。
     summary = _summarize_watchboard(items)
-    summary["total_est_day_pnl"] = 0.0 if all(it.get("est_pct") is None for it in items) else summary["total_est_day_pnl"]
     return {
         "positions": items,
         "summary": summary,
@@ -284,7 +299,8 @@ async def _compute_watchboard() -> dict:
                         "source": "none",
                         "stale": False,
                     }
-        item["est_day_pnl"] = round(_estimate_day_pnl(shares, item["nav"], item["est_nav"], item["est_pct"]), 2)
+        pnl = _estimate_day_pnl(shares, item["nav"], item["est_nav"], item["est_pct"])
+        item["est_day_pnl"] = round(pnl, 2) if pnl is not None else None
         if item["est_pct"] is not None:
             _last_known[code] = dict(item)  # 更新 last-known(仅内存)
         items.append(item)

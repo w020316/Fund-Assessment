@@ -238,3 +238,73 @@ class TestWatchboard:
             resp = client.get("/api/portfolio/watchboard")
         assert resp.status_code == 200
         assert resp.json()["degraded"] is True
+
+
+# ===== C-03(2026-11-17):降级时不得显示「¥0.00」 =====
+
+class TestDegradedPnlIsNullNotZero:
+    """盘中估值全降级时, 旧实现把 `total_est_day_pnl` 强制置 0.0、单只 `est_day_pnl`
+    也置 0.0(而同项 `est_pct` 是 null)→ 前端出现「— 涨跌幅 + ¥0.00 盈亏」的
+    自相矛盾行, 且 0 是一个能被当成真实盈亏读走的数字。现改为一律 None。"""
+
+    def test_full_degrade_sends_null_pnl(self, client, tmp_path):
+        """从未成功过 + 主源异常 → 整体与单只盈亏都必须是 null。"""
+        _write_positions(tmp_path, _POSITIONS)
+        with patch(
+            "src.core.data_source_v2.get_fund_realtime_tencent",
+            side_effect=RuntimeError("network down"),
+        ):
+            resp = client.get("/api/portfolio/watchboard")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["degraded"] is True
+        assert data["summary"]["total_est_day_pnl"] is None, "全降级时不能下发 0.0"
+        assert data["summary"]["pnl_missing_count"] == 2
+        for p in data["positions"]:
+            assert p["est_day_pnl"] is None, f"{p['fund_code']} 降级时仍下发 0.0"
+            assert p["est_pct"] is None
+
+    def test_normal_path_keeps_numbers(self, client, tmp_path):
+        """回归保护:正常路径数值不变。"""
+        _write_positions(tmp_path, _POSITIONS)
+        with patch("src.core.data_source_v2.get_fund_realtime_tencent", return_value=_QUOTES), \
+             patch("web.routes.portfolio.fund_route._today", return_value=__import__("datetime").date(2026, 10, 26)):
+            resp = client.get("/api/portfolio/watchboard")
+
+        data = resp.json()
+        items = {p["fund_code"]: p for p in data["positions"]}
+        assert items["110022"]["est_day_pnl"] == pytest.approx(9.90, abs=0.05)
+        assert data["summary"]["total_est_day_pnl"] == pytest.approx(
+            sum(p["est_day_pnl"] for p in data["positions"]), abs=0.02
+        )
+        assert data["summary"]["pnl_missing_count"] == 0
+
+    def test_partial_degrade_keeps_known_and_nulls_unknown(self, client, tmp_path):
+        """部分降级:有值的仍有值, 算不出来的为 null, 整体不得被置 null。"""
+        _write_positions(tmp_path, _POSITIONS)
+        # 只有 110022 有行情;002891 无报价 → 备源也失败 → est_pct=None → 盈亏 None
+        only_one = [q for q in _QUOTES if q["code"] == "110022"]
+        with patch("src.core.data_source_v2.get_fund_realtime_tencent", return_value=only_one), \
+             patch("web.routes.portfolio._fit_fallback_estimate", new=AsyncMock(return_value=None)), \
+             patch("web.routes.portfolio.fund_route._today", return_value=__import__("datetime").date(2026, 10, 26)):
+            resp = client.get("/api/portfolio/watchboard")
+
+        data = resp.json()
+        items = {p["fund_code"]: p for p in data["positions"]}
+        assert items["110022"]["est_day_pnl"] is not None
+        assert items["002891"]["est_day_pnl"] is None
+        assert data["summary"]["pnl_missing_count"] == 1
+        # 整体仍是"已知部分的合计", 不是 None
+        assert data["summary"]["total_est_day_pnl"] == pytest.approx(
+            items["110022"]["est_day_pnl"], abs=0.02
+        )
+
+    def test_estimate_helper_returns_none_when_uncomputable(self):
+        from web.routes.portfolio import _estimate_day_pnl
+
+        # 缺 est_pct / 缺官方净值 → 算不出来
+        assert _estimate_day_pnl(100.0, 2.5, None, None) is None
+        assert _estimate_day_pnl(100.0, 0.0, 2.5, 2.0) is None
+        # 没有份额 → 真实 0(不是"算不出来")
+        assert _estimate_day_pnl(0.0, 2.5, 2.5, 2.0) == 0.0

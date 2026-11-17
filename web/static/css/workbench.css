@@ -729,6 +729,16 @@
 #page-workbench .wb-pf-total-v.is-down { color: var(--wb-down); }
 #page-workbench .wb-pf-total-s { margin-top: 3px; font-size: 10.5px; color: var(--wb-dim); }
 
+/* C-03(2026-11-17):估算不可用(null)时整块降低视觉权重并标出暖色边框,
+   避免"¥0.00"或一个中性数字被当成真实盈亏读走。
+   注意:这不是"数据显示得不好看"的装饰, 是语义边界 —— 不可得 ≠ 0。 */
+#page-workbench .wb-pf-total.is-degraded {
+  border-color: var(--wb-warn, #f59e0b);
+  background: rgba(245, 158, 11, .06);
+}
+#page-workbench .wb-pf-total-v.is-muted { color: var(--wb-faint); }
+#page-workbench .wb-pf-pnl.is-muted { color: var(--wb-faint); }
+
 #page-workbench .wb-pf-list { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 7px; }
 
 #page-workbench .wb-pf-item {

@@ -838,20 +838,31 @@
       var conf = summary.confidence_counts || {};
       metaEl.textContent = '持仓 ' + positions.length + ' · 高置信 ' + (conf.high || 0) + ' · 滞后 ' + (summary.stale_count || 0);
     }
+    /* C-03(2026-11-17):估算不可用时后端给 null。绝不能 `|| 0` 兜底成 ¥0.00 ——
+       0 是一个可被读走的真实数值("今天不赚不亏"), 而真实情况是"算不出来"。
+       整块同时加 is-degraded 样式, 不只靠右下角小字。 */
+    var totalKnown = total !== null && total !== undefined && isNum(Number(total));
+    var pnlMissing = isNum(summary.pnl_missing_count) ? Number(summary.pnl_missing_count) : 0;
+    var totalCls = totalKnown ? clsOf(Number(total)) : 'is-muted';
+    var totalTxt = totalKnown ? fmtMoney(Number(total)) : '—';
+    var totalNote = totalKnown
+      ? (pnlMissing > 0 ? ('其中 ' + pnlMissing + ' 只无法估算 · 估算≠净值') : '估算≠净值')
+      : '估算不可用：当日盈亏无法计算，不是 0 元';
     el.innerHTML = '<div class="wb-portfolio">'
-      + '<div class="wb-pf-total">'
+      + '<div class="wb-pf-total' + (totalKnown ? '' : ' is-degraded') + '">'
       + '<div class="wb-pf-total-k">组合估算当日盈亏</div>'
-      + '<div class="wb-pf-total-v ' + clsOf(total) + '">' + esc(fmtMoney(total)) + '</div>'
-      + '<div class="wb-pf-total-s">估算≠净值 · ' + esc(d.degraded ? '已降级：' + String(d.degraded_reason || '') : '主源实时') + '</div>'
+      + '<div class="wb-pf-total-v ' + totalCls + '">' + esc(totalTxt) + '</div>'
+      + '<div class="wb-pf-total-s">' + esc(totalNote) + ' · ' + esc(d.degraded ? '已降级：' + String(d.degraded_reason || '') : '主源实时') + '</div>'
       + '</div>'
       + '<div class="wb-pf-list">' + sorted.map(function (p) {
         var pct = Number(p.est_pct);
         var c = clsOf(pct);
+        var pnlKnown = p.est_day_pnl !== null && p.est_day_pnl !== undefined;
         return '<div class="wb-pf-item" title="' + esc(p.fund_name || '') + '">'
           + '<div class="wb-pf-name">' + esc(p.fund_name || '—') + '</div>'
           + '<div class="wb-pf-code">' + esc(p.fund_code || '') + '</div>'
           + '<div class="wb-pf-pct ' + c + '">' + esc(isNum(pct) ? pctText(pct) : '—') + '</div>'
-          + '<div class="wb-pf-pnl">' + esc(fmtMoney(Number(p.est_day_pnl))) + '</div>'
+          + '<div class="wb-pf-pnl' + (pnlKnown ? '' : ' is-muted') + '">' + esc(pnlKnown ? fmtMoney(Number(p.est_day_pnl)) : '—') + '</div>'
           + '</div>';
       }).join('') + '</div>'
       + '</div>';

@@ -304,3 +304,26 @@ def test_load_reports_partial_failure_instead_of_silence():
     body = _function_body(_js(), "async function load(force, statusIn) {")
     assert "failedNames" in body
     assert "部分面板取数失败" in body
+
+
+# ===== C-03(2026-11-17):降级时不得渲染「¥0.00」 =====
+
+def test_render_portfolio_handles_null_pnl():
+    """`total_est_day_pnl` / `est_day_pnl` 为 null 时必须渲染「—」并标降级样式。
+
+    旧实现 `fmtMoney(Number(p.est_day_pnl))` 会把 null 变成 `Number(null)=0` → ¥0.00,
+    与同项 `est_pct: null`(显示「—」)自相矛盾, 且 0 会被当成真实盈亏读走。
+    """
+    body = _function_body(_js(), "function renderPortfolio(r) {")
+
+    # 必须有显式的 null 分支(而不是靠 fmtMoney 的隐式转换)
+    assert "totalKnown" in body
+    assert "total !== null" in body
+    assert "p.est_day_pnl !== null" in body
+    # 降级要整块可见, 不只小字
+    assert "is-degraded" in body
+    assert "估算不可用" in body
+    # 反向断言: 不得再把 null 兜成 0, 取值必须在"已知/未知"三元里
+    assert "total_est_day_pnl || 0" not in body
+    assert "pnlKnown ? fmtMoney(Number(p.est_day_pnl)) : '—'" in body
+    assert "totalKnown ? fmtMoney(Number(total)) : '—'" in body
