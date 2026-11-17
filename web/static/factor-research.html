@@ -69,8 +69,9 @@
     footer { margin-top: 24px; color: var(--qf-text-muted); font-size: 12px; }
     /* F-3(2026-11-12): 移动端触摸目标 ≥44px(实测按钮 42 / 输入 43.x / nav 链接 24) */
     @media (max-width: 640px) {
-      input, button, select { min-height: 44px; }
-      nav a, footer a { display: inline-flex; align-items: center; min-height: 44px; }
+      /* D(2026-11-17): 触摸目标门槛 44 → **48**(选择器已含 select)。 */
+      input, button, select { min-height: 48px; }
+      nav a, footer a { display: inline-flex; align-items: center; min-height: 48px; }
     }
     @media (max-width: 850px) { .fields, .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .report-grid { grid-template-columns: 1fr; } }
     @media (max-width: 480px) { main { padding: 18px 14px 40px; } .panel { padding: 17px; } .fields { grid-template-columns: 1fr; } .metric { padding: 12px; } .metric strong { font-size: 21px; } nav { gap: 8px; } }

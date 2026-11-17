@@ -47,8 +47,10 @@
     td.cell { font-family: var(--qf-font-mono); font-size: 12px; }
     footer { margin-top: 40px; color: var(--qf-text-secondary); font-size: 13px; }
     @media (max-width: 640px) {
-      input, button { min-height: 44px; }
-      nav a { display: inline-flex; align-items: center; min-height: 44px; }
+      /* D(2026-11-17): 触摸目标门槛 44 → **48**;并补上 select(#direction 等
+         是 select, 旧选择器不含它)。三页保持同一段规则。 */
+      input, button, select { min-height: 48px; }
+      nav a, footer a { display: inline-flex; align-items: center; min-height: 48px; }
     }
   </style>
 </head>

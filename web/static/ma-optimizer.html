@@ -57,8 +57,9 @@
     footer { margin-top: 40px; color: var(--qf-text-secondary); font-size: 13px; }
     /* F-3(2026-11-12): 移动端触摸目标 ≥44px(实测按钮 42 / 输入 43.x / nav 链接 24) */
     @media (max-width: 640px) {
-      input, button { min-height: 44px; }
-      nav a { display: inline-flex; align-items: center; min-height: 44px; }
+      /* D(2026-11-17): 触摸目标门槛 44 → **48**;并补上 select。 */
+      input, button, select { min-height: 48px; }
+      nav a, footer a { display: inline-flex; align-items: center; min-height: 48px; }
     }
   </style>
 </head>

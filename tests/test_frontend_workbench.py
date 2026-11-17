@@ -341,9 +341,20 @@ def test_render_portfolio_handles_null_pnl():
 
 # ===== C-04(2026-11-17):移动端触摸目标 ≥48px =====
 
-def _media_block(css: str, query: str = "@media (max-width: 640px)") -> str:
-    """按花括号配平截取某个 @media 块的内容(只断言块内规则, 不做全文匹配)。"""
-    start = css.index(query)
+def _media_block(css: str, query: str = "@media (max-width: 640px)", occurrence: int = 0) -> str:
+    """按花括号配平截取某个 @media 块的内容(只断言块内规则, 不做全文匹配)。
+
+    ``occurrence`` 取第几个匹配(0=首个, -1=最后一个): hud.css 里同一个断点出现多次。
+    """
+    if occurrence == 0:
+        start = css.index(query)
+    else:
+        positions = []
+        idx = css.find(query)
+        while idx != -1:
+            positions.append(idx)
+            idx = css.find(query, idx + 1)
+        start = positions[occurrence]
     brace = css.index("{", start)
     depth = 0
     for i in range(brace, len(css)):
@@ -586,3 +597,42 @@ def test_qf_sem_tokens_exist_in_tokens_css():
 
     assert "--qf-sem-warn" in tokens
     assert "--qf-sem-critical" in tokens
+
+
+# ===== D(2026-11-17):移动端触摸目标 48px 收口(4 页) =====
+# 真机矩阵(4 页 × 6 断点 × 2 主题)实测出的真实缺口只有两类: 三个辅助页的
+# input/select/button/nav a 是 44~46px, 首页 .hud-subtab 是 44px(且宽度 44)。
+# 这些是纯 CSS 门槛, 用结构断言钉住, 防止将来改样式时又退回 44。
+
+_AUX_PAGES = ("web/static/stock-compare.html", "web/static/ma-optimizer.html",
+              "web/static/factor-research.html")
+
+
+@pytest.mark.parametrize("rel", _AUX_PAGES)
+def test_aux_pages_mobile_touch_targets_are_48(rel):
+    html = (ROOT / rel).read_text(encoding="utf-8")
+    block = _media_block(html, "@media (max-width: 640px)")
+
+    assert "min-height: 48px" in block
+    assert "min-height: 44px" not in block, f"{rel} 仍有 44px 门槛"
+    # select 必须在选择器里(#direction / #trainRatio 是 select, 曾被漏掉)
+    assert "input, button, select { min-height: 48px; }" in block, f"{rel} 未覆盖 select"
+    assert "nav a" in block and "min-height: 48px" in block
+
+
+def test_hud_subtab_and_btn_sm_are_48_on_mobile():
+    """首页: `.hud-subtab` 被 aurora 的固定 height:44px 压住(固定值会盖掉 min-height),
+    且 aurora 在 hud.css 之后加载 —— 所以 hud.css 必须用更高特异性 + height:auto
+    覆盖;浅色回退档(body 去掉 hud-theme)还要有一份不带前缀的版本。"""
+    css = (ROOT / "web/static/css/hud.css").read_text(encoding="utf-8")
+    block = _media_block(css, "@media (max-width: 768px)", occurrence=-1)
+
+    flat = " ".join(block.split())
+    # 深色档(压过 body.hud-theme .hud-subtab) 与浅色档(无前缀)都要有
+    assert "body.hud-theme .hud-subtabs > .hud-subtab { height: auto; min-height: 48px; min-width: 48px; }" in flat
+    assert ".hud-subtabs > .hud-subtab { height: auto; min-height: 48px; min-width: 48px; }" in flat
+    # .btn-sm 在 aurora 里是 height:40/min-height:44 → 两档都提到 48
+    assert "body.hud-theme .btn.btn-sm { height: auto; min-height: 48px; }" in flat
+    assert ".btn.btn-sm { height: auto; min-height: 48px; }" in flat
+    # height:auto 必须显式写(否则固定 height 会压住 min-height)
+    assert "height: auto" in flat

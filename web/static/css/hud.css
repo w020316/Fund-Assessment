@@ -206,3 +206,27 @@ body.hud-theme .fw-header {
 @media (max-width: 768px) {
   body.hud-theme #stockDetailPanel .btn { min-height: 48px; padding-left: 18px; padding-right: 18px; }
 }
+
+/* ============================================================
+   D(2026-11-17):移动端触摸目标 48px 收口
+   - `.hud-subtab` 在 aurora-theme.css:352 是**固定** `height:44px`(固定值会压住
+     min-height), 且 aurora 在本文件**之后**加载 —— 所以必须:① 把 height 改 auto;
+     ② 选择器特异性高于 `body.hud-theme .hud-subtab`(0,2,1), 这里用
+     `body.hud-theme .hud-subtabs > .hud-subtab`(0,3,1), 沿用 :194 同一手法。
+   - `.btn-sm` 在 aurora:342 是 `height:40px;min-height:44px`(0,2,1), 375px 下实测
+     44px < 48;`.btn.btn-sm` 组合(0,3,1)可稳定压过, 且站内所有 .btn-sm 都带 .btn。
+   ============================================================ */
+@media (max-width: 768px) {
+  /* 深色(hud-theme)档:需要压过 aurora 的 `body.hud-theme .hud-subtab`(0,2,1) */
+  body.hud-theme .hud-subtabs > .hud-subtab { height: auto; min-height: 48px; min-width: 48px; }
+  body.hud-theme .btn.btn-sm { height: auto; min-height: 48px; }
+  body.hud-theme .token-banner-close { width: 48px; height: 48px; }
+
+  /* 浅色回退档(探针会把 body.hud-theme 摘掉):此时 aurora 的 hud-theme 规则整体
+     失效, 落到 index.html 的 `.tab/.btn-sm { min-height:44px }` 与 hud.css 自己的
+     `.token-banner-close{28px}` 上 —— 必须有不带 hud-theme 前缀的版本兜住,
+     否则真机矩阵的浅色 24 组里仍会报 44px。 */
+  .hud-subtabs > .hud-subtab { height: auto; min-height: 48px; min-width: 48px; }
+  .btn.btn-sm { height: auto; min-height: 48px; }
+  .token-banner-close { width: 48px; height: 48px; }
+}
