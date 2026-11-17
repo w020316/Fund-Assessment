@@ -1209,10 +1209,29 @@ def _get_dragon_tiger_from_ranking() -> list[dict]:
     return []
 
 
+# A-15(2026-11-17):板块排行被 6 个端点共用(/sector_ranking、/sector_flow、/heatmap、
+# /thermometer、/capital-flow、/assessment)。工作台首屏是 Promise.all 并发拉这些
+# 端点, 旧实现没有单飞: 冷缓存时同一条(最坏十几秒的)降级链会被并发跑 N 遍,
+# 上游请求数翻倍、每个请求都等满自己的 TTL 之前那一次。
+# 这里用"进程内单飞 + 双检缓存"(同 _single_backtest_guard 的思路):
+# 第一个线程真正取数并写缓存, 其余线程拿到锁后直接命中缓存返回。
+_SECTOR_RANKING_LOCK = threading.Lock()
+
+
 def get_sector_ranking() -> list[dict]:
     cached = _cache_get("sector_ranking")
     if cached is not None:
         return cached
+    with _SECTOR_RANKING_LOCK:
+        # 双检: 等锁期间可能已经有别的线程把结果写进缓存了
+        cached = _cache_get("sector_ranking")
+        if cached is not None:
+            return cached
+        return _fetch_sector_ranking_uncached()
+
+
+def _fetch_sector_ranking_uncached() -> list[dict]:
+    """真正的取数链(东财行业 → 东财概念 → 新浪板块资金 → 新浪旧接口)。"""
     # 优先使用行业板块(m:90+t:2),而非概念板块(m:90+t:3)
     # 注:东财 API fs 参数, m:90+t:2=行业板块, m:90+t:3=概念板块
     url = "https://push2.eastmoney.com/api/qt/clist/get"
@@ -1300,6 +1319,13 @@ def get_sector_ranking() -> list[dict]:
     return result
 
 
+# 新浪板块资金最近一次失败的单调时间(0 = 未失败)。
+# 用模块级时间戳而不是 data_health 的 seconds_since_attempt: 后者会把这条例
+# 内部子兜底注册成健康度 source, 让运维页多出一行噪声;语义(冷却窗口内跳过)一致。
+_SINA_FUND_RETRY_S = 300.0
+_sina_fund_failed_at: float = 0.0
+
+
 def _get_sector_ranking_sina_fund() -> list[dict]:
     """新浪板块资金流（东财 clist 不可用时的真实资金兜底）。
 
@@ -1308,19 +1334,32 @@ def _get_sector_ranking_sina_fund() -> list[dict]:
     不再是"50 行资金全 0"的假数据。超大/大/中/小单拆分明细上游不给，保持 0
     并由路由层记入 unavailable_fields，避免被读成"真的为 0"。
     """
+    global _sina_fund_failed_at
     url = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/MoneyFlow.ssl_bkzj_bk"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Referer": "https://finance.sina.com.cn/",
     }
-    for fenlei in (2, 0):  # 2=行业(首选, 对齐东财 m:90+t:2) 0=申万一级(兜底)
+    # A-15(2026-11-17):旧实现顺序试 fenlei=2 → fenlei=0, 各 6s 超时, 最坏 12s
+    # 只为了拿"同一份板块列表"的两种分类口径。现在:
+    #   ① 只试行业口径 fenlei=2(与东财 m:90+t:2 对齐), 失败就**本次放弃**,
+    #      不再串第二个 6s —— 旧接口 newFLJK(5s)仍在后面兜底;
+    #   ② 失败后 _SINA_FUND_RETRY_S 内不再重试(与 ddx 的源暂停同一语义),
+    #      否则六个端点每个都把这 6s 重走一遍。
+    since = None if not _sina_fund_failed_at else time.monotonic() - _sina_fund_failed_at
+    if since is not None and since < _SINA_FUND_RETRY_S:
+        logger.info(f"sina sector fund 冷却中({since:.0f}s < {_SINA_FUND_RETRY_S:.0f}s), 本轮跳过")
+        return []
+    for fenlei in (2,):  # 2=行业(对齐东财 m:90+t:2)
         try:
             resp = requests.get(url, params={
                 "page": 1, "num": 100, "sort": "netamount", "asc": 0, "fenlei": fenlei,
             }, timeout=6, headers=headers)
             items = resp.json()
             if not isinstance(items, list) or not items:
-                continue
+                _sina_fund_failed_at = time.monotonic()
+                logger.warning(f"_get_sector_ranking_sina_fund fenlei={fenlei} 返回空, 进入冷却")
+                return []
             result: list[dict] = []
             for item in items:
                 code = _safe_str(item.get("category"))
@@ -1344,10 +1383,14 @@ def _get_sector_ranking_sina_fund() -> list[dict]:
                     "small_pct": 0,
                 })
             if result:
+                _sina_fund_failed_at = 0.0
                 # 与东财口径对齐：按涨跌幅降序，而非上游的净流入排序
                 result.sort(key=lambda x: x["change_pct"], reverse=True)
                 return result[:50]
+            _sina_fund_failed_at = time.monotonic()
+            return []
         except Exception as e:
+            _sina_fund_failed_at = time.monotonic()
             logger.warning(f"_get_sector_ranking_sina_fund fenlei={fenlei} failed: {e}")
     return []
 

@@ -77,6 +77,18 @@ def _reset_scan_cooldown():
         _strategy._scan_last_timeout = 0.0
     except Exception:
         pass
+    try:
+        from src.core import data_source_v2 as _ds2
+        _ds2._sina_fund_failed_at = 0.0
+    except Exception:
+        pass
+    # A-15(2026-11-17):板块资金兜底源的失败冷却(300s)同为进程内状态,
+    # 不重置会让前一个用例的失败把后续用例挡在冷却分支外。
+    try:
+        from src.core import data_source_v2 as _ds2
+        _ds2._sina_fund_failed_at = 0.0
+    except Exception:
+        pass
 
 
 @pytest.fixture(autouse=True)
