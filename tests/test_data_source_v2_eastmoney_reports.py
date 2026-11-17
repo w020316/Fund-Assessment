@@ -28,9 +28,13 @@ def _ok(rows, count=None):
 def test_margin_trading_uses_current_report_and_fields(monkeypatch):
     """报表名/筛选列/字段映射锁定;并且**单位**必须对: RQMCL 是股, 不是元。
 
-    真实样本(2026-11-17 实测 RPTA_WEB_RZRQ_GGMX, 600519, 2026-11-16):
-    RZYE=14788586340(元) RQYE=322111545(元) RQYL=221550(股) RQMCL=2900(股) SPJ=1453.9
-    且 RQYE/RQYL == SPJ ⇒ RQYL/RQMCL 是**股**, RZYE/RQYE 是**元**;该报表没有融券"额"。
+    本用例的单位/口径依据来自 2026-11-17 实测响应, 见
+    docs/quality-review-2026-11-17-r6-stage1.md §5.4:
+    实测 RPTA_WEB_RZRQ_GGMX(600519, 2026-11-16):
+      RZYE=14,788,586,340(元) RQYE=322,111,545(元)
+      RQYL=221,550(股) RQMCL=2,900(股) SPJ=1453.9(收盘价)
+    且 RQYE/RQYL = 1453.9 = SPJ ⇒ RQYL/RQMCL 是**股**, RZYE/RQYE 是**元**;
+    该报表**没有融券「额」字段**。
     """
     captured = {}
 
@@ -38,8 +42,11 @@ def test_margin_trading_uses_current_report_and_fields(monkeypatch):
         captured.update(params or {})
         return _ok([{
             "SCODE": "600519", "DATE": "2026-11-16 00:00:00",
-            "RZMRE": 3.6e8, "RZYE": 1.5e10, "RQMCL": 2900, "RQYL": 221550,
-            "RQYE": 3.1e8, "RZRQYE": 1.53e10, "SPJ": 1453.9,
+            # 融资买入额本次未核对上游原值, 只用于字段映射断言
+            "RZMRE": 3.6e8,
+            # 以下六项全部取 2026-11-16 实测原值, 保持三者(元/股/价)互相自洽
+            "RZYE": 14788586340.0, "RQYE": 322111545.0, "RQYL": 221550,
+            "RQMCL": 2900, "RZRQYE": 15110697885.0, "SPJ": 1453.9,
         }])
 
     monkeypatch.setattr(ds2, "em_get", fake_em_get)
@@ -52,14 +59,20 @@ def test_margin_trading_uses_current_report_and_fields(monkeypatch):
         "code": "600519",
         "trade_date": "2026-11-16",
         "margin_buy": 3.6e8,
-        "margin_balance": 1.5e10,
+        "margin_balance": 14788586340.0,
         # 金额语义不可得 → 诚实空值, 不把股数当元
         "short_sell": None,
         # 融券卖出量, 单位:股
-        "short_sell_volume": 2900,
-        "short_balance": 3.1e8,
-        "total_balance": 1.53e10,
+        "short_sell_volume": 2900.0,
+        "short_balance": 322111545.0,
+        "total_balance": 15110697885.0,
     }
+    # 单位自洽(准入要求): 融券余额(元) / 融券余量(股) == 当日收盘价(元/股)
+    assert result["short_balance"] / 221550 == pytest.approx(1453.9, rel=1e-9)
+    # total_balance == 融资余额 + 融券余额(元), 证明三者同为"元"
+    assert result["total_balance"] == pytest.approx(
+        result["margin_balance"] + result["short_balance"], rel=1e-9
+    )
 
 
 def test_margin_units_are_self_consistent(monkeypatch):
@@ -101,10 +114,13 @@ def test_margin_missing_fields_are_none_not_zero(monkeypatch):
 def test_block_trades_uses_current_report_and_fields(monkeypatch):
     """报表字段 + 溢价率口径(上游 PREMIUM_RATIO 是小数, 基准=当日收盘价)。
 
-    真实样本(2026-11-17 实测 RPT_DATA_BLOCKTRADE, 300003, 2026-11-16):
-    DEAL_PRICE=9.92, CLOSE_PRICE=12.02, PRE_CLOSE_PRICE=12.09
-    PREMIUM_RATIO=-0.174708818636 == 9.92/12.02-1  (小数, 基准收盘价)
-    DISCOUNT_RATIO=-17.948717948718 == 9.92/12.09-1 (百分数, 基准昨收)
+    本用例的单位/口径依据来自 2026-11-17 实测响应, 见
+    docs/quality-review-2026-11-17-r6-stage1.md §5.4:
+    实测 RPT_DATA_BLOCKTRADE(300003, 2026-11-16):
+      DEAL_PRICE=9.92, CLOSE_PRICE=12.02, PRE_CLOSE_PRICE=12.09
+      PREMIUM_RATIO=-0.174708818636 == 9.92/12.02-1  (小数, 基准收盘价)
+      DISCOUNT_RATIO=-17.948717948718 == 9.92/12.09-1 (百分数, 基准昨收)
+      DEAL_AMT 13,137,100 / DEAL_PRICE 9.92 = 1,324,300 = DEAL_VOLUME(股)
     """
     captured = {}
 
@@ -113,7 +129,7 @@ def test_block_trades_uses_current_report_and_fields(monkeypatch):
         return _ok([{
             "SECURITY_CODE": "300003", "SECURITY_NAME_ABBR": "乐普医疗",
             "TRADE_DATE": "2026-11-16 00:00:00", "DEAL_PRICE": 9.92,
-            "DEAL_VOLUME": 1_000_000, "DEAL_AMT": 9_920_000.0,
+            "DEAL_VOLUME": 1_324_300, "DEAL_AMT": 13_137_100.0,
             "PREMIUM_RATIO": -0.174708818636, "BUYER_NAME": "机构专用",
             "SELLER_NAME": "机构专用",
         }])
@@ -124,15 +140,16 @@ def test_block_trades_uses_current_report_and_fields(monkeypatch):
     assert captured["reportName"] == "RPT_DATA_BLOCKTRADE"
     assert len(result) == 1
     item = result[0]
-    assert item["volume"] == 1_000_000
+    assert item["volume"] == 1_324_300
     assert item["name"] == "乐普医疗"
     # 小数 → 百分数, 保留 2 位
     assert item["premium_pct"] == pytest.approx(-17.47, abs=0.01)
     # 基准是**收盘价**:与按昨收算的 -17.95 明确不同, 防止有人把两个字段互换
     assert item["premium_pct"] == pytest.approx(round((9.92 / 12.02 - 1) * 100, 2))
     assert abs(item["premium_pct"] - (9.92 / 12.09 - 1) * 100) > 0.4
-    # 单位自洽:成交额(元) / 成交价(元/股) == 成交量(股) —— 印证 volume 是股不是手
-    assert item["amount"] / item["price"] == pytest.approx(item["volume"])
+    # 单位自洽(准入要求): 成交额(元) / 成交价(元/股) == 成交量(股)
+    # 容忍 1e-5: 上游成交量按整百股取整, 13,137,100/9.92 = 1,324,300.4
+    assert item["amount"] / item["price"] == pytest.approx(item["volume"], rel=1e-5)
 
 
 def test_block_trades_missing_premium_is_none(monkeypatch):
@@ -347,6 +364,7 @@ def test_northbound_resumes_with_total_only(monkeypatch):
     assert result["total_net_inflow"] == 5.0e9
     assert result["date"] == "2026-11-13"
     assert result["sh_sz_split_available"] is False
+
 
 def test_northbound_total_only_keeps_split_none(monkeypatch):
     """A-01(2026-11-17):只有合计净额时, sh/sz 必须是 None 而不是 0.0。
