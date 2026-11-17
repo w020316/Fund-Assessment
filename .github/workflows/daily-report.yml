@@ -64,12 +64,25 @@ jobs:
             git checkout -B daily-reports origin/daily-reports
           else
             # 首次运行: 建立仅含报告目录的孤立分支
+            # -f 必须: orphan 后索引里全仓库文件都是"已暂存新增", 无 -f 会被安全检查拒绝
             git checkout --orphan daily-reports
-            git rm -r -q --ignore-unmatch .
+            git rm -r -f -q --ignore-unmatch .
           fi
           mkdir -p "$REPORT_DIR"
           cp /tmp/new_report.html "$REPORT_DIR/$FILENAME"
           git add "$REPORT_DIR"
+
+          # 守卫(fail-closed): 既有分支追加 / orphan 首建两条路径共用。
+          # 暂存区若出现 daily_reports/ 前缀之外的文件, 说明上游有脏改动被裹挟,
+          # 直接列出文件名并失败, 绝不提交。
+          ALLOWED_PREFIX="${REPORT_DIR}/"
+          BAD_FILES="$(git diff --cached --name-only --diff-filter=ACMR | grep -v "^${ALLOWED_PREFIX}" || true)"
+          if [ -n "$BAD_FILES" ]; then
+            echo "::error::暂存区包含允许目录(${ALLOWED_PREFIX})之外的文件, 拒绝提交:"
+            echo "$BAD_FILES" | sed 's/^/::error::  越界文件: /'
+            exit 1
+          fi
+
           if git diff --cached --quiet; then
             echo "::notice::报告内容无变化，跳过提交"
           else

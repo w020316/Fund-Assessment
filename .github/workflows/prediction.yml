@@ -222,12 +222,24 @@ jobs:
           if git show-ref --verify --quiet refs/remotes/origin/daily-reports; then
             git checkout -B daily-reports origin/daily-reports
           else
+            # orphan 首建时索引里全仓库文件都是"已暂存新增", 无 -f 会被安全检查拒绝
             git checkout --orphan daily-reports
-            git rm -r -q --ignore-unmatch .
+            git rm -r -f -q --ignore-unmatch .
           fi
           mkdir -p db_backup
           cp /tmp/prediction_snapshot.db "db_backup/prediction_${STAMP}.db"
           git add db_backup
+
+          # 守卫(fail-closed): 既有分支追加 / orphan 首建两条路径共用。
+          # 暂存区若出现 db_backup/ 前缀之外的文件, 直接列出文件名并失败, 绝不提交。
+          ALLOWED_PREFIX="db_backup/"
+          BAD_FILES="$(git diff --cached --name-only --diff-filter=ACMR | grep -v "^${ALLOWED_PREFIX}" || true)"
+          if [ -n "$BAD_FILES" ]; then
+            echo "::error::暂存区包含允许目录(${ALLOWED_PREFIX})之外的文件, 拒绝提交:"
+            echo "$BAD_FILES" | sed 's/^/::error::  越界文件: /'
+            exit 1
+          fi
+
           if git diff --cached --quiet; then
             echo "::notice::备份内容无变化, 跳过提交"
           else
