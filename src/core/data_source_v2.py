@@ -2455,6 +2455,82 @@ def get_fund_history_tencent(code: str, period: str = "1y") -> list[dict]:
     return []
 
 
+# P1(2026-11-17):全市场涨跌家数**不能**用 clist 分页统计 —— 东财 clist 的 pz 有
+# 服务端上限(实测 pz=6000 只回 **100 行**, 而 total=5564), 且 `fid=f3` 是降序,
+# 那 100 行**全是上涨股** → rise=100/fall=0/flat=0, rise_ratio 恒等于 1.0
+# (与行情无关, 每天都一样), 连带「市场广度 100 分」「情绪恒偏多」「data_quality=normal」。
+# 线上实测: /api/review/board 返回 100/0/0 的同时, 同一时刻有 67 家跌停、创业板 -1.20%。
+# 改用 ulist.np 的**聚合字段**(f104/f105/f106)一次拿到两市各自家数。
+_SENTIMENT_SECIDS = ("1.000001", "0.399001")  # 沪市 / 深市
+_ULIST_FIELDS = "f1,f2,f3,f12,f14,f104,f105,f106"
+# 自洽校验: 两市家数合计 / clist total 的合理区间。实测 5294/5564 = 95.1%
+# (差额为北交所与退市标的)。越界即视为"只统计到一部分", fail-closed。
+_COUNTS_RATIO_MIN = 0.90
+_COUNTS_RATIO_MAX = 1.15
+
+
+def _ulist_breadth_one(secid: str, attempts: int = 2) -> tuple[int, int, int] | None:
+    """取单个市场的 (涨, 跌, 平) 家数;失败重试 1 次(实测沪市偶发连接被关闭)。"""
+    url = "https://push2.eastmoney.com/api/qt/ulist.np/get"
+    params = {"fltt": 2, "invt": 2, "fields": _ULIST_FIELDS, "secids": secid}
+    for attempt in range(max(1, attempts)):
+        try:
+            resp = em_get(url, params=params)
+            data = resp.json().get("data") or {}
+            diff = data.get("diff")
+            row = None
+            if isinstance(diff, list) and diff:
+                row = diff[0]
+            elif isinstance(diff, dict) and diff:
+                row = next(iter(diff.values()))
+            if isinstance(row, dict):
+                up = _opt_float(row.get("f104"))
+                down = _opt_float(row.get("f105"))
+                flat = _opt_float(row.get("f106"))
+                if up is not None and down is not None and flat is not None:
+                    return int(up), int(down), int(flat)
+            logger.warning(f"ulist breadth {secid} 第 {attempt + 1} 次无有效字段: {str(data)[:120]}")
+        except Exception as e:
+            logger.warning(f"ulist breadth {secid} 第 {attempt + 1} 次失败: {e}")
+        if attempt + 1 < attempts:
+            time.sleep(0.4)
+    return None
+
+
+def _bj_exchange_total() -> int | None:
+    """北交所家数(clist `m:0+t:81+s:2048`)。
+
+    P1 补正: clist 的 `fs` 把北交所也算进 `total`, 而 ulist 的沪/深聚合家数**不含**北交所。
+    实测同一时刻: clist total 5930、北交所 366、沪深 5564、ulist 合计 5294 → 5294/5564=95.1%
+    (直接拿 5930 当分母会算成 89.3%, 误判为"只统计到一部分")。
+    取不到北交所家数时返回 None, 调用方退回原始 total。
+    """
+    try:
+        resp = em_get("https://push2.eastmoney.com/api/qt/clist/get", params={
+            "pn": 1, "pz": 1, "po": 1, "np": 1, "fltt": 2, "invt": 2, "fid": "f3",
+            "fs": "m:0+t:81+s:2048", "fields": "f2,f3,f12,f14",
+        })
+        total = _opt_float((resp.json().get("data") or {}).get("total"))
+        return int(total) if total is not None else None
+    except Exception as e:
+        logger.warning(f"北交所家数获取失败(按原始 total 校验): {e}")
+        return None
+
+
+def _market_breadth_counts() -> tuple[int, int, int] | None:
+    """沪深合计涨跌家数;任一市场取不到就返回 None(绝不拿单市冒充全市场)。"""
+    total_up = total_down = total_flat = 0
+    for secid in _SENTIMENT_SECIDS:
+        got = _ulist_breadth_one(secid)
+        if got is None:
+            logger.warning(f"market breadth 缺市场 {secid}, 本轮不做全市场统计")
+            return None
+        total_up += got[0]
+        total_down += got[1]
+        total_flat += got[2]
+    return total_up, total_down, total_flat
+
+
 def get_market_sentiment() -> dict:
     cached = _cache_get("market_sentiment")
     if cached is not None:
@@ -2466,8 +2542,17 @@ def get_market_sentiment() -> dict:
         # 推算（basis=index_proxy），与"涨跌家数统计"不是一回事，消费方必须能区分，
         # 否则 0/0/0 + "偏空" 会被读成"0 只上涨"。
         "basis": "unavailable", "counts_available": False,
+        # P1: `basis` 表示"**结论**的依据"(counts / index_proxy / unavailable),
+        # `counts_basis` 表示"**家数**的状态"(counts / partial_sample / unavailable)。
+        # 两者必须分开: 家数对不上而由指数代理出结论时, basis=index_proxy 是准确的,
+        # 但"家数只统计到一部分"这件事不能因此丢失。
+        "counts_basis": "unavailable",
     }
+    counts_basis = "unavailable"   # 家数状态的唯一真值源(指数代理重建 result 时靠它兜住)
     try:
+        # clist 只用来拿**总家数**(自洽校验的分母), 不再用它统计涨跌家数:
+        # pz 有服务端上限(实测 pz=6000 仍只回 100 行)且 fid=f3 降序 → 前 100 行
+        # 全是上涨股, 统计出来必然是 100/0/0。
         url = "https://push2.eastmoney.com/api/qt/clist/get"
         params = {
             "pn": 1, "pz": 1, "po": 1, "np": 1,
@@ -2477,27 +2562,40 @@ def get_market_sentiment() -> dict:
         }
         resp = em_get(url, params=params)
         data = resp.json()
-        total_count = data.get("data", {}).get("total", 0)
-        if total_count > 0:
-            rise = 0
-            fall = 0
-            flat = 0
-            params_up = dict(params)
-            params_up["pz"] = min(total_count, 6000)
-            resp_up = em_get(url, params=params_up)
-            data_up = resp_up.json()
-            diff = data_up.get("data", {}).get("diff", [])
-            for item in diff:
-                chg = _safe_float(item.get("f3", 0))
-                if chg > 0:
-                    rise += 1
-                elif chg < 0:
-                    fall += 1
-                else:
-                    flat += 1
-            total = rise + fall + flat
-            if total > 0:
-                ratio = rise / total
+        total_count = int(_safe_float(data.get("data", {}).get("total", 0)))
+        breadth = _market_breadth_counts()
+        if breadth is None:
+            # 单市缺失: fail-closed, 由下面的指数代理兜底出结论
+            counts_basis = "partial_sample"
+            result = {
+                "rise_count": None, "fall_count": None, "flat_count": None,
+                "sentiment": "--", "ratio": 0.5,
+                "basis": "partial_sample", "counts_available": False,
+                "counts_basis": counts_basis,
+            }
+        else:
+            rise, fall, flat = breadth
+            counted = rise + fall + flat
+            # 分母校正: clist total 含北交所, ulist 只统计沪深, 直接相除会低估覆盖率
+            bj_total = _bj_exchange_total()
+            denom_total = total_count - bj_total if (bj_total and total_count > bj_total) else total_count
+            coverage = (counted / denom_total) if denom_total > 0 else None
+            if coverage is None or not (_COUNTS_RATIO_MIN <= coverage <= _COUNTS_RATIO_MAX):
+                # 自洽校验失败 = 只统计到一部分市场, 绝不能当全市场用
+                logger.warning(
+                    f"market breadth 自洽校验失败: 家数合计={counted} 沪深total={denom_total} "
+                    f"coverage={coverage if coverage is None else round(coverage, 3)} "
+                    f"(要求 {_COUNTS_RATIO_MIN}~{_COUNTS_RATIO_MAX})"
+                )
+                counts_basis = "partial_sample"
+                result = {
+                    "rise_count": None, "fall_count": None, "flat_count": None,
+                    "sentiment": "--", "ratio": 0.5,
+                    "basis": "partial_sample", "counts_available": False,
+                    "counts_basis": counts_basis,
+                }
+            elif counted > 0:
+                ratio = rise / counted
                 if ratio > 0.6:
                     label = "偏多"
                 elif ratio < 0.4:
@@ -2512,7 +2610,9 @@ def get_market_sentiment() -> dict:
                     "ratio": round(ratio, 3),
                     "basis": "counts",
                     "counts_available": True,
+                    "counts_basis": "counts",
                 }
+                counts_basis = "counts"
     except Exception as e:
         logger.warning(f"get_market_sentiment em failed: {e}")
     if result["sentiment"] == "--":
@@ -2546,6 +2646,9 @@ def get_market_sentiment() -> dict:
                         break
         except Exception as e:
             logger.warning(f"get_market_sentiment tencent fallback failed: {e}")
+    # 指数代理分支会整体重建 result(不带 counts_basis), 用局部变量回写,
+    # 否则"只统计到一部分"这件事会被抹成 unavailable
+    result["counts_basis"] = counts_basis
     _cache_set("market_sentiment", result, 30)
     return result
 

@@ -147,13 +147,22 @@ def _fetch_indices() -> list[dict[str, Any]]:
 
 
 def _fetch_sentiment() -> dict[str, Any]:
+    """P1(2026-11-17): 家数缺失时必须保持 None, 不能 `or 0` 兜成"0 家上涨";
+    并把 counts_available / basis 透传给下游(预测信号的权重据此降级)。"""
     d = ds2.get_market_sentiment() or {}
+
+    def _cnt(key: str) -> int | None:
+        value = d.get(key)
+        return None if value is None else int(value)
+
     return {
-        "rise_count": int(d.get("rise_count", 0) or 0),
-        "fall_count": int(d.get("fall_count", 0) or 0),
-        "flat_count": int(d.get("flat_count", 0) or 0),
+        "rise_count": _cnt("rise_count"),
+        "fall_count": _cnt("fall_count"),
+        "flat_count": _cnt("flat_count"),
         "sentiment": str(d.get("sentiment", "") or ""),
         "ratio": float(d.get("ratio", 0.0) or 0.0),
+        "counts_available": d.get("counts_available"),
+        "basis": str(d.get("basis", "") or ""),
     }
 
 

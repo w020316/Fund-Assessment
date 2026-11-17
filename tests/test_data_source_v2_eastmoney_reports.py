@@ -385,3 +385,147 @@ def test_northbound_total_only_keeps_split_none(monkeypatch):
     assert result["sh_net_inflow"] is None
     assert result["sz_net_inflow"] is None
     assert result["sh_sz_split_available"] is False
+
+
+# ===== P1(2026-11-17):全市场涨跌家数必须来自聚合字段, 不能靠 clist 分页 =====
+# 线上实测: /api/review/board 返回 rise=100 / fall=0 / flat=0 / ratio=1.0,
+# 而同一时刻有 67 家跌停、创业板 -1.20%。根因是 clist 的 pz 有服务端上限
+# (实测 pz=6000 仍只回 100 行)且 fid=f3 降序 → 那 100 行全是上涨股。
+# 真实值(同一时刻直连东财 ulist.np 聚合字段):
+#   沪市 f104=598 f105=1688 f106=69  / 深市 f104=638 f105=2237 f106=64
+#   合计 涨=1236 跌=3925 平=133 (总 5294; clist total 5564, 覆盖率 95.1%)
+
+_REAL_SH = {"f104": 598, "f105": 1688, "f106": 69}
+_REAL_SZ = {"f104": 638, "f105": 2237, "f106": 64}
+_REAL_TOTAL = 5564
+
+
+class _SentimentResp:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+def _mock_em_for_breadth(monkeypatch, sh, sz, total, clist_diff_rows=None,
+                         sh_raises=False, bj_total=366):
+    """按 URL 分发: clist(沪深+北交所) → total / clist(北交所) → bj / ulist.np → 家数。"""
+    calls = {"ulist": [], "clist": 0}
+
+    def fake_em_get(url, params=None, **kwargs):
+        params = params or {}
+        if params.get("fs") == "m:0+t:81+s:2048":
+            return _SentimentResp({"data": {"total": bj_total, "diff": []}})
+        if "ulist.np" in url:
+            secids = str(params.get("secids", ""))
+            calls["ulist"].append(secids)
+            if sh_raises and secids.startswith("1."):
+                raise RuntimeError("Remote end closed connection without response")
+            row = sh if secids.startswith("1.") else sz if secids.startswith("0.") else None
+            if row is None:
+                return _SentimentResp({"data": None})
+            return _SentimentResp({"data": {"diff": [dict(row, f12=secids, f14="指数")]}})
+        # clist: 只用于拿总家数; clist_diff_rows 用来模拟"只回 100 行且全上涨"
+        calls["clist"] += 1
+        if clist_diff_rows is not None:
+            return _SentimentResp({"data": {"total": total, "diff": clist_diff_rows}})
+        return _SentimentResp({"data": {"total": total, "diff": []}})
+
+    monkeypatch.setattr(ds2, "em_get", fake_em_get)
+    monkeypatch.setattr(ds2, "_cache_get", lambda key: None)
+    monkeypatch.setattr(ds2, "_cache_set", lambda key, val, ttl: None)
+    return calls
+
+
+class TestMarketBreadthCounts:
+    def test_real_counts_from_aggregate_fields(self, monkeypatch):
+        """真实值: 涨1236/跌3925/平133 → ratio 0.2335 → 偏空。"""
+        _mock_em_for_breadth(monkeypatch, _REAL_SH, _REAL_SZ, _REAL_TOTAL)
+
+        out = ds2.get_market_sentiment()
+
+        assert out["rise_count"] == 1236
+        assert out["fall_count"] == 3925
+        assert out["flat_count"] == 133
+        assert out["ratio"] == pytest.approx(0.2335, abs=1e-3)
+        assert out["sentiment"] == "偏空"
+        assert out["basis"] == "counts"
+        assert out["counts_available"] is True
+        assert out["counts_basis"] == "counts"
+
+    def test_clist_capped_at_100_rows_does_not_produce_100_0_0(self, monkeypatch):
+        """反向证明: 即便 clist 只回 100 行全上涨(真实上限), 也**不得**产出 100/0/0。
+
+        这是本次修复的核心: 旧实现用 clist 分页统计 → rise=100, fall=0, flat=0,
+        rise_ratio 恒 1.0; 现在家数来自聚合字段, clist 只提供分母。
+        """
+        hundred_up = [{"f3": 10.0 - i * 0.01} for i in range(100)]
+        _mock_em_for_breadth(monkeypatch, _REAL_SH, _REAL_SZ, _REAL_TOTAL,
+                             clist_diff_rows=hundred_up)
+
+        out = ds2.get_market_sentiment()
+
+        assert (out["rise_count"], out["fall_count"], out["flat_count"]) != (100, 0, 0)
+        assert out["rise_count"] == 1236
+        assert out["ratio"] != 1.0
+
+    def test_coverage_out_of_range_fails_closed(self, monkeypatch):
+        """只统计到半个市场(合计/total = 0.5) → 三个 count 一律 None, 不可当全市场。"""
+        half_sh = {"f104": 300, "f105": 700, "f106": 30}
+        half_sz = {"f104": 200, "f105": 900, "f106": 20}
+        # 合计 2150 / total 4300 = 0.5
+        _mock_em_for_breadth(monkeypatch, half_sh, half_sz, 4300)
+
+        out = ds2.get_market_sentiment()
+
+        assert out["rise_count"] is None
+        assert out["fall_count"] is None
+        assert out["flat_count"] is None
+        assert out["counts_available"] is False
+        # 家数状态: partial_sample;结论依据: 交给指数代理(basis=index_proxy)
+        assert out["counts_basis"] == "partial_sample"
+        assert out["basis"] != "counts"
+        assert out["sentiment"] in ("--", "偏多", "偏空", "中性"), "交由指数代理兜底"
+
+    def test_single_market_failure_is_not_treated_as_whole_market(self, monkeypatch):
+        """沪市取不到 → **不得**拿深市数字当全市场;标 partial 并由指数代理出结论。"""
+        calls = _mock_em_for_breadth(monkeypatch, _REAL_SH, _REAL_SZ, _REAL_TOTAL,
+                                     sh_raises=True)
+        monkeypatch.setattr(ds2.time, "sleep", lambda s: None)  # 跳过重试退避
+
+        out = ds2.get_market_sentiment()
+
+        # 沪市重试了 2 次(退避), 深市根本没去请求
+        assert calls["ulist"] == ["1.000001", "1.000001"]
+        assert out["counts_available"] is False
+        assert out["counts_basis"] == "partial_sample"
+        assert out["rise_count"] is None, "不能把深市的 638 当成全市场上涨家数"
+        assert out["fall_count"] is None
+
+    def test_clist_total_including_bj_is_not_mistaken_for_partial(self, monkeypatch):
+        """clist total 含北交所(实测 5930), 而 ulist 只统计沪深(5294/5564=95.1%)。
+
+        直接用 5930 当分母会算成 89.3% 而误判"只统计到一部分" —— 必须减去北交所家数。
+        """
+        _mock_em_for_breadth(monkeypatch, _REAL_SH, _REAL_SZ, 5930, bj_total=366)
+
+        out = ds2.get_market_sentiment()
+
+        assert out["counts_available"] is True, "分母未校正 → 误判 partial"
+        assert out["rise_count"] == 1236
+        assert out["sentiment"] == "偏空"
+
+    def test_zero_rise_is_valid_not_failure(self, monkeypatch):
+        """全市场下跌(rise=0)是合法实况, 不能被当成"数据缺失"。"""
+        _mock_em_for_breadth(
+            monkeypatch, {"f104": 0, "f105": 1200, "f106": 10},
+            {"f104": 0, "f105": 1300, "f106": 12}, 2600,
+        )
+
+        out = ds2.get_market_sentiment()
+
+        assert out["rise_count"] == 0
+        assert out["counts_available"] is True
+        assert out["sentiment"] == "偏空"
+        assert out["ratio"] == 0.0

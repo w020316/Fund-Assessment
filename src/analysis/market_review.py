@@ -558,8 +558,12 @@ def build_review_board(
 
     # 数据完整性:核心池全部为空说明当天无数据(非交易日照常返回空)
     available = bool(limit_pool or broken_pool or limit_down_pool)
-    # 有效涨跌家数 > 0 才算完整;仅拿到涨停池、缺市场广度时标记 partial
-    data_quality = "normal" if available and (rise_count or 0) > 0 else ("partial" if available else "empty")
+    # P1(2026-11-17): 旧判据 `(rise_count or 0) > 0` 有两个毛病:
+    #   ① 家数 fail-closed(None)时靠 `or 0` 恰好降级 —— 是巧合, 不是契约;
+    #   ② **全市场下跌(rise_count == 0)是合法实况**, 却会被误判成 partial。
+    # 改为看"家数是否真的取到了"(counts_available + 非 None)。
+    counts_ok = (not counts_missing) and rise_count is not None
+    data_quality = "normal" if available and counts_ok else ("partial" if available else "empty")
 
     return {
         "date": f"{target[:4]}-{target[4:6]}-{target[6:]}",
