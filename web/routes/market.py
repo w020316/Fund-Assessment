@@ -805,7 +805,9 @@ class BlockTradeItem(BaseModel):
     price: float
     volume: float
     amount: float
-    premium_pct: float
+    # 2026-11-17: 上游 PREMIUM_RATIO 是小数的溢价率(基准=当日收盘价),
+    # data_source_v2 已统一换算成百分数; 字段缺失时 None(不填 0)。
+    premium_pct: float | None = None
     buyer: str
     seller: str
 

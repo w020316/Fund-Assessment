@@ -612,3 +612,27 @@ class TestMarginUnitSemantics:
 
         assert data["short_sell"] is None, "融券卖出额不可得时必须为 null, 不能落成 0"
         assert data["short_sell_volume"] == 2900.0, "融券卖出量(股)必须原样透出"
+
+
+class TestBlockTradePercentSemantics:
+    """A-16(2026-11-17):大宗交易溢价率是百分数(后端已×100),缺失为 null 不是 0%。"""
+
+    def test_block_route_keeps_percent_or_null(self, client, monkeypatch):
+        item = {"code": "300003", "name": "乐普医疗", "trade_date": "2026-11-16",
+                "price": 9.92, "volume": 1_000_000.0, "amount": 9_920_000.0,
+                "premium_pct": -17.47, "buyer": "A", "seller": "B"}
+        market.cache.clear()
+        monkeypatch.setattr(market.ds2, "get_block_trades", lambda code: [item])
+        data = client.get("/api/market/block_trades", params={"code": "300003"}).json()["data"]
+
+        assert data[0]["premium_pct"] == -17.47
+
+        # 溢价率缺失 → null(不是 0%), 且整行仍要返回, 不能因一个字段缺失就丢掉记录
+        market.cache.clear()
+        monkeypatch.setattr(
+            market.ds2, "get_block_trades",
+            lambda code: [dict(item, premium_pct=None)],
+        )
+        rows = client.get("/api/market/block_trades", params={"code": "300003"}).json()["data"]
+        assert len(rows) == 1
+        assert rows[0]["premium_pct"] is None

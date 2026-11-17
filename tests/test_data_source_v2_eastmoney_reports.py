@@ -99,25 +99,57 @@ def test_margin_missing_fields_are_none_not_zero(monkeypatch):
 
 
 def test_block_trades_uses_current_report_and_fields(monkeypatch):
+    """报表字段 + 溢价率口径(上游 PREMIUM_RATIO 是小数, 基准=当日收盘价)。
+
+    真实样本(2026-11-17 实测 RPT_DATA_BLOCKTRADE, 300003, 2026-11-16):
+    DEAL_PRICE=9.92, CLOSE_PRICE=12.02, PRE_CLOSE_PRICE=12.09
+    PREMIUM_RATIO=-0.174708818636 == 9.92/12.02-1  (小数, 基准收盘价)
+    DISCOUNT_RATIO=-17.948717948718 == 9.92/12.09-1 (百分数, 基准昨收)
+    """
     captured = {}
 
     def fake_em_get(url, params=None, **kwargs):
         captured.update(params or {})
         return _ok([{
-            "SECURITY_CODE": "600519", "SECURITY_NAME_ABBR": "贵州茅台",
-            "TRADE_DATE": "2026-11-12 00:00:00", "DEAL_PRICE": 1410.27,
-            "DEAL_VOLUME": 16900, "DEAL_AMT": 2.38e7, "PREMIUM_RATIO": -1.5,
-            "BUYER_NAME": "机构专用", "SELLER_NAME": "机构专用",
+            "SECURITY_CODE": "300003", "SECURITY_NAME_ABBR": "乐普医疗",
+            "TRADE_DATE": "2026-11-16 00:00:00", "DEAL_PRICE": 9.92,
+            "DEAL_VOLUME": 1_000_000, "DEAL_AMT": 9_920_000.0,
+            "PREMIUM_RATIO": -0.174708818636, "BUYER_NAME": "机构专用",
+            "SELLER_NAME": "机构专用",
         }])
 
     monkeypatch.setattr(ds2, "em_get", fake_em_get)
-    result = ds2.get_block_trades("600519")
+    result = ds2.get_block_trades("300003")
 
     assert captured["reportName"] == "RPT_DATA_BLOCKTRADE"
     assert len(result) == 1
-    assert result[0]["volume"] == 16900
-    assert result[0]["premium_pct"] == -1.5
-    assert result[0]["name"] == "贵州茅台"
+    item = result[0]
+    assert item["volume"] == 1_000_000
+    assert item["name"] == "乐普医疗"
+    # 小数 → 百分数, 保留 2 位
+    assert item["premium_pct"] == pytest.approx(-17.47, abs=0.01)
+    # 基准是**收盘价**:与按昨收算的 -17.95 明确不同, 防止有人把两个字段互换
+    assert item["premium_pct"] == pytest.approx(round((9.92 / 12.02 - 1) * 100, 2))
+    assert abs(item["premium_pct"] - (9.92 / 12.09 - 1) * 100) > 0.4
+    # 单位自洽:成交额(元) / 成交价(元/股) == 成交量(股) —— 印证 volume 是股不是手
+    assert item["amount"] / item["price"] == pytest.approx(item["volume"])
+
+
+def test_block_trades_missing_premium_is_none(monkeypatch):
+    """PREMIUM_RATIO 缺失时 premium_pct 必须是 None, 不得当成 0% 溢价。"""
+
+    def fake_em_get(url, params=None, **kwargs):
+        return _ok([{
+            "SECURITY_CODE": "300003", "SECURITY_NAME_ABBR": "乐普医疗",
+            "TRADE_DATE": "2026-11-16 00:00:00", "DEAL_PRICE": 9.92,
+            "DEAL_VOLUME": 1_000_000, "DEAL_AMT": 9_920_000.0,
+            "PREMIUM_RATIO": None, "BUYER_NAME": "A", "SELLER_NAME": "B",
+        }])
+
+    monkeypatch.setattr(ds2, "em_get", fake_em_get)
+    result = ds2.get_block_trades("300003")
+
+    assert result[0]["premium_pct"] is None
 
 
 def test_shareholder_count_uses_renamed_fields(monkeypatch):

@@ -1594,6 +1594,14 @@ def get_block_trades(stock_code: str) -> list[dict]:
         items = data.get("result", {}).get("data", [])
         result: list[dict] = []
         for item in items:
+            # 2026-11-17 口径校准(实测 RPT_DATA_BLOCKTRADE, 300003, 2026-11-16):
+            #   DEAL_PRICE=9.92, CLOSE_PRICE=12.02, PRE_CLOSE_PRICE=12.09
+            #   PREMIUM_RATIO=-0.174708818636  == 9.92/12.02 - 1   (基准=收盘价, 小数)
+            #   DISCOUNT_RATIO=-17.948717948718 == 9.92/12.09 - 1  (基准=昨收, 百分数)
+            # ⇒ PREMIUM_RATIO 是**小数**, 乘 100 才是百分数; 且两者基准不同, 不可互换。
+            #   旧实现直接透传小数, 前端"折溢率"列比真实值小 100 倍(-0.17% vs -17.47%)。
+            # DEAL_VOLUME 单位是**股**(不是手): DEAL_AMT / DEAL_PRICE == DEAL_VOLUME。
+            premium_raw = _opt_float(item.get("PREMIUM_RATIO"))
             result.append({
                 "code": _safe_str(item.get("SECURITY_CODE", "")),
                 "name": _safe_str(item.get("SECURITY_NAME_ABBR", "")),
@@ -1601,7 +1609,7 @@ def get_block_trades(stock_code: str) -> list[dict]:
                 "price": _safe_float(item.get("DEAL_PRICE", 0)),
                 "volume": _safe_float(item.get("DEAL_VOLUME", 0)),
                 "amount": _safe_float(item.get("DEAL_AMT", 0)),
-                "premium_pct": _safe_float(item.get("PREMIUM_RATIO", 0)),
+                "premium_pct": round(premium_raw * 100, 2) if premium_raw is not None else None,
                 "buyer": _safe_str(item.get("BUYER_NAME", "")),
                 "seller": _safe_str(item.get("SELLER_NAME", "")),
             })

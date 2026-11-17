@@ -8214,9 +8214,10 @@ async function loadDataTab() {
     block: {
       title: '大宗交易',
       url: code ? `/api/market/block_trades?code=${code}` : '/api/market/block_trades?code=600519',
-      headers: ['日期','代码','名称','成交价','成交量','成交额','折溢率'],
+      // 2026-11-17: premium_pct 已由后端把上游小数换算成百分数; 缺失为 null → 「—」。
+      headers: ['日期','代码','名称','成交价','成交量(股)','成交额','折溢率(%)'],
       // API返回: code, name, trade_date, price, volume, amount, premium_pct, buyer, seller
-      mapItem: (item) => [item.trade_date||'', item.code||'', item.name||'', item.price||0, item.volume||0, item.amount||0, item.premium_pct||0],
+      mapItem: (item) => [item.trade_date||'', item.code||'', item.name||'', item.price||0, item.volume||0, item.amount||0, (item.premium_pct==null?'—':item.premium_pct)],
       default: [
         {trade_date:'2025-01-15',code:'600519',name:'贵州茅台',price:1830.00,volume:500,amount:915000,premium_pct:-1.4},
         {trade_date:'2025-01-14',code:'000858',name:'五粮液',price:154.00,volume:2000,amount:308000,premium_pct:-1.8},
