@@ -1,6 +1,7 @@
 from typing import Annotated, Any, Literal
 
 import asyncio
+import math
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -25,6 +26,33 @@ BACKTEST_TIMEOUT_SECONDS = 30
 # 阶段五 R1:回测同时只允许一个任务。
 # 单次回测已用 4 个因子线程 + 20s 预算;并发再来几次会同时打满上游与 512MB 实例,
 # 表现为"所有请求都超时"。这里用非阻塞锁快速拒绝,而不是排队(排队只会更糟)。
+# D-04(2026-11-17):JSON 出口的数值消毒。回测/优化返回的是浮点比率(IR/Sharpe/
+# 年化/回撤), 一旦上游给出 inf/nan, Starlette 的 `JSONResponse(allow_nan=False)`
+# 会抛 ValueError → 500;更隐蔽的是 nan 参与排序恒 False, 同一份数据两次请求
+# 可能得到不同排名。这里统一把非有限浮点换成 None(前端本就按「—」渲染 null),
+# 与第五轮在 dashboard.py 建立的消毒纪律保持同一套规矩。
+def _sanitize_floats(value: Any) -> Any:
+    """递归把 inf/nan 换成 None;dict/list/tuple 逐层处理, 其余原样返回。"""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, dict):
+        return {key: _sanitize_floats(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_floats(item) for item in value]
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
+
+
+def _rank_key(item: dict[str, Any]) -> tuple[bool, float]:
+    """排名键: IR 缺失/非有限 → 稳定排在末尾;其余按 IR 降序。"""
+    best = item.get("best") or {}
+    ir = _sanitize_floats(best.get("information_ratio"))
+    if ir is None:
+        return (True, 0.0)
+    return (False, -float(ir))
+
+
 _BACKTEST_GUARD = threading.Lock()
 
 
@@ -668,7 +696,8 @@ async def optimize_ma_cross(request: Request, req: OptimizeMaCrossRequest) -> di
         logger.exception(f"optimize_ma_cross {stock_code} 执行失败: {e}")
         raise HTTPException(status_code=503, detail="参数优化执行失败，请稍后重试")
     return {
-        "data": result,
+        # D-04: 网格与最优组合里的 inf/nan 一律换成 null, 否则 JSON 序列化即 500
+        "data": _sanitize_floats(result),
         "warning": "量化策略存在失效可能，历史回测不代表未来收益；网格最优点通常是过拟合幸存者，实盘请先小资金验证。",
     }
 
@@ -719,7 +748,8 @@ async def compare_ma_cross(request: Request, req: CompareMaCrossRequest) -> dict
         for code in codes:
             try:
                 res = engine.optimize_ma_cross(code, start.isoformat(), end.isoformat())
-                entries.append({"stock_code": code, **res})
+                # D-04: 每个字段先消毒, 再进排序与响应体
+                entries.append({"stock_code": code, **_sanitize_floats(res)})
             except Exception as e:
                 logger.warning(f"compare_ma_cross {code} 执行失败: {e}")
                 entries.append({"stock_code": code, "grid": [], "best": None, "error": "该股票数据获取或回测失败"})
@@ -735,9 +765,9 @@ async def compare_ma_cross(request: Request, req: CompareMaCrossRequest) -> dict
         logger.exception(f"compare_ma_cross {codes} 执行失败: {e}")
         raise HTTPException(status_code=503, detail="对比执行失败，请稍后重试")
 
-    entries.sort(key=lambda item: (
-        item["best"]["information_ratio"] if item.get("best") else float("-inf"),
-    ), reverse=True)
+    # D-04: 用显式排名键(缺失排末尾 + IR 降序), nan/inf 已在上一行被换成 None;
+    # Python 的 sort 是稳定排序, 同 IR 的标的两次请求顺序完全一致。
+    entries.sort(key=_rank_key)
     return {
         "data": {"results": entries, "start_date": start.isoformat(), "end_date": end.isoformat()},
         "warning": "各标的取的是各自网格最优组合（幸存者偏差），横向排名仅反映同一区间内策略表现的相对差异；历史回测不代表未来收益。",

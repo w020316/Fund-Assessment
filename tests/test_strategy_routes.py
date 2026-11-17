@@ -812,3 +812,102 @@ class TestCompareMaCross:
         assert index.status_code == 200
         assert "/static/stock-compare.html" in index.text
 
+
+
+# ===== D-04(2026-11-17):排名与网格出口必须是有限数值 =====
+
+class TestNonFiniteRatiosAreSanitized:
+    """IR/Sharpe 出现 inf/nan 时: 不得 500, 不得出现 `Infinity`/`NaN`,
+    且同一输入两次请求排名必须一致(nan 参与比较恒 False 会让排序漂移)。"""
+
+    endpoint = "/api/strategy/compare-ma-cross"
+
+    @pytest.fixture(autouse=True)
+    def _reset_rate_limiter(self):
+        from web.rate_limiter import limiter
+        storage = getattr(limiter, "_storage", None)
+        if storage is not None and hasattr(storage, "reset"):
+            storage.reset()
+        yield
+        if storage is not None and hasattr(storage, "reset"):
+            storage.reset()
+
+    @staticmethod
+    def _best(ir, total_return=0.1):
+        return {"short_window": 5, "long_window": 20, "total_return": total_return,
+                "annual_return": 0.2, "max_drawdown": 0.1, "sharpe_ratio": 1.0,
+                "information_ratio": ir, "trade_count": 6}
+
+    def _result(self, code, ir, total_return=0.1):
+        best = self._best(ir, total_return)
+        return {"stock_code": code, "start_date": "2025-01-01", "end_date": "2025-06-30",
+                "grid": [best], "best": best}
+
+    def test_inf_and_nan_do_not_reach_response_body(self, client):
+        with patch("src.core.backtest.BacktestEngine") as engine_cls:
+            engine_cls.return_value.optimize_ma_cross.side_effect = [
+                self._result("600519", float("inf")),
+                self._result("000001", float("nan")),
+                self._result("300750", 0.7),
+            ]
+            resp = client.post(self.endpoint, json={
+                "stock_codes": ["600519", "000001", "300750"],
+            })
+
+        assert resp.status_code == 200, "inf/nan 不得让端点 500"
+        assert "Infinity" not in resp.text
+        assert "NaN" not in resp.text
+        results = resp.json()["data"]["results"]
+        # 有有限值的排最前, 非有限的排后面
+        assert results[0]["stock_code"] == "300750"
+        assert results[0]["best"]["information_ratio"] == 0.7
+
+    def test_missing_best_ranks_last_stably(self, client):
+        with patch("src.core.backtest.BacktestEngine") as engine_cls:
+            engine_cls.return_value.optimize_ma_cross.side_effect = [
+                {"stock_code": "600519", "grid": [], "best": None},
+                self._result("000001", 0.3),
+                {"stock_code": "300750", "grid": [], "best": None},
+            ]
+            resp = client.post(self.endpoint, json={
+                "stock_codes": ["600519", "000001", "300750"],
+            })
+
+        assert resp.status_code == 200
+        codes = [r["stock_code"] for r in resp.json()["data"]["results"]]
+        assert codes[0] == "000001", "有 IR 的必须排最前"
+        # 两只 best=None 保序(稳定排序), 不是随机顺序
+        assert codes[1:] == ["600519", "300750"]
+
+    def test_repeated_calls_give_identical_ranking(self, client):
+        """同一输入连调两次 → 排名完全一致(旧实现 nan 会让顺序漂移)。"""
+        payload = {"stock_codes": ["600519", "000001", "300750"]}
+        orders = []
+        for _ in range(2):
+            with patch("src.core.backtest.BacktestEngine") as engine_cls:
+                engine_cls.return_value.optimize_ma_cross.side_effect = [
+                    self._result("600519", float("nan")),
+                    self._result("000001", 0.5),
+                    self._result("300750", 0.5),
+                ]
+                resp = client.post(self.endpoint, json=payload)
+            orders.append([r["stock_code"] for r in resp.json()["data"]["results"]])
+
+        assert orders[0] == orders[1]
+
+    def test_optimize_endpoint_sanitizes_grid(self, client):
+        """optimize-ma-cross 的 grid 同样要消毒(否则热力图数据带 inf → 500)。"""
+        grid = [self._best(float("inf")), self._best(0.4, total_return=0.05)]
+        canned = {"stock_code": "600519", "start_date": "2025-01-01",
+                  "end_date": "2025-06-30", "grid": grid, "best": grid[1],
+                  "plateau": {"component_ir_mean": float("inf")}}
+        with patch("src.core.backtest.BacktestEngine") as engine_cls:
+            engine_cls.return_value.optimize_ma_cross.return_value = canned
+            resp = client.post("/api/strategy/optimize-ma-cross", json={"stock_code": "600519"})
+
+        assert resp.status_code == 200
+        assert "Infinity" not in resp.text
+        data = resp.json()["data"]
+        assert data["grid"][0]["information_ratio"] is None
+        assert data["grid"][1]["information_ratio"] == 0.4
+        assert data["plateau"]["component_ir_mean"] is None
