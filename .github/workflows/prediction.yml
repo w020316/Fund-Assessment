@@ -12,6 +12,20 @@ name: Prediction Cycle
 # 追加推送到 daily-reports 分支 db_backup/prediction_YYYYMMDD.db(库内全是公开行情+基金代码)。
 # 人工恢复: 从 daily-reports 分支下载 db_backup/prediction_<日期>.db,
 # 覆盖到 Render data/prediction.db(或本地 data/prediction.db)后重启服务即可。
+#
+# ── 失败语义(M-01, 2026-11-17 统一)──────────────────────────────────────
+# 旧实现自相矛盾: guard 步用 ::warning:: + pred_failures 让整个 run 变红, 而各执行步
+# 又用 `[ -z "$PREDICT_API_BASE" ] && exit 0` **静默成功** —— 同一次运行里
+# "一步说失败、其余步说成功", 红/绿取决于谁后跑, 无法据以判断是配置问题还是代码问题。
+# 统一后的契约:
+#   1. `Guard secrets` 是**唯一**的配置判定点: secrets 缺失 → `exit 1`(job 稳定变红)
+#      并输出 job 级 output `secrets_ready=false`;
+#   2. 所有执行步都以 `steps.guard.outputs.secrets_ready == 'true'` 为前提, 缺失时
+#      整链 `skipped`(skipped ≠ success, 不会伪装成"跑过了");
+#   3. 各步不再各自 `[ -z ... ] && exit 0` 静默放行;
+#   4. secrets 缺失时的红是**预期的配置缺失信号, 不是代码故障**:
+#      修复方式是仓库 Settings → Secrets and variables → Actions 配置
+#      PREDICT_API_BASE / ADMIN_TOKEN 后重跑, 不需要改代码。
 on:
   schedule:
     - cron: '35 1 * * 1-5'
@@ -68,21 +82,28 @@ jobs:
             *)               echo "kind=skip" >> "$GITHUB_OUTPUT" ;;
           esac
 
+      # 唯一的配置判定点: 缺失即失败(而不是 warning), 后续执行步因此整体 skip。
       - name: Guard secrets
+        id: guard
         if: steps.kind.outputs.kind != 'skip'
         run: |
           set -euo pipefail
           if [ -z "$PREDICT_API_BASE" ] || [ -z "$ADMIN_TOKEN" ]; then
-            echo "::warning::缺少 secret PREDICT_API_BASE / ADMIN_TOKEN, 无法调用线上 API"
-            echo 1 > /tmp/pred_failures
+            echo "secrets_ready=false" >> "$GITHUB_OUTPUT"
+            echo "::error::缺少 secret PREDICT_API_BASE / ADMIN_TOKEN, 本次运行按配置缺失失败(预期红)。"
+            echo "::error::这不是代码故障: 在仓库 Settings → Secrets and variables → Actions 配置"
+            echo "::error::PREDICT_API_BASE 与 ADMIN_TOKEN 后重跑本 workflow 即可。"
+            echo "::error::各执行步已整体 skip, 不存在「部分步骤静默成功」的情况。"
+            exit 1
           fi
+          echo "secrets_ready=true" >> "$GITHUB_OUTPUT"
+          echo "::notice::secrets 已配置, 开始执行 kind=${{ steps.kind.outputs.kind }}"
 
       # ---- 09:35 早盘快照 ----
       - name: Collect morning snapshot
-        if: steps.kind.outputs.kind == 'morning' || steps.kind.outputs.kind == 'all'
+        if: steps.guard.outputs.secrets_ready == 'true' && (steps.kind.outputs.kind == 'morning' || steps.kind.outputs.kind == 'all')
         run: |
           set -euo pipefail
-          [ -z "$PREDICT_API_BASE" ] && exit 0
           CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" --max-time 120 --retry 1 \
             -X POST "$PREDICT_API_BASE/api/prediction/snapshots/collect" \
             -H "Authorization: Bearer $ADMIN_TOKEN" \
@@ -97,10 +118,9 @@ jobs:
 
       # ---- 13:05 午盘快照 ----
       - name: Collect noon snapshot
-        if: steps.kind.outputs.kind == 'noon' || steps.kind.outputs.kind == 'all'
+        if: steps.guard.outputs.secrets_ready == 'true' && (steps.kind.outputs.kind == 'noon' || steps.kind.outputs.kind == 'all')
         run: |
           set -euo pipefail
-          [ -z "$PREDICT_API_BASE" ] && exit 0
           CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" --max-time 120 --retry 1 \
             -X POST "$PREDICT_API_BASE/api/prediction/snapshots/collect" \
             -H "Authorization: Bearer $ADMIN_TOKEN" \
@@ -115,10 +135,9 @@ jobs:
 
       # ---- 15:40 盘后快照 ----
       - name: Collect close snapshot
-        if: steps.kind.outputs.kind == 'close' || steps.kind.outputs.kind == 'all'
+        if: steps.guard.outputs.secrets_ready == 'true' && (steps.kind.outputs.kind == 'close' || steps.kind.outputs.kind == 'all')
         run: |
           set -euo pipefail
-          [ -z "$PREDICT_API_BASE" ] && exit 0
           CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" --max-time 120 --retry 1 \
             -X POST "$PREDICT_API_BASE/api/prediction/snapshots/collect" \
             -H "Authorization: Bearer $ADMIN_TOKEN" \
@@ -133,10 +152,9 @@ jobs:
 
       # ---- 15:40 次日预测(服务端内含 LLM deep, 预算 ≤60s) ----
       - name: Generate next-day prediction
-        if: steps.kind.outputs.kind == 'close' || steps.kind.outputs.kind == 'all'
+        if: steps.guard.outputs.secrets_ready == 'true' && (steps.kind.outputs.kind == 'close' || steps.kind.outputs.kind == 'all')
         run: |
           set -euo pipefail
-          [ -z "$PREDICT_API_BASE" ] && exit 0
           CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" --max-time 120 --retry 1 \
             -X POST "$PREDICT_API_BASE/api/prediction/predictions/generate" \
             -H "Authorization: Bearer $ADMIN_TOKEN" || echo "000")
@@ -149,10 +167,9 @@ jobs:
 
       # ---- 15:40 推荐 ----
       - name: Generate recommendations
-        if: steps.kind.outputs.kind == 'close' || steps.kind.outputs.kind == 'all'
+        if: steps.guard.outputs.secrets_ready == 'true' && (steps.kind.outputs.kind == 'close' || steps.kind.outputs.kind == 'all')
         run: |
           set -euo pipefail
-          [ -z "$PREDICT_API_BASE" ] && exit 0
           CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" --max-time 120 --retry 1 \
             -X POST "$PREDICT_API_BASE/api/prediction/recommendations/generate" \
             -H "Authorization: Bearer $ADMIN_TOKEN" || echo "000")
@@ -165,10 +182,9 @@ jobs:
 
       # ---- 15:40 首跑验证 / 16:30 重试验证 ----
       - name: Verify yesterday
-        if: steps.kind.outputs.kind != 'skip' && steps.kind.outputs.kind != 'morning' && steps.kind.outputs.kind != 'noon'
+        if: steps.guard.outputs.secrets_ready == 'true' && steps.kind.outputs.kind != 'morning' && steps.kind.outputs.kind != 'noon' && steps.kind.outputs.kind != 'skip'
         run: |
           set -euo pipefail
-          [ -z "$PREDICT_API_BASE" ] && exit 0
           CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" --max-time 120 --retry 1 \
             -X POST "$PREDICT_API_BASE/api/prediction/verify" \
             -H "Authorization: Bearer $ADMIN_TOKEN" || echo "000")
@@ -181,16 +197,15 @@ jobs:
 
       # ---- 库备份(Render 免费层磁盘非持久; 只推 daily-reports 分支, 绝不推 main) ----
       - name: Checkout for backup
-        if: steps.kind.outputs.kind == 'close' || steps.kind.outputs.kind == 'all'
+        if: steps.guard.outputs.secrets_ready == 'true' && (steps.kind.outputs.kind == 'close' || steps.kind.outputs.kind == 'all')
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Backup prediction.db to daily-reports branch
-        if: steps.kind.outputs.kind == 'close' || steps.kind.outputs.kind == 'all'
+        if: steps.guard.outputs.secrets_ready == 'true' && (steps.kind.outputs.kind == 'close' || steps.kind.outputs.kind == 'all')
         run: |
           set -euo pipefail
-          [ -z "$PREDICT_API_BASE" ] && exit 0
           HTTP=$(curl -s -w "%{http_code}" --max-time 120 --retry 1 \
             -H "Authorization: Bearer $ADMIN_TOKEN" \
             "$PREDICT_API_BASE/api/prediction/export" -o /tmp/prediction_snapshot.db || echo "000")
@@ -221,11 +236,15 @@ jobs:
             echo "已备份 db_backup/prediction_${STAMP}.db 到 daily-reports 分支"
           fi
 
-      # ---- 汇总: 非全部失败则 job exit 0(契约要点) ----
+      # ---- 汇总: 配置缺失或任一环节失败 → job 失败(单一判定口径) ----
       - name: Summary
         if: always()
         run: |
           set -euo pipefail
+          if [ "${{ steps.kind.outputs.kind }}" != "skip" ] && [ "${{ steps.guard.outputs.secrets_ready }}" != "true" ]; then
+            echo "::error::secrets 未配置, 整链已 skip 并判失败(配置缺失信号, 不是代码故障)"
+            exit 1
+          fi
           if [ -f /tmp/pred_failures ] && [ -s /tmp/pred_failures ]; then
             N=$(wc -l < /tmp/pred_failures)
             echo "::error::共 ${N} 个环节失败(详见上方 warning)"
