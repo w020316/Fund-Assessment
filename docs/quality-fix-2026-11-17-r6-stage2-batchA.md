@@ -12,7 +12,7 @@
 |---|---|---|---|
 | 1 | C-01 工作台假死 | `f768db1` | ✅ 已上线 |
 | 2 | E-01 超时雪崩 | `57c2434` | ✅ 已上线 |
-| 3 | A-06 融券卖出股当元 | `8f140d1` | ✅ 已上线 |
+| 3 | A-06 融券卖出股当元 | `8f140d1` + `9e9da23`（测试加固） | ✅ 已上线 |
 | 4 | A-16 溢价率差 100 倍 | `ef47905` | ✅ 已上线 |
 | 5 | A-01 北向拆分伪造 0 | `8d5949e` | ✅ 已上线 |
 | 6 | A-02 冷启动首败即 down | `5fa61e9` | ✅ 已上线 |
@@ -102,8 +102,12 @@
 
 | 文件:用例 | 改前 | 改后 | 强度判定 |
 |---|---|---|---|
-| `tests/test_data_source_v2_eastmoney_reports.py::test_margin_trading_uses_current_report_and_fields` | `assert result == {..., "short_sell": 10400, ...}`（把「股」当「元」锁死） | 仍是**精确 dict 相等**，改为 `"short_sell": None, "short_sell_volume": 2900` | **不降**（仍全等比较）+ 新增 2 条用例 |
+| `tests/test_data_source_v2_eastmoney_reports.py::test_margin_trading_uses_current_report_and_fields`<br>（代码 `8f140d1`，fixture 加固 `9e9da23`） | `assert result == {..., "short_sell": 10400, ...}`（把「股」当「元」锁死；fixture `RQYE=3.1e8` 且缺 `RQYL/SPJ`，三字段本身不自洽） | 仍是**精确 dict 相等**，fixture 换成 2026-11-16 实测六字段（`RQMCL=2900 / RQYL=221550 / RQYE=322111545 / SPJ=1453.9`），期望改为 `"short_sell": None, "short_sell_volume": 2900.0` | **不降**（仍全等比较，键 7→8）+ 新增 2 条等式断言：`short_balance/221550 ≈ 1453.9`（rel=1e-9）、`total_balance == margin_balance + short_balance` |
 | 同上 `::test_block_trades_uses_current_report_and_fields` | `assert result[0]["premium_pct"] == -1.5`（把「差 100 倍」锁死） | `pytest.approx(-17.47, abs=0.01)` + 等于 `(9.92/12.02-1)*100` + **反向断言**与 −17.95 相差 >0.4 + `amount/price == volume` | **增强**（三重断言 + 反向排除） |
+
+> **口径偏离说明（经复核后批准）**：我原指令要求 `short_sell_volume == 10400`（沿用旧 fixture 的 `RQMCL`），工程师改为实测值 `2900`。理由成立——旧 fixture 的 `RQYE=3.1e8` 配 `RQYL` 缺失，无法承载我同时要求的 `RQYE/RQYL == SPJ` 自洽断言；整组换成实测六字段后两个要求才能同时满足。**以实测值为准**。
+>
+> `abs=0.01` 容差的来源是源码 `round(..., 2)` 的展示精度，**不是放水**：若换算误退化为 ×10 或 ×1，误差为 1.57 / 15.7，断言仍会红。
 
 - **无任何用例被删除或跳过**。
 - `tests/conftest.py` 新增 autouse fixture `_reset_scan_cooldown`：只重置 E-01 引入的模块级 `_scan_last_timeout`，**不改任何断言**（否则前一个超时用例会让后续扫描用例命中冷却分支，表现为随机失败）。
