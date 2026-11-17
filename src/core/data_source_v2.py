@@ -3234,6 +3234,213 @@ def get_global_market_overview() -> dict:
 
 
 # =====================================================================
+# 全球市场面板（2026-11-17 新增，改动前必读）
+#
+# 口径实测结论（2026-11-17 逐字验证，勿凭记忆改）：
+# 1. 腾讯 qt.gtimg.cn 只稳定覆盖 美股三大指数 + 港股；欧亚指数
+#    (jpNI225/ukFTSE/gmDAX 等)实测**不返回数据**——不要用腾讯拉欧亚指数。
+# 2. 东财 push2 clist fs=m:100 是「全球指数」全集(total=63)。缩放规则：
+#    f1=小数位数，f2(价)/f3(涨跌%)/f4(涨跌额) 都是真实值 * 10^f1，
+#    实测 f1=2 → 除以 100。f3 已是百分数(除以 100 后即 %，不需再乘 100)。
+# 3. 全球行业板块用 11 只 SPDR 行业 ETF 做代理（GICS 口径），腾讯源实测
+#    usXLK/XLF/XLE/XLV/XLI/XLY/XLP/XLU/XLB/XLRE/XLC 全部可用；
+#    东财 m:105+t:3 实测返回的是 ADR 个股列表，**不是**行业板块，勿用。
+# 4. 缺失值语义遵循 M-04/C-02：缺失 → None，严禁 safe_float 填 0。
+# =====================================================================
+
+# 东财全球指数精选(secid 前缀 100.，含中文名与区域分组)
+_GLOBAL_WORLD_INDICES: list[tuple[str, str, str]] = [
+    # (em_code, 中文名, region: americas/europe/asia/macro)
+    ("DJIA", "道琼斯", "americas"),
+    ("NDX", "纳斯达克", "americas"),
+    ("SPX", "标普500", "americas"),
+    ("BVSP", "巴西BOVESPA", "americas"),
+    ("MXX", "墨西哥BOLSA", "americas"),
+    ("FTSE", "英国富时100", "europe"),
+    ("GDAXI", "德国DAX30", "europe"),
+    ("FCHI", "法国CAC40", "europe"),
+    ("RTS", "俄罗斯RTS", "europe"),
+    ("N225", "日经225", "asia"),
+    ("KS11", "韩国KOSPI", "asia"),
+    ("TWII", "台湾加权", "asia"),
+    ("AS51", "澳大利亚标普200", "asia"),
+    ("SENSEX", "印度孟买SENSEX", "asia"),
+    ("A50", "富时中国A50", "asia"),
+    ("STI", "新加坡海峡时报", "asia"),
+    ("JKSE", "印尼雅加达综合", "asia"),
+    ("UDI", "美元指数", "macro"),
+]
+
+# 全球行业板块代理(11 只 SPDR 行业 ETF，腾讯代码)
+_GLOBAL_SECTOR_ETFS: list[tuple[str, str]] = [
+    ("usXLK", "科技"),
+    ("usXLF", "金融"),
+    ("usXLE", "能源"),
+    ("usXLV", "医疗保健"),
+    ("usXLI", "工业"),
+    ("usXLY", "非必需消费"),
+    ("usXLP", "必需消费"),
+    ("usXLU", "公用事业"),
+    ("usXLB", "基础材料"),
+    ("usXLRE", "房地产"),
+    ("usXLC", "通讯服务"),
+]
+
+_REGION_LABELS: dict[str, str] = {
+    "americas": "美洲",
+    "europe": "欧洲",
+    "asia": "亚太",
+    "macro": "宏观",
+}
+
+
+def _em_scale(value: Any, precision: Any) -> float | None:
+    """东财 m:100 缩放：真实值 = 原始值 / 10^precision。缺失/非法 → None。"""
+    if value is None or value == "-" or value == "":
+        return None
+    try:
+        raw = float(value)
+    except (TypeError, ValueError):
+        return None
+    try:
+        digits = int(precision) if precision is not None else 2
+    except (TypeError, ValueError):
+        digits = 2
+    return round(raw / (10 ** digits), digits)
+
+
+def get_global_indices_world() -> list[dict]:
+    """全球指数全景(东财 fs=m:100 精选 ~18 个，含区域分组)。
+
+    返回字段: code/name/region/region_label/price/change/change_pct，
+    缺失 → None(不填 0)。上游失败返回 []。
+    """
+    cached = _cache_get("global_indices_world")
+    if cached is not None:
+        return cached
+    url = "https://push2.eastmoney.com/api/qt/ulist.np/get"
+    secids = ",".join(f"100.{code}" for code, _, _ in _GLOBAL_WORLD_INDICES)
+    params = {
+        "fields": "f1,f2,f3,f4,f12,f14",
+        "secids": secids,
+        # 注意：不加 fltt=2 —— 加了东财会返回已缩放浮点(f2=58860.43)，
+        # _em_scale 会再除一次 100 造成 100 倍错误；保持原始整数自己缩放。
+    }
+    result: list[dict] = []
+    try:
+        resp = em_get(url, params=params)
+        payload = resp.json().get("data") or {}
+        rows = payload.get("diff") or []
+        if isinstance(rows, dict):
+            rows = list(rows.values())
+        by_code = {row.get("f12"): row for row in rows if isinstance(row, dict)}
+        for em_code, cn_name, region in _GLOBAL_WORLD_INDICES:
+            row = by_code.get(em_code)
+            if not row:
+                result.append({
+                    "code": em_code, "name": cn_name, "region": region,
+                    "region_label": _REGION_LABELS[region],
+                    "price": None, "change": None, "change_pct": None,
+                })
+                continue
+            precision = row.get("f1")
+            result.append({
+                "code": em_code,
+                "name": row.get("f14") or cn_name,
+                "region": region,
+                "region_label": _REGION_LABELS[region],
+                "price": _em_scale(row.get("f2"), precision),
+                "change": _em_scale(row.get("f4"), precision),
+                "change_pct": _em_scale(row.get("f3"), precision),
+            })
+        usable = [r for r in result if r.get("price") is not None]
+        if not usable:
+            data_health.record_failure("global_indices_world", "all fields empty")
+            _cache_set("global_indices_world", [], 30)
+            return []
+        data_health.record_success("global_indices_world", len(usable))
+        _mark_source("global_indices_world", "eastmoney")
+        _cache_set("global_indices_world", result, 30)
+        return result
+    except Exception as e:
+        logger.warning(f"get_global_indices_world failed: {e}")
+        data_health.record_failure("global_indices_world", str(e))
+        return []
+
+
+def get_global_sector_etfs() -> list[dict]:
+    """全球行业板块(11 只 SPDR 行业 ETF 代理，GICS 口径，腾讯源)。"""
+    cached = _cache_get("global_sector_etfs")
+    if cached is not None:
+        return cached
+    codes = [code for code, _ in _GLOBAL_SECTOR_ETFS]
+    quotes = _tencent_global_quote(codes)
+    by_code = {q.get("code"): q for q in quotes}
+    result: list[dict] = []
+    for tencent_code, sector_cn in _GLOBAL_SECTOR_ETFS:
+        # 腾讯返回的 code 形如 XLK.AM，按前缀匹配
+        q = next((v for k, v in by_code.items()
+                  if str(k).split(".")[0].upper() == tencent_code[2:].upper()), None)
+        if not q:
+            result.append({
+                "code": tencent_code[2:], "sector": sector_cn,
+                "name": f"{sector_cn}ETF-SPDR",
+                "price": None, "change_pct": None,
+            })
+            continue
+        result.append({
+            "code": tencent_code[2:],
+            "sector": sector_cn,
+            "name": q.get("name") or f"{sector_cn}ETF-SPDR",
+            "price": q.get("price") if q.get("price") else None,
+            "change_pct": q.get("change_pct") if q.get("price") else None,
+        })
+    usable = [r for r in result if r.get("price") is not None]
+    if usable:
+        data_health.record_success("global_sector_etfs", len(usable))
+        _mark_source("global_sector_etfs", "tencent")
+    else:
+        data_health.record_failure("global_sector_etfs", "all empty")
+    _cache_set("global_sector_etfs", result, 30)
+    return result
+
+
+def get_global_market_dashboard() -> dict:
+    """全球市场面板：核心指数(腾讯) + 全球指数全景(东财) + 行业板块(ETF) + VIX。
+
+    单次聚合缓存 30s；任一分组失败以空列表表达，不互相拖垮。
+    """
+    cached = _cache_get("global_market_dashboard")
+    if cached is not None:
+        return cached
+    fetched = _parallel_fetch([
+        ("core_indices", get_global_indices),
+        ("world_indices", get_global_indices_world),
+        ("sectors", get_global_sector_etfs),
+    ])
+    # VIX 单独拉(不在 core 五指数里)：腾讯 usVIX 实测可用
+    vix_quotes = _tencent_global_quote(["usVIX"])
+    vix = None
+    for q in vix_quotes:
+        if q.get("price"):
+            vix = {
+                "name": "标普500波动率指数(VIX)",
+                "price": q.get("price"),
+                "change_pct": q.get("change_pct"),
+            }
+            break
+    result = {
+        "core_indices": fetched.get("core_indices") or [],
+        "world_indices": fetched.get("world_indices") or [],
+        "sectors": fetched.get("sectors") or [],
+        "vix": vix,
+    }
+    _cache_set("global_market_dashboard", result, 30)
+    return result
+
+
+
+# =====================================================================
 # 个股异动（砸盘 / 拉高）—— 2026-11-08 新增
 #
 # 口径实测结论（决定了本模块的设计，勿凭常识改）：

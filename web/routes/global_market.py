@@ -249,6 +249,28 @@ async def hk_realtime(codes: str = Query(..., description="港股代码,逗号�
         return {"data": [], "_meta": _build_meta("tencent", cached=False, quality_score=0.0)}
 
 
+@router.get("/dashboard")
+async def global_dashboard():
+    """全球市场面板：核心指数(腾讯) + 全球指数全景(东财,含区域分组) + 行业板块(SPDR ETF) + VIX。
+
+    缺失值语义遵循 M-04/C-02：缺失 → null，不填 0；任一分组失败以空列表/null 表达，不互相拖垮。
+    """
+    cache_key = "global:dashboard"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": _build_meta("tencent+eastmoney", cached=True)}
+    try:
+        raw = await asyncio.to_thread(ds2.get_global_market_dashboard)
+        if not raw:
+            return {"data": {}, "_meta": _build_meta("tencent+eastmoney", cached=False, quality_score=0.0)}
+        quality = 90.0 if (raw.get("core_indices") or raw.get("world_indices") or raw.get("sectors")) else 0.0
+        cache.set(cache_key, raw, ttl=30)
+        return {"data": raw, "_meta": _build_meta("tencent+eastmoney", cached=False, quality_score=quality)}
+    except Exception as e:
+        logger.warning(f"global_dashboard failed: {e}")
+        return {"data": {}, "_meta": _build_meta("tencent+eastmoney", cached=False, quality_score=0.0)}
+
+
 @router.get("/overview")
 async def global_overview():
     """国际市场总览(并行拉取指数 + 美股热门 + 港股热门)"""

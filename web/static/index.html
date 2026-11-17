@@ -1018,6 +1018,8 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 <link rel="stylesheet" href="/static/css/aurora-theme.css">
 <!-- ===== STAGE7: workbench ===== 工作台终端风格(全部作用域限定 #page-workbench) -->
 <link rel="stylesheet" href="/static/css/workbench.css">
+<!-- ===== STAGE7: global-dashboard ===== 全球市场面板 + 版本弹窗样式(引用既有 token, 红涨绿跌) -->
+<link rel="stylesheet" href="/static/css/global-market.css">
 <!-- 性能优化:lightweight-charts 改为懒加载(仅在用户点击"走势"时加载),避免阻塞首屏 -->
 <link rel="preconnect" href="https://unpkg.com" crossorigin>
 <link rel="dns-prefetch" href="https://unpkg.com">
@@ -1435,6 +1437,10 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
           <div class="qf-page-actions">
             <button class="btn btn-sm btn-outline" type="button" onclick="loadMarketData()">刷新行情</button>
           </div>
+        </div>
+        <!-- ===== STAGE7: global-dashboard ===== 全球市场速览条(横向滚动 chip;点击跳国际市场页;global-market.js 渲染) -->
+        <div class="gm-strip mb-16" id="globalStrip" role="region" aria-label="全球市场速览">
+          <span class="gm-strip-empty">切换到本页时自动加载全球指数速览</span>
         </div>
         <!-- ===== STAGE6: onboarding ===== 首次使用指引(4 步;进度只存本机浏览器,不写服务端) -->
         <div class="card mb-16 st6-onb-card" id="onboardingCard" role="region" aria-labelledby="onboardingTitle">
@@ -2570,6 +2576,19 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
         </div>
       </div>
 
+      <!-- ===== STAGE7: version-modal ===== 版本更新弹窗(内容由 version-modal.js 渲染;ESC/遮罩/按钮关闭) -->
+      <div id="versionModal" class="modal-mask" style="display:none;">
+        <div class="modal-box" style="max-width:640px;">
+          <div class="modal-header">
+            <span id="versionModalTitle">版本更新</span>
+            <span class="modal-close" role="button" tabindex="0" aria-label="关闭" onclick="VersionModal.close()">×</span>
+          </div>
+          <div class="modal-body" id="versionModalBody" style="max-height:70vh;overflow-y:auto;">
+            <div style="color:var(--text-muted);text-align:center;padding:20px 0;">加载中...</div>
+          </div>
+        </div>
+      </div>
+
       <!-- ==================== 7. 国际市场 ==================== -->
       <div class="page" id="page-global">
         <div class="qf-page-head">
@@ -2586,6 +2605,28 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
           </div>
           <div id="globalOverviewBody" style="padding:8px 0;">
             <div style="color:var(--text-muted);text-align:center;padding:20px 0;">点击"刷新"获取全球市场总览</div>
+          </div>
+        </div>
+
+        <!-- ===== STAGE7: global-dashboard ===== 全球指数全景(核心 + 美洲/欧洲/亚太/宏观;global-market.js 渲染) -->
+        <div class="flex-between mb-12">
+          <div class="qf-section-title">全球指数全景</div>
+          <button class="btn btn-sm btn-outline" onclick="GlobalMarket.refresh()">刷新</button>
+        </div>
+        <div class="card mb-16" id="gmPanoramaCard">
+          <div id="gmPanoramaBody">
+            <div class="gm-empty">切换到本页时自动加载全球指数全景</div>
+          </div>
+        </div>
+
+        <!-- ===== STAGE7: global-dashboard ===== 全球行业板块(11 条 GICS + VIX 徽标;global-market.js 渲染) -->
+        <div class="flex-between mb-12">
+          <div class="qf-section-title">全球行业板块</div>
+          <button class="btn btn-sm btn-outline" onclick="GlobalMarket.refresh()">刷新</button>
+        </div>
+        <div class="card mb-16" id="gmSectorsCard">
+          <div id="gmSectorsBody">
+            <div class="gm-empty">切换到本页时自动加载行业板块与 VIX</div>
           </div>
         </div>
 
@@ -2818,6 +2859,13 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
           <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 17h.01"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/></svg> 使用指引</div>
           <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">首次使用指引共 4 步，可随时重新查看；进度与"不再提示"只记在本机浏览器。</div>
           <button class="btn btn-sm btn-outline" id="onboardingReopen" type="button">重新查看首次使用指引</button>
+        </div>
+
+        <!-- ===== STAGE7: version-modal ===== 版本与更新(当前 commit 短哈希 + 更新日志弹窗) -->
+        <div class="card mt-16" id="versionCard">
+          <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><circle cx="12" cy="12" r="3"/><path d="m5.8 7.8 2.9 2.9"/><path d="M5 17h.01"/><path d="M19 17h.01"/><path d="M8 19h8"/></svg> 版本与更新</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">当前版本：<span id="versionCurrent" style="font:500 12px/1.4 var(--qf-font-mono,monospace);color:var(--text-secondary);">—</span>；检测到新版本会自动弹窗提示。</div>
+          <button class="btn btn-sm btn-outline" id="versionDetailBtn" type="button" onclick="window.openVersionModal && window.openVersionModal()">查看更新内容</button>
         </div>
       </div>
 
@@ -7310,8 +7358,8 @@ async function loadGlobalOverview() {
   const totalGain = idxStats.gain + usStats.gain + hkStats.gain;
   const totalFall = idxStats.fall + usStats.fall + hkStats.fall;
   let sentiment = '中性', sentimentColor = 'var(--color-flat)';
-  if (totalGain > totalFall * 1.5) { sentiment = '偏多'; sentimentColor = 'var(--color-down)'; }
-  else if (totalFall > totalGain * 1.5) { sentiment = '偏空'; sentimentColor = 'var(--color-up)'; }
+  if (totalGain > totalFall * 1.5) { sentiment = '偏多'; sentimentColor = 'var(--color-up)'; }
+  else if (totalFall > totalGain * 1.5) { sentiment = '偏空'; sentimentColor = 'var(--color-down)'; }
 
   let html = '';
 
@@ -7324,9 +7372,9 @@ async function loadGlobalOverview() {
     <div style="text-align:right;">
       <span style="font-size:12px;color:var(--text-muted);">总涨跌统计</span>
       <div style="font-size:14px;">
-        <span style="color:var(--color-down);">▲ ${totalGain}</span>
+        <span style="color:var(--color-up);">▲ ${totalGain}</span>
         <span style="color:var(--text-muted);margin:0 6px;">/</span>
-        <span style="color:var(--color-up);">▼ ${totalFall}</span>
+        <span style="color:var(--color-down);">▼ ${totalFall}</span>
       </div>
     </div>
   </div>`;
@@ -9314,5 +9362,9 @@ document.addEventListener('DOMContentLoaded', () => {
 <script src="/static/js/recommendations.js"></script>
 <!-- ===== STAGE7: workbench ===== 工作台一屏判读(复用既有端点;包装 switchPage 接入) ===== -->
 <script src="/static/js/workbench.js"></script>
+<!-- ===== STAGE7: global-dashboard ===== 全球市场面板(全球指数全景/行业板块/速览条;包装 switchPage 接入) ===== -->
+<script src="/static/js/global-market.js"></script>
+<!-- ===== STAGE7: version-modal ===== 版本更新弹窗(health.version vs localStorage 自动弹出;暴露 window.openVersionModal) ===== -->
+<script src="/static/js/version-modal.js"></script>
 </body>
 </html>

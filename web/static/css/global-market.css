@@ -1,0 +1,202 @@
+/* ===== STAGE7: global-dashboard ===== 全球市场面板 + 版本弹窗样式
+   约定: 颜色只用既有 token 变量(禁裸 hex);间距 4px 网格(4/8/12/16);
+   红涨绿跌 = var(--color-up)/var(--color-down);缺失渲染「—」。 */
+
+/* ---------- 行情总览页:全球速览条(#globalStrip) ---------- */
+.gm-strip {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 4px 2px;
+  scrollbar-width: thin;
+}
+.gm-strip::-webkit-scrollbar { height: 4px; }
+.gm-strip::-webkit-scrollbar-thumb {
+  border-radius: 2px;
+  background: var(--qf-panel-line-soft, var(--border));
+}
+.gm-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  border: 1px solid var(--qf-panel-line-soft, var(--border));
+  border-radius: 999px;
+  background: var(--qf-panel-tint, transparent);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.gm-chip:hover { border-color: var(--qf-neon-cyan, var(--accent-blue)); }
+.gm-chip:focus-visible { outline: 2px solid var(--qf-neon-cyan, var(--accent-blue)); outline-offset: 1px; }
+.gm-chip-name { font-size: 12px; color: var(--qf-text-secondary, var(--text-secondary)); white-space: nowrap; }
+.gm-chip-pct { font: 500 12px/1.4 var(--qf-font-mono, monospace); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.gm-strip-empty { padding: 8px 0; font-size: 12px; color: var(--qf-text-muted, var(--text-muted)); }
+
+/* ---------- 国际市场页:全球指数全景 ---------- */
+.gm-group { margin-bottom: 12px; }
+.gm-group:last-child { margin-bottom: 0; }
+.gm-group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.gm-group-label {
+  font: 600 12px/1.4 var(--qf-font-display, inherit);
+  letter-spacing: .03em;
+  color: var(--qf-text-secondary, var(--text-secondary));
+}
+.gm-group-avg { font: 500 11px/1.4 var(--qf-font-mono, monospace); }
+.gm-idx-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+.gm-idx-cell {
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--qf-panel-line-soft, var(--border));
+  border-radius: 8px;
+  background: var(--qf-panel-tint, transparent);
+}
+.gm-idx-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--qf-text-muted, var(--text-muted));
+}
+.gm-idx-val {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+}
+.gm-idx-price {
+  font: 600 14px/1.25 var(--qf-font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  color: var(--qf-text-primary, var(--text-primary));
+}
+.gm-idx-pct { font: 500 12px/1.4 var(--qf-font-mono, monospace); white-space: nowrap; }
+
+/* ---------- 国际市场页:全球行业板块 ---------- */
+.gm-sector-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.gm-sector-cap { font-size: 11px; color: var(--qf-text-muted, var(--text-muted)); }
+.gm-vix-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--qf-panel-line-soft, var(--border));
+  border-radius: 999px;
+  font: 500 11px/1.6 var(--qf-font-mono, monospace);
+  color: var(--qf-text-secondary, var(--text-secondary));
+}
+.gm-vix-badge b { font-weight: 700; color: var(--qf-text-primary, var(--text-primary)); }
+.gm-vix-badge i { font-style: normal; }
+.gm-vix-badge em {
+  font-style: normal;
+  font-family: var(--qf-font-display, inherit);
+  padding: 0 4px;
+  border-radius: 4px;
+  color: var(--qf-text-muted, var(--text-muted));
+  background: var(--qf-neutral-soft, transparent);
+}
+.gm-vix-badge.is-high em { color: var(--qf-sem-warn, var(--color-warning)); background: var(--qf-warn-soft, transparent); }
+.gm-sector-list { display: flex; flex-direction: column; }
+.gm-sector-row {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) 64px;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--qf-panel-line-dash, var(--border));
+}
+.gm-sector-row:last-child { border-bottom: 0; }
+.gm-sector-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--qf-text-secondary, var(--text-secondary));
+}
+.gm-sector-bar {
+  height: 8px;
+  min-width: 24px;
+  border-radius: 4px;
+  background: var(--qf-panel-tint, transparent);
+  overflow: hidden;
+}
+.gm-sector-bar i { display: block; height: 100%; border-radius: 4px; }
+.gm-sector-pct {
+  justify-self: end;
+  font: 500 12px/1.4 var(--qf-font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.gm-empty {
+  padding: 16px 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--qf-text-muted, var(--text-muted));
+}
+
+/* ---------- 版本更新弹窗(#versionModal) ---------- */
+.gm-ver-latest {
+  padding: 12px;
+  border: 1px solid var(--qf-panel-line-soft, var(--border));
+  border-left: 3px solid var(--qf-neon-cyan, var(--accent-blue));
+  border-radius: 8px;
+  background: var(--qf-panel-tint, transparent);
+}
+.gm-ver-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.gm-ver-head b { font: 600 14px/1.4 var(--qf-font-display, inherit); color: var(--qf-text-primary, var(--text-primary)); }
+.gm-ver-head span { font: 500 11px/1.4 var(--qf-font-mono, monospace); color: var(--qf-text-muted, var(--text-muted)); }
+.gm-ver-list {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--qf-text-secondary, var(--text-secondary));
+}
+.gm-ver-history { margin-top: 12px; }
+.gm-ver-cap {
+  margin-bottom: 4px;
+  font-size: 11px;
+  letter-spacing: .03em;
+  color: var(--qf-text-muted, var(--text-muted));
+}
+.gm-ver-details { border-bottom: 1px dashed var(--qf-panel-line-dash, var(--border)); }
+.gm-ver-details summary {
+  padding: 4px 0;
+  font-size: 12px;
+  color: var(--qf-text-secondary, var(--text-secondary));
+  cursor: pointer;
+}
+.gm-ver-details summary:hover { color: var(--qf-text-primary, var(--text-primary)); }
+.gm-ver-details ul { padding: 0 20px 8px; }
+
+/* ---------- 国际市场页窄屏:全景瓦片两列 ---------- */
+@media (max-width: 640px) {
+  .gm-idx-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .gm-sector-row { grid-template-columns: 72px minmax(0, 1fr) 56px; }
+}
