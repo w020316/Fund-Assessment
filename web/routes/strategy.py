@@ -2,6 +2,8 @@ from typing import Annotated, Any, Literal
 
 import asyncio
 import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
@@ -326,12 +328,64 @@ def _scan_unavailable(operation: str) -> HTTPException:
 # 因此给扫描加上限: 超时即按"数据源不可用"返回 503, 而不是无限等待。
 _SCAN_TIMEOUT_S = 15.0
 
+# ── 扫描端点:并发规模钉死 + 半开熔断(E-01, 2026-11-17)─────────────────────
+# 现实约束(写在这里, 免得后人以为这段能"杀掉挂起的任务"):
+#   1. `asyncio.wait_for` 只能取消 **await**, 无法 kill 已在运行的线程;
+#   2. akshare 的东财接口自己不设 socket 超时, 超时后线程仍会跑到 TCP 层放弃,
+#      期间继续占着上游连接与内存;
+#   3. 默认 executor 的线程数 = min(32, cpu+4)。一旦这些线程被挂起的扫描任务占满,
+#      **全站所有 `asyncio.to_thread` 都会排队**(行情、复盘、持仓一起变慢) ——
+#      这正是"加了 15s 超时反而制造雪崩"的机制。
+# 所以这里能做、也只做两件事:
+#   A. 把扫描放进**独立的 2 线程池**(`_scan_pool`), 爆炸半径限制在 2 个线程,
+#      默认 executor 不再被扫描任务污染;
+#   B. 半开熔断: 任一扫描超时后 60s 内直接 503(cooldown), **不再起新任务**,
+#      避免把已经半挂的上游彻底打死; 冷却到期后自动放行一次重试(半开)。
+_SCAN_POOL_SIZE = 2
+_scan_pool = ThreadPoolExecutor(max_workers=_SCAN_POOL_SIZE, thread_name_prefix="scan")
+_SCAN_COOLDOWN_S = 60.0
+_scan_last_timeout: float = 0.0
+
+
+def _scan_cooldown_remaining() -> float:
+    """距扫描冷却结束还剩多少秒;0 表示未处于冷却期。"""
+    if not _scan_last_timeout:
+        return 0.0
+    left = _SCAN_COOLDOWN_S - (time.monotonic() - _scan_last_timeout)
+    return left if left > 0 else 0.0
+
+
+def _scan_cooldown_unavailable(operation: str, remaining: float) -> HTTPException:
+    """冷却期语义必须与"上游失败"可区分:前端据此提示"稍后再试"而不是"数据源坏了"。"""
+    return HTTPException(
+        status_code=503,
+        detail={
+            "code": "SCAN_DATA_UNAVAILABLE",
+            "message": f"{operation}刚发生过超时,冷却中({remaining:.0f}s 后可重试)。",
+            "retryable": True,
+            "cooldown": True,
+            "retry_after_s": round(remaining, 1),
+        },
+    )
+
 
 async def _run_scan(operation: str, fn):
+    """在专用 2 线程池里跑同步扫描函数;超时开冷却,冷却期内不再起新任务。"""
+    global _scan_last_timeout
+    remaining = _scan_cooldown_remaining()
+    if remaining > 0:
+        logger.info(f"{operation} 冷却中, 跳过上游调用(剩余 {remaining:.1f}s)")
+        raise _scan_cooldown_unavailable(operation, remaining)
+    loop = asyncio.get_running_loop()
     try:
-        return await asyncio.wait_for(asyncio.to_thread(fn), timeout=_SCAN_TIMEOUT_S)
+        return await asyncio.wait_for(
+            loop.run_in_executor(_scan_pool, fn), timeout=_SCAN_TIMEOUT_S
+        )
     except asyncio.TimeoutError:
-        logger.warning(f"{operation} timeout({_SCAN_TIMEOUT_S}s)")
+        # 注意: 这里的线程仍在跑(wait_for 只是不再等它)。冷却期的作用是
+        # 不让新的挂起任务继续堆积, 而不是"取消"已经跑起来的那个。
+        _scan_last_timeout = time.monotonic()
+        logger.warning(f"{operation} timeout({_SCAN_TIMEOUT_S}s), 进入 {_SCAN_COOLDOWN_S:.0f}s 冷却")
         raise _scan_unavailable(operation)
 
 
@@ -383,6 +437,10 @@ async def scan_new_high():
                     amount=float(row.get("成交额", 0)),
                 ))
         return items
+    except HTTPException:
+        # E-01: _run_scan 抛的是有明确语义的 503(超时/冷却),不能被下面的通用
+        # 兜底改写成"数据源不可用",否则 cooldown 标记会丢,前端无法区分"稍后再试"。
+        raise
     except Exception:
         # P2 修复(2026-07-30):补日志; R-13:显式 503 而非 return []
         logger.exception("scan_new_high akshare path failed")
@@ -402,6 +460,9 @@ async def scan_limit_up():
             reason=r.reason.value, seal_time=r.seal_time, open_count=r.open_count,
             seal_volume=r.seal_volume, quality_score=r.quality_score,
         ) for r in results]
+    except HTTPException:
+        # E-01: 保留 _run_scan 的超时/冷却语义(见 scan_new_high 同名处理)
+        raise
     except Exception:
         # P2 修复(2026-07-30):补日志; R-13:显式 503 而非 return []
         logger.exception("scan_limit_up failed")
@@ -423,6 +484,9 @@ async def scan_cb():
             premium_rate=r.premium_rate, is_limit_up=r.is_limit_up,
             volume_ratio=r.volume_ratio, turnover_rate=r.turnover_rate,
         ) for r in results]
+    except HTTPException:
+        # E-01: 保留 _run_scan 的超时/冷却语义(见 scan_new_high 同名处理)
+        raise
     except Exception:
         # P2 修复(2026-07-30):补日志; R-13:显式 503 而非 return []
         logger.exception("scan_cb failed")

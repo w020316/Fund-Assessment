@@ -59,6 +59,27 @@ os.environ.setdefault("APP_ENV", "dev")
 
 
 @pytest.fixture(autouse=True)
+def _reset_scan_cooldown():
+    """E-01(2026-11-17):扫描端点的半开熔断是**进程内模块级**状态。
+
+    超时会把 `_scan_last_timeout` 置为当前时间, 随后 60s 内所有扫描请求直接 503。
+    若不在用例间清零, 前一个用例跑出的超时会让后面的扫描用例全部命中冷却分支,
+    表现为随机失败。这里只重置状态, 不改任何断言。
+    """
+    try:
+        from web.routes import strategy as _strategy
+        _strategy._scan_last_timeout = 0.0
+    except Exception:
+        pass
+    yield
+    try:
+        from web.routes import strategy as _strategy
+        _strategy._scan_last_timeout = 0.0
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
 def _clear_global_caches():
     """每个测试前清理全局缓存,避免测试间状态共享
 
