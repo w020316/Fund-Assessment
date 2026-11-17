@@ -390,3 +390,71 @@ class TestPlateauDetection:
             assert opt["plateau"]["best_short"] == opt["best"]["short_window"]
         else:
             assert opt["plateau"] is None
+
+
+# ===== D-03(2026-11-17):高原识别不再依赖调用方排序, 且 inf/nan 不得污染出口 =====
+
+def _rows(ir_by_combo: dict[tuple[int, int], float]) -> list[dict]:
+    """不做任何排序的原始网格(刻意暴露"隐式依赖已排序"的旧契约)。"""
+    return [
+        {"short_window": s, "long_window": lw, "information_ratio": ir}
+        for (s, lw), ir in ir_by_combo.items()
+    ]
+
+
+class TestPlateauRobustness:
+    def test_unsorted_grid_picks_true_max(self):
+        """乱序传入仍须选中真正的最大 IR —— 旧实现取 grid[0], 会静默选错行。"""
+        shuffled = _rows({
+            (5, 40): -0.3, (4, 20): 0.4, (3, 10): 1.6, (4, 10): 0.9, (3, 20): -0.2,
+        })
+        plateau = _analyze_plateau(shuffled)
+
+        assert plateau is not None
+        assert (plateau["best_short"], plateau["best_long"]) == (3, 10)
+        # 与"已排序"输入的结果完全一致(顺序无关性)
+        assert plateau == _analyze_plateau(sorted(
+            shuffled, key=lambda r: r["information_ratio"], reverse=True
+        ))
+
+    def test_inf_does_not_leak_into_result(self):
+        """含 inf 的网格不得把 inf 带进返回值(否则 JSONResponse 500)。"""
+        import math
+
+        grid = _rows({(3, 10): 1.2, (4, 10): float("inf"), (3, 20): 0.5, (4, 20): -0.1})
+        plateau = _analyze_plateau(grid)
+
+        assert plateau is not None
+        mean = plateau["component_ir_mean"]
+        assert mean is None or math.isfinite(mean), f"component_ir_mean={mean!r} 不是有限值"
+        assert plateau["component_size"] == 2  # inf 那一格不进连通域
+        assert (plateau["best_short"], plateau["best_long"]) == (3, 10)
+
+    def test_nan_is_not_selected_nor_counted(self):
+        import math
+
+        grid = _rows({(3, 10): float("nan"), (4, 10): 0.8, (3, 20): 0.6, (4, 20): -0.2})
+        plateau = _analyze_plateau(grid)
+
+        assert plateau is not None
+        assert (plateau["best_short"], plateau["best_long"]) == (4, 10)
+        assert plateau["grid_positive_count"] == 2  # nan 不计数
+        assert all(math.isfinite(v) for v in (plateau["component_ir_mean"],))
+
+    def test_all_inf_or_nan_returns_none(self):
+        """全是没有有效值的格子 → None(缺失就显示缺失, 不编一个高原出来)。"""
+        assert _analyze_plateau(_rows({(3, 10): float("inf"), (4, 10): float("nan")})) is None
+
+    def test_none_ir_is_tolerated(self):
+        """IR 为 None 的行不得抛异常(前端可能传 null)。"""
+        grid = _rows({(4, 10): 0.7, (3, 20): 0.5})
+        grid.append({"short_window": 5, "long_window": 40, "information_ratio": None})
+
+        plateau = _analyze_plateau(grid)
+        assert plateau is not None
+        assert (plateau["best_short"], plateau["best_long"]) == (4, 10)
+        assert plateau["grid_positive_count"] == 2
+
+    def test_empty_and_all_negative_still_none(self):
+        assert _analyze_plateau([]) is None
+        assert _analyze_plateau(_rows({(3, 10): -0.5, (4, 10): -0.2})) is None

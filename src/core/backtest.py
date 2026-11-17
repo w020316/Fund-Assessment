@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Callable, Optional
@@ -192,6 +193,21 @@ def _calc_monthly_returns(equity_dates: list, equity_curve: list[float]) -> list
 StrategyFunc = Callable[[date, dict, pd.DataFrame], list[Signal]]
 
 
+def _finite_ir(value: object) -> Optional[float]:
+    """把网格里的 information_ratio 归一到"有限数值或 None"。
+
+    D-03(2026-11-17):`inf`/`nan` 一旦进入 IR, 会顺着
+    `component_ir_mean` → `/api/strategy/optimize-ma-cross` 抵达
+    `JSONResponse(allow_nan=False)` 抛 ValueError → 500。
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    if not math.isfinite(number):
+        return None
+    return number
+
+
 def _analyze_plateau(grid: list[dict]) -> Optional[dict]:
     """网格高原识别(启发式, 非统计检验): 最优组合所在正 IR 连通域分析。
 
@@ -199,22 +215,35 @@ def _analyze_plateau(grid: list[dict]) -> Optional[dict]:
     information_ratio > 0 的有效组合。返回最优组合所在连通域的规模与
     平均 IR: 连片(≥3)提示高原, 孤立(=1)提示过拟合尖峰。最优 IR 非正
     或网格为空返回 None(缺失必须显示缺失, 不伪造高原)。
+
+    D-03(2026-11-17) 两条自保:
+    1. **不再假设调用方已按 IR 降序排好**。旧实现取 `grid[0]` 当最优,
+       隐式依赖 `optimize_ma_cross` 里的 `grid.sort(...)`;一旦有人在上游
+       插入过滤/重排, `best` 会静默变成错误的那一行(而且看不出来)。
+       这里函数内自己排序, `None`/非数/`inf`/`nan` 一律按 0 参与比较。
+    2. `inf`/`nan` 不再能污染结果: 连通域只收**有限**正 IR,
+       `component_ir_mean` 只对有限值求均值(全被过滤则给 None)。
     """
     if not grid:
         return None
-    best = grid[0]
-    best_ir = best.get("information_ratio")
-    if not isinstance(best_ir, float) or not best_ir > 0:
+    ordered = sorted(
+        grid, key=lambda row: _finite_ir(row.get("information_ratio")) or 0.0, reverse=True
+    )
+    best = ordered[0]
+    best_ir = _finite_ir(best.get("information_ratio"))
+    if best_ir is None or best_ir <= 0:
         return None
     shorts = sorted({row["short_window"] for row in grid})
     longs = sorted({row["long_window"] for row in grid})
     s_idx = {w: i for i, w in enumerate(shorts)}
     l_idx = {w: i for i, w in enumerate(longs)}
-    cells = {
-        (s_idx[row["short_window"]], l_idx[row["long_window"]]): row["information_ratio"]
-        for row in grid
-        if isinstance(row.get("information_ratio"), float) and row["information_ratio"] > 0
-    }
+    cells = {}
+    for row in grid:
+        ir = _finite_ir(row.get("information_ratio"))
+        if ir is not None and ir > 0:
+            cells[(s_idx[row["short_window"]], l_idx[row["long_window"]])] = ir
+    if not cells:
+        return None
     start = (s_idx[best["short_window"]], l_idx[best["long_window"]])
     seen = {start}
     stack = [start]
@@ -226,11 +255,15 @@ def _analyze_plateau(grid: list[dict]) -> Optional[dict]:
                 seen.add(neighbor)
                 stack.append(neighbor)
                 irs.append(cells[neighbor])
+    finite_irs = [value for value in irs if math.isfinite(value)]
     return {
         "best_short": best["short_window"],
         "best_long": best["long_window"],
         "component_size": len(irs),
-        "component_ir_mean": round(sum(irs) / len(irs), 4),
+        # 全被过滤时给 None(缺失显示缺失), 绝不回 inf/nan
+        "component_ir_mean": (
+            round(sum(finite_irs) / len(finite_irs), 4) if finite_irs else None
+        ),
         "grid_positive_count": sum(1 for ir in cells.values() if ir > 0),
         # 连通域成员(供前端高亮); 仅正 IR 节点, 规模受网格上限约束
         "component_cells": sorted(
