@@ -63,7 +63,7 @@ body.hud-theme .app{
   background:
     radial-gradient(52% 38% at 12% -6%,rgba(34,227,255,.10),transparent 62%),
     radial-gradient(46% 32% at 88% -4%,rgba(255,79,216,.07),transparent 64%),
-    #04070E;
+    var(--qf-bg-void);
 }
 body.hud-theme .content{
   background-image:
@@ -74,7 +74,7 @@ body.hud-theme .content{
 
 /* 滚动条 */
 body.hud-theme ::-webkit-scrollbar{width:10px;height:10px}
-body.hud-theme ::-webkit-scrollbar-thumb{background:#1E2C3F;border-radius:999px;border:2px solid #04070E}
+body.hud-theme ::-webkit-scrollbar-thumb{background:#1E2C3F;border-radius:999px;border:2px solid var(--qf-bg-void)}
 body.hud-theme ::-webkit-scrollbar-thumb:hover{background:#2C3F57}
 
 /* ---------- 2. 顶栏 ---------- */
@@ -83,12 +83,12 @@ body.hud-theme .topbar{
   background:rgba(7,12,21,.82);
   backdrop-filter:blur(16px) saturate(130%);
   -webkit-backdrop-filter:blur(16px) saturate(130%);
-  border-bottom:1px solid #1C2A3D;
+  border-bottom:1px solid var(--qf-line-1);
 }
 body.hud-theme .logo{font-family:var(--qf-font-display);font-size:14px;letter-spacing:.09em}
 body.hud-theme .logo-icon{
   width:32px;height:32px;border-radius:9px;
-  background:var(--qf-grad-cyan);color:#04070E;
+  background:var(--qf-grad-cyan);color:var(--qf-ink);
   font:700 13px/1 var(--qf-font-display);
   box-shadow:0 0 0 1px rgba(34,227,255,.35),0 0 22px rgba(34,227,255,.22);
 }
@@ -111,7 +111,7 @@ body.hud-theme #freshnessText{color:var(--qf-text-muted)}
 body.hud-theme .sidebar{
   width:200px;min-width:200px;padding:16px 12px;
   background:rgba(12,19,31,.62);
-  border-right:1px solid #1C2A3D;
+  border-right:1px solid var(--qf-line-1);
   backdrop-filter:blur(10px);
 }
 body.hud-theme .nav-item{
@@ -129,19 +129,19 @@ body.hud-theme .nav-item.active{
 body.hud-theme .nav-icon{width:20px;font-size:14px}
 body.hud-theme .nav-item .kbd{
   font:500 10px/1 var(--qf-font-mono);color:var(--qf-text-muted);
-  border:1px solid #1C2A3D;border-radius:4px;padding:2px 4px;
+  border:1px solid var(--qf-line-1);border-radius:4px;padding:2px 4px;
 }
 
 /* ---------- 4. 内容区与卡片 ---------- */
 body.hud-theme .content{padding:32px}
 body.hud-theme .card{
-  background:#0C131F;border:1px solid #1C2A3D;border-radius:12px;padding:24px;
+  background:var(--qf-bg-surface);border:1px solid var(--qf-line-1);border-radius:12px;padding:24px;
   transition:border-color var(--duration-base) var(--qf-ease-standard),
              box-shadow var(--duration-base) var(--qf-ease-standard),
              transform var(--duration-base) var(--qf-ease-standard);
 }
 body.hud-theme .card:hover{
-  border-color:#2A3D55;
+  border-color:var(--qf-line-2);
   box-shadow:0 8px 24px rgba(0,0,0,.45);
   transform:translateY(-1px);
 }
@@ -157,7 +157,7 @@ body.hud-theme th{
   height:40px;padding:0 14px;
   background:#0F1826;color:var(--qf-text-secondary);
   font:500 12px/20px var(--qf-font-body);letter-spacing:.03em;
-  border-bottom:1px solid #1C2A3D;position:sticky;top:0;z-index:1;
+  border-bottom:1px solid var(--qf-line-1);position:sticky;top:0;z-index:1;
 }
 body.hud-theme td{
   height:44px;padding:0 14px;border-bottom:1px solid rgba(28,42,61,.7);
@@ -170,7 +170,7 @@ body.hud-theme tr:nth-child(even):hover td{background:rgba(255,255,255,.035)}
 body.hud-theme .tabs,
 body.hud-theme .hud-subtabs{
   display:inline-flex;flex-wrap:wrap;gap:2px;padding:4px;
-  background:rgba(255,255,255,.04);border:1px solid #1C2A3D;border-radius:10px;
+  background:rgba(255,255,255,.04);border:1px solid var(--qf-line-1);border-radius:10px;
 }
 body.hud-theme .tab,
 body.hud-theme .hud-subtab{
@@ -199,9 +199,9 @@ body.hud-theme .btn{
 }
 body.hud-theme .btn:active{transform:scale(.98)}
 body.hud-theme .btn-primary{
-  background-image:linear-gradient(100deg,#22E3FF,#3D7BFF 52%,#22E3FF);
+  background-image:linear-gradient(100deg,var(--qf-neon-cyan),var(--qf-neon-azure) 52%,var(--qf-neon-cyan));
   background-size:190% 100%;background-position:0 0;
-  color:#04070E;font-weight:600;
+  color:var(--qf-ink);font-weight:600;
   box-shadow:0 0 0 1px rgba(34,227,255,.30),0 6px 20px rgba(34,227,255,.16);
 }
 body.hud-theme .btn-primary:hover{
@@ -209,7 +209,7 @@ body.hud-theme .btn-primary:hover{
   box-shadow:0 0 0 1px rgba(34,227,255,.5),0 8px 26px rgba(34,227,255,.26);
 }
 body.hud-theme .btn-outline{
-  background:rgba(34,227,255,.07);border-color:rgba(34,227,255,.34);color:#22E3FF;
+  background:rgba(34,227,255,.07);border-color:rgba(34,227,255,.34);color:var(--qf-neon-cyan);
 }
 body.hud-theme .btn-outline:hover{background:rgba(34,227,255,.14);border-color:rgba(34,227,255,.7)}
 body.hud-theme .btn-success{
@@ -226,17 +226,17 @@ body.hud-theme .btn-sm{height:32px;min-height:44px;padding:0 14px;border-radius:
 body.hud-theme .input,
 body.hud-theme .select,
 body.hud-theme textarea{
-  background:#070C15;border:1px solid #1C2A3D;border-radius:8px;
+  background:var(--qf-bg-deep);border:1px solid var(--qf-line-1);border-radius:8px;
   color:var(--qf-text-primary);
   transition:border-color var(--duration-base) var(--qf-ease-standard),box-shadow var(--duration-base) var(--qf-ease-standard),
              background var(--duration-base) var(--qf-ease-standard);
 }
 body.hud-theme .input:hover,
-body.hud-theme .select:hover{border-color:#2A3D55}
+body.hud-theme .select:hover{border-color:var(--qf-line-2)}
 body.hud-theme .input:focus,
 body.hud-theme .select:focus,
 body.hud-theme textarea:focus{
-  border-color:#22E3FF;
+  border-color:var(--qf-neon-cyan);
   box-shadow:0 0 0 3px rgba(34,227,255,.14),0 0 18px rgba(34,227,255,.10);
   background:#08101B;
 }
@@ -256,10 +256,10 @@ body.hud-theme .badge-mock{background:rgba(255,90,95,.12);color:#FF8589;border:1
 /* ---------- 10. 弹窗 / Toast ---------- */
 body.hud-theme .modal-mask{background:rgba(4,7,14,.78)}
 body.hud-theme .modal-box{
-  background:#121C2B;border:1px solid #2A3D55;border-radius:16px;
+  background:var(--qf-bg-elev);border:1px solid var(--qf-line-2);border-radius:16px;
   box-shadow:0 24px 64px rgba(0,0,0,.55);
 }
-body.hud-theme .modal-header{border-bottom:1px solid #2A3D55;padding:20px 24px}
+body.hud-theme .modal-header{border-bottom:1px solid var(--qf-line-2);padding:20px 24px}
 body.hud-theme .modal-body{padding:24px}
 body.hud-theme .modal-close{
   width:44px;height:44px;border-radius:8px;color:var(--qf-text-muted);
@@ -270,7 +270,7 @@ body.hud-theme .modal-close:hover{background:rgba(255,255,255,.06);color:var(--q
 body.hud-theme .toast-container{top:76px;right:24px}
 body.hud-theme .toast{
   background:rgba(24,35,53,.86);backdrop-filter:blur(16px);
-  border:1px solid #2A3D55;border-radius:10px;color:var(--qf-text-primary);
+  border:1px solid var(--qf-line-2);border-radius:10px;color:var(--qf-text-primary);
   box-shadow:0 8px 24px rgba(0,0,0,.45);
   font:500 13px/1.4 var(--qf-font-body);
   animation:qf-toast-in var(--duration-slow) var(--qf-ease-enter);
@@ -302,7 +302,7 @@ body.hud-theme .bottom-tab-bar{
   padding:0 4px env(safe-area-inset-bottom,0px);
   background:rgba(18,28,43,.92);
   backdrop-filter:blur(16px) saturate(130%);
-  border-top:1px solid #2A3D55;
+  border-top:1px solid var(--qf-line-2);
 }
 body.hud-theme .bottom-tab-item{
   min-height:56px;color:var(--qf-text-muted);
@@ -316,7 +316,7 @@ body.hud-theme .bottom-tab-item.active{
 /* ---------- 13. 焦点环（全局统一，任意底色可见） ---------- */
 body.hud-theme :focus-visible{
   outline:none;
-  box-shadow:0 0 0 2px #0C131F,0 0 0 4px #22E3FF;
+  box-shadow:0 0 0 2px var(--qf-bg-surface),0 0 0 4px var(--qf-neon-cyan);
 }
 body.hud-theme .input:focus-visible,
 body.hud-theme .select:focus-visible,

@@ -62,10 +62,10 @@
 }
 .st6-conf-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
 .st6-conf-high .st6-conf-dot { background: var(--hud-down, #34D399); }
-.st6-conf-medium .st6-conf-dot { background: #f59e0b; }
+.st6-conf-medium .st6-conf-dot { background: var(--color-warning, #f59e0b); }
 .st6-conf-low .st6-conf-dot { background: var(--hud-up, #F87171); }
 .st6-stale-mark {
-  font-size: 11px; color: #f59e0b; border: 1px dashed #f59e0b;
+  font-size: 11px; color: var(--color-warning, #f59e0b); border: 1px dashed var(--color-warning, #f59e0b);
   border-radius: 4px; padding: 1px 6px;
 }
 
@@ -145,7 +145,7 @@
 /* ===== STAGE6: xray-report ===== 重叠矩阵与暴露表 */
 
 .st6-xray-warn {
-  border-left: 3px solid #f59e0b; padding: 6px 10px; margin-bottom: 6px;
+  border-left: 3px solid var(--color-warning, #f59e0b); padding: 6px 10px; margin-bottom: 6px;
   font-size: 12px; color: var(--text-secondary, #c3c9d9);
   background: rgba(245, 158, 11, 0.08); border-radius: 0 6px 6px 0;
 }

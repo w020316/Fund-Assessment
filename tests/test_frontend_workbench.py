@@ -832,3 +832,27 @@ def test_sector_board_sort_puts_missing_last_and_fmtYi_guards_null():
     assert "Number(b.change_pct || 0)" not in js, "排序仍把缺失涨跌幅当 0"
     assert ".concat(noPct);" in js
     assert "if (v == null || !isFinite(n)) return '—';" in js
+
+
+def test_aurora_theme_stock_hex_are_tokenized():
+    """STAGE5 遗留#2 分片一: aurora-theme.css 存量字面色 → token(同值替换)。
+    锁定已 token 化的 8 个 qf 色不再回退成裸 hex(注释里的引用不算)。"""
+    css = (ROOT / "web/static/css/aurora-theme.css").read_text(encoding="utf-8")
+    # 去掉块注释后再断言, 注释中的色值引用(对比度记录等)合法保留
+    stripped = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    for h in ("#1C2A3D", "#2A3D55", "#0C131F", "#22E3FF", "#3D7BFF",
+              "#04070E", "#070C15", "#121C2B"):
+        assert h not in stripped, f"aurora-theme.css 仍有裸 hex {h}(应引用对应 --qf-* token)"
+    for tok in ("var(--qf-line-1)", "var(--qf-line-2)", "var(--qf-bg-surface)",
+                "var(--qf-neon-cyan)", "var(--qf-ink)"):
+        assert tok in css, f"aurora-theme.css 缺少 {tok}"
+
+
+def test_stage6_bare_warning_amber_is_tokenized():
+    """stage6.css 三处裸 #f59e0b 改为 var(--color-warning, #f59e0b)
+    (沿用本文件「token + 字面量回退」既有约定, 回退值保持同色)。"""
+    css = (ROOT / "web/static/css/stage6.css").read_text(encoding="utf-8")
+    stripped = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    for bad in ("background: #f59e0b", "color: #f59e0b", "dashed #f59e0b", "solid #f59e0b"):
+        assert bad not in stripped, f"stage6.css 仍有裸警告色: {bad}"
+    assert css.count("var(--color-warning, #f59e0b)") >= 5
