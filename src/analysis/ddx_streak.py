@@ -268,13 +268,31 @@ def _fetch_sina_snapshot(code: str) -> dict | None:
 
 # 已知 down 的源暂停重试的时长(秒): 12 只候选逐只等同一个 5s 超时,
 # 会把整轮取数拖过 deadline, 连可用的新浪兜底都轮不到。
+# C-03(2026-11-17):固定 600s 是**非对称惩罚** —— 冷却到期只给一次探测机会,
+# 该次哪怕瞬时 502 就再锁 600s;而不可用源反而每 10 分钟被重打一轮。
+# 改为指数退避: 600 → 1200 → 2400(封顶), 成功即回落到 600。
 _SOURCE_RETRY_AFTER = 600.0
+_SOURCE_RETRY_MAX = 2400.0
+
+
+def _backoff_seconds(name: str) -> float:
+    """按连续失败次数给冷却时长: 1 档 600s, 之后每档翻倍, 2400s 封顶。"""
+    streak = max(0, data_health.failure_streak(name))
+    overflow = max(0, streak - data_health.DOWN_THRESHOLD)  # 刚判定 down 时 = 0
+    return min(_SOURCE_RETRY_AFTER * (2 ** min(overflow, 2)), _SOURCE_RETRY_MAX)
 
 
 def _paused(name: str) -> bool:
     """该源近期已判定 down → 本轮跳过, 不产生新的失败计数。"""
     age = data_health.seconds_since_attempt(name)
-    return bool(data_health.is_down(name) and age is not None and age < _SOURCE_RETRY_AFTER)
+    return bool(data_health.is_down(name) and age is not None and age < _backoff_seconds(name))
+
+
+def _with_skips(payload: dict | None, skipped: list[str]) -> dict | None:
+    """把"本轮被跳过的源"附在返回体上, 供 build 侧区分"被跳过"与"没数据"。"""
+    if not payload or not skipped:
+        return payload
+    return {**payload, "skipped_sources": list(skipped)}
 
 
 def fetch_flow_streak(code: str) -> dict | None:
@@ -285,7 +303,12 @@ def fetch_flow_streak(code: str) -> dict | None:
     """
     df = None
     source = "eastmoney"
-    if not _paused("ddx_em"):
+    skipped: list[str] = []
+
+    em_paused = _paused("ddx_em")
+    if em_paused:
+        skipped.append("ddx_em")
+    else:
         df = _fetch_em_history(code)
         if df is not None and not df.empty:
             data_health.record_success("ddx_em", len(df))
@@ -294,7 +317,10 @@ def fetch_flow_streak(code: str) -> dict | None:
 
     if df is None or df.empty:
         source = "akshare"
-        if not _paused("ddx_akshare"):
+        ak_paused = _paused("ddx_akshare")
+        if ak_paused:
+            skipped.append("ddx_akshare")
+        else:
             df = _fetch_akshare_history(code)
             if df is not None and not df.empty:
                 data_health.record_success("ddx_akshare", len(df))
@@ -303,21 +329,46 @@ def fetch_flow_streak(code: str) -> dict | None:
 
     if df is None or df.empty:
         source = "sina_history"
-        df = _fetch_sina_history(code)
-        if df is None or df.empty:
-            return _fetch_sina_snapshot(code)
+        # C-03: 历史兜底主力此前**完全没有暂停保护** —— 可用源被过度惩罚(见 _paused),
+        # 而这一条最该受保护。现在它和另外两源同一口径, 成功后同样清零退避。
+        sina_paused = _paused("ddx_sina_hist")
+        if sina_paused:
+            skipped.append("ddx_sina_hist")
+        else:
+            df = _fetch_sina_history(code)
+            if df is not None and not df.empty:
+                data_health.record_success("ddx_sina_hist", len(df))
+            else:
+                data_health.record_failure("ddx_sina_hist", "empty or unreachable")
+
+    if df is None or df.empty:
+        if len(skipped) >= 3:
+            # 三个历史源全在冷却: 本轮"被跳过" —— 既不当作有数据, 也不能退到快照,
+            # 否则"被跳过的源"会伪装成"今天没有连增"(快照没有 history_available)。
+            return {
+                "streak": None,
+                "net_today": None,
+                "net_sum": None,
+                "ratio_today": None,
+                "start_date": None,
+                "end_date": None,
+                "source": "paused",
+                "history_available": False,
+                "skipped_sources": list(skipped),
+            }
+        return _with_skips(_fetch_sina_snapshot(code), skipped)
 
     stats = compute_streak(df)
     if stats:
         stats["source"] = source
         stats["history_available"] = True
-        return stats
+        return _with_skips(stats, skipped)
     snapshot = _last_row_snapshot(df)
     if snapshot:
         snapshot["source"] = source
         snapshot["history_available"] = True
-        return snapshot
-    return None
+        return _with_skips(snapshot, skipped)
+    return _with_skips(None, skipped)
 
 
 def fetch_streak(code: str) -> dict | None:
@@ -327,7 +378,13 @@ def fetch_streak(code: str) -> dict | None:
     调用方会把"筛不出连增"误报成"取数失败"。
     """
     stats = fetch_flow_streak(code)
-    if not stats or not stats.get("history_available"):
+    if not stats:
+        return None
+    if stats.get("source") == "paused":
+        # C-03: 三源全在冷却时把"被跳过"原样透传给 build, 由它记进 skipped
+        # (不能用 None 表示, 否则会被计成"取数失败")。
+        return stats
+    if not stats.get("history_available"):
         return None
     return stats
 
@@ -349,6 +406,7 @@ def build_ddx_streak(
     items: list[dict] = []
     failed = 0
     sources: dict[str, int] = {}
+    skipped_sources: dict[str, int] = {}
     executor = ThreadPoolExecutor(max_workers=max(1, min(workers, len(pool))))
     try:
         futures = {executor.submit(fetch_streak, str(c["code"])): c for c in pool}
@@ -360,8 +418,13 @@ def build_ddx_streak(
                 stats = future.result()
             except Exception:  # fetch_streak 已兜底，这里只防御 future 层异常
                 stats = None
+            for name in (stats or {}).pop("skipped_sources", []) or []:
+                skipped_sources[name] = skipped_sources.get(name, 0) + 1
             if not stats:
                 failed += 1
+                continue
+            if stats.get("source") == "paused":
+                # 三源全在冷却: 记"被跳过", 不计成"取数失败"也不进候选
                 continue
             if stats["streak"] < min_days:
                 continue
@@ -378,4 +441,11 @@ def build_ddx_streak(
         executor.shutdown(wait=False, cancel_futures=True)
 
     items.sort(key=lambda x: (-x["streak"], -(x.get("net_today") or 0.0)))
-    return {"items": items, "sampled": len(pool), "failed": failed, "sources": sources}
+    return {
+        "items": items,
+        "sampled": len(pool),
+        "failed": failed,
+        "sources": sources,
+        # C-03: 让"被跳过"和"没数据"可区分(前端/运维据此判断是源冷却还是真的没连增)
+        "skipped": skipped_sources,
+    }

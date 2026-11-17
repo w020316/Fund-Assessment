@@ -689,6 +689,9 @@ async def _build_ddx_payload(limit: int, min_days: int) -> tuple[dict, float]:
         "sampled": result["sampled"],
         "failed": result["failed"],
         "sources": result.get("sources") or {},
+        # C-03: 源在冷却窗口内被跳过的次数 —— 与 failed(真失败)分开,
+        # 前端/运维据此区分"源冷却"与"今天确实没有连增"。
+        "skipped": result.get("skipped") or {},
         "min_days": min_days,
         "trade_date": rows[0]["end_date"] if rows else None,
     }

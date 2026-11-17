@@ -576,3 +576,97 @@ class TestLimitTiers:
 
         assert codes[:6] == [200] * 6
         assert codes[6] == 429
+
+
+# ===== C-03(2026-11-17):冷却指数退避 + sina_history 纳入暂停 + skipped 可区分 =====
+
+class TestSourceBackoff:
+    """旧实现 600s 固定 → 冷却到期只给一次探测机会, 瞬时 502 就再锁 600s;
+    而 `_fetch_sina_history` 作为历史兜底主力**完全没有 _paused 保护**。"""
+
+    def test_backoff_sequence_is_exponential(self):
+        for _ in range(ddx.data_health.DOWN_THRESHOLD):
+            ddx.data_health.record_failure("ddx_em", "x")
+        # 刚判定 down: 600
+        assert ddx._backoff_seconds("ddx_em") == 600.0
+        ddx.data_health.record_failure("ddx_em", "x")
+        assert ddx._backoff_seconds("ddx_em") == 1200.0
+        ddx.data_health.record_failure("ddx_em", "x")
+        assert ddx._backoff_seconds("ddx_em") == 2400.0
+        # 封顶
+        for _ in range(5):
+            ddx.data_health.record_failure("ddx_em", "x")
+        assert ddx._backoff_seconds("ddx_em") == 2400.0
+
+    def test_success_resets_backoff(self):
+        for _ in range(6):
+            ddx.data_health.record_failure("ddx_em", "x")
+        assert ddx._backoff_seconds("ddx_em") == 2400.0
+
+        ddx.data_health.record_success("ddx_em", 5)
+        assert ddx._backoff_seconds("ddx_em") == 600.0
+
+    def test_paused_uses_backoff_not_fixed_600(self):
+        """第 2 档退避(1200s)内, 即使已过 600s 也仍在暂停中。"""
+        for _ in range(ddx.data_health.DOWN_THRESHOLD + 1):
+            ddx.data_health.record_failure("ddx_em", "x")
+        monkeypatch_age = 900.0  # 落在 600~1200 之间
+        original = ddx.data_health.seconds_since_attempt
+        try:
+            ddx.data_health.seconds_since_attempt = lambda name: monkeypatch_age
+            assert ddx._paused("ddx_em") is True, "第 2 档仍应暂停(900 < 1200)"
+        finally:
+            ddx.data_health.seconds_since_attempt = original
+
+    def test_sina_history_is_paused_and_not_called(self, monkeypatch):
+        """sina 历史兜底在 down 时必须被跳过(spy 断言调用次数为 0)。"""
+        for _ in range(ddx.data_health.DOWN_THRESHOLD):
+            ddx.data_health.record_failure("ddx_sina_hist", "blocked")
+        calls: list[str] = []
+        monkeypatch.setattr(ddx, "_fetch_em_history", lambda code: None)
+        monkeypatch.setattr(ddx, "_fetch_akshare_history", lambda code: None)
+        monkeypatch.setattr(ddx, "_fetch_sina_history", lambda code: calls.append(code) or _make_df([1e7, 2e7]))
+        monkeypatch.setattr(ddx, "_fetch_sina_snapshot", lambda code: None)
+
+        out = ddx.fetch_flow_streak("600519")
+
+        assert calls == [], "sina 历史源已 down 却仍被调用"
+        # em/akshare 本轮是真失败(未冷却), 快照也被 stub 成 None → 本轮确实无数据
+        assert out is None
+
+    def test_all_sources_paused_returns_none_not_empty(self, monkeypatch):
+        """三源全 paused → 返回 None(不是快照、也不是空数组冒充"今天没连增")。"""
+        for name in ("ddx_em", "ddx_akshare", "ddx_sina_hist"):
+            for _ in range(ddx.data_health.DOWN_THRESHOLD):
+                ddx.data_health.record_failure(name, "blocked")
+        snapshot_calls: list[str] = []
+        monkeypatch.setattr(ddx, "_fetch_sina_snapshot", lambda code: snapshot_calls.append(code) or {"streak": None})
+
+        out = ddx.fetch_flow_streak("600519")
+
+        assert out is not None
+        assert out["source"] == "paused"
+        assert out["history_available"] is False
+        assert sorted(out["skipped_sources"]) == ["ddx_akshare", "ddx_em", "ddx_sina_hist"]
+        # fetch_streak 必须把它标成"不可用"(history_available=False), 绝不能当连增数据;
+        # 但仍要把"paused"透传给 build, 由 build 记进 skipped 而不是 failed。
+        paused = ddx.fetch_streak("600519")
+        assert paused is not None
+        assert paused["source"] == "paused"
+        assert paused["history_available"] is False
+        assert paused["streak"] is None
+        assert snapshot_calls == [], "全 paused 时不应再退到当日快照"
+
+    def test_build_reports_skipped_separately_from_failed(self, monkeypatch):
+        """`skipped` 与 `failed` 必须是两回事: 源在冷却 ≠ 取数失败。"""
+        for name in ("ddx_em", "ddx_akshare", "ddx_sina_hist"):
+            for _ in range(ddx.data_health.DOWN_THRESHOLD):
+                ddx.data_health.record_failure(name, "blocked")
+        monkeypatch.setattr(ddx, "_fetch_sina_snapshot", lambda code: None)
+
+        out = ddx.build_ddx_streak([{"code": "600519", "name": "贵州茅台"}], min_days=2, workers=1, deadline=5.0)
+
+        assert out["items"] == []
+        assert out["failed"] == 0, "源冷却不该计成取数失败"
+        assert out["skipped"]["ddx_em"] == 1
+        assert out["skipped"]["ddx_sina_hist"] == 1

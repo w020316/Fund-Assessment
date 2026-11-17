@@ -109,6 +109,18 @@ def _status(entry: dict[str, Any]) -> str:
     return "down" if entry["consecutive_failures"] >= DOWN_THRESHOLD else "degraded"
 
 
+def failure_streak(name: str) -> int:
+    """当前连续失败次数(0 表示没有连续失败)。
+
+    C-03(2026-11-17):冷却时长需要"退避到第几档", 但 `snapshot()` 会组装整张表
+    (含预注册源与时间格式化), 在"每只候选股都要判一次"的热路径上太重。
+    这里只读一个字段。
+    """
+    with _lock:
+        entry = _state.get(name)
+        return int(entry["consecutive_failures"]) if entry else 0
+
+
 def is_down(name: str) -> bool:
     """该源是否已判定 down(连续失败 ≥ DOWN_THRESHOLD)。调用方可据此暂停重试。
 
