@@ -595,3 +595,20 @@ class TestAggregators:
             "quote": True, "kline": True, "capital_flow": False, "financial": True
         }
         assert isinstance(payload["quality_score"], (int, float))
+
+
+class TestMarginUnitSemantics:
+    """A-06(2026-11-17):两融"量 vs 额"的口径必须在路由层原样透出 ——
+    模型若把 None 强制成 0,前端就会把"没有融券卖出额"显示成"融券卖出 0 元"。"""
+
+    def test_margin_route_keeps_null_amount_and_volume(self, client, monkeypatch):
+        item = {"code": "600519", "trade_date": "2026-11-16", "margin_buy": 1.0,
+                "margin_balance": 2.0, "short_sell": None, "short_sell_volume": 2900.0,
+                "short_balance": 322111545.0, "total_balance": 5.0}
+        market.cache.clear()
+        monkeypatch.setattr(market.ds2, "get_margin_trading", lambda code: item)
+
+        data = client.get("/api/market/margin", params={"code": "600519"}).json()["data"]
+
+        assert data["short_sell"] is None, "融券卖出额不可得时必须为 null, 不能落成 0"
+        assert data["short_sell_volume"] == 2900.0, "融券卖出量(股)必须原样透出"

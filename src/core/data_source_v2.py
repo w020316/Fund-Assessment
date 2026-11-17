@@ -1538,12 +1538,24 @@ def get_margin_trading(stock_code: str) -> dict:
         if not items:
             return _get_margin_trading_fallback(stock_code)
         item = items[0]
+        # 2026-11-17 单位校准(实测 RPTA_WEB_RZRQ_GGMX, 600519, 2026-11-16):
+        #   RZYE=14788586340(元)  RQYE=322111545(元)
+        #   RQYL=221550(股)       RQMCL=2900(股)       SPJ=1453.9(收盘价)
+        #   且 RQYE / RQYL = 1453.9 = SPJ ⇒ 结论:
+        #     RZRQYE/RZYE/RZMRE 是**元**, RQYL/RQMCL 是**股**;
+        #   该报表**没有**融券"额"字段。
+        # 旧实现把 RQMCL(股数) 塞进 short_sell(金额), 等于把"2900 股"报成
+        # "融券卖出 2900 元"(差 1453 倍), 前端表格里还标着金额列。
+        # 因此:
+        #   short_sell        —— 金额语义, 上游无此字段 → 恒为 None(诚实空值, 不填 0);
+        #   short_sell_volume —— 融券卖出**量(股)**, 缺失时 None(不是 0)。
         return {
             "code": _safe_str(item.get("SCODE", "")),
             "trade_date": _safe_str(item.get("DATE", ""))[:10],
             "margin_buy": _safe_float(item.get("RZMRE", 0)),
             "margin_balance": _safe_float(item.get("RZYE", 0)),
-            "short_sell": _safe_float(item.get("RQMCL", 0)),
+            "short_sell": None,
+            "short_sell_volume": _opt_float(item.get("RQMCL")),
             "short_balance": _safe_float(item.get("RQYE", 0)),
             "total_balance": _safe_float(item.get("RZRQYE", 0)),
         }

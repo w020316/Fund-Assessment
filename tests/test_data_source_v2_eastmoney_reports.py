@@ -26,14 +26,20 @@ def _ok(rows, count=None):
 
 
 def test_margin_trading_uses_current_report_and_fields(monkeypatch):
+    """报表名/筛选列/字段映射锁定;并且**单位**必须对: RQMCL 是股, 不是元。
+
+    真实样本(2026-11-17 实测 RPTA_WEB_RZRQ_GGMX, 600519, 2026-11-16):
+    RZYE=14788586340(元) RQYE=322111545(元) RQYL=221550(股) RQMCL=2900(股) SPJ=1453.9
+    且 RQYE/RQYL == SPJ ⇒ RQYL/RQMCL 是**股**, RZYE/RQYE 是**元**;该报表没有融券"额"。
+    """
     captured = {}
 
     def fake_em_get(url, params=None, **kwargs):
         captured.update(params or {})
         return _ok([{
-            "SCODE": "600519", "DATE": "2026-11-13 00:00:00",
-            "RZMRE": 3.6e8, "RZYE": 1.5e10, "RQMCL": 10400,
-            "RQYE": 3.1e8, "RZRQYE": 1.53e10,
+            "SCODE": "600519", "DATE": "2026-11-16 00:00:00",
+            "RZMRE": 3.6e8, "RZYE": 1.5e10, "RQMCL": 2900, "RQYL": 221550,
+            "RQYE": 3.1e8, "RZRQYE": 1.53e10, "SPJ": 1453.9,
         }])
 
     monkeypatch.setattr(ds2, "em_get", fake_em_get)
@@ -44,13 +50,52 @@ def test_margin_trading_uses_current_report_and_fields(monkeypatch):
     assert captured["sortColumns"] == "DATE"
     assert result == {
         "code": "600519",
-        "trade_date": "2026-11-13",
+        "trade_date": "2026-11-16",
         "margin_buy": 3.6e8,
         "margin_balance": 1.5e10,
-        "short_sell": 10400,
+        # 金额语义不可得 → 诚实空值, 不把股数当元
+        "short_sell": None,
+        # 融券卖出量, 单位:股
+        "short_sell_volume": 2900,
         "short_balance": 3.1e8,
         "total_balance": 1.53e10,
     }
+
+
+def test_margin_units_are_self_consistent(monkeypatch):
+    """单位自洽等式(准入要求):融券余额(元) / 融券余量(股) == 当日收盘价(元/股)。"""
+
+    def fake_em_get(url, params=None, **kwargs):
+        return _ok([{
+            "SCODE": "600519", "DATE": "2026-11-16 00:00:00",
+            "RZMRE": 1.0e9, "RZYE": 14788586340.0, "RQMCL": 2900,
+            "RQYL": 221550, "RQYE": 322111545.0, "RZRQYE": 15110697885.0,
+            "SPJ": 1453.9,
+        }])
+
+    monkeypatch.setattr(ds2, "em_get", fake_em_get)
+    result = ds2.get_margin_trading("600519")
+
+    # 元 / 股 == 元/股(收盘价):证明 RQYE 是元、RQYL 是股
+    assert result["short_balance"] / 221550 == pytest.approx(1453.9, rel=1e-6)
+    assert result["short_sell_volume"] == 2900
+
+
+def test_margin_missing_fields_are_none_not_zero(monkeypatch):
+    """上游给空字段时 short_sell/short_sell_volume 必须是 None, 不得落成 0。"""
+
+    def fake_em_get(url, params=None, **kwargs):
+        return _ok([{
+            "SCODE": "600519", "DATE": "2026-11-16 00:00:00",
+            "RZMRE": 1.0e9, "RZYE": 1.0e10, "RQMCL": None,
+            "RQYE": None, "RZRQYE": 1.1e10,
+        }])
+
+    monkeypatch.setattr(ds2, "em_get", fake_em_get)
+    result = ds2.get_margin_trading("600519")
+
+    assert result["short_sell"] is None
+    assert result["short_sell_volume"] is None
 
 
 def test_block_trades_uses_current_report_and_fields(monkeypatch):

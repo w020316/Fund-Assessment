@@ -8199,13 +8199,16 @@ async function loadDataTab() {
     margin: {
       title: '融资融券',
       url: code ? `/api/market/margin?code=${code}` : '/api/market/margin?code=600519',
-      headers: ['日期','融资余额','融资买入','融券余额','融券卖出','总余额'],
-      // API返回: code, trade_date, margin_buy, margin_balance, short_sell, short_balance, total_balance
-      mapItem: (item) => [item.trade_date||'', item.margin_balance||0, item.margin_buy||0, item.short_balance||0, item.short_sell||0, item.total_balance||0],
+      // 2026-11-17: 东财个股两融报表只有融券卖出「量(股)」,没有融券「额」。
+      // short_sell(金额) 恒为 null → 显示「—」, 不能落成 0 冒充"没有融券卖出";
+      // 数量列单独用 short_sell_volume(股)。
+      headers: ['日期','融资余额','融资买入','融券余额','融券卖出量(股)','总余额'],
+      // API返回: code, trade_date, margin_buy, margin_balance, short_sell, short_sell_volume, short_balance, total_balance
+      mapItem: (item) => [item.trade_date||'', item.margin_balance||0, item.margin_buy||0, item.short_balance||0, (item.short_sell_volume==null?'—':item.short_sell_volume), item.total_balance||0],
       default: [
-        {trade_date:'2025-01-15',margin_balance:156.78,margin_buy:12.34,short_balance:8.56,short_sell:2.34,total_balance:148.22},
-        {trade_date:'2025-01-14',margin_balance:155.23,margin_buy:11.89,short_balance:8.34,short_sell:2.12,total_balance:146.89},
-        {trade_date:'2025-01-13',margin_balance:154.56,margin_buy:10.56,short_balance:8.12,short_sell:1.98,total_balance:146.44}
+        {trade_date:'2025-01-15',margin_balance:156.78,margin_buy:12.34,short_balance:8.56,short_sell_volume:23400,total_balance:148.22},
+        {trade_date:'2025-01-14',margin_balance:155.23,margin_buy:11.89,short_balance:8.34,short_sell_volume:21200,total_balance:146.89},
+        {trade_date:'2025-01-13',margin_balance:154.56,margin_buy:10.56,short_balance:8.12,short_sell_volume:19800,total_balance:146.44}
       ]
     },
     block: {

@@ -787,7 +787,13 @@ class MarginTradingItem(BaseModel):
     trade_date: str
     margin_buy: float
     margin_balance: float
-    short_sell: float
+    # 2026-11-17 单位校准:东财个股两融报表(RPTA_WEB_RZRQ_GGMX)只有融券卖出
+    # **量(股)** RQMCL, 没有融券卖出**额**。旧实现把股数当金额返回, 前端还标着
+    # 金额列, 差了一个股价倍数。现约定:
+    #   short_sell        —— 金额(元), 上游不可得 → 恒 None, 前端显示「—」;
+    #   short_sell_volume —— 数量(股), 缺失时 None, 不得用 0 冒充。
+    short_sell: float | None = None
+    short_sell_volume: float | None = None
     short_balance: float
     total_balance: float
 
