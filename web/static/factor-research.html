@@ -21,7 +21,7 @@
     p { margin: 10px 0; }
     .muted, small { color: var(--qf-text-secondary); }
     .intro { max-width: 880px; }
-    .badge { color: var(--qf-neon-cyan); border: 1px solid var(--qf-line-neon); border-radius: 99px; padding: 3px 12px; font-size: 12px; }
+    .badge { color: var(--qf-neon-cyan); border: 1px solid var(--qf-line-neon); border-radius: 99px; padding: 4px 12px; font-size: 12px; }
     .steps { display: flex; flex-wrap: wrap; gap: 8px; margin: 22px 0; padding: 0; list-style: none; }
     .steps li { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--qf-line-1); color: var(--qf-text-secondary); }
     .panel { margin-top: 20px; padding: 24px; border: 1px solid var(--qf-line-1); border-radius: 14px; background: var(--qf-bg-surface); }
@@ -30,10 +30,10 @@
     .fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin: 18px 0; }
     label { display: flex; flex-direction: column; gap: 6px; color: var(--qf-text-secondary); }
     input, select, textarea, button, .button { font: inherit; border-radius: 7px; }
-    input, select, textarea { width: 100%; background: var(--qf-bg-deep); border: 1px solid var(--qf-line-2); color: var(--qf-text-primary); padding: 9px 11px; min-width: 0; }
+    input, select, textarea { width: 100%; background: var(--qf-bg-deep); border: 1px solid var(--qf-line-2); color: var(--qf-text-primary); padding: 8px 12px; min-width: 0; }
     input[type="file"] { margin: 12px 0; }
     textarea { font: 12px/1.6 var(--qf-font-mono); resize: vertical; }
-    button, .button { background: var(--qf-bg-elev); border: 1px solid var(--qf-line-2); color: var(--qf-text-primary); padding: 8px 15px; cursor: pointer; text-decoration: none; }
+    button, .button { background: var(--qf-bg-elev); border: 1px solid var(--qf-line-2); color: var(--qf-text-primary); padding: 8px 16px; cursor: pointer; text-decoration: none; }
     button.primary { background: var(--qf-neon-cyan); color: var(--qf-ink); font-weight: 700; border-color: transparent; }
     button:disabled { opacity: .5; cursor: not-allowed; }
     :focus-visible { outline: 2px solid var(--qf-neon-cyan); outline-offset: 3px; }
@@ -74,7 +74,7 @@
       nav a, footer a { display: inline-flex; align-items: center; min-height: 48px; }
     }
     @media (max-width: 850px) { .fields, .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .report-grid { grid-template-columns: 1fr; } }
-    @media (max-width: 480px) { main { padding: 18px 14px 40px; } .panel { padding: 17px; } .fields { grid-template-columns: 1fr; } .metric { padding: 12px; } .metric strong { font-size: 20px; } nav { gap: 8px; } }
+    @media (max-width: 480px) { main { padding: 18px 14px 40px; } .panel { padding: 16px; } .fields { grid-template-columns: 1fr; } .metric { padding: 12px; } .metric strong { font-size: 20px; } nav { gap: 8px; } }
   </style>
   <script src="/static/js/factor-research.js" defer></script>
 </head>

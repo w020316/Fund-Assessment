@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 INDEX = Path(__file__).resolve().parents[1] / "web/static/index.html"
@@ -17,7 +18,13 @@ def _text() -> str:
 
 def test_agent_points_are_escaped():
     text = _text()
-    assert "opData.points.map(p => `<div style=\"padding:3px 0;\">• ${escapeHtml(p)}</div>`)" in text
+    # 不把整个字面量连 padding 一起写死 —— 首版写成 `padding:3px 0` 的精确匹配，
+    # 结果被一次纯视觉的间距收敛(3px→4px)打成红，而转义其实一直是对的。
+    # 断言应只锁"结构 + 转义"，不锁样式数值。
+    assert re.search(
+        r"opData\.points\.map\(p => `<div style=\"padding:\d+px 0;\">• \$\{escapeHtml\(p\)\}</div>`\)",
+        text,
+    ), "opData.points 的分点未按模板转义"
     assert "• ${p}</div>" not in text
 
 

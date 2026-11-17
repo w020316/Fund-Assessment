@@ -5068,7 +5068,7 @@ function renderAgentCards(opinions, result) {
         </div>
       </div>
       <div style="font-size:12px;color:var(--text-secondary);">
-        ${opData.points.map(p => `<div style="padding:3px 0;">• ${escapeHtml(p)}</div>`).join('')}
+        ${opData.points.map(p => `<div style="padding:4px 0;">• ${escapeHtml(p)}</div>`).join('')}
       </div>
     `;
   });
@@ -8686,8 +8686,8 @@ async function loadStrategyParams() {
   form.innerHTML = note + Object.keys(groups).map(group => {
     const gmeta = STRATEGY_GROUP_META[group] || [group, false];
     const badge = gmeta[1]
-      ? '<span style="font-size:10px;color:#34D399;border:1px solid rgba(52,211,153,.4);border-radius:4px;padding:0 5px;margin-left:6px;">生效中</span>'
-      : '<span style="font-size:10px;color:var(--text-muted);border:1px solid var(--border);border-radius:4px;padding:0 5px;margin-left:6px;">仅记录</span>';
+      ? '<span style="font-size:10px;color:#34D399;border:1px solid rgba(52,211,153,.4);border-radius:4px;padding:0 4px;margin-left:6px;">生效中</span>'
+      : '<span style="font-size:10px;color:var(--text-muted);border:1px solid var(--border);border-radius:4px;padding:0 4px;margin-left:6px;">仅记录</span>';
     return `
     <div style="margin-bottom:12px;">
       <div style="font-weight:600;color:var(--text-primary);margin-bottom:6px;">${escapeHtml(gmeta[0])}${badge}
@@ -9134,7 +9134,7 @@ function _renderSkeletons() {
   const indexCards = document.getElementById('indexCards');
   if (indexCards && !indexCards.innerHTML.trim()) {
     // ===== STAGE5: cls-fix ===== 末尾 26px 占位与真实卡片中 T04 新鲜度徽章行
-    // (margin-top:8px + 11px*1.6 行高 ≈ 25.6px)等高,消除骨架→实卡的 CLS(QA Bug S2)
+    // (margin-top:8px + 12px*1.6 行高 ≈ 25.6px)等高,消除骨架→实卡的 CLS(QA Bug S2)
     indexCards.innerHTML = Array(3).fill(0).map(() =>
       '<div class="skeleton-card"><div class="skeleton-line short"></div><div class="skeleton-line large" style="height:28px;"></div><div class="skeleton-line medium"></div><div style="height:26px;margin-top:8px;"></div></div>'
     ).join('');
