@@ -246,7 +246,8 @@ class TestMarketThermometerEndToEnd:
         mock_sentiment = {"rise_count": 3000, "fall_count": 2000, "sentiment": "偏多"}
 
         with patch.object(market_assessment.ds2, "get_index_realtime", return_value=mock_index):
-            with patch.object(market_assessment.ds2, "get_sector_ranking", return_value=mock_sectors):
+            # P1-2:温度计改用**全量**板块评分, patch 目标随之更新(断言未改)
+            with patch.object(market_assessment.ds2, "get_sector_ranking_full", return_value=mock_sectors):
                 with patch.object(market_assessment.ds2, "get_northbound_flow_realtime", return_value=mock_northbound):
                     with patch.object(market_assessment.ds2, "get_market_sentiment", return_value=mock_sentiment):
                         result = await get_market_thermometer()
@@ -360,7 +361,8 @@ class TestMarketThermometerEndToEnd:
         mock_sentiment = {"rise_count": 4000, "fall_count": 1000, "sentiment": "偏多"}
 
         with patch.object(market_assessment.ds2, "get_index_realtime", return_value=mock_index):
-            with patch.object(market_assessment.ds2, "get_sector_ranking", return_value=mock_sectors):
+            # P1-2:同上 —— 评分路径改用全量板块
+            with patch.object(market_assessment.ds2, "get_sector_ranking_full", return_value=mock_sectors):
                 with patch.object(market_assessment.ds2, "get_northbound_flow_realtime", return_value=mock_northbound):
                     with patch.object(market_assessment.ds2, "get_market_sentiment", return_value=mock_sentiment):
                         result = await get_market_assessment()
@@ -373,3 +375,55 @@ class TestMarketThermometerEndToEnd:
         # 大涨,温度计高分
         assert result["thermometer"]["score"] >= 70
         assert "大幅净流入" in result["capital_signal"]
+
+
+# ===== P1-2(2026-11-17):板块轮动分不得用"涨幅榜前 50"当全市场 =====
+# 线上实测: /api/market/sector_ranking 返回 50 条(change_pct 从 +5.82% 到 +0.30%),
+# 上涨 50 / 下跌 0; 而 fs=m:90+t:2 真实有 496 个板块。同一时刻个股 1236/3925 上涨,
+# "所有板块都在涨"是不可能的。根因: pz=50 + fid=f3 降序 = 只要了涨幅榜前 50。
+# 真实全量(2026-11-17 21:00): 496 个板块 → 涨 72 / 跌 423 → ratio 0.145。
+
+_REAL_SECTOR_TOTAL = 496
+_REAL_SECTOR_GAIN = 72
+
+
+def _real_sector_universe() -> list[dict]:
+    """按真实分布构造 496 条: 72 涨 / 423 跌 / 1 平。"""
+    rows = [{"change_pct": 1.0} for _ in range(_REAL_SECTOR_GAIN)]
+    rows += [{"change_pct": -1.0} for _ in range(423)]
+    rows += [{"change_pct": 0.0}]
+    return rows
+
+
+class TestSectorRotationFullUniverse:
+    def test_full_universe_gives_real_score(self):
+        """全量 496 条 → total_sectors=496、gain_count=72、score≈14.5, 不再是 100。"""
+        result = _calc_sector_rotation_score(_real_sector_universe())
+
+        assert result["total_sectors"] == _REAL_SECTOR_TOTAL
+        assert result["gain_count"] == _REAL_SECTOR_GAIN
+        assert result["ratio" if "ratio" in result else "score"] is not None
+        assert result["score"] == pytest.approx(72 / 496 * 100, abs=0.1)
+        assert result["score"] != 100
+        assert result["available"] is True
+
+    def test_truncated_top50_does_not_score_100_when_breadth_contradicts(self):
+        """**反向证明**: 只拿到涨幅榜前 50(全上涨)+ 个股广度 23.9% → 不得给 100 分。
+
+        这是修复的核心: 旧实现永远只看到这 50 条, score 恒 100。
+        """
+        top50 = [{"change_pct": 5.82 - i * 0.11} for i in range(50)]
+        result = _calc_sector_rotation_score(top50, sentiment_ratio=0.239)
+
+        assert result["score"] != 100
+        assert result["available"] is False
+        assert "背离" in result.get("note", "")
+        assert result["score"] == 50  # 宁可中性也不给假的满分
+
+    def test_guard_not_triggered_when_breadth_is_also_broad(self):
+        """个股也普涨时不误伤: 全涨板块 + 个股广度 85% → 仍按 100 分算。"""
+        all_up = [{"change_pct": 1.0} for _ in range(10)]
+        result = _calc_sector_rotation_score(all_up, sentiment_ratio=0.85)
+
+        assert result["available"] is True
+        assert result["score"] == 100

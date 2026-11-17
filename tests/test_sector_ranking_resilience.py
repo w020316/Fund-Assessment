@@ -139,3 +139,120 @@ class TestSectorRankingFallbackChain:
 
         assert len(out) == 1 and out[0]["name"] == "银行"
         assert ds2.get_last_source("sector_ranking") == "eastmoney"
+
+
+# ===== P1-2(2026-11-17):板块评分必须用全量分页, 单页失败即 fail-closed =====
+# 旧 `get_sector_ranking` 是 pz=50 + fid=f3 降序 = "涨幅榜前 50", 上涨占比恒 1.0
+# → 板块轮动分恒 100。全量取数走 5 页(pz=100, total 496)。
+
+class TestSectorRankingFullPages:
+    @staticmethod
+    def _page(n: int, total: int, positive: int):
+        """构造一页: 前 positive 条为正, 其余为负。"""
+        rows = []
+        for i in range(n):
+            rows.append({"f12": f"BK{i}", "f14": f"板块{i}", "f3": 1.0 if i < positive else -1.0,
+                         "f2": 1000.0, "f62": 1e8 if i < positive else -1e8, "f184": 0.5,
+                         "f66": 0.0, "f69": 0.0, "f72": 0.0, "f75": 0.0,
+                         "f78": 0.0, "f81": 0.0, "f84": 0.0, "f87": 0.0})
+        return {"data": {"total": total, "diff": rows}}
+
+    def test_pages_all_fetched(self, monkeypatch):
+        """496 条 → 5 页全取, total_sectors 才是真实的 496(72 涨 / 423 跌 / 1 平)。"""
+        changes = [1.0] * 72 + [-1.0] * 423 + [0.0]     # 按真实分布, 共 496
+        pages = [changes[i:i + 100] for i in range(0, len(changes), 100)]
+
+        monkeypatch.setattr(ds2, "em_get", lambda url, params=None, **kw: _RowsResp(
+            pages[int((params or {}).get("pn", 1)) - 1], 496))
+        monkeypatch.setattr(ds2, "_cache_get", lambda key: None)
+        monkeypatch.setattr(ds2, "_cache_set", lambda key, val, ttl: None)
+
+        rows = ds2.get_sector_ranking_full()
+
+        assert len(rows) == 496
+        assert sum(1 for r in rows if r["change_pct"] > 0) == 72
+        assert sum(1 for r in rows if r["change_pct"] < 0) == 423
+        assert sum(1 for r in rows if r["change_pct"] == 0) == 1
+
+    def test_page_failure_fails_closed(self, monkeypatch):
+        """第 3 页抛异常 → 返回 [](评分侧据此 available=False / score=50)。
+
+        绝不能用前两页(全是上涨板块)算比例 —— 那正是恒 100 的成因。
+        """
+        sizes = [100, 100, 100, 100, 96]
+
+        def fake_em_get(url, params=None, **kwargs):
+            pn = int((params or {}).get("pn", 1))
+            if pn == 3:
+                raise RuntimeError("Remote end closed connection")
+            return _PageResp(sizes[pn - 1], 496, 50)
+
+        monkeypatch.setattr(ds2, "em_get", fake_em_get)
+        monkeypatch.setattr(ds2, "_cache_get", lambda key: None)
+        monkeypatch.setattr(ds2, "_cache_set", lambda key, val, ttl: None)
+
+        assert ds2.get_sector_ranking_full() == []
+
+    def test_short_page_list_fails_closed(self, monkeypatch):
+        """上游 total 说 496 但只给了 2 页就空 → 视为部分数据, 同样 fail-closed。"""
+        def fake_em_get(url, params=None, **kwargs):
+            pn = int((params or {}).get("pn", 1))
+            if pn > 2:
+                return _PageResp(0, 496, 0, empty=True)
+            return _PageResp(100, 496, 50)
+
+        monkeypatch.setattr(ds2, "em_get", fake_em_get)
+        monkeypatch.setattr(ds2, "_cache_get", lambda key: None)
+        monkeypatch.setattr(ds2, "_cache_set", lambda key, val, ttl: None)
+
+        assert ds2.get_sector_ranking_full() == []
+
+    def test_display_path_unchanged(self, monkeypatch):
+        """回归保护: 展示路径 `get_sector_ranking` 仍是 top-N(不因本次改动变大)。"""
+        rows = [{"f12": f"BK{i}", "f14": f"板块{i}", "f3": 1.0, "f2": 1000.0, "f62": 1e8,
+                 "f184": 0.5, "f66": 0, "f69": 0, "f72": 0, "f75": 0,
+                 "f78": 0, "f81": 0, "f84": 0, "f87": 0} for i in range(50)]
+        monkeypatch.setattr(ds2, "em_get", lambda url, params=None, **kw: _PageResp(50, 496, 50, rows=rows))
+        ds2._cache.clear()
+
+        out = ds2.get_sector_ranking()
+
+        assert len(out) == 50, "展示路径仍是 top-50, 不应变成 496 行"
+
+
+class _PageResp:
+    """极简 clist 分页响应。"""
+
+    def __init__(self, size: int, total: int, positive: int, empty: bool = False, rows=None):
+        if rows is not None:
+            self._payload = {"data": {"total": total, "diff": rows}}
+        elif empty:
+            self._payload = {"data": {"total": total, "diff": []}}
+        else:
+            self._payload = {"data": {"total": total, "diff": [
+                {"f12": f"BK{i}", "f14": f"板块{i}",
+                 "f3": 1.0 if i < positive else -1.0, "f2": 1000.0,
+                 "f62": 1e8 if i < positive else -1e8, "f184": 0.5,
+                 "f66": 0, "f69": 0, "f72": 0, "f75": 0, "f78": 0, "f81": 0,
+                 "f84": 0, "f87": 0}
+                for i in range(size)
+            ]}}
+
+    def json(self):
+        return self._payload
+
+
+class _RowsResp:
+    """按 change_pct 列表构造一页 clist 响应。"""
+
+    def __init__(self, changes: list[float], total: int):
+        self._payload = {"data": {"total": total, "diff": [
+            {"f12": f"BK{i}", "f14": f"板块{i}", "f3": chg, "f2": 1000.0,
+             "f62": 1e8 if chg > 0 else (-1e8 if chg < 0 else 0.0), "f184": 0.5,
+             "f66": 0, "f69": 0, "f72": 0, "f75": 0, "f78": 0, "f81": 0,
+             "f84": 0, "f87": 0}
+            for i, chg in enumerate(changes)
+        ]}}
+
+    def json(self):
+        return self._payload

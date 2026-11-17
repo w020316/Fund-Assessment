@@ -1235,6 +1235,115 @@ def get_sector_ranking() -> list[dict]:
         return _fetch_sector_ranking_uncached()
 
 
+# P1-2(2026-11-17):板块轮动分**结构性恒 100** 的根因 ——
+# `get_sector_ranking` 用 `pz=50` + `fid=f3` 降序, 拿到的其实是"**涨幅榜前 50**":
+# 线上实测 50 条全部为正(+5.82% … +0.30%), 而 `fs=m:90+t:2` 实际有 **496** 个板块
+# (单页上限 100 → 5 页), 被砍掉的 446 个里全是跌的。
+# 于是 gain_count/total 恒 = 50/50 → sector_rotation 恒 100 分(权重 0.25), 系统性抬高温度。
+# 这里新增**全量**取数专供评分; 展示路径(get_sector_ranking)保持 top-N 语义不变。
+_SECTOR_PAGE_SIZE = 100        # 实测 clist 单页上限
+_SECTOR_MAX_PAGES = 12         # 496 → 5 页; 上限防上游 total 异常时失控
+
+_SECTOR_FIELDS = "f2,f3,f4,f12,f14,f62,f184,f66,f69,f72,f75,f78,f81,f84,f87"
+
+
+def _map_sector_row(item: dict) -> dict:
+    return {
+        "code": _safe_str(item.get("f12", "")),
+        "name": _safe_str(item.get("f14", "")),
+        "change_pct": _safe_float(item.get("f3", 0)),
+        "price": _safe_float(item.get("f2", 0)),
+        "main_net_inflow": _safe_float(item.get("f62", 0)),
+        "main_inflow_pct": _safe_float(item.get("f184", 0)),
+        "super_large_net": _safe_float(item.get("f66", 0)),
+        "super_large_pct": _safe_float(item.get("f69", 0)),
+        "large_net": _safe_float(item.get("f72", 0)),
+        "large_pct": _safe_float(item.get("f75", 0)),
+        "medium_net": _safe_float(item.get("f78", 0)),
+        "medium_pct": _safe_float(item.get("f81", 0)),
+        "small_net": _safe_float(item.get("f84", 0)),
+        "small_pct": _safe_float(item.get("f87", 0)),
+    }
+
+
+def get_sector_ranking_full() -> list[dict]:
+    """**全量**行业板块(分页), 专供评分(分母必须是全量)。
+
+    任一页失败 → 返回 `[]`(fail-closed): 绝不拿部分页算"上涨板块占比"。
+    与 `get_sector_ranking` 共用 A-15 的进程内单飞锁, 但用独立缓存键 + 30s TTL。
+    """
+    cache_key = "sector_ranking_full"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+    with _SECTOR_RANKING_LOCK:
+        cached = _cache_get(cache_key)   # 双检
+        if cached is not None:
+            return cached
+        rows = _fetch_sector_ranking_pages()
+        # 60s(比展示路径的 30s 长一倍): 全量 5 页冷路径实测 3.4~9.0s(上游抖动),
+        # 而板块涨跌是慢变量, 60s 内变化可忽略; 30s 会让约一半请求都走冷路径。
+        _cache_set(cache_key, rows, 60)
+        return rows
+
+
+_SECTOR_URL = "https://push2.eastmoney.com/api/qt/clist/get"
+
+
+def _fetch_sector_page(page: int, attempts: int = 2) -> tuple[list[dict], int] | None:
+    """取一页;返回 (rows, total)。重试 1 次仍失败/空页 → None(调用方据此 fail-closed)。
+
+    实测该接口偶发 Read timeout, 一次抖动就打掉整个评分太脆;重试仍失败才放弃。
+    """
+    base = {
+        "pz": _SECTOR_PAGE_SIZE, "po": 1, "np": 1, "fltt": 2, "invt": 2,
+        "fid": "f3", "fs": "m:90+t:2", "fields": _SECTOR_FIELDS,
+    }
+    for attempt in range(max(1, attempts)):
+        try:
+            resp = em_get(_SECTOR_URL, params=dict(base, pn=page))
+            data = (resp.json() or {}).get("data") or {}
+            items = data.get("diff") or []
+            if isinstance(items, list) and items:
+                total = int(_safe_float(data.get("total") or 0))
+                return [_map_sector_row(item) for item in items if isinstance(item, dict)], total
+            logger.warning(f"sector_ranking_full 第 {page} 页为空(第 {attempt + 1} 次)")
+        except Exception as e:
+            logger.warning(f"sector_ranking_full 第 {page} 页失败(第 {attempt + 1} 次): {e}")
+        if attempt + 1 < attempts:
+            time.sleep(0.3)
+    logger.warning(f"sector_ranking_full 第 {page} 页重试后仍失败, fail-closed")
+    return None
+
+
+def _fetch_sector_ranking_pages() -> list[dict]:
+    """先取第 1 页拿 total, 其余页**并发**取 —— 实测单页 ~0.6~0.9s, 5 页串行 3~4.5s,
+    并发后 ~1s 内。任一页失败或条数明显不足 → 返回 [](fail-closed)。"""
+    first = _fetch_sector_page(1)
+    if first is None:
+        return []
+    rows, total = first
+    if total <= 0:
+        logger.warning("sector_ranking_full 上游 total=0, fail-closed")
+        return []
+    pages = min(math.ceil(total / _SECTOR_PAGE_SIZE), _SECTOR_MAX_PAGES)
+    if pages > 1:
+        with ThreadPoolExecutor(max_workers=min(4, pages - 1)) as pool:
+            futures = {pool.submit(_fetch_sector_page, p): p for p in range(2, pages + 1)}
+            for future, page in futures.items():
+                got = future.result()
+                if got is None:
+                    logger.warning(f"sector_ranking_full 缺第 {page}/{pages} 页, fail-closed")
+                    return []
+                rows.extend(got[0])
+    if len(rows) < min(total, _SECTOR_PAGE_SIZE * _SECTOR_MAX_PAGES) * 0.9:
+        logger.warning(f"sector_ranking_full 只拿到 {len(rows)}/{total} 条, fail-closed")
+        return []
+    data_health.record_success("sector_ranking_full", len(rows))
+    _mark_source("sector_ranking", "eastmoney")
+    return rows
+
+
 def _fetch_sector_ranking_uncached() -> list[dict]:
     """真正的取数链(东财行业 → 东财概念 → 新浪板块资金 → 新浪旧接口)。"""
     # 优先使用行业板块(m:90+t:2),而非概念板块(m:90+t:3)

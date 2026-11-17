@@ -32,6 +32,8 @@ def _clear_cache():
 
 def _mock_sources(monkeypatch, *, index, sectors, northbound, sentiment):
     monkeypatch.setattr("src.analysis.market_assessment.ds2.get_index_realtime", lambda: index)
+    # P1-2: 温度计评分改用全量板块取数, patch 目标随之更新(断言未改)
+    monkeypatch.setattr("src.analysis.market_assessment.ds2.get_sector_ranking_full", lambda: sectors)
     monkeypatch.setattr("src.analysis.market_assessment.ds2.get_sector_ranking", lambda: sectors)
     monkeypatch.setattr(
         "src.analysis.market_assessment.ds2.get_northbound_flow_realtime", lambda: northbound

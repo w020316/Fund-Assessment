@@ -66,10 +66,21 @@ def _calc_index_trend_score(index_data: list[dict]) -> dict[str, Any]:
     }
 
 
-def _calc_sector_rotation_score(sector_ranking: list[dict]) -> dict[str, Any]:
-    """板块轮动评分(25%)
+# P1-2:自洽守卫阈值。板块上涨占比 ≥95% 而个股上涨占比 ≤40% 是不可能的组合
+# (板块是成分股的聚合, 不可能"板块几乎全涨、个股普遍下跌")。
+_SECTOR_RATIO_SUSPICIOUS = 0.95
+_BREADTH_CONTRADICTION_MAX = 0.40
 
-    基于上涨板块数 / 总板块数
+
+def _calc_sector_rotation_score(
+    sector_ranking: list[dict], sentiment_ratio: float | None = None,
+) -> dict[str, Any]:
+    """板块轮动评分(25%): 上涨板块数 / **全量**板块数。
+
+    P1-2(2026-11-17):此前 `get_sector_ranking` 只返回 top-50(按涨幅降序),
+    gain/total 恒 = 50/50 → score 恒 100。现在传进来的必须是**全量**(496 个)。
+    另加自洽守卫: 板块上涨占比与个股上涨占比是相关量, "板块几乎全涨 + 个股普遍下跌"
+    是不可能组合(说明分母还是被截断了), 此时宁可给 50 分也不给假的 100 分。
     """
     if not sector_ranking:
         return {"score": 50, "note": "板块数据不可用", "available": False}
@@ -80,6 +91,22 @@ def _calc_sector_rotation_score(sector_ranking: list[dict]) -> dict[str, Any]:
 
     # 上涨占比映射: 0% → 0, 50% → 50, 100% → 100
     ratio = gain_count / total if total > 0 else 0.5
+
+    if ratio >= _SECTOR_RATIO_SUSPICIOUS and sentiment_ratio is not None and sentiment_ratio <= _BREADTH_CONTRADICTION_MAX:
+        logger.warning(
+            f"板块轮动口径可疑: 板块上涨占比={ratio:.3f}({gain_count}/{total}) "
+            f"而个股上涨占比={sentiment_ratio:.3f} —— 两者背离, 按数据不可用处理"
+        )
+        return {
+            "score": 50,
+            "total_sectors": total,
+            "gain_count": gain_count,
+            "fall_count": fall_count,
+            "note": "板块上涨占比与个股广度严重背离(疑似分母被截断), 按不可用处理",
+            "available": False,
+            "weight": 0.25,
+        }
+
     score = ratio * 100
 
     # 板块涨跌强度(平均涨跌幅)
@@ -273,7 +300,9 @@ async def get_market_thermometer() -> dict[str, Any]:
     # 并行抓取4源数据
     funcs = [
         ("index", ds2.get_index_realtime),
-        ("sectors", ds2.get_sector_ranking),
+        # 评分必须用**全量**板块(display 路径仍是 top-N):
+        # top-50 按涨幅降序 → 上涨占比恒 1.0 → 板块轮动分恒 100。
+        ("sectors", ds2.get_sector_ranking_full),
         ("northbound", ds2.get_northbound_flow_realtime),
         ("sentiment", ds2.get_market_sentiment),
     ]
@@ -285,9 +314,14 @@ async def get_market_thermometer() -> dict[str, Any]:
     sentiment = fetched.get("sentiment") or {}
 
     index_score = _calc_index_trend_score(index_data)
-    sector_score = _calc_sector_rotation_score(sector_ranking)
-    capital_score = _calc_capital_flow_score(northbound, sector_ranking)
+    # 个股广度用于"板块 vs 个股"自洽守卫(缺失时传 None, 守卫不触发)
     sentiment_score = _calc_sentiment_score(sentiment)
+    breadth_ratio = (
+        sentiment_score.get("ratio")
+        if sentiment_score.get("available") is True else None
+    )
+    sector_score = _calc_sector_rotation_score(sector_ranking, breadth_ratio)
+    capital_score = _calc_capital_flow_score(northbound, sector_ranking)
 
     thermometer = _calc_thermometer(index_score, sector_score, capital_score, sentiment_score)
     thermometer["update_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
