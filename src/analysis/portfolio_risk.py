@@ -173,6 +173,12 @@ def _safe_shares(val: Any) -> float:
 # ===== 分散度诊断(2026-11-12,范围裁决后量化向) =====
 
 MIN_CORR_OVERLAP_RETURNS: int = 21  # 相关性最少重叠日收益数(约一个月),不足按缺失
+# D-02(2026-11-17):零方差判定的**下限**。旧实现写成 `np.std(r, ddof=1) > MIN_CORR_STD`,
+# 而"常数序列"在浮点下并不产生精确 0:实测 [1.01**i] 的日收益 std = 8.6e-17,
+# 于是货基/理财这类净值只精确到 4 位小数的标的, 会因为四舍五入残留噪声被判成
+# "有方差", 进而与其它标的算出**纯噪声的相关系数**并混进 avg_correlation 结论。
+# 1e-12 远低于任何真实日收益波动(货基日收益量级 1e-4~1e-5), 只会吃掉浮点残差。
+MIN_CORR_STD: float = 1e-12
 
 
 def compute_correlation(series_map: dict[str, list[tuple[str, float]]]) -> dict[str, Any]:
@@ -209,7 +215,8 @@ def compute_correlation(series_map: dict[str, list[tuple[str, float]]]) -> dict[
     for code in codes:
         arr = np.array([lookup[code][d] for d in dates_sorted], dtype=np.float64)
         r = np.diff(arr) / arr[:-1]
-        if r.size >= MIN_CORR_OVERLAP_RETURNS and np.std(r, ddof=1) > 0:
+        # D-02: 用带下限的判定, 把"浮点残差"当成零方差剔除
+        if r.size >= MIN_CORR_OVERLAP_RETURNS and np.std(r, ddof=1) > MIN_CORR_STD:
             rets[code] = r
     out["overlap_points"] = int(next(iter(rets.values())).size) if rets else 0
     pair_vals: list[float] = []

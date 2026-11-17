@@ -12,6 +12,7 @@ import math
 import os
 from unittest.mock import patch
 
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
@@ -349,17 +350,69 @@ class TestComputeCorrelation:
         assert out["valid_pairs"] == 0
 
     def test_zero_variance_fund_excluded(self):
-        """零方差(如货基)基金不参与相关对,但不影响其它对。"""
+        """零方差(如货基)基金不参与相关对, 也不影响其它两只之间的对。
+
+        D-02(2026-11-17) 台账: 旧 fixture 用 `1.01**i` / `0.99**i` 当"零方差",
+        但它们其实是**常数收益 + 浮点残差**(实测 std=8.6e-17), 旧断言
+        `matrix[A][C] is not None` 正是靠这 1e-17 噪声才通过 —— 结论对、机制错。
+        现在 A 是"精确常数"(真零方差), TINY 是常数收益(浮点残差), N1/N2 才是真方差。
+        """
         dates = [f"d{i:02d}" for i in range(25)]
-        a = _seq([(dates[i], 1.0 * (1.01 ** i)) for i in range(25)])
-        flat = _seq([(dates[i], 1.0) for i in range(25)])
-        c = _seq([(dates[i], 1.0 * (0.99 ** i)) for i in range(25)])
-        out = prisk.compute_correlation({"A": a, "FLAT": flat, "C": c})
-        iflat = out["codes"].index("FLAT")
-        ia, ic = out["codes"].index("A"), out["codes"].index("C")
-        assert out["matrix"][iflat][ia] is None
-        assert out["matrix"][ia][ic] is not None
+        flat = _seq([(dates[i], 1.0) for i in range(25)])            # 精确常数
+        tiny = _seq([(dates[i], 1.0 * (1.01 ** i)) for i in range(25)])  # 常数收益
+        rets = _pattern_returns(24)
+        n1 = _seq([(dates[i], v) for i, v in enumerate(_navs_from_returns(rets))])
+        n2 = _seq([(dates[i], v) for i, v in enumerate(_navs_from_returns(rets, start=2.0))])
+
+        out = prisk.compute_correlation({"FLAT": flat, "TINY": tiny, "N1": n1, "N2": n2})
+        i_flat, i_tiny = out["codes"].index("FLAT"), out["codes"].index("TINY")
+        i_n1, i_n2 = out["codes"].index("N1"), out["codes"].index("N2")
+
+        assert out["matrix"][i_flat][i_tiny] is None
+        assert out["matrix"][i_flat][i_n1] is None
+        # 台账: 原断言是 `is not None`(靠 1e-17 噪声通过) → 现为 `is None`
+        assert out["matrix"][i_tiny][i_n1] is None
+        assert out["matrix"][i_tiny][i_n2] is None
+        # 正向保护: 两只真有方差的仍要算出来, 且只此一对
+        assert out["matrix"][i_n1][i_n2] is not None
         assert out["valid_pairs"] == 1
+
+    def test_tiny_variance_is_treated_as_zero(self):
+        """D-02 核心证明: 1e-17 级"常数收益 + 浮点残差"必须按零方差剔除。
+
+        真实货基净值只有 4 位小数, `1.01**i` 这种序列的日收益 std 实测 8.6e-17
+        —— 旧判据 `std > 0` 会认为它有方差, 进而与另一个同样"常数收益"的标的
+        算出纯噪声相关系数, 并混进 avg_correlation(直接进"平均相关"结论)。
+        """
+        dates = [f"d{i:02d}" for i in range(25)]
+        tiny_a = _seq([(dates[i], 1.0 * (1.01 ** i)) for i in range(25)])
+        tiny_b = _seq([(dates[i], 1.0 * (1.02 ** i)) for i in range(25)])
+
+        # 先证明序列本身"看起来"有方差(浮点残差)
+        arr = np.array([v for _, v in tiny_a], dtype=np.float64)
+        r = np.diff(arr) / arr[:-1]
+        assert 0 < float(np.std(r, ddof=1)) < prisk.MIN_CORR_STD, "构造的噪声量级不符合预期"
+
+        out = prisk.compute_correlation({"A": tiny_a, "B": tiny_b})
+
+        ia, ib = out["codes"].index("A"), out["codes"].index("B")
+        assert out["matrix"][ia][ib] is None, "浮点残差被当成了真实方差 → 会输出噪声相关"
+        assert out["valid_pairs"] == 0
+        assert out["avg_correlation"] is None
+
+    def test_real_variance_still_counts(self):
+        """反向保护: 真有方差的序列不能被过度过滤(阈值不能定得过高)。"""
+        dates = [f"d{i:02d}" for i in range(25)]
+        rets = _pattern_returns(24)
+        a = _seq([(dates[i], v) for i, v in enumerate(_navs_from_returns(rets))])
+        b = _seq([(dates[i], v) for i, v in enumerate(_navs_from_returns(rets, start=1.5))])
+
+        out = prisk.compute_correlation({"A": a, "B": b})
+
+        ia, ib = out["codes"].index("A"), out["codes"].index("B")
+        assert out["matrix"][ia][ib] == pytest.approx(1.0, abs=1e-6)
+        assert out["valid_pairs"] == 1
+        assert out["avg_correlation"] == pytest.approx(1.0, abs=1e-6)
 
     def test_single_fund_and_empty(self):
         one = _seq([(f"d{i}", 1.0 + 0.01 * i) for i in range(30)])
