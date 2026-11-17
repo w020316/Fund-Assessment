@@ -3372,7 +3372,7 @@ function renderEmpty(container, msg='暂无数据', hint='') {
   if (!container) return;
   container.innerHTML = `<div style="padding:32px 16px;text-align:center;color:var(--text-muted);">
     <div style="font-size:28px;margin-bottom:8px;opacity:0.4;">○</div>
-    <div style="font-size:13px;margin-bottom:4px;">${msg}</div>
+    <div style="font-size:13px;margin-bottom:4px;">${escapeHtml(msg)}</div>
     ${hint ? `<div style="font-size:11px;color:var(--text-tertiary);">${hint}</div>` : ''}
   </div>`;
 }
@@ -3393,7 +3393,7 @@ function renderStatus(container, state='empty', msg='暂无数据', hint='') {
   const cls = state === 'error' ? 'hud-status-error' : 'hud-status-empty';
   container.innerHTML = `<div class="hud-status ${cls}">
     <div class="hud-status-icon">${icon}</div>
-    <div class="hud-status-msg">${msg}</div>
+    <div class="hud-status-msg">${escapeHtml(msg)}</div>
     ${hint ? `<div class="hud-status-hint">${hint}</div>` : ''}
   </div>`;
 }
@@ -3582,7 +3582,7 @@ async function loadMarketAssessment() {
     <div class="card" style="padding:12px;font-size:12px;color:var(--text-secondary);">
       <div style="margin-bottom:6px;"><b>综合研判：</b>${escapeHtml(a.assessment || '数据缺失')}</div>
       <div><b>板块信号：</b>${escapeHtml(a.sector_signal || '—')} · <b>资金信号：</b>${escapeHtml(a.capital_signal || '—')}</div>
-      ${note}
+      ${escapeHtml(note)}
       <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">更新：${escapeHtml(a.update_time || '—')} · 涨${s.rise_count != null ? s.rise_count : '—'} / 跌${s.fall_count != null ? s.fall_count : '—'} / 平${s.flat_count != null ? s.flat_count : '—'}</div>
     </div>`;
 }
@@ -4153,7 +4153,7 @@ async function loadIndexData() {
     const color = changeColor(idx.change_pct);
     const sign = changeSign(idx.change_pct);
     return `<div class="index-item">
-      <span class="index-name">${idx.name}</span>
+      <span class="index-name">${escapeHtml(idx.name)}</span>
       <span class="index-price" style="color:${color}">${fmtNum(idx.price)}</span>
       <span class="index-change" style="color:${color}">${sign}${fmtNum(idx.change)} ${sign}${fmtNum(idx.change_pct)}%</span>
     </div>`;
@@ -4167,7 +4167,7 @@ async function loadIndexData() {
     return `<div class="card">
       <div class="flex-between mb-12">
         <div>
-          <div style="font-size:12px;color:var(--text-muted);">${idx.name}</div>
+          <div style="font-size:12px;color:var(--text-muted);">${escapeHtml(idx.name)}</div>
           <div class="qf-count" data-countup="${idx.price}" style="font-size:28px;font-weight:700;color:${color};">—</div>
         </div>
         <svg id="${svgId}" class="sparkline" width="100" height="40" viewBox="0 0 100 40"></svg>
@@ -6122,7 +6122,7 @@ async function toggleFundChart(fundCode) {
       chart.timeScale().fitContent();
       _fundCharts[fundCode] = chart;
     } catch (e) {
-      container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px;">加载失败: ${e.message || '未知错误'}</div>`;
+      container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px;">加载失败: ${escapeHtml(e.message || '未知错误')}</div>`;
     }
   } else {
     row.style.display = 'none';
@@ -6688,7 +6688,7 @@ async function viewHoldings(fundCode, fundName) {
     return `<tr>
       <td>${i + 1}</td>
       <td>${code}</td>
-      <td>${name}</td>
+      <td>${escapeHtml(name)}</td>
       <td>${weight.toFixed(2)}%</td>
       <td style="color:${c};">${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%</td>
     </tr>`;
@@ -7006,7 +7006,7 @@ async function loadFundScripts(advices, market) {
     body.innerHTML = scripts.map(s => {
       return `<div style="padding:8px 0;border-bottom:1px solid var(--border);">
         <div style="display:flex;justify-content:space-between;align-items:center;">
-          <strong style="color:var(--accent-cyan);">${s.title || '—'}</strong>
+          <strong style="color:var(--accent-cyan);">${escapeHtml(s.title || '—')}</strong>
           <span style="font-size:11px;color:var(--text-muted);">${s.dimension || ''} · ${s.scene || ''}</span>
         </div>
         <div style="font-size:13px;color:var(--text-primary);margin-top:4px;line-height:1.6;">${s.content || '—'}</div>
@@ -7195,8 +7195,8 @@ function customConfirm(title, message) {
     const modal = document.createElement('div');
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:var(--qf-z-modal);display:flex;align-items:center;justify-content:center;';
     modal.innerHTML = `<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:24px;min-width:320px;max-width:90vw;box-shadow:var(--shadow);">
-      <div style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">${title}</div>
-      <div style="font-size:13px;color:var(--text-secondary);margin-bottom:20px;">${message}</div>
+      <div style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">${escapeHtml(title)}</div>
+      <div style="font-size:13px;color:var(--text-secondary);margin-bottom:20px;">${escapeHtml(message)}</div>
       <div style="display:flex;gap:8px;justify-content:flex-end;">
         <button id="_cancelBtn" class="btn btn-sm" style="background:transparent;border:1px solid var(--border);color:var(--text-secondary);padding:8px 16px;border-radius:6px;cursor:pointer;">取消</button>
         <button id="_okBtn" class="btn btn-sm" style="background:var(--color-up);color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:500;">确认</button>
@@ -7442,7 +7442,7 @@ async function loadUsHot() {
     const sign = changeSign(s.change_pct);
     return `<tr>
       <td style="font-family:monospace;">${s.code}</td>
-      <td>${s.name || '-'}</td>
+      <td>${escapeHtml(s.name || '-')}</td>
       <td style="font-weight:600;">${fmtNum(s.price)}</td>
       <td style="color:${color};font-weight:500;">${sign}${fmtNum(s.change_pct)}%</td>
       <td style="color:var(--text-muted);">${s.currency || 'USD'}</td>
@@ -7463,7 +7463,7 @@ async function loadHkHot() {
     const sign = changeSign(s.change_pct);
     return `<tr>
       <td style="font-family:monospace;">${s.code}</td>
-      <td>${s.name || '-'}</td>
+      <td>${escapeHtml(s.name || '-')}</td>
       <td style="font-weight:600;">${fmtNum(s.price)}</td>
       <td style="color:${color};font-weight:500;">${sign}${fmtNum(s.change_pct)}%</td>
       <td style="color:var(--text-muted);">${s.currency || 'HKD'}</td>
@@ -7500,7 +7500,7 @@ async function queryGlobalStock() {
     const sign = changeSign(s.change_pct);
     return `<tr>
       <td style="font-family:monospace;">${s.code}</td>
-      <td>${s.name || '-'}</td>
+      <td>${escapeHtml(s.name || '-')}</td>
       <td style="font-weight:600;">${fmtNum(s.price)}</td>
       <td style="color:${color};">${sign}${fmtNum(s.change)}</td>
       <td style="color:${color};font-weight:500;">${sign}${fmtNum(s.change_pct)}%</td>
@@ -8176,10 +8176,10 @@ async function loadRiskStatus() {
   container.innerHTML = risks.map(r => {
     const levelColor = r.level === '低' ? 'var(--color-down)' : r.level === '中' ? 'var(--color-warning)' : 'var(--color-up)';
     return `<div class="card" style="text-align:center;">
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">${r.name}</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">${escapeHtml(r.name)}</div>
       <div style="font-size:20px;font-weight:700;color:${levelColor};">${r.level}</div>
       <div style="font-size:13px;margin-top:4px;">${r.value}</div>
-      <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">${r.desc}</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">${escapeHtml(r.desc)}</div>
     </div>`;
   }).join('');
 }
@@ -8340,7 +8340,7 @@ async function loadAlerts() {
     return `<div class="alert-item alert-${a.type}">
       <span class="alert-icon">${a.icon}</span>
       <div style="flex:1;">
-        <div style="font-size:13px;">${a.msg}</div>
+        <div style="font-size:13px;">${escapeHtml(a.msg)}</div>
         <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${a.time}</div>
       </div>
     </div>`;
@@ -8551,8 +8551,8 @@ async function loadHotSignals() {
     const strengthColor = s.strength >= 80 ? 'var(--color-up)' : s.strength >= 60 ? 'var(--color-warning)' : 'var(--color-flat)';
     return `<tr>
       <td style="color:var(--accent-cyan);">${s.code}</td>
-      <td>${s.name}</td>
-      <td><span class="signal signal-bullish">${s.signal}</span></td>
+      <td>${escapeHtml(s.name)}</td>
+      <td><span class="signal signal-bullish">${escapeHtml(s.signal)}</span></td>
       <td>
         <div style="display:flex;align-items:center;gap:8px;">
           <div class="progress-bar" style="flex:1;">

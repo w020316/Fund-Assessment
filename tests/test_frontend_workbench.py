@@ -708,3 +708,74 @@ def test_health_dot_not_green_when_thermo_unavailable():
     body = _function_body(_js(), "async function load(force, statusIn) {")
 
     assert "thermo.score_available !== false" in body, "四维全缺时健康点仍是绿的"
+
+
+# ===== XSS(2026-11-17): 上游文本 → innerHTML 的机制级审计 =====
+#
+# 为什么不用 `assert "escapeHtml(msg)" in text` 这种写法：
+# 那种断言锁的是"某段字面量还在文件里"，抓不到新增的漏网（本仓库第五轮已因此漏过）。
+# 这里改为**按上下文重扫描**：先定位所有 innerHTML / insertAdjacentHTML 的语句范围
+# （命中行 -2 ~ +22 行），取出该范围内所有 `${...}`，再断言「最末属性名像上游文本」
+# 的插值**全部**被转义包装。新增一处裸插值这条就会红。
+#
+# 两道显式豁免（都写明依据，不做"全放过"）：
+#   1) signalLabel() / decisionLabel() —— 定义处即为 `return escapeHtml(...)`（见 index.html:3195），
+#      调用点再包一层会双重转义；
+#   2) 纯字面量三元 —— 如 `${type === 'number' ? 'number' : 'text'}`，两支都是代码内字面量。
+_INDEX_RISKY_FIELD = re.compile(
+    r"(?:^|\.)(name|reason|signal|message|msg|text|title|label|note|desc|remark"
+    r"|buyer|seller|industry|concept|fund_name|stock_name)$", re.I)
+_INDEX_SAFE_WRAPPERS = (
+    "esc(", "escapeHtml(", "_numOrDash(", "_pctOrDash(", "_ratioOrDash(", "_esc(",
+    "signalLabel(", "decisionLabel(",  # 定义处已 return escapeHtml(...)
+)
+_INDEX_TEMPLATE_EXPR = re.compile(r"\$\{([^{}]*)\}")
+
+
+def _is_literal_ternary(expr: str) -> bool:
+    """`a === 'x' ? 'y' : 'z'` —— 两支都是引号字面量、且不取任何对象属性。"""
+    return "'" in expr and "?" in expr and not re.search(r"[A-Za-z_$][\w$]*\s*\.", expr)
+
+
+def _inner_html_spans(lines: list[str]) -> set[int]:
+    """定位 innerHTML / insertAdjacentHTML 语句覆盖的行号集合。"""
+    span: set[int] = set()
+    for i, line in enumerate(lines):
+        if re.search(r"innerHTML\s*=|insertAdjacentHTML\(", line):
+            span.update(range(max(0, i - 2), min(len(lines), i + 22)))
+    return span
+
+
+def test_index_upstream_text_into_innerhtml_is_escaped():
+    """index.html + js/*.js：进入 innerHTML 的上游文本字段必须被转义包装。"""
+    files = [INDEX] + sorted((ROOT / "web/static/js").glob("*.js"))
+    offenders: list[str] = []
+    for path in files:
+        lines = path.read_text(encoding="utf-8").splitlines()
+        span = _inner_html_spans(lines)
+        for i in sorted(span):
+            for m in _INDEX_TEMPLATE_EXPR.finditer(lines[i]):
+                expr = m.group(1).strip()
+                if any(w in expr for w in _INDEX_SAFE_WRAPPERS):
+                    continue
+                if _is_literal_ternary(expr):
+                    continue
+                idents = re.findall(r"[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*", expr)
+                if not idents:
+                    continue
+                if _INDEX_RISKY_FIELD.match(idents[-1].split(".")[-1]):
+                    offenders.append(f"{path.name}:L{i + 1} ${{{expr[:60]}}}")
+    assert not offenders, (
+        "以下位置把上游文本直接插进 innerHTML（未转义，可被上游注入脚本）：\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_index_escape_helper_covers_html_metachars():
+    """escapeHtml 必须覆盖 & < > " ' 五个字符（少一个就留一条注入缝）。"""
+    html = INDEX.read_text(encoding="utf-8")
+    start = html.index("function escapeHtml(")
+    body = html[start:start + 600]
+    for pat, name in ((r"&/g", "&"), (r"</g", "<"), (r">/g", ">"),
+                      ('"/g', '"'), (r"'/g", "'")):
+        assert pat in body, f"escapeHtml 未处理 {name}"
