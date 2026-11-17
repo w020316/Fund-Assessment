@@ -90,19 +90,45 @@
     return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') + ':' + String(d.getSeconds()).padStart(2, '0');
   }
 
+  /* 单请求超时预算。
+     裸 fetch 没有超时:上游半挂起时 Promise 永远不 settle,load() 的 await 卡住,
+     state.loading 在 finally 里永不复位 → 刷新按钮永久置灰、60s 定时器每次静默 return
+     (用户看到的"工作台假死")。这里给每个请求一个 deadline,超时主动 abort,
+     让调用方按"该面板失败"独立降级,而不是整页互锁。
+     预算分级:复盘 /api/review/board 服务端要跑全市场聚合,给 30s;
+     其余行情类面板 15s 足够(正常 <2s)。 */
+  var FETCH_TIMEOUT_MS = 15000;
+  var FETCH_TIMEOUT_BOARD_MS = 30000;
+
+  function timeoutFor(url) {
+    var u = String(url || '');
+    return u.indexOf('/api/review/board') === 0 ? FETCH_TIMEOUT_BOARD_MS : FETCH_TIMEOUT_MS;
+  }
+
   async function fetchJSON(url) {
     var headers = {};
     try {
       var t = localStorage.getItem('admin_token');
       if (t) headers.Authorization = 'Bearer ' + t;
     } catch (e) { /* localStorage 禁用时按匿名请求 */ }
+    var ctrl = (typeof AbortController === 'function') ? new AbortController() : null;
+    var timedOut = false;
+    var timer = setTimeout(function () {
+      timedOut = true;
+      if (ctrl) { try { ctrl.abort(); } catch (e3) { /* 已结束, 忽略 */ } }
+    }, timeoutFor(url));
     try {
-      var resp = await fetch(url, { headers: headers });
+      var opts = { headers: headers };
+      if (ctrl) opts.signal = ctrl.signal;
+      var resp = await fetch(url, opts);
       var body = null;
       try { body = await resp.json(); } catch (e2) { body = null; }
       return { ok: resp.ok, status: resp.status, body: body };
     } catch (e) {
-      return { ok: false, status: 0, body: null, error: e };
+      /* 超时与网络错误统一成 status 0:调用方只需判 ok, 不用区分异常类型 */
+      return { ok: false, status: 0, body: null, error: e, timeout: timedOut };
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -832,6 +858,12 @@
   }
 
   /* ================= 加载编排 ================= */
+  /* 面板超时/失败时的占位响应。必须是独立对象(不能共享同一个可变引用,
+     否则某个面板若改写字段会污染其他面板的判定)。 */
+  function failedPanel(reason) {
+    return { ok: false, status: 0, body: null, error: reason || 'panel-failed', timeout: false };
+  }
+
   async function load(force, statusIn) {
     if (state.loading) return;
     state.loading = true;
@@ -839,7 +871,9 @@
     if (btn) { btn.disabled = true; btn.textContent = '刷新中'; }
     var suffix = force ? ('?_t=' + Date.now()) : '';
     try {
-      var results = await Promise.all([
+      /* allSettled 而不是 all:七个面板各自结算,任一超时/抛错只让该面板显示失败态,
+         绝不阻塞其余面板渲染, 也不会让 await 永不返回导致 loading 卡死。 */
+      var settled = await Promise.allSettled([
         fetchJSON('/api/market/index_realtime' + suffix),
         fetchJSON('/api/market/thermometer' + suffix),
         fetchJSON('/api/review/board' + suffix),
@@ -848,6 +882,10 @@
         fetchJSON('/api/portfolio/watchboard' + suffix),
         statusIn ? Promise.resolve(statusIn) : fetchStatus()
       ]);
+      var results = settled.map(function (r) {
+        if (r && r.status === 'fulfilled') return r.value || failedPanel('empty-panel');
+        return failedPanel((r && r.reason && r.reason.message) ? r.reason.message : 'panel-rejected');
+      });
       var idx = results[0], thermoR = results[1], boardR = results[2], sectorR = results[3], hotR = results[4], pfR = results[5];
       var indices = (idx.ok && idx.body && Array.isArray(idx.body.data)) ? idx.body.data : null;
       var thermo = (thermoR.ok && thermoR.body && thermoR.body.data) ? thermoR.body.data : null;
@@ -880,8 +918,19 @@
       loadDdx(suffix);
 
       state.loadedAt = Date.now();
+      /* 失败态文案:部分面板失败也照常渲染其余面板,并在页脚明确说明失败数量,
+         不让"少了一块数据"被读成"今天没有数据"。 */
+      var panelNames = ['指数', '温度', '复盘', '板块', '热门', '持仓'];
+      var failedNames = [];
+      results.slice(0, 6).forEach(function (r, i) {
+        if (!r || !r.ok) failedNames.push(panelNames[i]);
+      });
       var foot = $id('wbFootTime');
-      if (foot) foot.textContent = timeText();
+      if (foot) {
+        foot.textContent = failedNames.length
+          ? ('部分面板取数失败：' + failedNames.join('、') + '，其余数据已更新 · ' + timeText())
+          : timeText();
+      }
       var up = $id('wbUpstreamTime');
       if (up) up.textContent = clockText((thermo && thermo.update_time) || (board && board.update_time) || (sectorMeta && sectorMeta.timestamp));
       var live = $id('wbLiveDot');

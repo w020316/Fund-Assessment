@@ -237,3 +237,70 @@ def test_primary_pages_share_page_head_and_kpi():
     assert "fund-head" not in text
     stage6 = (ROOT / "web/static/css/stage6.css").read_text(encoding="utf-8")
     assert ".fund-head" not in stage6
+
+
+# ===== C-01(2026-11-17):工作台假死的机制契约 =====
+# 背景:fetchJSON 原先是裸 fetch,没有 AbortController / 超时;load() 用 Promise.all
+# 串起 7 个请求,任一上游永不 settle → await 不返回 → state.loading 卡在 true,
+# 刷新按钮永久置灰、60s 定时器每次静默 return(用户感知为"工作台假死")。
+# 这里不全文子串匹配,而是**先定位具体函数体**再做结构断言。
+
+
+def _function_body(js: str, signature: str) -> str:
+    """按花括号配平截取某个函数体(含签名),避免"全文命中"式的伪断言。"""
+    start = js.index(signature)
+    brace = js.index("{", start)
+    depth = 0
+    for i in range(brace, len(js)):
+        ch = js[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return js[start:i + 1]
+    raise AssertionError(f"{signature} 花括号未配平")
+
+
+def test_fetch_json_has_abort_and_timeout():
+    """fetchJSON 必须自带 deadline:AbortController + setTimeout + clearTimeout。"""
+    body = _function_body(_js(), "async function fetchJSON(url) {")
+    assert "AbortController" in body, "fetchJSON 缺少 AbortController, 上游挂起时无法中断"
+    assert "setTimeout(" in body, "fetchJSON 缺少超时计时器"
+    assert "abort()" in body, "计时器到点必须调用 abort()"
+    assert "clearTimeout(" in body, "请求结束后必须 clearTimeout, 否则计时器泄漏"
+
+
+def test_fetch_json_timeout_budgets_are_graded():
+    """超时预算分级:复盘面板 30s,其余 15s;两档都必须在 URL 分发函数里。"""
+    js = _js()
+    assert "var FETCH_TIMEOUT_MS = 15000;" in js
+    assert "var FETCH_TIMEOUT_BOARD_MS = 30000;" in js
+    body = _function_body(js, "function timeoutFor(url) {")
+    assert "/api/review/board" in body
+    assert "FETCH_TIMEOUT_BOARD_MS" in body
+    assert "FETCH_TIMEOUT_MS" in body
+
+
+def test_load_uses_allsettled_not_promise_all():
+    """load() 不能再让单个面板拖死全局:必须 allSettled, 且不得残留 Promise.all。"""
+    body = _function_body(_js(), "async function load(force, statusIn) {")
+    assert "Promise.allSettled(" in body, "load() 仍用 Promise.all, 单点挂起会阻塞全部面板"
+    assert "Promise.all(" not in body, "load() 里不得再出现裸 Promise.all"
+
+
+def test_load_resets_loading_and_button_after_failure():
+    """反向断言:失败/超时路径必须回到可用态 —— finally 里复位 loading 与按钮。"""
+    body = _function_body(_js(), "async function load(force, statusIn) {")
+    finally_at = body.index("} finally {")
+    tail = body[finally_at:]
+    assert "state.loading = false" in tail, "finally 未复位 state.loading → 刷新按钮永久置灰"
+    assert "btn.disabled = false" in tail, "finally 未恢复刷新按钮可点击"
+    assert "btn.textContent = '刷新'" in tail
+
+
+def test_load_reports_partial_failure_instead_of_silence():
+    """单面板失败要在页脚明说失败的是哪几块, 不能让"少一块"被读成"今天没数据"。"""
+    body = _function_body(_js(), "async function load(force, statusIn) {")
+    assert "failedNames" in body
+    assert "部分面板取数失败" in body
