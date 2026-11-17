@@ -146,8 +146,16 @@ class TestPortfolioRiskRoute:
 
     def test_all_positive_returns_sortino_none(self, client, tmp_path, monkeypatch):
         """F-1(2026-11-12): 无下跌日且均值为正 → _calc_sortino_ratio 返回 inf(既有
-        设计, 由 test_backtest_analyzers 锁定), API 边界必须消毒为 None; 响应不得含
-        裸 Infinity(非法 JSON, 浏览器 JSON.parse 会整体失败)。"""
+        设计, 由 test_backtest_analyzers 锁定), API 边界必须消毒为 None。
+
+        机理更正(2026-11-17 实测): 裸 inf 逃逸到响应的真实后果是 **HTTP 500**,
+        不是"浏览器 JSON.parse 崩"。本仓库返回 dict 或 pydantic 模型都会被
+        Starlette `JSONResponse.render` 的 `json.dumps(allow_nan=False)` 抛
+        `ValueError`(实测 dict 与 response_model 两条路径均 500),前端根本拿不到
+        响应体。因此本用例**必须先断言 status_code == 200** —— 只断言"文本里没有
+        Infinity"是不够的: 500 的 body 是 "Internal Server Error",同样不含该串,
+        会变成一条恒绿的空断言。
+        """
         _write_positions(tmp_path / "positions.json", [POSITION])
         closes = [100.0 + i for i in range(10)]
         monkeypatch.setattr(dashboard.ds2, "get_kline_mootdx", lambda code, period, count: _klines(closes))
