@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -636,3 +637,74 @@ def test_hud_subtab_and_btn_sm_are_48_on_mobile():
     assert ".btn.btn-sm { height: auto; min-height: 48px; }" in flat
     # height:auto 必须显式写(否则固定 height 会压住 min-height)
     assert "height: auto" in flat
+
+
+# ===== A-08 漏网(2026-11-17):score_available=false 时不得把占位 50 当结论 =====
+# 后端在四维全缺时返回 `score: 50` + `score_available: false`。旧实现只看
+# `isNum(thermo.score)` → 标签渲染成「大盘温度 50.0 · 数据不足」并着 is-warn
+# (50 落在 40~60), 用户读到的是"温度中性", 而实际是四维全缺 —— 比纯空态更误导。
+
+def _thermo_usable_source() -> str:
+    return _function_body(_js(), "function thermoUsable(thermo) {")
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="需要 node 才能执行该判据")
+def test_thermo_usable_gate_is_behaviourally_correct():
+    """真跑一遍判据(不是子串匹配): 只看 score_available 与 available_dims。"""
+    script = (
+        _thermo_usable_source()
+        + """
+const cases = [
+  null,
+  {score: 50, score_available: false, data_quality: {available_dims: 0}},
+  {score: 50, score_available: true, data_quality: {available_dims: 0}},
+  {score: 73.8, score_available: true, data_quality: {available_dims: 4}},
+  {score: 60, data_quality: {available_dims: 3}},
+];
+console.log(JSON.stringify(cases.map(thermoUsable)));
+"""
+    )
+    proc = subprocess.run([shutil.which("node"), "-e", script],
+                          capture_output=True, text=True, timeout=60, check=False)
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout.strip()) == [False, False, False, True, True]
+
+
+def test_temp_tag_does_not_show_placeholder_score():
+    """标签分支必须先过 thermoUsable; false 分支不输出数字、不着结论色。"""
+    body = _function_body(_js(), "function renderHead(board, thermo) {")
+
+    assert "thermoUsable(thermo) && isNum(thermo.score)" in body, "标签未接 score_available"
+    # false 分支那段(从说明文案的组装到 live 点之前)不得出现三种结论色
+    seg = body[body.index("var why"): body.index("var live =")]
+    for cls in ("is-up", "is-down", "is-warn"):
+        assert cls not in seg, f"不可用分支仍给了结论色 {cls}"
+    assert "数据不足" in seg, "不可用时必须写明数据不足"
+    assert "tempTag.className = 'wb-tag';" in seg, "不可用时应保持中性单类"
+
+
+def test_radar_marks_unavailable_components_as_missing():
+    """维度对象存在但 available=false 时也算缺失, 否则占位 50 会被画成正常的点。"""
+    body = _function_body(_js(), "function radarDims(board, thermo) {")
+
+    assert body.count("available === false") >= 4, "四个维度都要判 available"
+
+
+def test_radar_center_and_points_ignore_unavailable():
+    body = _function_body(_js(), "function renderRadar(board, thermo) {")
+
+    assert "thermoUsable(thermo) && isNum(thermo.score)" in body, "雷达中心分未接 score_available"
+    assert "if (d.missing || !isNum(d.value)) return;" in body, "缺失维仍被画成 50 的点"
+
+
+def test_discipline_score_does_not_use_placeholder():
+    """占位 50 会让「温度 ≥ 50」判成通过 —— 缺失数据伪造出一个通过的纪律项。"""
+    body = _function_body(_js(), "function disciplineChecks(board, thermo) {")
+
+    assert "thermoUsable(thermo) && isNum(thermo.score)" in body
+
+
+def test_health_dot_not_green_when_thermo_unavailable():
+    body = _function_body(_js(), "async function load(force, statusIn) {")
+
+    assert "thermo.score_available !== false" in body, "四维全缺时健康点仍是绿的"

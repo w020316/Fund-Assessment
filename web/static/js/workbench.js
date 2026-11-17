@@ -135,6 +135,20 @@
   function $id(id) { return document.getElementById(id); }
 
   /* ================= 渲染：页头 ================= */
+  /**
+   * A-08 漏网修复(2026-11-17):四维数据全缺时, 后端 `score` 只是**占位 50**, 同时
+   * 给出 `score_available=false` 与 `data_quality.available_dims`。
+   * 任何"把 thermo.score 当结论"的消费点都必须先过这个判据, 否则会出现
+   * "标签写着数据不足、却给出数字和涨跌色"的自相矛盾(比纯空态更误导)。
+   */
+  function thermoUsable(thermo) {
+    if (!thermo) return false;
+    if (thermo.score_available === false) return false;
+    var dq = thermo.data_quality || {};
+    if (dq.available_dims === 0) return false;
+    return true;
+  }
+
   function renderHead(board, thermo) {
     var dateEl = $id('wbDate');
     if (dateEl) dateEl.textContent = (board && board.date) ? board.date : '—';
@@ -148,11 +162,14 @@
 
     var tempTag = $id('wbTempTag');
     if (tempTag) {
-      if (thermo && isNum(thermo.score)) {
+      if (thermoUsable(thermo) && isNum(thermo.score)) {
         tempTag.textContent = '大盘温度 ' + num(thermo.score, 1) + ' · ' + (thermo.level || '—');
         tempTag.className = 'wb-tag ' + (thermo.score >= 60 ? 'is-up' : thermo.score < 40 ? 'is-down' : 'is-warn');
       } else {
-        tempTag.textContent = '大盘温度 —';
+        /* 不可用: 不输出数字、不给 is-up/is-down/is-warn —— 50 落在 40~60 会被
+           着成 is-warn, 用户读成"温度中性", 而实际是四维全缺。 */
+        var why = (thermo && thermo.score_available === false) ? ' · 数据不足' : '';
+        tempTag.textContent = '大盘温度 —' + why;
         tempTag.className = 'wb-tag';
       }
     }
@@ -408,11 +425,14 @@
   function radarDims(board, thermo) {
     var comp = (thermo && thermo.components) || {};
     var lim = (board && board.limit) || {};
+    /* 缺失判据必须看 `available === false`: 维度对象存在但"没数据"时, 旧写法
+       `!comp.x` 为 false → 雷达会把占位 50 画成一个正常的点, 六维全缺会画成一圈
+       "都还行"的满图形(正是 A-08 要消灭的"用缺失数据出结论")。 */
     var dims = [
-      { label: '指数', value: comp.index_trend ? comp.index_trend.score : null, missing: !comp.index_trend },
-      { label: '板块', value: comp.sector_rotation ? comp.sector_rotation.score : null, missing: !comp.sector_rotation },
-      { label: '资金', value: comp.capital_flow ? comp.capital_flow.score : null, missing: capitalMissing(comp.capital_flow) },
-      { label: '情绪', value: comp.sentiment ? comp.sentiment.score : null, missing: !comp.sentiment || String(comp.sentiment.note || '').indexOf('不可用') >= 0 },
+      { label: '指数', value: comp.index_trend ? comp.index_trend.score : null, missing: !comp.index_trend || comp.index_trend.available === false },
+      { label: '板块', value: comp.sector_rotation ? comp.sector_rotation.score : null, missing: !comp.sector_rotation || comp.sector_rotation.available === false },
+      { label: '资金', value: comp.capital_flow ? comp.capital_flow.score : null, missing: capitalMissing(comp.capital_flow) || (comp.capital_flow && comp.capital_flow.available === false) },
+      { label: '情绪', value: comp.sentiment ? comp.sentiment.score : null, missing: !comp.sentiment || comp.sentiment.available === false || String(comp.sentiment.note || '').indexOf('不可用') >= 0 },
       { label: '封板', value: isNum(lim.broken_rate_pct) ? Math.max(0, Math.min(100, 100 - lim.broken_rate_pct)) : null, missing: !isNum(lim.broken_rate_pct) },
       { label: '连板', value: isNum(lim.max_streak) ? Math.max(0, Math.min(100, lim.max_streak * 20)) : null, missing: !isNum(lim.max_streak) }
     ];
@@ -463,13 +483,15 @@
     });
     parts.push('<polygon points="' + pts2.join(' ') + '" fill="rgba(124,134,255,.16)" stroke="#7C86FF" stroke-width="1.6" stroke-linejoin="round"/>');
     dims.forEach(function (d, idx) {
+      /* 缺失维不画点(旧写法按 50 落在中环, 视觉上等于"这一维中等") */
+      if (d.missing || !isNum(d.value)) return;
       var a = -Math.PI / 2 + idx * Math.PI / 3;
-      var v = isNum(d.value) ? Math.max(0, Math.min(100, d.value)) : 50;
+      var v = Math.max(0, Math.min(100, d.value));
       var rr = r * v / 100;
       parts.push('<circle cx="' + (cx + Math.cos(a) * rr).toFixed(1) + '" cy="' + (cy + Math.sin(a) * rr).toFixed(1) + '" r="2.6" fill="#A9B0FF"/>');
     });
-    // 中心综合分
-    var score = (thermo && isNum(thermo.score)) ? thermo.score : null;
+    // 中心综合分: 数据不可用时显示「—」而不是占位 50
+    var score = (thermoUsable(thermo) && isNum(thermo.score)) ? thermo.score : null;
     parts.push('<text class="wb-radar-center" x="' + cx + '" y="' + (cy - 6) + '">' + esc(score == null ? '—' : num(score, 1)) + '</text>');
     parts.push('<text class="wb-radar-center-sub" x="' + cx + '" y="' + (cy + 14) + '">综合</text>');
     parts.push('</svg>');
@@ -550,8 +572,10 @@
     var m = (board && board.market) || {};
     var temp = (board && board.temperature) || {};
     var y = (board && board.yesterday) || {};
-    /* 优先用温度计的「大盘温度」，缺失时退回复盘的打板温度 */
-    var score = (thermo && isNum(thermo.score)) ? thermo.score : (isNum(temp.score) ? temp.score : null);
+    /* 优先用温度计的「大盘温度」，缺失时退回复盘的打板温度。
+       注意: 四维全缺时 thermo.score 是占位 50, 会被 "温度 ≥ 50" 判成**通过** ——
+       必须先用 thermoUsable 挡住, 否则缺失数据会伪造出一个通过的纪律项。 */
+    var score = (thermoUsable(thermo) && isNum(thermo.score)) ? thermo.score : (isNum(temp.score) ? temp.score : null);
     var broken = isNum(lim.broken_rate_pct) ? lim.broken_rate_pct : null;
     var maxStreak = isNum(lim.max_streak) ? lim.max_streak : null;
     var avg = isNum(m.index_avg_change_pct) ? m.index_avg_change_pct : null;
@@ -913,7 +937,7 @@
       renderSession(results[6]);
       renderHealth([
         { k: '指数', ok: idx.ok && !!indices },
-        { k: '温度', ok: thermoR.ok && !!thermo },
+        { k: '温度', ok: thermoR.ok && !!thermo && thermo.score_available !== false },
         { k: '复盘', ok: boardR.ok && !!board },
         { k: '板块', ok: sectorR.ok && !!sectors },
         { k: '热门', ok: hotR.ok && !!hot },
