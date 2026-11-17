@@ -281,3 +281,54 @@ class TestScanRateLimit:
 
         assert client.get("/api/strategy/scan/new_high").status_code == 200
         assert client.get("/api/strategy/scan/cb").status_code == 200
+
+
+# ===== C-04(2026-11-17):正常超时不得被打成"未预期异常" =====
+# 三个扫描端点的 `except Exception` 会把 `_run_scan` 抛出的 503 再抓一次并
+# `logger.exception(...)` —— 状态码没变, 但每次正常超时都留一条**带完整堆栈的
+# ERROR**。`logger.exception` 的语义是"未预期异常", 排障时会把"上游挂起"误判成
+# "扫描逻辑写错了", 也稀释真实告警。
+# (A-2 批次已补 `except HTTPException: raise`; 这两个用例把它钉成契约。)
+
+class TestScanErrorLoggingSemantics:
+    def test_timeout_is_not_logged_as_unexpected_exception(self, monkeypatch):
+        """超时路径: 503 + **不**调用 logger.exception(不产生堆栈噪声)。"""
+        from unittest.mock import MagicMock
+
+        _reset_cooldown()
+        fake_logger = MagicMock()
+        monkeypatch.setattr(strategy, "logger", fake_logger)
+        monkeypatch.setattr(strategy, "_HAS_STRATEGIES", True)
+        monkeypatch.setattr(strategy, "_SCAN_TIMEOUT_S", 0.05)
+
+        class SlowAnalyzer:
+            def scan_limit_up(self):
+                time.sleep(0.3)
+                return []
+
+        monkeypatch.setattr(strategy, "LimitUpAnalyzer", SlowAnalyzer)
+
+        resp = client.get("/api/strategy/scan/limit_up")
+
+        assert resp.status_code == 503
+        assert fake_logger.exception.call_count == 0, "正常超时被当成了未预期异常(打了堆栈)"
+
+    def test_real_parse_failure_still_logs_exception(self, monkeypatch):
+        """真异常(解析炸了)仍必须 logger.exception + 503(回归保护, 不能因噎废食)。"""
+        from unittest.mock import MagicMock
+
+        _reset_cooldown()
+        fake_logger = MagicMock()
+        monkeypatch.setattr(strategy, "logger", fake_logger)
+        monkeypatch.setattr(strategy, "_HAS_STRATEGIES", True)
+
+        class BoomAnalyzer:
+            def scan_limit_up(self):
+                raise ValueError("解析炸了")
+
+        monkeypatch.setattr(strategy, "LimitUpAnalyzer", BoomAnalyzer)
+
+        resp = client.get("/api/strategy/scan/limit_up")
+
+        assert resp.status_code == 503
+        assert fake_logger.exception.call_count == 1, "真异常必须留堆栈"
