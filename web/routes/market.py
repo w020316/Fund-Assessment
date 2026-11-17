@@ -11,7 +11,7 @@ try:
 except ImportError:
     _HAS_AKSHARE = False
 import pandas as pd
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from loguru import logger
 
@@ -20,6 +20,7 @@ from src.core import data_source_v2 as ds2
 from src.core.cache import DataCache
 from src.core.data_validator import get_data_validator
 from src.utils.convert import opt_float, safe_float as _safe_float, safe_str as _safe_str
+from web.rate_limiter import limiter
 
 router = APIRouter()
 
@@ -514,6 +515,23 @@ class StockFlowStreak(BaseModel):
 _DDX_CANDIDATES = 12
 _DDX_WORKERS = 3
 _DDX_TTL = 300
+# A-04(2026-11-17):limit 直接参与缓存键,任意取值(1..30)会把缓存打散成 30 份,
+# 等价于绕过 300s 缓存反复全量取数。归一到 3 个档位,缓存键只有 3 种。
+_DDX_LIMIT_TIERS = (5, 10, 12)
+
+
+def _normalize_ddx_limit(limit: int) -> int:
+    """把 1..30 的 limit 归一化到 ``_DDX_LIMIT_TIERS`` 中"不小于请求值"的最小档。
+
+    语义是"至少给这么多":请求 3 条也按 5 条取数并缓存(前端只展示需要的前 N 条),
+    请求 20 条则封顶 12 条(候选池本身最多 12 只,再多也拿不到)。
+    """
+    for tier in _DDX_LIMIT_TIERS:
+        if limit <= tier:
+            return tier
+    return _DDX_LIMIT_TIERS[-1]
+
+
 # 上游（东财个股资金流）对突发请求敏感：一轮全部失败后冷却 2 分钟，
 # 避免工作台每分钟重试把 IP 打进限流，反而拖垮其他东财接口。
 _DDX_FAIL_COOLDOWN = 120
@@ -626,8 +644,12 @@ def _schedule_ddx_refresh(cache_key: str, limit: int, min_days: int) -> None:
         logger.warning(f"SWR 无法投递后台任务 ddx_streak: {e}")
 
 
+# A-05(2026-11-17):该端点每轮要给候选池逐只拉资金流(1~3s, 最坏 15s 预算),
+# 无限制刷会持续打东财并占住线程。6 次/分钟/桶 + 300s 缓存 + 单飞足够。
 @router.get("/ddx_streak")
+@limiter.limit("6/minute")
 async def ddx_streak(
+    request: Request,
     limit: int = Query(12, ge=1, le=30, description="返回条数"),
     min_days: int = Query(2, ge=1, le=10, description="最少连增交易日数"),
 ):
@@ -635,8 +657,10 @@ async def ddx_streak(
 
     口径为"从最近交易日起主力净流入额连续为正的交易日数"，不是通达信
     DDX 大单净量；前端按"资金连增"展示。失败股票计入 failed，不用 0 顶替。
+    limit 会先归一到 {5,10,12} 三档再进缓存键(A-04)。
     """
     global _ddx_failed_at
+    limit = _normalize_ddx_limit(limit)
     cache_key = f"market:ddx_streak:{limit}:{min_days}"
     cached, is_stale = cache.get_with_stale(cache_key, max_stale=3600)
     if cached is not None:

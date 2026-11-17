@@ -69,7 +69,7 @@ class TestRunScanMechanism:
 
     @pytest.mark.asyncio
     async def test_peak_concurrency_is_capped_at_pool_size(self):
-        """4 个并发扫描同时在飞,实际并行度不得超过池容量 2。"""
+        """4 个并发扫描(不同单飞键)同时在飞,实际并行度不得超过池容量 2。"""
         _reset_cooldown()
         lock = threading.Lock()
         active = 0
@@ -87,12 +87,56 @@ class TestRunScanMechanism:
 
         with patch.object(strategy, "_SCAN_TIMEOUT_S", 5.0):
             results = await asyncio.gather(
-                *[strategy._run_scan("并发扫描", fn) for _ in range(4)]
+                *[
+                    strategy._run_scan("并发扫描", fn, key=f"k{i}")
+                    for i in range(4)
+                ]
             )
 
         assert results == [[], [], [], []]
         assert peak <= strategy._SCAN_POOL_SIZE, f"并发峰值 {peak} 超过池容量"
         assert peak >= 1
+
+    @pytest.mark.asyncio
+    async def test_single_flight_rejects_second_same_key_request(self):
+        """同参数请求在飞时,第二个请求必须被快速拒绝(503 busy), 不再起上游抓取。"""
+        _reset_cooldown()
+        started = threading.Event()
+        calls: list[int] = []
+
+        def slow():
+            calls.append(1)
+            started.set()
+            time.sleep(0.3)
+            return ["first"]
+
+        with patch.object(strategy, "_SCAN_TIMEOUT_S", 5.0):
+            first = asyncio.create_task(strategy._run_scan("涨停扫描", slow))
+            await asyncio.get_running_loop().run_in_executor(None, started.wait)
+
+            with pytest.raises(HTTPException) as busy:
+                await strategy._run_scan("涨停扫描", slow)
+
+            assert busy.value.status_code == 503
+            assert busy.value.detail["code"] == "SCAN_IN_PROGRESS"
+            assert busy.value.detail["busy"] is True
+
+            assert await first == ["first"]
+
+        # 只起了一次上游抓取
+        assert len(calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_single_flight_releases_after_completion(self):
+        """第一个请求结束后单飞键必须释放,否则该端点永久 busy。"""
+        _reset_cooldown()
+
+        def quick():
+            return ["one"]
+
+        with patch.object(strategy, "_SCAN_TIMEOUT_S", 5.0):
+            assert await strategy._run_scan("可转债扫描", quick) == ["one"]
+            assert await strategy._run_scan("可转债扫描", quick) == ["one"]
 
     @pytest.mark.asyncio
     async def test_timeout_opens_cooldown_and_skips_next_upstream_call(self):
@@ -216,3 +260,24 @@ class TestScanEndpointsCooldown:
         resp = client.get("/api/strategy/scan/limit_up")
         assert resp.status_code == 200
         assert resp.json() == []
+
+
+class TestScanRateLimit:
+    """A-05(2026-11-17):扫描是匿名面核心功能,不加鉴权,但必须有成本边界。"""
+
+    def test_scan_endpoint_rate_limited_after_six(self, monkeypatch):
+        monkeypatch.setattr(strategy, "_HAS_STRATEGIES", False)
+        _reset_cooldown()
+
+        codes = [client.get("/api/strategy/scan/limit_up").status_code for _ in range(7)]
+
+        assert codes[:6] == [200] * 6
+        assert codes[6] == 429, "第 7 次必须被限流, 否则可无限消耗上游"
+
+    def test_scan_endpoints_are_not_admin_only(self, monkeypatch):
+        """回归保护:扫描是匿名可用功能, 不能因为限流顺手挂上 require_admin。"""
+        monkeypatch.setattr(strategy, "_HAS_STRATEGIES", False)
+        _reset_cooldown()
+
+        assert client.get("/api/strategy/scan/new_high").status_code == 200
+        assert client.get("/api/strategy/scan/cb").status_code == 200

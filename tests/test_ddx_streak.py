@@ -511,3 +511,68 @@ class TestStockFlowStreakEndpoint:
 
     def test_rejects_bad_code(self, client):
         assert client.get("/api/market/stock_flow_streak?code=abc").status_code == 422
+
+
+class TestLimitTiers:
+    """A-04(2026-11-17):limit 归一化到 {5,10,12} 三档,缓存键只有 3 种变体。"""
+
+    def test_limit_normalizes_to_three_tiers(self):
+        import web.routes.market as market_route
+
+        values = {market_route._normalize_ddx_limit(v) for v in range(1, 31)}
+        assert values == {5, 10, 12}
+
+    def test_limit_tier_boundaries(self):
+        import web.routes.market as market_route
+
+        assert market_route._normalize_ddx_limit(1) == 5
+        assert market_route._normalize_ddx_limit(5) == 5
+        assert market_route._normalize_ddx_limit(6) == 10
+        assert market_route._normalize_ddx_limit(10) == 10
+        assert market_route._normalize_ddx_limit(11) == 12
+        assert market_route._normalize_ddx_limit(30) == 12
+
+    def test_cache_key_collapses_limit_variants(self, client, monkeypatch):
+        """1..30 的任意 limit 只能落成 3 个缓存键, 否则等于绕过 300s 缓存。"""
+        import web.routes.market as market_route
+        from web.rate_limiter import limiter
+
+        keys: list[str] = []
+
+        async def fake_candidates(limit=18):
+            return []
+
+        monkeypatch.setattr(market_route, "_ddx_candidates", fake_candidates)
+        monkeypatch.setattr(market_route, "_ddx_failed_at", 0.0)
+        monkeypatch.setattr(
+            market_route.cache, "get_with_stale",
+            lambda key, max_stale=300: (keys.append(key) or (None, False)),
+        )
+        monkeypatch.setattr(market_route.cache, "set", lambda *a, **k: None)
+
+        for lim in (1, 3, 5, 7, 10, 11, 12, 20, 30):
+            # 逐个请求前清零限流计数(本用例验证缓存键, 不是限流)
+            limiter._storage.reset()
+            client.get(f"/api/market/ddx_streak?limit={lim}")
+
+        assert len(keys) == 9
+        assert len(set(keys)) == 3, f"缓存键未被归一: {sorted(set(keys))}"
+
+    def test_ddx_streak_rate_limited(self, client, monkeypatch):
+        """ddx_streak 每轮要逐只拉资金流, 必须有 6/minute 的成本边界。"""
+        import web.routes.market as market_route
+
+        async def boom(limit=18):
+            raise RuntimeError("network down")
+
+        monkeypatch.setattr(market_route, "_ddx_candidates", boom)
+        monkeypatch.setattr(market_route, "_ddx_failed_at", 0.0)
+        monkeypatch.setattr(
+            market_route.cache, "get_with_stale", lambda key, max_stale=300: (None, False)
+        )
+        monkeypatch.setattr(market_route.cache, "set", lambda *a, **k: None)
+
+        codes = [client.get("/api/market/ddx_streak").status_code for _ in range(7)]
+
+        assert codes[:6] == [200] * 6
+        assert codes[6] == 429

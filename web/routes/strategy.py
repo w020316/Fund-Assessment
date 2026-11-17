@@ -345,6 +345,10 @@ _SCAN_POOL_SIZE = 2
 _scan_pool = ThreadPoolExecutor(max_workers=_SCAN_POOL_SIZE, thread_name_prefix="scan")
 _SCAN_COOLDOWN_S = 60.0
 _scan_last_timeout: float = 0.0
+# A-05(2026-11-17):进程内单飞。扫描端点没有参数, 同一时刻重复点击/多人同时点
+# 会各自起一次全市场抓取(akshare 东财 59 页), 把上游和 2 线程池一起拖住。
+# 有同类扫描在飞时直接拒绝, 而不是排队 —— 排队只会让等待时间线性增长。
+_scan_inflight: set[str] = set()
 
 
 def _scan_cooldown_remaining() -> float:
@@ -369,13 +373,37 @@ def _scan_cooldown_unavailable(operation: str, remaining: float) -> HTTPExceptio
     )
 
 
-async def _run_scan(operation: str, fn):
-    """在专用 2 线程池里跑同步扫描函数;超时开冷却,冷却期内不再起新任务。"""
+def _scan_busy_unavailable(operation: str) -> HTTPException:
+    """同类扫描已在飞:快速拒绝, 不再起第二个上游抓取。"""
+    return HTTPException(
+        status_code=503,
+        detail={
+            "code": "SCAN_IN_PROGRESS",
+            "message": f"{operation}正在执行中,请稍后查看结果。",
+            "retryable": True,
+            "busy": True,
+        },
+    )
+
+
+async def _run_scan(operation: str, fn, key: str | None = None):
+    """在专用 2 线程池里跑同步扫描函数;单飞 + 冷却,避免堆叠上游抓取。
+
+    参数:
+        operation: 中文操作名,用于日志与错误文案。
+        fn: 同步扫描函数(akshare / 策略对象方法)。
+        key: 单飞键;缺省用 operation。不同操作互不阻塞。
+    """
     global _scan_last_timeout
     remaining = _scan_cooldown_remaining()
     if remaining > 0:
         logger.info(f"{operation} 冷却中, 跳过上游调用(剩余 {remaining:.1f}s)")
         raise _scan_cooldown_unavailable(operation, remaining)
+    flight_key = key or operation
+    if flight_key in _scan_inflight:
+        logger.info(f"{operation} 已有同参数请求在飞, 直接拒绝")
+        raise _scan_busy_unavailable(operation)
+    _scan_inflight.add(flight_key)
     loop = asyncio.get_running_loop()
     try:
         return await asyncio.wait_for(
@@ -387,10 +415,16 @@ async def _run_scan(operation: str, fn):
         _scan_last_timeout = time.monotonic()
         logger.warning(f"{operation} timeout({_SCAN_TIMEOUT_S}s), 进入 {_SCAN_COOLDOWN_S:.0f}s 冷却")
         raise _scan_unavailable(operation)
+    finally:
+        _scan_inflight.discard(flight_key)
 
 
+# A-05(2026-11-17):扫描是匿名面核心功能(runScan() 直接匿名调用),加 require_admin
+# 会让匿名用户点扫描直接 401 —— 这是产品回归。改为只限流: 6 次/分钟/桶,
+# 配合 _run_scan 的进程内单飞, 单人刷也起不了第二个上游抓取。
 @router.get("/scan/new_high", response_model=list[NewHighItem])
-async def scan_new_high():
+@limiter.limit("6/minute")
+async def scan_new_high(request: Request):
     if not _HAS_STRATEGIES:
         top = []
         source_failed = False
@@ -448,7 +482,8 @@ async def scan_new_high():
 
 
 @router.get("/scan/limit_up", response_model=list[LimitUpItem])
-async def scan_limit_up():
+@limiter.limit("6/minute")
+async def scan_limit_up(request: Request):
     if not _HAS_STRATEGIES:
         return []
     try:
@@ -470,7 +505,8 @@ async def scan_limit_up():
 
 
 @router.get("/scan/cb", response_model=list[CBItem])
-async def scan_cb():
+@limiter.limit("6/minute")
+async def scan_cb(request: Request):
     if not _HAS_STRATEGIES:
         return []
     try:
