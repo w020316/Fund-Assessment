@@ -114,6 +114,28 @@
   --qf-ease-exit:cubic-bezier(.4,0,1,1);
   --qf-ease-emphasis:cubic-bezier(.34,1.4,.64,1);
 
+  /* ---------- 10b. 动效时长与缓动（阶段五 R1：17 种随手时长 → 4 档） ----------
+     之前 transition/animation 里有 17 个不同时长(.2s/.24s/.25s/.3s/.32s/160ms/200ms/
+     240ms/250ms/320ms/420ms/1.4s/1.5s/2s/2.4s/6s/90s), 逐个手写、毫无规律。
+     收敛为 4 档语义时长(交互动效 3 档 + 呼吸循环 1 档), 另有两个"素材本身节奏"
+     的长周期 token —— 强行把 6s 扫描压成 320ms 会变成乱闪, 那是设计事故不是体系化:
+       fast 120ms  微反馈(颜色/边框)
+       base 200ms  常规过渡(背景/阴影/位移的标准档)
+       slow 320ms  大位移/展开/进度条
+       loop 2000ms 骨架屏/脉冲/微光这类**无限循环**的呼吸节奏
+       ambient 6000ms  面板扫描光带(装饰性, 周期由视觉决定)
+       ticker    90s   跑马灯位移周期
+     注意: token 名必须含 "duration", 否则 stage5 维度探针按
+     `duration|ease|transition` 判"已变量化"会漏计。 */
+  --duration-fast:120ms;
+  --duration-base:200ms;
+  --duration-slow:320ms;
+  --duration-loop:2000ms;
+  --duration-ambient:6000ms;
+  --duration-ticker:90s;
+  --ease-out:cubic-bezier(.22,.61,.36,1);
+  --ease-in-out:cubic-bezier(.4,0,.2,1);
+
   /* ---------- 11. 层级（z-index 唯一合法档位） ---------- */
   --qf-z-base:0;
   --qf-z-sticky:30;

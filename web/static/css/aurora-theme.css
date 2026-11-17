@@ -48,7 +48,7 @@ body.hud-theme{
   --shadow:var(--qf-shadow-1);
   /* QA 复核观察项: transition 显式化同步到暗色主题(与 index.html :root 亮色回退
      R2 修复对齐)——保留原 cubic-bezier 曲线, 仅属性列表改为六视觉属性 */
-  --transition:color .2s cubic-bezier(.2,.8,.2,1),background-color .2s cubic-bezier(.2,.8,.2,1),border-color .2s cubic-bezier(.2,.8,.2,1),box-shadow .2s cubic-bezier(.2,.8,.2,1),transform .2s cubic-bezier(.2,.8,.2,1),opacity .2s cubic-bezier(.2,.8,.2,1);
+  --transition:color var(--duration-base) cubic-bezier(.2,.8,.2,1),background-color var(--duration-base) cubic-bezier(.2,.8,.2,1),border-color var(--duration-base) cubic-bezier(.2,.8,.2,1),box-shadow var(--duration-base) cubic-bezier(.2,.8,.2,1),transform var(--duration-base) cubic-bezier(.2,.8,.2,1),opacity var(--duration-base) cubic-bezier(.2,.8,.2,1);
 
   /* hud.css 的组件直接引用 --hud-*：--hud-* 真源在 hud.css（值引用 --qf-*），
      此处不再同步覆盖。 */
@@ -94,7 +94,7 @@ body.hud-theme .logo-icon{
 }
 body.hud-theme .index-item{
   padding:4px 10px;border-radius:6px;background:rgba(255,255,255,.03);
-  transition:background .2s var(--qf-ease-standard);
+  transition:background var(--duration-base) var(--qf-ease-standard);
 }
 body.hud-theme .index-item:hover{background:rgba(255,255,255,.06)}
 body.hud-theme .index-name{color:var(--qf-text-muted);font-size:12px}
@@ -118,8 +118,8 @@ body.hud-theme .nav-item{
   height:40px;padding:0 12px;margin-bottom:4px;
   border-left:2px solid transparent;border-radius:8px;
   font:500 13px/1 var(--qf-font-body);color:var(--qf-text-secondary);
-  transition:background .2s var(--qf-ease-standard),color .2s var(--qf-ease-standard),
-             border-color .2s var(--qf-ease-standard);
+  transition:background var(--duration-base) var(--qf-ease-standard),color var(--duration-base) var(--qf-ease-standard),
+             border-color var(--duration-base) var(--qf-ease-standard);
 }
 body.hud-theme .nav-item:hover{background:rgba(255,255,255,.05);color:var(--qf-text-primary)}
 body.hud-theme .nav-item.active{
@@ -136,9 +136,9 @@ body.hud-theme .nav-item .kbd{
 body.hud-theme .content{padding:32px}
 body.hud-theme .card{
   background:#0C131F;border:1px solid #1C2A3D;border-radius:12px;padding:24px;
-  transition:border-color .2s var(--qf-ease-standard),
-             box-shadow .2s var(--qf-ease-standard),
-             transform .2s var(--qf-ease-standard);
+  transition:border-color var(--duration-base) var(--qf-ease-standard),
+             box-shadow var(--duration-base) var(--qf-ease-standard),
+             transform var(--duration-base) var(--qf-ease-standard);
 }
 body.hud-theme .card:hover{
   border-color:#2A3D55;
@@ -176,8 +176,8 @@ body.hud-theme .tab,
 body.hud-theme .hud-subtab{
   height:32px;min-height:44px;padding:0 16px;border-radius:7px;
   font:500 13px/1 var(--qf-font-body);color:var(--qf-text-secondary);
-  transition:background .2s var(--qf-ease-standard),color .2s var(--qf-ease-standard),
-             box-shadow .2s var(--qf-ease-standard),transform .2s var(--qf-ease-standard);
+  transition:background var(--duration-base) var(--qf-ease-standard),color var(--duration-base) var(--qf-ease-standard),
+             box-shadow var(--duration-base) var(--qf-ease-standard),transform var(--duration-base) var(--qf-ease-standard);
 }
 body.hud-theme .tab:hover,
 body.hud-theme .hud-subtab:hover{background:rgba(255,255,255,.05);color:var(--qf-text-primary)}
@@ -193,9 +193,9 @@ body.hud-theme .hud-subtab:active{transform:scale(.98)}
 body.hud-theme .btn{
   height:40px;min-height:44px;padding:0 20px;border-radius:8px;
   font:500 14px/1 var(--qf-font-body);border:1px solid transparent;
-  transition:transform .2s var(--qf-ease-standard),background-color .2s var(--qf-ease-standard),
-             background-position .2s var(--qf-ease-standard),border-color .2s var(--qf-ease-standard),
-             box-shadow .2s var(--qf-ease-standard),color .2s var(--qf-ease-standard);
+  transition:transform var(--duration-base) var(--qf-ease-standard),background-color var(--duration-base) var(--qf-ease-standard),
+             background-position var(--duration-base) var(--qf-ease-standard),border-color var(--duration-base) var(--qf-ease-standard),
+             box-shadow var(--duration-base) var(--qf-ease-standard),color var(--duration-base) var(--qf-ease-standard);
 }
 body.hud-theme .btn:active{transform:scale(.98)}
 body.hud-theme .btn-primary{
@@ -228,8 +228,8 @@ body.hud-theme .select,
 body.hud-theme textarea{
   background:#070C15;border:1px solid #1C2A3D;border-radius:8px;
   color:var(--qf-text-primary);
-  transition:border-color .2s var(--qf-ease-standard),box-shadow .24s var(--qf-ease-standard),
-             background .2s var(--qf-ease-standard);
+  transition:border-color var(--duration-base) var(--qf-ease-standard),box-shadow var(--duration-base) var(--qf-ease-standard),
+             background var(--duration-base) var(--qf-ease-standard);
 }
 body.hud-theme .input:hover,
 body.hud-theme .select:hover{border-color:#2A3D55}
@@ -263,7 +263,7 @@ body.hud-theme .modal-header{border-bottom:1px solid #2A3D55;padding:20px 24px}
 body.hud-theme .modal-body{padding:24px}
 body.hud-theme .modal-close{
   width:44px;height:44px;border-radius:8px;color:var(--qf-text-muted);
-  transition:background .2s var(--qf-ease-standard),color .2s var(--qf-ease-standard);
+  transition:background var(--duration-base) var(--qf-ease-standard),color var(--duration-base) var(--qf-ease-standard);
 }
 body.hud-theme .modal-close:hover{background:rgba(255,255,255,.06);color:var(--qf-text-primary)}
 
@@ -273,7 +273,7 @@ body.hud-theme .toast{
   border:1px solid #2A3D55;border-radius:10px;color:var(--qf-text-primary);
   box-shadow:0 8px 24px rgba(0,0,0,.45);
   font:500 13px/1.4 var(--qf-font-body);
-  animation:qf-toast-in .32s var(--qf-ease-enter);
+  animation:qf-toast-in var(--duration-slow) var(--qf-ease-enter);
 }
 body.hud-theme .toast-success{background:rgba(52,211,153,.14);color:#9BEBC9;border-color:rgba(52,211,153,.34)}
 body.hud-theme .toast-error{background:rgba(255,90,95,.14);color:#FFA3A6;border-color:rgba(255,90,95,.36)}
@@ -293,7 +293,7 @@ body.hud-theme .hud-status-error .hud-status-icon{
   background:rgba(255,90,95,.10);border-color:rgba(255,90,95,.3);color:#FF8589;
 }
 body.hud-theme .skeleton-line{background:linear-gradient(90deg,#16202F,#22314A 48%,#16202F);background-size:220% 100%;
-  animation:qf-shimmer 1.4s linear infinite;border-radius:4px}
+  animation:qf-shimmer var(--duration-loop) linear infinite;border-radius:4px}
 @keyframes qf-shimmer{0%{background-position:130% 0}100%{background-position:-30% 0}}
 
 /* ---------- 12. 移动端底栏 ---------- */
@@ -307,7 +307,7 @@ body.hud-theme .bottom-tab-bar{
 body.hud-theme .bottom-tab-item{
   min-height:56px;color:var(--qf-text-muted);
   font:500 11px/1 var(--qf-font-body);letter-spacing:.05em; /* STAGE5 R2: 与存量同步 10→11px 微标签档 */
-  transition:color .2s var(--qf-ease-standard),background .2s var(--qf-ease-standard);
+  transition:color var(--duration-base) var(--qf-ease-standard),background var(--duration-base) var(--qf-ease-standard);
 }
 body.hud-theme .bottom-tab-item.active{
   color:var(--qf-neon-cyan);background:rgba(34,227,255,.08);border-radius:8px;

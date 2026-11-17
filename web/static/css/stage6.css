@@ -254,7 +254,7 @@
   height: 10px; border-radius: 5px; background: rgba(255, 255, 255, 0.06);
   margin-top: 6px; overflow: hidden;
 }
-/* QA 复核观察项: 移除 transition:width(layout 属性动效违反 motion 铁律)。
+/* QA 复核观察项: 移除 transition: width(layout 属性动效违反 motion 铁律)。
    该进度条随父卡 innerHTML 重渲染整体重建, transition 在重建元素上从不生效,
    移除为零视觉变化(与 index.html progress-fill/thermo-pointer 同一裁定)。 */
 .st6-attr-bar { height: 100%; border-radius: 5px; }
@@ -380,7 +380,7 @@
   border: 1px solid var(--border, rgba(255,255,255,0.08));
   border-radius: 8px;
   cursor: pointer;
-  transition: var(--transition, all 0.2s ease);
+  transition: var(--transition, all var(--duration-base) ease);
 }
 .st6-onb-step:hover { border-color: var(--border-light, #484f58); }
 .st6-onb-step:focus-visible { outline: 2px solid var(--accent, #f59e0b); outline-offset: 2px; }

@@ -41,7 +41,7 @@
   --shadow: 0 4px 24px rgba(0,0,0,0.3);
   /* STAGE5 R2(P1-12): transition 显式化——原 all 会把 layout 属性(padding/width)
      也纳入过渡，改为只过渡视觉合成属性；var(--transition) 的全部引用点随之生效 */
-  --transition: color 0.2s ease, background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease, opacity 0.2s ease;
+  --transition: color var(--duration-base) ease, background-color var(--duration-base) ease, border-color var(--duration-base) ease, box-shadow var(--duration-base) ease, transform var(--duration-base) ease, opacity var(--duration-base) ease;
 }
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html, body { height:100%; overflow:hidden; }
@@ -111,10 +111,10 @@ body {
   width:8px; height:8px; border-radius:50%;
   background:var(--color-down);
   box-shadow: 0 0 6px var(--color-down);
-  animation: pulse-dot 2s infinite;
+  animation: pulse-dot var(--duration-loop) infinite;
 }
 .status-dot.connected { background:var(--color-down); }
-.status-dot.disconnected { background:var(--color-up); animation:none; }
+.status-dot.disconnected { background:var(--color-up); animation: none; }
 @keyframes pulse-dot {
   0%,100% { opacity:1; }
   50% { opacity:0.4; }
@@ -136,7 +136,7 @@ body {
   padding:12px 20px;
   cursor:pointer;
   color:var(--text-secondary);
-  transition:var(--transition);
+  transition: var(--transition);
   border-left:3px solid transparent;
   font-size:14px;
 }
@@ -158,7 +158,7 @@ body {
   border:1px solid var(--border);
   border-radius:var(--radius-lg);
   padding:20px;
-  transition:var(--transition);
+  transition: var(--transition);
 }
 .card:hover { border-color:var(--border-light); }
 .card-title {
@@ -245,7 +245,7 @@ th {
 td {
   padding:12px 12px;
   border-bottom:1px solid var(--border);
-  transition:var(--transition);
+  transition: var(--transition);
 }
 tr:hover td { background:rgba(255,255,255,0.02); }
 tr:nth-child(even) td { background:rgba(255,255,255,0.01); }
@@ -256,7 +256,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 .tab {
   padding:8px 16px; border-radius:6px; cursor:pointer;
   color:var(--text-secondary); font-size:13px; font-weight:500;
-  transition:var(--transition);
+  transition: var(--transition);
 }
 .tab:hover { color:var(--text-primary); }
 .tab.active { background:var(--accent-blue); color:var(--qf-ink); } /* STAGE5 R2: 琥珀底 ink 深字(8.8:1) */
@@ -265,7 +265,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 .btn {
   padding:8px 20px; border:none; border-radius:6px;
   font-size:13px; font-weight:500; cursor:pointer;
-  transition:var(--transition); display:inline-flex;
+  transition: var(--transition); display:inline-flex;
   align-items:center; gap:8px;
 }
 .btn-primary { background:var(--accent); color:var(--qf-ink); }
@@ -360,7 +360,7 @@ tr:nth-child(even):hover td { background:rgba(255,255,255,0.03); }
 .input, .select {
   background:var(--bg-primary); border:1px solid var(--border);
   border-radius:6px; padding:8px 12px; color:var(--text-primary);
-  font-size:13px; outline:none; transition:var(--transition);
+  font-size:13px; outline:none; transition: var(--transition);
   width:100%;
 }
 .input:focus, .select:focus { border-color:var(--accent-blue); }
@@ -390,7 +390,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 
 /* 进度条 */
 .progress-bar { height:6px; background:var(--border); border-radius:3px; overflow:hidden; }
-/* QA 复核观察项: 移除 transition:width(同 thermo-pointer 裁定——innerHTML 重渲染
+/* QA 复核观察项: 移除 transition: width(同 thermo-pointer 裁定——innerHTML 重渲染
    使 transition 从不生效, 移除为零视觉变化且符合 motion 铁律) */
 .progress-fill { height:100%; border-radius:3px; }
 
@@ -400,7 +400,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
   padding:12px 20px; border-radius:8px;
   font-size:13px; font-weight:500;
   box-shadow:var(--shadow);
-  animation: toast-in 0.3s ease;
+  animation: toast-in var(--duration-slow) ease;
   min-width:240px;
 }
 /* 状态色板(toast/api-error-panel 成对调校 bg/border/text，语义独立暂不入 token；暗色由 aurora-theme 覆写) */
@@ -445,7 +445,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 .heatmap-cell {
   padding:8px 12px; border-radius:4px;
   font-size:12px; font-weight:500;
-  cursor:default; transition:var(--transition);
+  cursor:default; transition: var(--transition);
   text-align:center; min-width:80px;
 }
 .heatmap-cell:hover { transform:scale(1.05); }
@@ -462,7 +462,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
   /* 2026-11-08：时长由 JS 按内容宽度注入（--ticker-dur，固定 60px/s）。
      原来写死 30s：40 条资讯内容宽约 1.5 万像素，30 秒跑完 ≈ 520px/s，
      肉眼来不及读。默认值仅作兜底。 */
-  animation:ticker-scroll var(--ticker-dur, 90s) linear infinite;
+  animation: ticker-scroll var(--ticker-dur, var(--duration-ticker)) linear infinite;
 }
 @keyframes ticker-scroll {
   0% { transform:translateX(0); }
@@ -721,7 +721,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
   font-weight:500;
   min-width:0; flex:1 0 auto;
   position:relative;
-  transition:color 0.25s ease, transform 0.2s ease;
+  transition: color var(--duration-base) ease, transform var(--duration-base) ease;
   border-radius:8px;
   margin:2px 1px;
   letter-spacing:0.3px;
@@ -734,11 +734,11 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
   justify-content:center;
   position:relative;
   z-index:var(--qf-z-sticky); /* STAGE5 R1: 需压过 .active::after(base 档) */
-  transition:transform 0.3s cubic-bezier(0.34,1.56,0.64,1), color 0.25s ease;
+  transition: transform var(--duration-slow) cubic-bezier(0.34,1.56,0.64,1), color var(--duration-base) ease;
 }
 .bottom-tab-item .tab-icon svg {
   width:18px; height:18px;
-  transition:transform 0.3s cubic-bezier(0.34,1.56,0.64,1);
+  transition: transform var(--duration-slow) cubic-bezier(0.34,1.56,0.64,1);
 }
 /* 活动指示器 — 标签上方的小圆点 */
 .bottom-tab-item .tab-indicator {
@@ -747,7 +747,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
   border-radius:50%;
   background:var(--accent);
   transform:translateX(-50%) scale(0);
-  transition:transform 0.3s cubic-bezier(0.34,1.56,0.64,1);
+  transition: transform var(--duration-slow) cubic-bezier(0.34,1.56,0.64,1);
   box-shadow:0 0 6px rgba(245,158,11,0.6);
 }
 /* 活动标签背景高亮 */
@@ -811,7 +811,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
      改为 background-position 渐变位移(仅 paint，与 aurora qf-shimmer 同法) */
   background:linear-gradient(90deg, transparent, rgba(255,255,255,0.03), transparent);
   background-size:220% 100%; background-position:130% 0;
-  animation:skeleton-shimmer 2.4s linear infinite;
+  animation: skeleton-shimmer var(--duration-loop) linear infinite;
 }
 @keyframes skeleton-shimmer { 0% { background-position:130% 0; } 100% { background-position:-30% 0; } }
 .skeleton-card {
@@ -836,11 +836,11 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 .data-freshness .freshness-icon {
   width:4px; height:4px; border-radius:50%;
   background:var(--color-down);
-  animation:pulse-dot 2s infinite;
+  animation: pulse-dot var(--duration-loop) infinite;
 }
 .data-freshness.stale .freshness-icon {
   background:var(--color-warning);
-  animation:none;
+  animation: none;
 }
 
 /* ========== 键盘快捷键提示 ========== */
@@ -880,7 +880,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
   background: var(--bg-card);
   border-radius: var(--radius);
   padding: 16px;
-  animation: skeleton-pulse 1.5s ease-in-out infinite;
+  animation: skeleton-pulse var(--duration-loop) ease-in-out infinite;
 }
 .skeleton-line {
   height: 12px;
@@ -896,7 +896,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
   background: var(--bg-card);
   border-radius: 4px;
   margin-bottom: 4px;
-  animation: skeleton-pulse 1.5s ease-in-out infinite;
+  animation: skeleton-pulse var(--duration-loop) ease-in-out infinite;
 }
 
 /* ===== STAGE5: ia-merge ===== 聚合容器二级 tab 栏(T03) */
@@ -3349,7 +3349,7 @@ function withLoading(btn, asyncFn) {
   btn.style.opacity = '0.6';
   btn.style.cursor = 'not-allowed';
   // 加载指示器(文字+脉冲圆点)
-  btn.innerHTML = '<span style="display:inline-flex;align-items:center;gap:8px;"><span style="width:6px;height:6px;border-radius:50%;background:currentColor;animation:pulse-dot 1.2s infinite;"></span>处理中...</span>';
+  btn.innerHTML = '<span style="display:inline-flex;align-items:center;gap:8px;"><span style="width:6px;height:6px;border-radius:50%;background:currentColor;animation: pulse-dot var(--duration-loop) infinite;"></span>处理中...</span>';
   return Promise.resolve(asyncFn()).then(() => {
     /* ===== STAGE5: motion (R3) ===== signature 微交互：主操作成功时刻
        播一次 1.0→1.02→1.0 强调(250ms emphasis)；类由 animationend 移除 */
@@ -6310,7 +6310,7 @@ async function newsAiSearch() {
   }
   const btn = event.currentTarget;
   await withLoading(btn, async () => {
-    body.innerHTML = '<div style="color:var(--text-muted);padding:8px 0;font-size:12px;display:flex;align-items:center;gap:8px;"><span style="width:6px;height:6px;border-radius:50%;background:var(--accent);animation:pulse-dot 1.2s infinite;"></span>智能检索中(Tavily+LLM总结,约 10-20 秒)...</div>';
+    body.innerHTML = '<div style="color:var(--text-muted);padding:8px 0;font-size:12px;display:flex;align-items:center;gap:8px;"><span style="width:6px;height:6px;border-radius:50%;background:var(--accent);animation: pulse-dot var(--duration-loop) infinite;"></span>智能检索中(Tavily+LLM总结,约 10-20 秒)...</div>';
     try {
       // P0 修复(2026-07-30):原裸 fetch 未携带 Authorization 头,后端 require_admin 必返回 401
       // 改用 api() 封装,自动注入 admin_token;失败返回 null(已弹 toast)
@@ -6797,9 +6797,9 @@ function _renderFundAnalyzeProgress(currentStep, elapsedSec) {
     const idx = i + 1;
     let icon, color, bg;
     if (idx < currentStep) { icon = '✓'; color = 'var(--color-up)'; bg = 'rgba(0,200,83,0.12)'; }
-    else if (idx === currentStep) { icon = '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);animation:pulse-dot 1.2s infinite;"></span>'; color = 'var(--accent)'; bg = 'rgba(0,217,255,0.08)'; }
+    else if (idx === currentStep) { icon = '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);animation: pulse-dot var(--duration-loop) infinite;"></span>'; color = 'var(--accent)'; bg = 'rgba(0,217,255,0.08)'; }
     else { icon = idx; color = 'var(--text-tertiary)'; bg = 'transparent'; }
-    return `<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:6px;background:${bg};margin-bottom:4px;transition:background 0.3s;">
+    return `<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:6px;background:${bg};margin-bottom:4px;transition: background var(--duration-slow);">
       <div style="width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;color:${color};border:1px solid ${color};flex-shrink:0;">${icon}</div>
       <div style="flex:1;min-width:0;">
         <div style="font-size:12px;color:${idx <= currentStep ? 'var(--text-primary)' : 'var(--text-tertiary)'};font-weight:${idx === currentStep ? '600' : '400'};">${s.name}</div>
@@ -6813,7 +6813,7 @@ function _renderFundAnalyzeProgress(currentStep, elapsedSec) {
       <span style="font-size:11px;color:var(--text-tertiary);">${elapsedSec}s / ~90s</span>
     </div>
     <div style="height:4px;background:var(--bg-card);border-radius:2px;overflow:hidden;margin-bottom:14px;">
-      <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,var(--accent),var(--color-up));border-radius:2px;"></div><!-- QA: 移除 transition:width(重渲染重建元素, 从不生效; motion 铁律) -->
+      <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,var(--accent),var(--color-up));border-radius:2px;"></div><!-- QA: 移除 transition: width(重渲染重建元素, 从不生效; motion 铁律) -->
     </div>
     <div>${stepsHtml}</div>
     <div style="margin-top:12px;font-size:11px;color:var(--text-tertiary);text-align:center;">分析中(请勿关闭窗口)</div>

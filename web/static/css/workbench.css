@@ -131,7 +131,7 @@
   color: var(--wb-dim);
   font: 500 12px/1 var(--qf-font-body);
   cursor: pointer;
-  transition: background-color 200ms var(--qf-ease-standard), border-color 200ms var(--qf-ease-standard), color 200ms var(--qf-ease-standard);
+  transition: background-color var(--duration-base) var(--qf-ease-standard), border-color var(--duration-base) var(--qf-ease-standard), color var(--duration-base) var(--qf-ease-standard);
 }
 
 #page-workbench .wb-btn:hover { color: var(--wb-text); border-color: var(--wb-accent); background: var(--wb-surface-3); }
@@ -601,7 +601,7 @@
   width: 0;
   border-radius: inherit;
   background: linear-gradient(90deg, rgba(124, 134, 255, .55), var(--wb-accent));
-  transition: width 420ms var(--qf-ease-enter);
+  transition: width var(--duration-slow) var(--qf-ease-enter);
 }
 
 #page-workbench .wb-bar.is-up i { background: linear-gradient(90deg, rgba(248, 113, 113, .45), var(--wb-up)); }
@@ -695,7 +695,7 @@
   font-size: 11px;
   text-align: left;
   cursor: pointer;
-  transition: background-color 160ms var(--qf-ease-standard);
+  transition: background-color var(--duration-base) var(--qf-ease-standard);
 }
 
 #page-workbench .wb-hot-row:hover { background: rgba(255, 255, 255, .035); }
@@ -908,7 +908,7 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  #page-workbench .wb-skel { animation: wb-skel 1.4s ease infinite; }
+  #page-workbench .wb-skel { animation: wb-skel var(--duration-loop) ease infinite; }
   @keyframes wb-skel {
     0% { background-position: 100% 0; }
     100% { background-position: 0 0; }
