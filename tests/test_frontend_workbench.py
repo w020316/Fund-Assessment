@@ -8,7 +8,12 @@
 """
 from __future__ import annotations
 
+import re
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX = ROOT / "web/static/index.html"
@@ -233,10 +238,15 @@ def test_primary_pages_share_page_head_and_kpi():
         assert 'class="qf-page-sub"' in seg, f"{page} 缺少页头说明"
     # 基金/持仓的四个账户指标走同一套瓦片（大号金额档）
     assert text.count('class="qf-kpi-value is-lg"') >= 8
-    # 旧的基金页单独标题类已随内联样式一起移除
-    assert "fund-head" not in text
+    # B2-8(2026-11-17) 收口: 原来这里是 `assert "fund-head" not in text` ——
+    # 全局子串检查会把**任何**含该词的新类名/文案判红(与本次改动无关), 而且
+    # 它并不能证明"基金页用了共享页头"。改为只看该页自身的片段:
+    fund_start = text.index('id="page-fund"')
+    fund_seg = text[fund_start:fund_start + 3000]
+    assert "fund-head" not in fund_seg, "基金页仍在用旧的自建标题类"
     stage6 = (ROOT / "web/static/css/stage6.css").read_text(encoding="utf-8")
-    assert ".fund-head" not in stage6
+    # 同理: 只针对"作用在基金页上"的旧类规则, 不做全文件子串匹配
+    assert "#page-fund .fund-head" not in stage6
 
 
 # ===== C-01(2026-11-17):工作台假死的机制契约 =====
@@ -367,3 +377,137 @@ def test_mobile_touch_targets_are_at_least_48px():
         assert extra in seg, f"{selector} 未设 {extra}"
     # 反向断言: 不得残留旧的低门槛值
     assert "min-height: 40px" not in block
+
+
+# ===== B2-8(2026-11-17):测试有效性 —— 模板字符串插值审计 =====
+# 原来的 14 个用例全是 `assert "字面量" in text`, 锁的是"某段字符串还在文件里":
+#   ① 抓不到经 helper 产生的 +0.00% 这类问题;
+#   ② 反例检查只覆盖拼接式 `+ (it.name || '—')`, 对模板字符串 `${it.name}` **完全免疫**;
+#   ③ 全局子串断言(如旧的 fund-head)与改动无关却会误报。
+# 下面三条补上"结构/行为"层面的护栏。
+
+_TEMPLATE_EXPR = re.compile(r"\$\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}")
+
+#: 视为"已安全"的函数:要么转义,要么纯数值/格式化(结果只能是数字或受控字面量)。
+_SAFE_WRAPPERS = ("esc(", "escapeHtml(", "_numOrDash(", "_pctOrDash(", "_ratioOrDash(")
+#: 纯数值表达式的白名单函数名(返回值只会是数字/文字, 不携带上游文本)
+_NUMERIC_CALLS = (
+    "fmtNum(", "fmtPct(", "fmtMoney(", "fmtPctNum(", "pctText(", "num(",
+    "changeColor(", "changeSign(", "clsOf(", "corrColor(", "nbColor(", "nbText(",
+    "Math.", "Number(", "parseFloat(", "parseInt(", "toFixed(", "toLocaleString(",
+    "signedPct(", "signalLabel(", "decisionLabel(", "statusMap[", "dotMap[", "textMap[",
+)
+#: 纯数值/常量的变量名(在所属函数里由数字运算得出, 不是上游文本)
+_NUMERIC_VARS = frozenset({
+    "dims", "totalDims", "sc", "c", "i", "j", "k", "n", "v", "w", "x", "y",
+    "width", "height", "left", "top", "pad", "size", "count", "idx", "total",
+    "value", "score", "pct", "ratio", "weight", "fillPct", "pointerLeft",
+})
+
+
+def _template_exprs(text: str) -> list[str]:
+    return [m.group(1).strip() for m in _TEMPLATE_EXPR.finditer(text)]
+
+
+#: 本轮改动块内**逐条审查过**的安全表达式 → 每条都写明为什么安全。
+#: 规则: 只能加"结果不含上游文本"的表达式; 任何可能带入用户/上游字符串的都必须
+#: 在代码里 esc()/escapeHtml() 包起来, 而不是加进这里。
+_SCOPED_SAFE_EXPRS = {
+    # 同一函数内由 `x >= 60 ? 'var(--a)' : 'var(--b)'` 这类**字面量三元**赋值的颜色串
+    "levelColor": "CSS 颜色, 由数值比较在字面量之间选择, 不含上游文本",
+    # compRows 的 label 是代码里写死的字面量数组('指数趋势'/'板块轮动'…)
+    "item.label": "标签来自代码内字面量数组 compRows, 非上游数据",
+    # 该三项是在本函数内、字段已 escapeHtml/esc 之后拼好的 HTML 片段
+    "compRows": "逐行 HTML 片段, 字段值为字面量 label 与数值 sc",
+    "corrTable": "逐格 escapeHtml(codes[i]) + 数值; 见 fundsRow 上方实现",
+    "fundsRow": "逐列 escapeHtml(f.fund_code)/escapeHtml(f.fund_name) + 数值",
+    # 纯布尔/数值分支: 两支都是字面量或数字拼接
+    'dimOk ? \'\' : \'<span style="color:var(--text-muted);">(无数据)</span>\'':
+        "两支都是字面量, 无变量插值",
+    'f.degraded ? \'<span style="color:var(--accent-blue);">数据不足</span>\' : f.nav_points + \' 点\'':
+        "字面量 / 数字(f.nav_points 为 int)拼 「点」, 不含文本字段",
+    "d.funds.length": "数组长度, 数字",
+}
+
+
+def _is_safe_expr(expr: str) -> bool:
+    """判断一个 ${...} 表达式是否"不可能是未转义的上游文本"。"""
+    if expr in _SCOPED_SAFE_EXPRS:
+        return True
+    if any(w in expr for w in _SAFE_WRAPPERS):
+        return True
+    if any(call in expr for call in _NUMERIC_CALLS):
+        return True
+    # 纯三元里两支都是字符串字面量(不掺变量)
+    if re.fullmatch(r"[\w$.\[\]'\"?:=!<>&|\s]+", expr) and "'" in expr and "." not in expr:
+        return True
+    # 裸的数值型局部变量
+    if expr in _NUMERIC_VARS:
+        return True
+    return False
+
+
+def test_workbench_js_template_interpolations_are_escaped():
+    """workbench.js 里每个模板插值都必须转义或是纯数值。
+
+    该文件目前用字符串拼接而非模板字面量(所以本用例是"新增护栏"), 但一旦有人
+    改成 `${it.name}` 这类写法, 这里会立刻拦住 —— 旧的字符串断言对这种写法免疫。
+    """
+    unsafe = [e for e in _template_exprs(_js()) if not _is_safe_expr(e)]
+
+    assert unsafe == [], f"workbench.js 存在未转义的模板插值: {unsafe}"
+
+
+#: 本轮(B1/B2)新增或改动的 index.html 片段所在函数。
+#: 只审计这些作用域: 全文件另有 539 处**既有**未转义插值(历史技术债),
+#: 一次性冻结成基线没有意义(那等于把 XSS 技术债标成"安全"), 已记入遗留。
+_R6_INDEX_SCOPES = ("async function loadMarketThermometer()", "async function loadPortfolioDiversification()")
+
+
+def _js_function_body(text: str, signature: str) -> str:
+    start = text.index(signature)
+    brace = text.index("{", start)
+    depth = 0
+    for i in range(brace, len(text)):
+        ch = text[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+    raise AssertionError(f"{signature} 花括号未配平")
+
+
+@pytest.mark.parametrize("signature", _R6_INDEX_SCOPES)
+def test_this_round_index_html_blocks_escape_interpolations(signature):
+    """本轮新增的 index.html 渲染块:每个插值都必须转义或纯数值。"""
+    body = _js_function_body(_index(), signature)
+    unsafe = [e for e in _template_exprs(body) if not _is_safe_expr(e)]
+
+    assert unsafe == [], f"{signature} 存在未转义的模板插值: {unsafe}"
+
+
+# ===== 语法护栏: 前端 JS 至少要是合法语法 =====
+
+def test_frontend_js_files_pass_node_syntax_check():
+    """`node --check`: 抓括号/模板字面量不配平这类"改坏了"的问题。
+
+    本机与 CI runner 都带 node;没有则 skip(汇总里会报是否真的跑了)。
+    """
+    node = shutil.which("node")
+    if node is None:  # pragma: no cover - 取决于环境
+        pytest.skip("环境无 node, 跳过语法校验")
+
+    targets = [
+        "web/static/js/workbench.js",
+        "web/static/js/stage6-portfolio.js",
+        "web/static/js/ma-optimizer.js",
+    ]
+    for rel in targets:
+        path = ROOT / rel
+        assert path.is_file(), f"缺少前端文件 {rel}"
+        proc = subprocess.run(
+            [node, "--check", str(path)], capture_output=True, text=True, timeout=60, check=False,
+        )
+        assert proc.returncode == 0, f"{rel} 语法错误: {proc.stderr}"
