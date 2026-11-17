@@ -131,12 +131,22 @@ class TestCapitalFlowScore:
         assert result["northbound_net"] == -100.0
 
     def test_sector_main_inflow(self):
-        """板块主力净流入"""
+        """板块主力净流入
+
+        A-08(2026-11-17)台账: 旧断言 `score == 55` 锁定的是"北向缺失时把 nb_score
+        固定 50 再与板块各占一半"——即用占位值把资金维度系统性拉向中性。
+        北向已永久停更, 缺失时资金分应直接等于板块分(权重 nb=0 / sector=1)。
+        """
         sectors = [{"main_net_inflow": 20 * 1_0000_0000}]  # 20亿
         result = _calc_capital_flow_score({}, sectors)
-        # sector_score = 50 + 20 * 0.5 = 60, nb_score = 50, avg = 55
-        assert result["score"] == pytest.approx(55, abs=0.1)
+        # sector_score = 50 + 20 * 0.5 = 60;北向缺失 → 资金分 = 板块分
+        assert result["score"] == pytest.approx(60, abs=0.1)
         assert result["sector_main_net"] == 20.0
+        # 北向仍然"不可用", 且资金口径不完整(缺 northbound)
+        assert result["northbound_available"] is False
+        assert result["available"] is True          # 这一维有板块数据
+        assert result["complete"] is False          # 但口径不完整
+        assert result["missing"] == ["northbound"]
 
 
 class TestSentimentScore:

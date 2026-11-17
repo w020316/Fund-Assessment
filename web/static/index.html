@@ -6139,9 +6139,24 @@ async function loadMarketThermometer() {
     return;
   }
 
+  // A-08(2026-11-17):四维数据全缺时后端 score 只是占位值(score_available=false),
+  // 不能再把它当"50 分 · 中性"渲染 —— 那正是"用缺失数据出结论"。
+  const scoreAvailable = data.score_available !== false;
   const score = data.score || 50;
   const level = data.level || '中性';
   const action = data.action || '—';
+  if (!scoreAvailable) {
+    const dims = (data.data_quality && data.data_quality.available_dims) || 0;
+    const totalDims = (data.data_quality && data.data_quality.total_dims) || 4;
+    body.innerHTML = `<div style="padding:20px 12px;text-align:center;color:var(--text-muted);">
+      <div style="font-size:14px;margin-bottom:6px;">大盘温度计暂无法评分</div>
+      <div style="font-size:12px;line-height:1.7;">
+        指数/板块/资金/情绪四个维度均未取到数据(${dims}/${totalDims}),<br>
+        此处的 50 分只是占位值,<b>不代表中性行情</b>,请稍后重试。
+      </div>
+    </div>`;
+    return;
+  }
   const pointerLeft = Math.min(Math.max(score, 0), 100);
 
   const levelColor = score >= 80 ? 'var(--color-up)' :
@@ -6158,13 +6173,16 @@ async function loadMarketThermometer() {
     { label: '市场情绪', val: components.sentiment },
   ].map(item => {
     const s = item.val || {};
+    // A-08:某一维没数据时不能把占位 50 分画成"中性"条(那是把缺失读成结论)
+    const dimOk = s.available !== false;
     const sc = s.score || 50;
-    const fillPct = Math.min(Math.max(sc, 0), 100);
-    const c = sc >= 60 ? 'var(--color-up)' : sc >= 40 ? 'var(--color-flat)' : 'var(--color-down)';
+    const fillPct = dimOk ? Math.min(Math.max(sc, 0), 100) : 0;
+    const c = !dimOk ? 'var(--text-muted)'
+      : (sc >= 60 ? 'var(--color-up)' : sc >= 40 ? 'var(--color-flat)' : 'var(--color-down)');
     return `<div class="signal-row">
-      <span class="signal-label">${item.label}</span>
+      <span class="signal-label">${item.label}${dimOk ? '' : '<span style="color:var(--text-muted);">(无数据)</span>'}</span>
       <div class="signal-bar"><div class="signal-bar-fill" style="width:${fillPct}%;background:${c};"></div></div>
-      <span class="signal-score" style="color:${c};">${sc.toFixed(1)}</span>
+      <span class="signal-score" style="color:${c};">${dimOk ? sc.toFixed(1) : '—'}</span>
     </div>`;
   }).join('');
 

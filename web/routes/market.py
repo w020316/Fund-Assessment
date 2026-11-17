@@ -1624,17 +1624,53 @@ async def market_wide_stats():
 
 # ===== P1-3: 大盘研判增强 =====
 
+def _thermometer_meta(payload: dict, cached: bool) -> dict:
+    """A-08(2026-11-17):按可用维度数给质量分, 不再恒定 80。
+
+    旧实现 `_build_meta("aggregator", cached=False)` 对"四维全缺、score 恰好 50"
+    的 payload 也报 80 分 → `degraded=False`, 前端把"没数据"当"中性行情"。
+    """
+    quality, extra = _thermometer_quality(payload, cached)
+    return _build_meta("aggregator", cached=cached, quality_score=quality, extra=extra)
+
+
+def _thermometer_quality(payload: dict, cached: bool) -> tuple[float, dict]:
+    dq = (payload or {}).get("data_quality") or {}
+    try:
+        dims = int(dq.get("available_dims") or 0)
+    except (TypeError, ValueError):
+        dims = 0
+    total = int(dq.get("total_dims") or 4)
+    if dims == 0:
+        return 0.0, {
+            "degraded_reason": f"四维数据全部缺失(0/{total}), 温度计不给结论",
+            "available_dims": 0,
+        }
+    if dims <= 2:
+        return 40.0, {
+            "degraded_reason": f"仅 {dims}/{total} 维数据可用, 结论可靠性低",
+            "available_dims": dims,
+        }
+    if dims < total:
+        # 3/4 维可用: 保留默认分, 但仍要标出缺哪一维
+        return (100.0 if cached else _DEFAULT_QUALITY), {
+            "degraded_reason": f"{dims}/{total} 维数据可用",
+            "available_dims": dims,
+        }
+    return (100.0 if cached else _DEFAULT_QUALITY), {"available_dims": dims}
+
+
 @router.get("/thermometer")
 async def market_thermometer():
     """大盘温度计(0-100) - 综合指数趋势/板块轮动/资金流向/市场情绪"""
     cache_key = "market:thermometer"
     cached = cache.get(cache_key)
     if cached is not None:
-        return {"data": cached, "_meta": _build_meta("aggregator", cached=True)}
+        return {"data": cached, "_meta": _thermometer_meta(cached, cached=True)}
     from src.analysis.market_assessment import get_market_thermometer
     data = await get_market_thermometer()
     cache.set(cache_key, data, ttl=60)
-    return {"data": data, "_meta": _build_meta("aggregator", cached=False)}
+    return {"data": data, "_meta": _thermometer_meta(data, cached=False)}
 
 
 @router.get("/capital-flow")

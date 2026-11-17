@@ -30,7 +30,10 @@ def _calc_index_trend_score(index_data: list[dict]) -> dict[str, Any]:
     基于上证/深证/创业板涨跌幅平均,映射到0-100
     """
     if not index_data:
-        return {"score": 50, "change_pct": 0, "indices": [], "note": "指数数据不可用"}
+        return {
+            "score": 50, "change_pct": 0, "indices": [],
+            "note": "指数数据不可用", "available": False,
+        }
 
     changes = []
     indices_info = []
@@ -46,7 +49,9 @@ def _calc_index_trend_score(index_data: list[dict]) -> dict[str, Any]:
             continue
 
     if not changes:
-        return {"score": 50, "change_pct": 0, "indices": [], "note": "无有效数据"}
+        # A-08(2026-11-17):available=False 表示"这一维没拿到数据",
+        # score=50 只是占位(调用方不得据此下结论), 由 _calc_thermometer 汇总可用维度。
+        return {"score": 50, "change_pct": 0, "indices": [], "note": "无有效数据", "available": False}
 
     avg_change = sum(changes) / len(changes)
     # 涨跌幅映射: -5% → 0, 0% → 50, +5% → 100
@@ -57,6 +62,7 @@ def _calc_index_trend_score(index_data: list[dict]) -> dict[str, Any]:
         "change_pct": round(avg_change, 2),
         "indices": indices_info,
         "weight": 0.30,
+        "available": True,
     }
 
 
@@ -66,7 +72,7 @@ def _calc_sector_rotation_score(sector_ranking: list[dict]) -> dict[str, Any]:
     基于上涨板块数 / 总板块数
     """
     if not sector_ranking:
-        return {"score": 50, "note": "板块数据不可用"}
+        return {"score": 50, "note": "板块数据不可用", "available": False}
 
     total = len(sector_ranking)
     gain_count = sum(1 for s in sector_ranking if float(s.get("change_pct", 0)) > 0)
@@ -86,6 +92,7 @@ def _calc_sector_rotation_score(sector_ranking: list[dict]) -> dict[str, Any]:
         "fall_count": fall_count,
         "avg_change_pct": round(avg_change, 2),
         "weight": 0.25,
+        "available": True,
     }
 
 
@@ -104,21 +111,43 @@ def _calc_capital_flow_score(northbound: dict, sector_ranking: list[dict]) -> di
     nb_score = max(0, min(100, 50 + nb_net / 1_0000_0000 * 0.5))
 
     # 板块主力净流入(单位: 元)
+    sector_available = bool(sector_ranking)
     sector_main_net = sum(float(s.get("main_net_inflow", 0) or 0) for s in sector_ranking) if sector_ranking else 0
     # 板块主力净流入评分: 100亿 → 100, 0 → 50, -100亿 → 0
     sector_score = max(0, min(100, 50 + sector_main_net / 1_0000_0000 * 0.5))
 
-    # 综合: 北向 50% + 板块主力 50%
-    score = (nb_score + sector_score) / 2
+    # A-08(2026-11-17):北向停更后, 旧实现把 nb_score 固定 50 再与板块各占一半 →
+    # 「资金」维度被系统性拉向 50(板块真值 60 被稀释成 55), 而前端直接展示这个数。
+    # 现在按**可得数据**归一:北向缺失 → 资金分 = 板块分(权重 nb=0 / sector=1);
+    # 两者都缺 → 占位 50 且 available=False(由调用方判为"这一维没数据")。
+    if nb_available and sector_available:
+        score = (nb_score + sector_score) / 2
+        missing: list[str] = []
+    elif sector_available:
+        score = sector_score
+        missing = ["northbound"]
+    elif nb_available:
+        # 板块榜单临时拉取失败(与北向永久停更不同): 保留原口径 ——
+        # 缺失维按中性 50 加权, 不把单侧信号放大成满格判断。
+        score = (nb_score + 50.0) / 2
+        missing = ["sector_main_flow"]
+    else:
+        score = 50.0
+        missing = ["northbound", "sector_main_flow"]
 
     return {
         "score": round(score, 1),
         "northbound_net": round(nb_net / 1_0000_0000, 2) if nb_available else None,  # 亿元
         "northbound_available": nb_available,
         "sector_main_net": round(sector_main_net / 1_0000_0000, 2),
-        "northbound_score": round(nb_score, 1),
-        "sector_score": round(sector_score, 1),
+        "northbound_score": round(nb_score, 1) if nb_available else None,
+        "sector_score": round(sector_score, 1) if sector_available else None,
         "weight": 0.25,
+        # 维度可用性:至少一路资金数据可用才算"这一维有数据";
+        # complete=False 表示口径不完整(缺哪一路见 missing), 前端据此标注。
+        "available": nb_available or sector_available,
+        "complete": nb_available and sector_available,
+        "missing": missing,
     }
 
 
@@ -128,7 +157,7 @@ def _calc_sentiment_score(sentiment: dict) -> dict[str, Any]:
     基于涨跌家数比
     """
     if not sentiment or sentiment.get("sentiment") == "--":
-        return {"score": 50, "note": "情绪数据不可用"}
+        return {"score": 50, "note": "情绪数据不可用", "available": False}
 
     # 2026-11-08 修复：上游在指数代理路径下会把 rise_count/fall_count 置为 None
     # （counts_available=False，表示"没拿到涨跌家数"而不是"0 只上涨"）。
@@ -136,13 +165,13 @@ def _calc_sentiment_score(sentiment: dict) -> dict[str, Any]:
     # key 存在且为 None 时返回 None → int(None) 抛 TypeError → /api/market/assessment 500。
     # 注意：早退条件是 sentiment == "--"，而代理路径返回的是"偏空/偏多"，走不到早退。
     if sentiment.get("counts_available") is False:
-        return {"score": 50, "note": "涨跌家数不可用（上游未返回计数）"}
+        return {"score": 50, "note": "涨跌家数不可用（上游未返回计数）", "available": False}
 
     rise = int(sentiment.get("rise_count") or 0)
     fall = int(sentiment.get("fall_count") or 0)
     total = rise + fall
     if total == 0:
-        return {"score": 50, "note": "无涨跌家数数据"}
+        return {"score": 50, "note": "无涨跌家数数据", "available": False}
 
     ratio = rise / total
     score = ratio * 100
@@ -154,6 +183,7 @@ def _calc_sentiment_score(sentiment: dict) -> dict[str, Any]:
         "ratio": round(ratio, 3),
         "sentiment": sentiment.get("sentiment", ""),
         "weight": 0.20,
+        "available": True,
     }
 
 
@@ -163,13 +193,47 @@ def _calc_thermometer(
     capital_score: dict,
     sentiment_score: dict,
 ) -> dict[str, Any]:
-    """综合计算大盘温度计(0-100)"""
+    """综合计算大盘温度计(0-100)
+
+    A-08(2026-11-17):各维度缺失时 `_calc_*` 只回 50 + note, 固定权重加总后
+    全缺恰好得到 50.0 → `level=中性` / `action=观望,等待方向`。
+    **用缺失数据生成了投资结论**, 比空态更有害。现在:
+      - 每维带 `available` 标记, 顶层输出 `data_quality.available_dims`;
+      - 一维都没有时不再给方向结论(level/action 改为"数据不足"), 并用
+        `score_available=False` 显式告诉调用方"这个数字不要当结论用"
+        (score 仍保留加权值以兼容既有契约, 但任何消费方都应先看 score_available)。
+    """
     total_score = (
         index_score.get("score", 50) * index_score.get("weight", 0.30) +
         sector_score.get("score", 50) * sector_score.get("weight", 0.25) +
         capital_score.get("score", 50) * capital_score.get("weight", 0.25) +
         sentiment_score.get("score", 50) * sentiment_score.get("weight", 0.20)
     )
+
+    components = {
+        "index_trend": index_score,
+        "sector_rotation": sector_score,
+        "capital_flow": capital_score,
+        "sentiment": sentiment_score,
+    }
+    # 显式 False 才算缺失;字段缺省视为可用(兼容外部手工构造的 component 字典,
+    # 生产路径里四个 _calc_* 都会显式写 available)。
+    available_dims = sum(1 for c in components.values() if c.get("available") is not False)
+    score_available = available_dims > 0
+
+    if not score_available:
+        return {
+            "score": round(total_score, 1),
+            "level": "数据不足",
+            "action": "四维数据全部缺失,不评分、不给出方向判断",
+            "score_available": False,
+            "data_quality": {
+                "available_dims": 0,
+                "total_dims": 4,
+                "missing_dims": sorted(components.keys()),
+            },
+            "components": components,
+        }
 
     # 温度等级
     if total_score >= 80:
@@ -192,12 +256,15 @@ def _calc_thermometer(
         "score": round(total_score, 1),
         "level": level,
         "action": action,
-        "components": {
-            "index_trend": index_score,
-            "sector_rotation": sector_score,
-            "capital_flow": capital_score,
-            "sentiment": sentiment_score,
+        "score_available": True,
+        "data_quality": {
+            "available_dims": available_dims,
+            "total_dims": 4,
+            "missing_dims": sorted(
+                name for name, c in components.items() if c.get("available") is False
+            ),
         },
+        "components": components,
     }
 
 
@@ -309,8 +376,12 @@ async def get_market_assessment() -> dict[str, Any]:
     score = thermometer.get("score", 50)
     level = thermometer.get("level", "中性")
 
+    # A-08(2026-11-17):四维全缺时 thermometer 的 score 只是占位值, 不能再拿它
+    # 分支出"市场震荡,方向不明,观望为主"这种结论 —— 那是用缺失数据下判断。
+    if thermometer.get("score_available") is False:
+        assessment = "四维数据全部缺失,暂不给出研判结论(不是中性行情)"
     # 综合研判
-    if score >= 70:
+    elif score >= 70:
         assessment = "市场情绪过热,短期可能面临回调压力,建议控制仓位"
     elif score >= 55:
         assessment = "市场偏强,可适度参与,关注景气板块"
@@ -323,7 +394,10 @@ async def get_market_assessment() -> dict[str, Any]:
 
     # 板块轮动信号
     sectors = thermometer.get("components", {}).get("sector_rotation", {})
-    if sectors.get("gain_count", 0) > sectors.get("fall_count", 0) * 2:
+    if sectors.get("available") is False:
+        # 没有板块数据时不能给"板块分化"(那也是一个结论)
+        sector_signal = "板块数据不可用,无法判断轮动方向"
+    elif sectors.get("gain_count", 0) > sectors.get("fall_count", 0) * 2:
         sector_signal = "板块普涨"
     elif sectors.get("fall_count", 0) > sectors.get("gain_count", 0) * 2:
         sector_signal = "板块普跌"
