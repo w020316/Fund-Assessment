@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
 try:
     import akshare as ak
@@ -35,6 +35,26 @@ class ResponseMeta(BaseModel):
     timestamp: str = ""
 
 
+# M-03(2026-11-17):这是**乐观默认**,不是质量评估结果。
+# 只适用于"取数成功、但没有单独评估质量"的端点(如纯转发上游一次真值)。
+# ⚠ 任何**可能返回空列表/空字典/降级**的端点必须显式传 quality_score
+# (通常用 _rows_quality(...)), 不要依赖这个默认 —— 否则"抓取失败"会拿到
+# 80 分 + degraded=False, 前端无法区分"确实没有数据"与"没拿到数据"。
+# 本轮**不**把默认值改成 fail-closed(50/0):全文件 60+ 处调用点会一起翻成
+# degraded, 把健康端点误标成降级。已确认这是有意的范围收敛, 记为遗留项。
+_DEFAULT_QUALITY = 80.0
+
+
+def _rows_quality(rows: Any, base: float = _DEFAULT_QUALITY) -> float:
+    """按"有没有拿到行"给质量分:空 → 0.0(降级), 非空 → base。
+
+    A-07(2026-11-17):/hot_stocks、/hot_stocks_signal、/news、/global_news 此前
+    取到空列表也走 `_build_meta` 的乐观默认 80 分, 前端于是拿到
+    `degraded=false` + 空列表, 把"抓取失败"读成"今天没有"。
+    """
+    return float(base) if rows else 0.0
+
+
 def _build_meta(
     data_source: str,
     cached: bool = False,
@@ -43,7 +63,11 @@ def _build_meta(
     extra: dict | None = None,
 ) -> dict:
     """构建响应元数据"""
-    resolved_quality = quality_score if quality_score is not None else (100.0 if cached else 80.0)
+    resolved_quality = (
+        quality_score
+        if quality_score is not None
+        else (100.0 if cached else _DEFAULT_QUALITY)
+    )
     meta = ResponseMeta(
         data_source=data_source,
         quality_score=resolved_quality,
@@ -466,6 +490,16 @@ async def _fetch_hot_stocks() -> dict:
     return payload
 
 
+def _hot_stocks_rows(payload: Any) -> list:
+    """三个榜单合并成一行列表: **三个都为空**才算"没拿到数据"。"""
+    if not isinstance(payload, dict):
+        return []
+    rows: list = []
+    for key in ("top_gainers", "top_losers", "top_volume"):
+        rows.extend(payload.get(key) or [])
+    return rows
+
+
 @router.get("/hot_stocks")
 async def hot_stocks():
     cache_key = "market:hot_stocks"
@@ -474,13 +508,27 @@ async def hot_stocks():
         if is_stale:
             _schedule_refresh(cache_key, _fetch_hot_stocks, "hot_stocks")
         source = cache.get(_HOT_STOCKS_SOURCE_KEY) or "eastmoney"
-        return {"data": cached, "_meta": _build_meta(source, cached=True, stale=is_stale)}
+        return {
+            "data": cached,
+            "_meta": _build_meta(
+                source, cached=True, stale=is_stale,
+                # 缓存命中非空时沿用 _build_meta(cached=True) 的 100 分约定,
+                # 只有"缓存的也是空集合"才降到 0(degraded)
+                quality_score=_rows_quality(_hot_stocks_rows(cached), base=100.0),
+            ),
+        }
     # P1 修复(2026-07-31):整个函数体包裹,确保模型构造/cache.set 异常也返回空数据而非 500
     try:
         payload = await _fetch_hot_stocks()
         cache.set(cache_key, payload)
         source = cache.get(_HOT_STOCKS_SOURCE_KEY) or "eastmoney"
-        return {"data": payload, "_meta": _build_meta(source, cached=False)}
+        return {
+            "data": payload,
+            "_meta": _build_meta(
+                source, cached=False,
+                quality_score=_rows_quality(_hot_stocks_rows(payload)),
+            ),
+        }
     except Exception as e:
         logger.warning(f"hot_stocks failed: {e}")
         return {"data": HotStocksResponse(top_gainers=[], top_losers=[], top_volume=[]).model_dump(), "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
@@ -989,7 +1037,13 @@ async def news(
     source_key = f"{cache_key}:source"
     cached = cache.get(cache_key)
     if cached is not None:
-        return {"data": cached, "_meta": _build_meta(cache.get(source_key) or "eastmoney", cached=True)}
+        return {
+            "data": cached,
+            "_meta": _build_meta(
+                cache.get(source_key) or "eastmoney", cached=True,
+                quality_score=_rows_quality(cached, base=100.0),
+            ),
+        }
     try:
         if not code:
             data = await asyncio.to_thread(ds2.get_global_news)
@@ -1001,7 +1055,10 @@ async def news(
             source = _meta_source("news")
         cache.set(cache_key, result, ttl=120)
         cache.set(source_key, source, ttl=660)
-        return {"data": result, "_meta": _build_meta(source, cached=False)}
+        return {
+            "data": result,
+            "_meta": _build_meta(source, cached=False, quality_score=_rows_quality(result)),
+        }
     except Exception as e:
         logger.warning(f"news failed: {e}")
         return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
@@ -1013,14 +1070,23 @@ async def global_news():
     source_key = f"{cache_key}:source"
     cached = cache.get(cache_key)
     if cached is not None:
-        return {"data": cached, "_meta": _build_meta(cache.get(source_key) or "eastmoney", cached=True)}
+        return {
+            "data": cached,
+            "_meta": _build_meta(
+                cache.get(source_key) or "eastmoney", cached=True,
+                quality_score=_rows_quality(cached, base=100.0),
+            ),
+        }
     try:
         data = await asyncio.to_thread(ds2.get_global_news)
         result = [NewsItem(**item) for item in data]
         cache.set(cache_key, result, ttl=120)
         source = _meta_source("global_news")
         cache.set(source_key, source, ttl=660)
-        return {"data": result, "_meta": _build_meta(source, cached=False)}
+        return {
+            "data": result,
+            "_meta": _build_meta(source, cached=False, quality_score=_rows_quality(result)),
+        }
     except Exception as e:
         logger.warning(f"global_news failed: {e}")
         return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
@@ -1031,7 +1097,10 @@ async def hot_stocks_signal():
     cache_key = "market:hot_stocks_signal"
     cached = cache.get(cache_key)
     if cached is not None:
-        return {"data": cached, "_meta": _build_meta("ths", cached=True)}
+        return {
+            "data": cached,
+            "_meta": _build_meta("ths", cached=True, quality_score=_rows_quality(cached, base=100.0)),
+        }
     try:
         data_source = "ths"
         data = await asyncio.to_thread(ds2.get_hot_stocks_ths)
@@ -1042,7 +1111,10 @@ async def hot_stocks_signal():
             data_source = "eastmoney"
             result = [HotStockSignalItem(**item) for item in data]
         cache.set(cache_key, result)
-        return {"data": result, "_meta": _build_meta(data_source, cached=False)}
+        return {
+            "data": result,
+            "_meta": _build_meta(data_source, cached=False, quality_score=_rows_quality(result)),
+        }
     except Exception as e:
         logger.warning(f"hot_stocks_signal failed: {e}")
         return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
