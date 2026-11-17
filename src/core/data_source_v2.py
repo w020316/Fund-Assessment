@@ -639,18 +639,23 @@ def get_stock_ranking_em(sort_field: str = "f3", sort_order: int = 0, count: int
         items = data.get("data", {}).get("diff", [])
         result: list[dict] = []
         for item in items:
+            # M-04(2026-11-17):东财 clist 对退市/停牌股会把 f2/f3 等直接返回 "-",
+            # 实测 100 行样本里 **21 行 f2='-'**(PT金田A/国华退/ST星源…)。
+            # 旧实现 `_safe_float(item.get("f2", 0))` 一律填 0 → 前端渲染成
+            # "价格 0.00 / 涨幅 0.00%", 把"没拿到"画成"今天不涨不跌"。
+            # 口径与 30abf5c(宽表改 None)对齐: 数值缺失 → None, code/name 仍是字符串。
             result.append({
                 "code": _safe_str(item.get("f12", "")),
                 "name": _safe_str(item.get("f14", "")),
-                "price": _safe_float(item.get("f2", 0)),
-                "change_pct": _safe_float(item.get("f3", 0)),
-                "change": _safe_float(item.get("f4", 0)),
-                "volume": _safe_float(item.get("f5", 0)),
-                "amount": _safe_float(item.get("f6", 0)),
-                "high": _safe_float(item.get("f15", 0)),
-                "low": _safe_float(item.get("f16", 0)),
-                "open": _safe_float(item.get("f17", 0)),
-                "prev_close": _safe_float(item.get("f18", 0)),
+                "price": _opt_float(item.get("f2")),
+                "change_pct": _opt_float(item.get("f3")),
+                "change": _opt_float(item.get("f4")),
+                "volume": _opt_float(item.get("f5")),
+                "amount": _opt_float(item.get("f6")),
+                "high": _opt_float(item.get("f15")),
+                "low": _opt_float(item.get("f16")),
+                "open": _opt_float(item.get("f17")),
+                "prev_close": _opt_float(item.get("f18")),
             })
         if result:
             _cache_set(cache_key, result, 15)

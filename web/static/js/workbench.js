@@ -675,11 +675,16 @@
       el.innerHTML = '<div class="wb-empty"><b>板块数据暂不可用</b><br>上游未返回行业板块行情，请稍后刷新。</div>';
       return;
     }
-    var sorted = items.slice().sort(function (a, b) { return Number(b.change_pct || 0) - Number(a.change_pct || 0); });
+    /* M-04(2026-11-17):缺失值不得按 0 参与排序 —— 否则"没拿到涨跌幅"会被排进
+       "领跌"里, 还会被画成 0.00%。口径: 有值的按涨跌幅降序在前, 缺失固定排末尾。 */
+    var hasPct = items.filter(function (s) { return isNum(s.change_pct); });
+    var noPct = items.filter(function (s) { return !isNum(s.change_pct); });
+    var sorted = hasPct.slice().sort(function (a, b) { return b.change_pct - a.change_pct; })
+      .concat(noPct);
     var up = sorted.slice(0, 6);
-    var down = sorted.slice(-6).reverse();
+    var down = hasPct.slice(Math.max(0, hasPct.length - 6)).reverse();
     var maxAbs = 1;
-    sorted.forEach(function (s) { maxAbs = Math.max(maxAbs, Math.abs(Number(s.change_pct) || 0)); });
+    hasPct.forEach(function (s) { maxAbs = Math.max(maxAbs, Math.abs(s.change_pct)); });
     el.innerHTML = '<div class="wb-heat-cols">'
       + '<div><div class="wb-heat-title is-up"><span>领涨</span><span>涨跌幅</span></div>' + sectorRows(up, maxAbs) + '</div>'
       + '<div><div class="wb-heat-title is-down"><span>领跌</span><span>涨跌幅</span></div>' + sectorRows(down, maxAbs) + '</div>'
@@ -688,9 +693,9 @@
 
   function sectorRows(list, maxAbs) {
     return list.map(function (s) {
-      var v = Number(s.change_pct);
+      var v = s.change_pct;              /* 保持 null, 交给 pctText/clsOf 渲染「—」 */
       var c = clsOf(v);
-      var w = Math.max(3, Math.round(Math.abs(v) / maxAbs * 100));
+      var w = isNum(v) ? Math.max(3, Math.round(Math.abs(v) / maxAbs * 100)) : 0;
       return '<div class="wb-row">'
         + '<span class="wb-row-name">' + esc(s.sector || '—') + '</span>'
         + '<span class="wb-bar ' + c + '"><i style="width:' + w + '%"></i></span>'
@@ -718,7 +723,7 @@
   }
 
   function hotGainRow(s) {
-    var v = Number(s.change_pct);
+    var v = s.change_pct;                /* M-04: null 不转 0, 由 pctText 渲染「—」 */
     var c = clsOf(v);
     var code = s.code || '';
     return '<button type="button" class="wb-hot-row" data-code="' + esc(code) + '" title="查看 ' + esc(s.name || code) + ' 详情">'
@@ -729,13 +734,13 @@
   }
 
   function hotVolRow(s) {
-    var v = Number(s.change_pct);
+    var v = s.change_pct;                /* M-04: 同上 */
     var c = clsOf(v);
     var code = s.code || '';
     return '<button type="button" class="wb-hot-row" data-code="' + esc(code) + '" title="查看 ' + esc(s.name || code) + ' 详情">'
       + '<span class="wb-hot-name">' + esc(s.name || '—') + '<span>' + esc(code) + '</span></span>'
       + '<span class="wb-hot-num ' + c + '">' + esc(pctText(v)) + '</span>'
-      + '<span class="wb-hot-num">' + esc(fmtYuanAmount(Number(s.amount))) + '</span>'
+      + '<span class="wb-hot-num">' + esc(fmtYuanAmount(s.amount)) + '</span>'
       + '</button>';
   }
 

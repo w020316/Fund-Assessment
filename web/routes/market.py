@@ -254,12 +254,14 @@ class IndexRealtimeItem(BaseModel):
 
 
 class HotStocksItem(BaseModel):
+    """热门股条目。数值字段可为 None —— 上游对退市/停牌股返回 `-`,
+    缺失必须如实为空(前端渲染「—」), 不能强制成 0 冒充"0.00%"。M-04。"""
     code: str
     name: str
-    price: float
-    change_pct: float
-    volume: float
-    amount: float
+    price: float | None = None
+    change_pct: float | None = None
+    volume: float | None = None
+    amount: float | None = None
 
 
 class HotStocksResponse(BaseModel):
@@ -494,10 +496,11 @@ async def _fetch_hot_stocks() -> dict:
         return HotStocksItem(
             code=_safe_str(item.get("code")),
             name=_safe_str(item.get("name")),
-            price=_safe_float(item.get("price")),
-            change_pct=_safe_float(item.get("change_pct")),
-            volume=_safe_float(item.get("volume")),
-            amount=_safe_float(item.get("amount")),
+            # M-04: `_opt_float` 只把"真的缺失"变成 None, 有值语义不变
+            price=opt_float(item.get("price")),
+            change_pct=opt_float(item.get("change_pct")),
+            volume=opt_float(item.get("volume")),
+            amount=opt_float(item.get("amount")),
         )
 
     payload = HotStocksResponse(

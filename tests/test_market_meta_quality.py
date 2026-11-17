@@ -156,3 +156,71 @@ def test_default_quality_constant_is_optimistic_and_named():
     assert meta["degraded"] is False
     # 显式传 0 时必须是降级
     assert market._build_meta("x", quality_score=0.0)["degraded"] is True
+
+
+# ===== M-04(2026-11-17):上游 `-` 占位不得被伪造成 0 =====
+
+class TestMissingQuoteFieldsStayNone:
+    """实测东财 clist 100 行样本中 21 行 `f2='-'`(PT金田A/国华退/ST星源…)。
+    旧实现 `_safe_float(item.get("f2", 0))` 一律填 0 → 前端渲染"价格 0.00 / 涨幅 0.00%"。"""
+
+    def test_dash_placeholder_becomes_none(self, monkeypatch):
+        import src.core.data_source_v2 as ds2
+
+        class _Resp:
+            def json(self):
+                return {"data": {"diff": [
+                    {"f12": "000001", "f14": "PT金田A", "f2": "-", "f3": "-", "f4": "-",
+                     "f5": "-", "f6": "-", "f15": "-", "f16": "-", "f17": "-", "f18": "-"},
+                    {"f12": "600519", "f14": "贵州茅台", "f2": 1435.26, "f3": 1.77, "f4": 25.0,
+                     "f5": 1000, "f6": 1.4e9, "f15": 1440.0, "f16": 1420.0,
+                     "f17": 1430.0, "f18": 1410.26},
+                ]}}
+
+        ds2._cache.clear()
+        monkeypatch.setattr(ds2, "em_get", lambda *a, **k: _Resp())
+
+        rows = ds2.get_stock_ranking_em("f3", 0, 2)
+
+        assert rows[0]["code"] == "000001"          # code/name 仍是字符串
+        assert rows[0]["price"] is None, "`-` 被填成了 0.0"
+        assert rows[0]["change_pct"] is None
+        assert rows[0]["amount"] is None
+        # 正常数据数值不变(回归保护)
+        assert rows[1]["price"] == 1435.26
+        assert rows[1]["change_pct"] == 1.77
+
+    def test_hot_stocks_endpoint_keeps_none(self, monkeypatch):
+        async def fake_fetch():
+            return {
+                "top_gainers": [{"code": "000001", "name": "PT金田A",
+                                 "price": None, "change_pct": None,
+                                 "volume": None, "amount": None}],
+                "top_losers": [],
+                "top_volume": [],
+            }
+
+        monkeypatch.setattr(market, "_fetch_hot_stocks", fake_fetch)
+        data = client.get("/api/market/hot_stocks").json()["data"]
+
+        row = data["top_gainers"][0]
+        assert row["price"] is None and row["change_pct"] is None
+        assert row["volume"] is None and row["amount"] is None
+
+    def test_scan_new_high_skips_rows_without_change_pct(self, monkeypatch):
+        """缺 change_pct 的行既不能比较(null >= 3 会 TypeError), 也不该算"新高"。"""
+        from web.routes import strategy
+
+        monkeypatch.setattr(strategy, "_HAS_STRATEGIES", False)
+        monkeypatch.setattr(strategy.ds2, "get_stock_ranking_em", lambda **kw: [
+            {"code": "000001", "name": "PT金田A", "change_pct": None,
+             "volume": None, "amount": None},
+            {"code": "600519", "name": "贵州茅台", "change_pct": 5.2,
+             "volume": 1000, "amount": 1.4e9},
+        ])
+
+        resp = client.get("/api/strategy/scan/new_high")
+
+        assert resp.status_code == 200
+        rows = resp.json()
+        assert [r["stock_code"] for r in rows] == ["600519"]

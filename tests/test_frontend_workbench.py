@@ -511,3 +511,37 @@ def test_frontend_js_files_pass_node_syntax_check():
             [node, "--check", str(path)], capture_output=True, text=True, timeout=60, check=False,
         )
         assert proc.returncode == 0, f"{rel} 语法错误: {proc.stderr}"
+
+
+# ===== M-04(2026-11-17):缺失值不得在前端被 Number() 归一成 0 =====
+
+def test_hot_rows_do_not_coerce_missing_pct_to_zero():
+    """`Number(null) === 0` → `clsOf(0)` 空类 + `pctText(0)` 返回 `+0.00%`,
+    把"没拿到涨跌幅"画成"今天不涨不跌"。函数体内不得再出现 `Number(s.change_pct)`。"""
+    for signature in ("function hotGainRow(s) {", "function hotVolRow(s) {"):
+        body = _function_body(_js(), signature)
+        assert "Number(s.change_pct)" not in body, f"{signature} 仍把 null 归一成 0"
+        assert "var v = s.change_pct;" in body
+        assert "pctText(v)" in body
+        assert "clsOf(v)" in body
+
+    # 成交额同理(缺失时 fmtYuanAmount 自己会渲染「—」)
+    vol_body = _function_body(_js(), "function hotVolRow(s) {")
+    assert "fmtYuanAmount(Number(s.amount))" not in vol_body
+    assert "fmtYuanAmount(s.amount)" in vol_body
+
+
+def test_sector_rows_keep_null_and_width_zero():
+    body = _function_body(_js(), "function sectorRows(list, maxAbs) {")
+    assert "Number(s.change_pct)" not in body
+    assert "var v = s.change_pct;" in body
+    assert "isNum(v) ?" in body, "柱宽必须对缺失值单独处理, 不能按 0 算"
+
+
+def test_sector_sorting_puts_missing_last():
+    """缺失值按 0 参与排序会被排进"领跌"; 必须显式分离并固定排末尾。"""
+    body = _function_body(_js(), "function renderSectors(items, meta) {")
+    assert "isNum(s.change_pct)" in body
+    assert "hasPct" in body and "noPct" in body
+    assert ".concat(noPct)" in body, "缺失项必须固定排末尾"
+    assert "Number(s.change_pct || 0)" not in body

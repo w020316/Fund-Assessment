@@ -26,8 +26,12 @@
   }
 
   function rowHTML(item, idx, flowUnavailable, ratioUnavailable) {
-    const pct = Number(item.change_pct);
-    const sign = pct > 0 ? '+' : '';
+    // M-04: `Number(null) === 0` 会把"没拿到涨跌幅"渲染成 0.00%(还带绿/红中性色);
+    // 先判"是否真的有数", 缺失一律渲染「—」(旧实现在 NaN 分支会把「—」拼成「—%」)。
+    const pctKnown = item.change_pct !== null && item.change_pct !== undefined
+      && isFinite(Number(item.change_pct));
+    const pct = pctKnown ? Number(item.change_pct) : null;
+    const sign = pctKnown && pct > 0 ? '+' : '';
     // 2026-11-08：资金流字段不可用时渲染 '—'，不能渲染 0.00 —— 用户会把
     // "没拿到资金流"读成"主力净流入为零"，这是两件完全不同的事。
     const flowCell = flowUnavailable
@@ -38,7 +42,7 @@
       : '<td>' + esc(isFinite(Number(item.large_order_ratio)) ? Number(item.large_order_ratio).toFixed(2) : '—') + '</td>';
     return '<tr><td>' + esc(idx + 1) + '</td>'
       + '<td>' + esc(item.sector) + '</td>'
-      + '<td class="' + pctCls(pct) + '">' + esc(sign + (isFinite(pct) ? pct.toFixed(2) : '—')) + '%</td>'
+      + '<td class="' + pctCls(pct) + '">' + (pctKnown ? esc(sign + pct.toFixed(2) + '%') : '—') + '</td>'
       + flowCell + ratioCell + '</tr>';
   }
 

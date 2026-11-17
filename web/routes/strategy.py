@@ -472,14 +472,19 @@ async def scan_new_high(request: Request):
             raise _scan_unavailable("新高扫描")
         items: list[NewHighItem] = []
         for s in top:
-            if s.get("change_pct", 0) >= 3:
-                items.append(NewHighItem(
-                    stock_code=s.get("code", ""),
-                    stock_name=s.get("name", ""),
-                    change_pct=s.get("change_pct", 0),
-                    volume=s.get("volume", 0),
-                    amount=s.get("amount", 0),
-                ))
+            # M-04: 排名数值字段缺失时为 None(退市/停牌股);None 既不能比较大小,
+            # 也不该被当成"涨幅 ≥3% 的新高" —— 直接跳过。
+            pct = s.get("change_pct")
+            if not isinstance(pct, (int, float)) or pct < 3:
+                continue
+            items.append(NewHighItem(
+                stock_code=s.get("code", ""),
+                stock_name=s.get("name", ""),
+                change_pct=pct,
+                # 量额是次要字段, 缺失沿用 0(它们不参与"是不是新高"的判断)
+                volume=s.get("volume") or 0.0,
+                amount=s.get("amount") or 0.0,
+            ))
         return items
     try:
         import akshare as ak
