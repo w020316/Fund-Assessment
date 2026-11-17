@@ -545,3 +545,44 @@ def test_sector_sorting_puts_missing_last():
     assert "hasPct" in body and "noPct" in body
     assert ".concat(noPct)" in body, "缺失项必须固定排末尾"
     assert "Number(s.change_pct || 0)" not in body
+
+
+# ===== C-06(2026-11-17):相关性不得借用"红=涨"的语义色 =====
+
+def _corr_block(html: str) -> str:
+    """截取 corrColor 定义 + 紧随的图例段落(到相关性表格开始为止)。
+
+    刻意不用全文子串: 同一个文件里别的图表确实该用涨跌色, 只有这一块不该。
+    """
+    start = html.index("const corrColor =")
+    # 到本函数的 catch 块为止: 覆盖 corrColor + 相关矩阵 + 图例 + 口径脚注
+    end = html.index("} catch (e)", start)
+    return html[start:end]
+
+
+def test_corr_color_uses_risk_scale_not_up_down_semantics():
+    """`--color-up` 的站内语义是"涨"。用它表示"相关性高=风险高"会让用户按
+    红涨绿跌的直觉把高相关读成利好; `#FBBF24` 还是写死 hex(违背 token 规范)。"""
+    block = _corr_block(_index())
+
+    assert "--color-up" not in block, "相关性仍在使用「涨」的语义色"
+    assert "--color-down" not in block
+    assert "--qf-sem-critical" in block
+    assert "--qf-sem-warn" in block
+    assert "#FBBF24" not in block, "仍存在写死 hex(应为 var(--qf-sem-warn))"
+
+
+def test_corr_card_explains_colors_are_not_gain_loss():
+    """换色不够, 还要**主动澄清** —— 同一屏里权重是青色、相关是暖色, 容易被误读。"""
+    block = _corr_block(_index())
+
+    assert "不表示涨跌" in block
+    assert "分散度风险" in block
+
+
+def test_qf_sem_tokens_exist_in_tokens_css():
+    """断言的 token 必须真的存在(否则改成了未定义变量 = 无色)。"""
+    tokens = (ROOT / "web/static/css/tokens.css").read_text(encoding="utf-8")
+
+    assert "--qf-sem-warn" in tokens
+    assert "--qf-sem-critical" in tokens
