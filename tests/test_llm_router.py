@@ -1684,3 +1684,67 @@ class TestGeminiSystemInstruction:
         ])
 
         assert "systemInstruction" not in payload
+
+
+# ===== B-02(2026-11-17):协议开关手误不得静默回落 =====
+
+class TestProtocolSwitchIsObservable:
+    """`LY77625_PROTOCOL` 除了精确的 `gemini` 以外的任何取值都会落到 OpenAI 兼容层
+    —— 而那层正是这个开关要绕开的(频繁 502)。Render 的 env 只能手填, 所以:
+    误填要 WARN、生效协议要进 /api/health/llm, 不能让运维靠猜。"""
+
+    @staticmethod
+    def _build(monkeypatch, protocol):
+        import importlib
+
+        from src.core import llm_router as lr
+
+        env = {"LY77625_API_KEY": "ly-test-key"}
+        if protocol is not None:
+            env["LY77625_PROTOCOL"] = protocol
+        monkeypatch.setattr(lr.os, "environ", dict(env))
+        warnings: list[str] = []
+        monkeypatch.setattr(lr.logger, "warning", lambda msg, *a, **k: warnings.append(str(msg)))
+        monkeypatch.setattr(lr.logger, "info", lambda msg, *a, **k: None)
+        router = lr.LLMRouter()
+        return router, warnings
+
+    def test_typo_warns_and_falls_back_to_openai(self, monkeypatch):
+        router, warnings = self._build(monkeypatch, "gemini-pro")
+
+        status = router.health_check()["ly77625"]
+        assert status["protocol"] == "openai"
+        assert status["provider_type"] == "openai"
+        assert warnings, "误填协议必须打 WARN(静默回落等于让人猜)"
+        assert "gemini-pro" in warnings[0]
+        assert "gemini" in warnings[0]
+
+    def test_exact_gemini_uses_native_protocol(self, monkeypatch):
+        router, warnings = self._build(monkeypatch, "gemini")
+
+        status = router.health_check()["ly77625"]
+        assert status["protocol"] == "gemini"
+        assert status["provider_type"] == "gemini"
+        assert status["base_url"].endswith("/v1beta")
+        assert warnings == []
+
+    def test_case_and_space_insensitive(self, monkeypatch):
+        router, warnings = self._build(monkeypatch, "  GEMINI  ")
+
+        assert router.health_check()["ly77625"]["protocol"] == "gemini"
+        assert warnings == []
+
+    def test_unset_defaults_to_openai_without_warning(self, monkeypatch):
+        router, warnings = self._build(monkeypatch, None)
+
+        assert router.health_check()["ly77625"]["protocol"] == "openai"
+        assert warnings == [], "未设置时不应产生噪声告警"
+
+    def test_warning_never_leaks_api_key(self, monkeypatch):
+        router, warnings = self._build(monkeypatch, "gemini2")
+
+        assert warnings
+        joined = "".join(warnings)
+        assert "ly-test-key" not in joined
+        # 任何 key 片段(前缀 4 位以上)也不得出现
+        assert "ly-t" not in joined

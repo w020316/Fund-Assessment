@@ -72,6 +72,9 @@ class LLMProvider:
     enabled: bool = True
     rpm: int = 0  # 每分钟请求数限制(0=不限),用于令牌桶限流
     free_tier: bool = False  # 是否使用免费档(仅用于状态展示,不影响调度)
+    # B-02(2026-11-17):实际生效的协议名(gemini/openai)。渲染到 /api/health/llm,
+    # 让"env 填错了但静默回落"这件事在运维页可见, 而不是只能靠猜。
+    protocol: str = ""
     api_keys: list = field(default_factory=list)  # 多Key轮换(逗号分隔的多个key)
     _fail_count: int = field(default=0, repr=False)
     _last_fail_time: float = field(default=0.0, repr=False)
@@ -565,7 +568,19 @@ class LLMRouter:
         # 故提供 LY77625_PROTOCOL=gemini 协议开关(默认 openai,保持既有行为)。
         ly_key = os.getenv("LY77625_API_KEY", "")
         if ly_key:
-            ly_gemini = os.getenv("LY77625_PROTOCOL", "openai").strip().lower() == "gemini"
+            # B-02(2026-11-17):协议开关的手误必须**说出来**。
+            # 旧写法 `... == "gemini"` 对其它任何取值(gemini-pro / Gemini2 / gemni)
+            # 都静默回落 OpenAI 兼容层 —— 而那层正是这个开关要绕开的(频繁 502)。
+            # Render 的 env 只能在控制台手填, 误填概率不低, 静默等于让人猜。
+            raw_protocol = os.getenv("LY77625_PROTOCOL", "")
+            ly_protocol = (raw_protocol or "openai").strip().lower()
+            ly_gemini = ly_protocol == "gemini"
+            if raw_protocol.strip() and not ly_gemini:
+                logger.warning(
+                    f"[llm] LY77625_PROTOCOL={raw_protocol!r} 不是 gemini, "
+                    "按 OpenAI 兼容层处理(该层对 ly.77625.xyz 频繁 502;"
+                    "若要原生协议请精确填 gemini)"
+                )
             self.add_provider(LLMProvider(
                 name="ly77625",
                 provider_type=ProviderType.GEMINI if ly_gemini else ProviderType.OPENAI,
@@ -578,7 +593,13 @@ class LLMRouter:
                 priority=95,
                 timeout=int(os.getenv("LY77625_TIMEOUT", "30")),
                 free_tier=True,
+                protocol="gemini" if ly_gemini else "openai",
             ))
+            # 生效协议落到日志(只打协议与 base_url, 沿用 _sanitize_error 的纪律:
+            # 绝不打 api_key / Authorization / key 片段)
+            logger.info(
+                f"[llm] ly77625 生效协议={ly_protocol} base_url={self._providers[-1].base_url}"
+            )
 
         # 按优先级排序
         self._providers.sort(key=lambda p: p.priority)
@@ -1210,6 +1231,8 @@ class LLMRouter:
                 "rpm": provider.rpm,
                 "has_multi_keys": len(provider.api_keys) > 1,
                 "provider_type": provider.provider_type.value,
+                # B-02: 实际生效协议(gemini/openai), 运维页可见
+                "protocol": provider.protocol or provider.provider_type.value,
                 "free_tier": provider.free_tier,
                 "same_upstream_as": SAME_UPSTREAM.get(provider.name),
             }
