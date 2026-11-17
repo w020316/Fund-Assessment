@@ -424,11 +424,15 @@ class TestFetchFundHoldingsEm:
         assert result[1]["change"] == "不变"
 
     def test_change_unknown_falls_back_to_unchanged(self):
-        """未知变化标记 → 不变"""
+        """D-05(2026-11-17):未知变化标记 → None(无法判定), 不得写成「不变」。
+
+        函数名沿用历史命名(避免改名被误读成增删用例);行为已按 D-05 反转:
+        旧断言 `== "不变"` 锁定的正是缺陷本体 —— 把"解析不出"当成"确认没变化"。
+        """
         html = "<table><tbody>" + _em_row(1, "600519", "贵州茅台", "9.85", "100", "100000", "Q", "XYZ") + "</tbody></table>"
         with patch.object(fund_holdings._EM_FUND_SESSION, "get", _mock_em_get(_em_text(html))):
             result = _fetch_fund_holdings_em("110022")
-        assert result[0]["change"] == "不变"
+        assert result[0]["change"] is None
 
     def test_empty_weight_becomes_zero(self):
         """占净值比例为空 → weight 0.0"""
@@ -539,7 +543,9 @@ class TestFetchFundHoldingsAk:
         assert result[0]["code"] == "600519"
         assert result[0]["name"] == "贵州茅台"
         assert result[0]["weight"] == 9.85
-        assert result[0]["change"] == "不变"
+        # D-05(2026-11-17):akshare 表**没有**持仓变化列, 旧断言 `== "不变"` 是
+        # 把"没这个字段"写成"确认没变化" —— 改为 None(无法判定)。
+        assert result[0]["change"] is None
 
     def test_none_df_returns_empty(self):
         with patch.object(fund_holdings, "_HAS_AKSHARE", True), \
@@ -1071,3 +1077,82 @@ class TestFetchFundHoldingsEmNewTableLayout:
         assert len(result) == 1
         assert result[0]["code"] == "00883"
         assert result[0]["quarter"] == "2026年3季度"
+
+
+# ===== D-05(2026-11-17):「无法判定」不得写成「确认没变」 =====
+
+def _new_layout_row(idx, code, name, weight, hold_amount, hold_value, info_cell):
+    """2026-11 改版后的行:新增「最新价/涨跌幅/相关资讯」列, 变化信息在「相关资讯」里。"""
+    return (
+        f"<tr><td>{idx}</td><td>{code}</td><td>{name}</td>"
+        f"<td>{weight}%</td><td>{hold_amount}</td><td>{hold_value}</td>"
+        f"<td>12.34</td><td>+1.23%</td>"
+        f"<td>{info_cell}</td></tr>"
+    )
+
+
+class TestHoldingChangeHonesty:
+    """实测证据: 东财改版后 110022 / 161725 各 10 只全部返回「不变」,
+    因为解析器在「相关资讯」列里找不到 新进/增持/减持 关键词就无条件兜底。"""
+
+    def test_change_detail_link_only_is_not_unchanged(self):
+        """只有 `变动详情` 链接、没有关键词 → 不得是「不变」(应区分"未披露"/"无法判定")。"""
+        html = (
+            "<table><tbody>"
+            + _new_layout_row(
+                1, "600519", "贵州茅台", "9.85", "1,234", "1,234,567",
+                "<a href='//data.eastmoney.com/notices/detail/600519.html'>变动详情</a>",
+            )
+            + "</tbody></table>"
+        )
+        with patch.object(fund_holdings._EM_FUND_SESSION, "get", _mock_em_get(_em_text(html))):
+            result = _fetch_fund_holdings_em("110022")
+
+        assert len(result) == 1
+        assert result[0]["change"] == "未披露", (
+            "「相关资讯」里有变动详情入口但解析不出关键词, 必须标未披露, 不能写不变"
+        )
+        assert result[0]["change"] != "不变"
+
+    def test_no_change_cell_at_all_is_none(self):
+        """连「相关资讯」列都没有 → None(无法判定), 不是「不变」。"""
+        html = (
+            "<table><tbody>"
+            + _new_layout_row(1, "600519", "贵州茅台", "9.85", "1,234", "1,234,567", "")
+            + "</tbody></table>"
+        )
+        with patch.object(fund_holdings._EM_FUND_SESSION, "get", _mock_em_get(_em_text(html))):
+            result = _fetch_fund_holdings_em("110022")
+
+        assert result[0]["change"] is None
+
+    def test_disclosed_increase_still_parsed(self):
+        """真披露了「增持」就必须识别出来(不能为了修 D-05 把真值也丢掉)。"""
+        html = (
+            "<table><tbody>"
+            + _new_layout_row(
+                1, "600519", "贵州茅台", "9.85", "1,234", "1,234,567",
+                "变动详情 增持 1.2%",
+            )
+            + "</tbody></table>"
+        )
+        with patch.object(fund_holdings._EM_FUND_SESSION, "get", _mock_em_get(_em_text(html))):
+            result = _fetch_fund_holdings_em("110022")
+
+        assert result[0]["change"] == "增持"
+
+    def test_legacy_seven_column_layout_still_parses(self):
+        """老版 7 列布局(变化在最后一列)仍要正确解析: 三值 + 不变。"""
+        html = (
+            "<table><tbody>"
+            + _em_row(1, "600519", "贵州茅台", "9.85", "1,234", "1,234,567", "2026Q2", "减持")
+            + _em_row(2, "000858", "五粮液", "7.23", "2,000", "2,000,000", "2026Q2", "不变")
+            + "</tbody></table>"
+        )
+        with patch.object(fund_holdings._EM_FUND_SESSION, "get", _mock_em_get(_em_text(html))):
+            result = _fetch_fund_holdings_em("110022")
+
+        assert result[0]["change"] == "减持"
+        assert result[1]["change"] == "不变"
+        assert result[0]["weight"] == 9.85
+        assert result[1]["hold_value"] == 2000000.0

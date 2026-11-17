@@ -150,7 +150,15 @@ def _fetch_fund_holdings_em(fund_code: str, topline: int = 10) -> list[dict]:
                     weight = float(cells[weight_idx].replace("%", "") or 0)
                     hold_amount = float(cells[weight_idx + 1].replace(",", "").replace("--", "0") or 0)
                     hold_value = float(cells[weight_idx + 2].replace(",", "").replace("--", "0") or 0)
-                    change = "不变"
+                    # D-05(2026-11-17):东财改版后「持仓变化」不再是逐行文本列, 而是
+                    # 「相关资讯」列里的一个 `变动详情` 链接;旧实现匹配不到
+                    # 新进/增持/减持 就**无条件落到 "不变"** —— 把"无法判定"写成了
+                    # "确认没变化"(实测 110022 / 161725 各 10 只全部返回 不变)。
+                    # 现在三态:
+                    #   匹配到 新进/增持/减持/不变 → 用该值(上游真的披露了);
+                    #   出现 `变动详情` 但解析不出关键词 → "未披露"(有这个入口但没给文字);
+                    #   两者都没有 → None(无法判定, 前端渲染「—」)。
+                    change: str | None = None
                     for c in cells:
                         if "新进" in c:
                             change = "新进"
@@ -161,6 +169,11 @@ def _fetch_fund_holdings_em(fund_code: str, topline: int = 10) -> list[dict]:
                         if "减持" in c:
                             change = "减持"
                             break
+                        if "不变" in c:
+                            change = "不变"
+                            break
+                    if change is None and any("变动详情" in c for c in cells):
+                        change = "未披露"
                     result.append({
                         "code": code,
                         "name": name,
@@ -222,7 +235,9 @@ def _fetch_fund_holdings_ak(fund_code: str) -> list[dict]:
                 "hold_amount": hold_amount,
                 "hold_value": hold_value,
                 "quarter": quarter_str,
-                "change": "不变",
+                # D-05:akshare 的 fund_portfolio_hold_em 表里**没有**持仓变化列,
+                # 旧实现固定写 "不变" 属于凭空断言 → 无法判定一律 None。
+                "change": None,
             })
         return result[:10]
     except Exception as e:
