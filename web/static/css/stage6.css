@@ -12,8 +12,8 @@
   background: var(--bg-card, rgba(255,255,255,0.04));
   border: 1px solid var(--border, rgba(255,255,255,0.08));
   border-radius: 10px;
-  padding: 14px 16px;
-  margin-bottom: 14px;
+  padding: 16px 16px;
+  margin-bottom: 16px;
 }
 .st6-summary-big {
   font-size: 24px; font-weight: 700; line-height: 1.3;
@@ -85,12 +85,12 @@
 }
 .st6-metric-grid {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 10px; margin-bottom: 14px;
+  gap: 12px; margin-bottom: 16px;
 }
 .st6-metric-card {
   background: var(--bg-card, rgba(255,255,255,0.04));
   border: 1px solid var(--border, rgba(255,255,255,0.08));
-  border-radius: 10px; padding: 10px 12px;
+  border-radius: 10px; padding: 12px 12px;
 }
 .st6-metric-label { font-size: 11px; color: var(--text-muted, #8b92a8); }
 .st6-metric-value { font-size: 18px; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
@@ -106,7 +106,7 @@
 #st6AttrBody { min-height: 217px; }
 .st6-risk-deep { color: var(--hud-up, #F87171); }   /* 深回撤等警示值 */
 .st6-note {
-  font-size: 11px; color: var(--text-muted, #8b92a8); margin-top: 6px;
+  font-size: 11px; color: var(--text-muted, #8b92a8); margin-top: 8px;
 }
 
 /* ===== STAGE7: rebalance ===== 再平衡建议单(目标权重 + 偏离阈值) */
@@ -128,10 +128,10 @@
   font-size: 12px; color: var(--text-secondary, #c3c9d9);
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.st6-rb-suggests { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.st6-rb-suggests { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
 .st6-rb-suggest {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  padding: 8px 10px; border-radius: 8px; font-size: 12px;
+  padding: 8px 12px; border-radius: 8px; font-size: 12px;
   background: var(--bg-card, rgba(255,255,255,0.04));
   border: 1px solid var(--border, rgba(255,255,255,0.08));
 }
@@ -145,7 +145,7 @@
 /* ===== STAGE6: xray-report ===== 重叠矩阵与暴露表 */
 
 .st6-xray-warn {
-  border-left: 3px solid var(--color-warning, #f59e0b); padding: 6px 10px; margin-bottom: 6px;
+  border-left: 3px solid var(--color-warning, #f59e0b); padding: 8px 12px; margin-bottom: 8px;
   font-size: 12px; color: var(--text-secondary, #c3c9d9);
   background: rgba(245, 158, 11, 0.08); border-radius: 0 6px 6px 0;
 }
@@ -160,11 +160,11 @@
 /* ===== STAGE6: ledger-io ===== 账本导入导出 */
 
 .st6-ledger-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.st6-diff-block { margin-top: 10px; font-size: 12px; }
+.st6-diff-block { margin-top: 12px; font-size: 12px; }
 .st6-diff-title { font-weight: 600; margin: 8px 0 4px; }
 .st6-diff-item { padding: 2px 0; }
 .st6-confirm-row {
-  display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap;
+  display: flex; gap: 8px; align-items: center; margin-top: 12px; flex-wrap: wrap;
 }
 .st6-confirm-row input[type="checkbox"] { width: 18px; height: 18px; min-width: 18px; min-height: 18px; }
 
@@ -172,7 +172,7 @@
    分组条/分组头/小计/管理面板;44px 触摸目标、长名称省略不撑破 375px。 */
 
 .st6-group-bar {
-  display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 4px 0 10px;
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 4px 0 12px;
 }
 .st6-group-chip {
   min-height: 44px; display: inline-flex; align-items: center; gap: 4px;
@@ -193,7 +193,7 @@
 }
 .st6-group-head {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  min-height: 44px; padding: 6px 10px; cursor: pointer; user-select: none;
+  min-height: 44px; padding: 8px 12px; cursor: pointer; user-select: none;
 }
 .st6-group-head:focus-visible { outline: 2px solid var(--accent-blue, #3b82f6); outline-offset: -2px; }
 .st6-group-head-card {
@@ -240,9 +240,9 @@
 .st6-attr-tabs { flex-wrap: wrap; }
 .st6-attr-total {
   display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline;
-  font-size: 13px; margin-bottom: 10px;
+  font-size: 13px; margin-bottom: 12px;
 }
-.st6-attr-row { padding: 10px 0; border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08)); }
+.st6-attr-row { padding: 12px 0; border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08)); }
 .st6-attr-row:last-of-type { border-bottom: none; }
 .st6-attr-head {
   display: flex; justify-content: space-between; gap: 8px;
@@ -252,7 +252,7 @@
 .st6-attr-val { font-weight: 700; font-variant-numeric: tabular-nums; }
 .st6-attr-track {
   height: 10px; border-radius: 5px; background: rgba(255, 255, 255, 0.06);
-  margin-top: 6px; overflow: hidden;
+  margin-top: 8px; overflow: hidden;
 }
 /* QA 复核观察项: 移除 transition: width(layout 属性动效违反 motion 铁律)。
    该进度条随父卡 innerHTML 重渲染整体重建, transition 在重建元素上从不生效,
@@ -275,7 +275,7 @@
    =================================================================== */
 /* ===== STAGE5-R2: scope ===== 模拟股票账户与真实基金持仓的口径说明 */
 .notice-info {
-  padding: 10px 12px;
+  padding: 12px 12px;
   font-size: 12px;
   line-height: 1.6;
   color: var(--text-secondary);
@@ -372,7 +372,7 @@
   align-items: flex-start;
   gap: 10px;
   min-height: 44px;
-  padding: 10px 12px;
+  padding: 12px 12px;
   text-align: left;
   font: inherit;
   color: inherit;
@@ -409,7 +409,7 @@
   text-decoration-color: var(--text-muted, #8b92a8);
   opacity: 0.75;
 }
-.st6-onb-note { margin-top: 10px; font-size: 11px; color: var(--text-muted, #8b92a8); }
+.st6-onb-note { margin-top: 12px; font-size: 11px; color: var(--text-muted, #8b92a8); }
 @media (max-width: 768px) {
   .st6-onb-steps { grid-template-columns: 1fr; }
 }

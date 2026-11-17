@@ -856,3 +856,35 @@ def test_stage6_bare_warning_amber_is_tokenized():
     for bad in ("background: #f59e0b", "color: #f59e0b", "dashed #f59e0b", "solid #f59e0b"):
         assert bad not in stripped, f"stage6.css 仍有裸警告色: {bad}"
     assert css.count("var(--color-warning, #f59e0b)") >= 5
+
+
+def test_layout_spacing_on_4px_grid_slice():
+    """STAGE5 遗留#1 分片一: 布局级间距(卡片/区块/面板/列表行的 padding/margin)
+    10/14/18/6 → 12/16/16/8。锁定本分片已改的声明不回退;
+    内联控件(.btn/.tab/.badge/.kbd/input)与 2px 细调按文档口径有意保留。"""
+    checks = {
+        "web/static/css/prediction.css": [
+            "padding: 12px 16px;", "margin: 0 0 12px;", "padding: 16px 0;",
+        ],
+        "web/static/css/stage6.css": [
+            "padding: 16px 16px;", "margin-bottom: 16px;", "padding: 12px 12px;",
+        ],
+        "web/static/css/workbench.css": [
+            "padding: 12px 12px 12px;", "padding: 16px 8px;", "padding: 16px 8px; min-height: 48px;",
+        ],
+    }
+    for rel, needles in checks.items():
+        css = (ROOT / rel).read_text(encoding="utf-8")
+        for n in needles:
+            assert n in css, f"{rel} 缺少 {n}(布局级间距应已上 4px 网格)"
+    # 旧值不得回归
+    regressions = {
+        "web/static/css/prediction.css": ["padding: 12px 14px;", "padding: 14px 0;", "margin: 0 0 10px;"],
+        "web/static/css/stage6.css": ["padding: 14px 16px;", "padding: 10px 12px;"],
+        "web/static/css/workbench.css": ["padding: 18px 8px;", "padding: 14px 6px;"],
+        "web/static/index.html": ["margin-bottom:14px; }", "margin-bottom:10px; }"],
+    }
+    for rel, bads in regressions.items():
+        css = (ROOT / rel).read_text(encoding="utf-8")
+        for b in bads:
+            assert b not in css, f"{rel} 出现已下网的旧值: {b}"
