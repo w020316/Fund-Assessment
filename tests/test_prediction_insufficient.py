@@ -137,6 +137,11 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     fake = _FakeLLM()
     monkeypatch.setattr("src.core.llm_router.get_llm_router", lambda: fake)
 
+    # 2026-11-17 收尾: generate_prediction 新增调用 ds2.get_sector_ranking_full()
+    # 取全量板块广度。默认 mock 为 None(回退口径), 否则它会发真实网络请求,
+    # 把真实板块数据混进三信号合成, 冲掉本文件既有集成测试的断言语义。
+    monkeypatch.setattr(ds2, "get_sector_ranking_full", lambda: None)
+
     class _Env:
         def __init__(self) -> None:
             self.store = store
@@ -159,6 +164,13 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             monkeypatch.setattr(ds2, "get_market_sentiment", _boom)
             monkeypatch.setattr(ds2, "get_index_realtime", lambda: [])
             monkeypatch.setattr(ds2, "get_sector_ranking", lambda: [])
+            # 全量板块源同样 mock 为"取不到"(None) → 回退 top_n 口径,
+            # insufficient 场景仍应按三信号缺失判 skipped。
+            monkeypatch.setattr(ds2, "get_sector_ranking_full", lambda: None)
+
+        def set_breadth_full(self, breadth: list[dict]) -> None:
+            """生产路径用: 提供受控全量板块(模拟 get_sector_ranking_full 成功)。"""
+            monkeypatch.setattr(ds2, "get_sector_ranking_full", lambda: list(breadth))
 
     return _Env()
 
@@ -236,3 +248,80 @@ def test_generate_prediction_one_valid_signal_still_persists(env, monkeypatch) -
     assert env.upsert_spy.call_count == 1
     assert len(env.store.list_predictions(days=30)) == 1
     assert len(env.llm.calls) == 1  # deep 档正常调用
+
+
+# ===== 2026-11-17: sector_momentum 必须能看空（全量广度 vs 涨幅榜口径）=====
+#
+# 线上实证: prediction 返回 sector_momentum {"up":8,"down":0} verdict=bullish,
+# 而同一时刻全市场是 72 个板块上涨 / 423 个下跌。根因是它统计的是
+# payload["top_sectors"]（展示用涨幅榜前 10，全为正）—— 一个"先挑出赢家,
+# 再问赢家是否在赢"的指标, 结构上永远不可能输出 down>0。
+
+def test_sector_momentum_can_go_bearish_with_full_breadth() -> None:
+    """传全量板块时, 普跌行情必须判 bearish（旧口径做不到）。"""
+    breadth = (
+        [{"name": f"涨{i}", "change_pct": 1.5} for i in range(72)]
+        + [{"name": f"跌{i}", "change_pct": -2.0} for i in range(423)]
+        + [{"name": "平", "change_pct": 0.0}]
+    )
+    out = sig.synthesize(None, None, None, sig.DEFAULT_CONFIG, breadth_sectors=breadth)
+    reason = next(r for r in out["reasons"] if r["signal"] == "sector_momentum")
+    assert reason["verdict"] == "bearish", reason
+    assert reason["value"]["up"] == 72 and reason["value"]["down"] == 423
+    assert reason["value"]["basis"] == "full"
+    assert reason["value"]["counted"] == len(breadth)
+
+
+def test_sector_momentum_reverse_proof_top_n_only_cannot_go_bearish() -> None:
+    """反向证明: 只给涨幅榜(全为正)时, 旧口径必然 up>0/down==0, 永远 bullish。
+
+    这条锁的是"为什么必须传全量"——不是要求它输出 bearish, 而是要求
+    basis 被标成 top_n_only, 让消费方知道这不是等价证据。
+    """
+    top_only = [{"name": f"涨{i}", "change_pct": 1.0 + i * 0.1} for i in range(10)]
+    out = sig.synthesize(None, None, top_only, sig.DEFAULT_CONFIG)
+    reason = next(r for r in out["reasons"] if r["signal"] == "sector_momentum")
+    assert reason["value"]["down"] == 0
+    assert reason["verdict"] == "bullish"
+    assert reason["value"]["basis"] == "top_n_only"
+
+
+def test_sector_momentum_breadth_takes_precedence_over_top_list() -> None:
+    """同时给两个列表时, 必须以全量为准（不能被涨幅榜覆盖）。"""
+    top_gainers = [{"name": "半导体", "change_pct": 5.8}] * 8
+    breadth = [{"name": f"跌{i}", "change_pct": -3.0} for i in range(50)]
+    out = sig.synthesize(None, None, top_gainers, sig.DEFAULT_CONFIG, breadth_sectors=breadth)
+    reason = next(r for r in out["reasons"] if r["signal"] == "sector_momentum")
+    assert reason["value"]["basis"] == "full"
+    assert reason["verdict"] == "bearish"
+
+
+def test_generate_prediction_passes_full_breadth_to_synthesize(env) -> None:
+    """生产链集成锁: generate_prediction 必须把 ds2.get_sector_ranking_full()
+    的全量广度真正传进 synthesize —— 普跌行情下 sector_momentum 判 bearish,
+    落库方向为 down(旧口径结构性不可能输出该结果, 只有全量真的传到位才成立)。
+    """
+    today = trading_days_ago(0)
+    now = cst_on(today)
+    env.set_trading_day(now)
+    # sentiment / index / top_sectors 全部 mock 为缺失 → 唯一有效信号是板块动量,
+    # 其判定完全来自受控全量广度, 断言不会被其它信号稀释。
+    env.set_all_sources_missing()
+    breadth = (
+        [{"name": f"涨{i}", "change_pct": 1.2} for i in range(8)]
+        + [{"name": f"跌{i}", "change_pct": -2.5} for i in range(50)]
+    )
+    env.set_breadth_full(breadth)
+
+    out = svc.generate_prediction(now=now)
+
+    assert out["skipped"] is False
+    assert out["direction"] == "down"  # 普跌广度 → 看空
+    assert env.upsert_spy.call_count == 1
+
+    reason = next(r for r in out["rule_reasons"] if r["signal"] == "sector_momentum")
+    assert reason["verdict"] == "bearish", reason
+    assert reason["value"]["up"] == 8
+    assert reason["value"]["down"] == 50
+    assert reason["value"]["basis"] == "full"
+    assert reason["value"]["counted"] == len(breadth)  # 全量计数, 不被 top_n 切片

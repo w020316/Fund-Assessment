@@ -431,11 +431,20 @@ def generate_prediction(now: _dt.datetime | None = None) -> dict[str, Any]:
         return {"trade_date": today, "skipped": True, "reason": reason}
 
     payload, missing = _collect_market_payload()
+    # 板块广度必须用全量(496 个), 不能用 payload["top_sectors"](展示用涨幅榜前 10:
+    # 全为正 → sector_momentum 永远 up>0/down=0, 结构性无法看空)。
+    # 取不到全量时不传, synthesize 会回退旧口径并在 value.basis 标 "top_n_only"。
+    try:
+        breadth = ds2.get_sector_ranking_full() or None
+    except Exception as e:  # noqa: BLE001 - 取数失败不应打断预测主链
+        logger.warning(f"generate_prediction: 全量板块取数失败, 回退 top_n 口径: {e}")
+        breadth = None
     syn = sig.synthesize(
         payload.get("sentiment") or None,
         payload.get("indices") or None,
         payload.get("top_sectors") or None,
         sig.load_signal_config(),
+        breadth_sectors=breadth,
     )
     # P0 QF3-01 守卫: 三信号全缺失 → 无证据可依, 不调 LLM(不消耗额度)、不落库。
     # 落库一条"全盲却确定"的预测会污染 /verify 的准确率分子分母, 必须阻断。

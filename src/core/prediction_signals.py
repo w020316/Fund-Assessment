@@ -153,10 +153,17 @@ def synthesize(
     indices: list[dict[str, Any]] | None,
     sectors: list[dict[str, Any]] | None,
     cfg: dict[str, Any] | None = None,
+    breadth_sectors: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """三信号合成: 返回 {direction, confidence, rule_direction, rule_confidence,
     composite, reasons[], valid_signals, insufficient}。
     reasons 每项 {signal, value, verdict} 可追溯。
+
+    `sectors` vs `breadth_sectors` (2026-11-17 修):
+    `sectors` 是**展示用的涨幅榜**(top_sectors, 10 条全为正)。用它统计"涨跌板块净条数"
+    在结构上不可能得到 down>0 —— 该信号永远无法看空(线上实测 up=8/down=0 而全市场
+    72 涨/423 跌)。生产调用必须传 `breadth_sectors`(全量, 见 get_sector_ranking_full);
+    未传时回退到旧口径以兼容既有调用, 但在 value 里标 `basis="top_n_only"` 以示可追溯。
 
     数据不足口径(P0 QF3-01): 三信号全部 missing 时 valid_signals==0 且
     insufficient 为 True, direction/confidence/rule_* 一律返回 None。
@@ -210,21 +217,31 @@ def synthesize(
     else:
         reasons.append({"signal": "sentiment_score", "value": None, "verdict": "missing"})
 
-    # ③ 板块动量(前 top_n 板块中涨跌板块净条数)
+    # ③ 板块动量(涨跌板块净条数)
+    # 全量优先: breadth_sectors 是市场全部板块(当前 496 个), 才是"广度";
+    # sectors 是展示用涨幅榜, 只在没有全量时回退, 并标记 basis 以便追溯。
     sector_up = 0
     sector_down = 0
     mom_threshold = float(cfg["sector"]["momentum_threshold_pct"])
     top_n = int(cfg["sector"]["top_n"])
     ranked: list[dict[str, Any]] = []
-    if isinstance(sectors, list):
-        for s in sectors:
+    breadth_basis = "top_n_only"
+    source = breadth_sectors if breadth_sectors else sectors
+    if isinstance(source, list) and source:
+        for s in source:
             try:
                 chg = float(s.get("change_pct", 0.0) or 0.0)
             except (TypeError, ValueError):
                 continue
             ranked.append({"name": str(s.get("name", "")), "change_pct": chg})
-        ranked.sort(key=lambda x: x["change_pct"], reverse=True)
-        for s in ranked[:top_n]:
+        if breadth_sectors:
+            # 全量口径: 不切片, 统计全部板块
+            breadth_basis = "full"
+            counted = ranked
+        else:
+            # 兼容回退: 旧口径只数涨幅前 top_n 个(结构性无法看空, 仅供老调用方)
+            counted = sorted(ranked, key=lambda x: x["change_pct"], reverse=True)[:top_n]
+        for s in counted:
             if s["change_pct"] >= mom_threshold:
                 sector_up += 1
             elif s["change_pct"] <= -mom_threshold:
@@ -240,7 +257,10 @@ def synthesize(
         composite += delta
         reasons.append({
             "signal": "sector_momentum",
-            "value": {"up": sector_up, "down": sector_down},
+            # basis 让消费方能区分"全市场广度"与"只看涨幅榜"两种口径,
+            # 后者结构性无法看空, 不应被当成等价证据。
+            "value": {"up": sector_up, "down": sector_down,
+                      "basis": breadth_basis, "counted": len(counted)},
             "verdict": verdict,
         })
     else:
