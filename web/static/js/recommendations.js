@@ -159,7 +159,7 @@
         cell.appendChild(badge);
         const btn = document.createElement('button');
         btn.className = 'btn btn-sm';
-        btn.style.cssText = 'padding:2px 8px;min-height:28px;margin-left:4px;';
+        btn.style.cssText = 'padding:2px 8px;min-height:28px;margin:4px 0 0;';
         btn.setAttribute('aria-label', '行内编辑 ' + code + ' 的份额');
         btn.textContent = '改';
         btn.addEventListener('click', function () { editShareRow(code); });

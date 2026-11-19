@@ -6109,7 +6109,7 @@ async function loadFundData() {
     </tr>
     <tr id="chart-row-${p.fund_code}" data-chart-for="${escapeHtml(p.fund_code)}" style="display:none;">
       <td colspan="8" style="padding:0;border:none;">
-        <div id="fund-chart-${p.fund_code}" style="height:220px;width:100%;"></div>
+        <div id="fund-chart-${p.fund_code}" style="position:relative;overflow:hidden;height:220px;width:100%;"></div>
       </td>
     </tr>`;
   }).join('');
@@ -6145,6 +6145,12 @@ async function toggleFundChart(fundCode) {
     row.style.display = '';
     const container = document.getElementById(`fund-chart-${fundCode}`);
     if (!container) return;
+    // 先销毁旧图表再清空 DOM: 否则旧 canvas 还在引用、占位文案会占满 220px，
+    // 新图表被追加到占位块下方，看起来像"图表盖住后续持仓行"（2026-11-19 线上复现）。
+    if (_fundCharts[fundCode]) {
+      try { _fundCharts[fundCode].remove(); } catch (e) { /* 已随 innerHTML 移除 */ }
+      delete _fundCharts[fundCode];
+    }
     container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px;">加载净值走势中...</div>';
     try {
       // 并行:加载图表库 + 获取历史数据
@@ -6162,8 +6168,9 @@ async function toggleFundChart(fundCode) {
         time: d.date,
         value: parseFloat(d.nav || d.acc_nav || 0)
       }));
-      // 销毁旧图表
-      if (_fundCharts[fundCode]) { _fundCharts[fundCode].remove(); delete _fundCharts[fundCode]; }
+      // 清掉"加载中"占位: lightweight-charts 是 append 模式，不清空会让占位块
+      // 占满 220px 高，图表被追加到其下方并溢出覆盖后续表格行。
+      container.innerHTML = '';
       // 图表专用色（canvas 渲染不接受 CSS var()，暂不入 token）：轴/网格=#8B92A8/#2A3142，主线=#00D9FF
       const chart = LightweightCharts.createChart(container, {
         layout: { background: { type: 'solid', color: 'transparent' }, textColor: '#8B92A8', fontSize: 11 },
@@ -6740,43 +6747,69 @@ async function viewHoldings(fundCode, fundName) {
   }
 
   // 重仓股表格
+  // 后端契约: weight/total_weight/top5_weight 均为**百分数**(如 7.96 表示 7.96%),
+  // 前端不得再 ×100(2026-11-19 复现: 7.96% 被渲染成 796.00%、集中度 3585.00%)。
   const holdingsRows = holdings.slice(0, 10).map((h, i) => {
     const name = h.name || h.stock_name || '—';
     const code = h.code || h.stock_code || '—';
-    const weight = (h.weight || 0) * 100;
-    const changePct = h.change_pct || 0;
-    const c = changeColor(changePct);
+    const weight = Number.isFinite(h.weight) ? h.weight
+      : (Number.isFinite(h.total_weight) ? h.total_weight : 0);
+    // change_pct 缺失时回退 h.change(季度报告里可能是"未披露"字符串) —— 缺失显示「—」不填 0
+    const rawChange = Number.isFinite(h.change_pct) ? h.change_pct
+      : (Number.isFinite(h.change) ? h.change : null);
+    const changeHtml = rawChange == null
+      ? '<span style="color:var(--text-muted);" title="上游未披露">—</span>'
+      : `<span style="color:${changeColor(rawChange)};">${rawChange >= 0 ? '+' : ''}${rawChange.toFixed(2)}%</span>`;
     return `<tr>
       <td>${i + 1}</td>
       <td>${code}</td>
       <td>${escapeHtml(name)}</td>
       <td>${weight.toFixed(2)}%</td>
-      <td style="color:${c};">${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%</td>
+      <td>${changeHtml}</td>
     </tr>`;
   }).join('');
 
-  // 板块分布
+  // 板块分布: 后端字段为 sector/total_weight(百分数), 无涨跌幅时显示「—」
   const sectorRows = sectors.slice(0, 8).map(s => {
     const name = s.name || s.sector || '—';
-    const weight = (s.weight || 0) * 100;
-    const changePct = s.change_pct || s.avg_change || 0;
-    const c = changeColor(changePct);
+    const weight = Number.isFinite(s.weight) ? s.weight
+      : (Number.isFinite(s.total_weight) ? s.total_weight : 0);
+    const rawChange = Number.isFinite(s.change_pct) ? s.change_pct
+      : (Number.isFinite(s.avg_change) ? s.avg_change : null);
+    const changeHtml = rawChange == null
+      ? '<span style="color:var(--text-muted);" title="上游未披露">—</span>'
+      : `<span style="color:${changeColor(rawChange)};">${rawChange >= 0 ? '+' : ''}${rawChange.toFixed(2)}%</span>`;
     return `<tr>
-      <td>${name}</td>
+      <td>${escapeHtml(name)}</td>
       <td>${weight.toFixed(2)}%</td>
-      <td style="color:${c};">${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%</td>
+      <td>${changeHtml}</td>
     </tr>`;
   }).join('');
+
+  // sector_rotation 后端是**数组** [{sector, weight, change_pct, rank, signal}],
+  // 不是单个 {signal, reason} 对象(2026-11-19 契约对齐)。
+  const rotationList = Array.isArray(sectorRotation) ? sectorRotation : [];
+  const rotationHtml = rotationList.length ? `<div class="card mb-16" style="padding:12px;background:rgba(245,158,11,0.05);border:1px solid var(--accent);">
+      <div style="font-size:13px;font-weight:600;color:var(--accent);margin-bottom:6px;">板块轮动信号</div>
+      ${rotationList.slice(0, 6).map(r => {
+        const cp = Number.isFinite(r.change_pct) ? r.change_pct : null;
+        const cpText = cp == null ? '—' : `${cp >= 0 ? '+' : ''}${cp.toFixed(2)}%`;
+        return `<div style="font-size:12px;color:var(--text-secondary);line-height:1.8;">
+          ${escapeHtml(r.sector || '—')} · <b>${escapeHtml(r.signal || '—')}</b>
+          · 排名 ${r.rank || '—'}/${r.total_sectors || '—'} · ${cpText}
+        </div>`;
+      }).join('')}
+    </div>` : '';
 
   bodyEl.innerHTML = `
     <div class="grid-4" style="margin-bottom:16px;">
       <div class="card" style="text-align:center;padding:12px;">
         <div style="font-size:11px;color:var(--text-muted);">前5集中度</div>
-        <div style="font-size:20px;font-weight:700;color:var(--accent);">${((concentration.top5_weight || 0) * 100).toFixed(2)}%</div>
+        <div style="font-size:20px;font-weight:700;color:var(--accent);">${(concentration.top5_weight || 0).toFixed(2)}%</div>
       </div>
       <div class="card" style="text-align:center;padding:12px;">
         <div style="font-size:11px;color:var(--text-muted);">前10集中度</div>
-        <div style="font-size:20px;font-weight:700;color:var(--accent);">${((concentration.top10_weight || 0) * 100).toFixed(2)}%</div>
+        <div style="font-size:20px;font-weight:700;color:var(--accent);">${(concentration.top10_weight || 0).toFixed(2)}%</div>
       </div>
       <div class="card" style="text-align:center;padding:12px;">
         <div style="font-size:11px;color:var(--text-muted);">HHI指数</div>
@@ -6788,14 +6821,11 @@ async function viewHoldings(fundCode, fundName) {
       </div>
     </div>
 
-    ${sectorRotation.signal ? `<div class="card mb-16" style="padding:12px;background:rgba(245,158,11,0.05);border:1px solid var(--accent);">
-      <div style="font-size:13px;font-weight:600;color:var(--accent);margin-bottom:4px;">板块轮动信号</div>
-      <div style="font-size:12px;color:var(--text-secondary);">${sectorRotation.signal} - ${sectorRotation.reason || sectorRotation.description || ''}</div>
-    </div>` : ''}
+    ${rotationHtml}
 
-    ${navImpact.estimated_nav_change != null ? `<div class="card mb-16" style="padding:12px;background:rgba(6,182,212,0.05);border:1px solid var(--accent-cyan);">
+    ${navImpact.estimated_change_pct != null ? `<div class="card mb-16" style="padding:12px;background:rgba(6,182,212,0.05);border:1px solid var(--accent-cyan);">
       <div style="font-size:13px;font-weight:600;color:var(--accent-cyan);margin-bottom:4px;">净值影响预估</div>
-      <div style="font-size:12px;color:var(--text-secondary);">预估变动: <span style="color:${changeColor(navImpact.estimated_nav_change)};font-weight:600;">${navImpact.estimated_nav_change >= 0 ? '+' : ''}${navImpact.estimated_nav_change.toFixed(4)}</span></div>
+      <div style="font-size:12px;color:var(--text-secondary);">预估变动: <span style="color:${changeColor(navImpact.estimated_change_pct)};font-weight:600;">${navImpact.estimated_change_pct >= 0 ? '+' : ''}${navImpact.estimated_change_pct.toFixed(2)}%</span></div>
     </div>` : ''}
 
     <div class="grid-2">
@@ -8352,9 +8382,12 @@ async function loadDataTab() {
     return '<tr>' + cells.map((c, i) => {
       // 对涨跌幅、折溢率等数值着色
       if (typeof c === 'number' && (cfg.headers[i].includes('涨幅') || cfg.headers[i].includes('折溢率') || cfg.headers[i].includes('变化'))) {
-        return `<td style="color:${changeColor(c)}">${changeSign(c)}${fmtNum(Math.abs(c))}${cfg.headers[i].includes('%') || cfg.headers[i].includes('率') ? '%' : ''}</td>`;
+        // 涨幅/较上期变化本身就是百分数, 旧逻辑只在表头含 %/率 时补 % → 出现 "+9.99" 与 "6.09"
+        return `<td style="color:${changeColor(c)}">${changeSign(c)}${fmtNum(Math.abs(c))}${cfg.headers[i].includes('%') || cfg.headers[i].includes('率') || cfg.headers[i].includes('涨幅') || cfg.headers[i].includes('变化') ? '%' : ''}</td>`;
       }
-      if (typeof c === 'number' && c > 10000) return `<td>${fmtMoney(c)}</td>`;
+      // 用绝对值判断: 净买入为负(如 -2856 万)时旧逻辑走 fmtNum → 同列混用
+      // "5.84亿" 与 "-28,564,015.67" 两种口径(2026-11-19 实走发现)。
+      if (typeof c === 'number' && Math.abs(c) > 10000) return `<td>${fmtMoney(c)}</td>`;
       if (typeof c === 'number') return `<td>${fmtNum(c)}</td>`;
       return `<td>${escapeHtml(c)}</td>`;
     }).join('') + '</tr>';

@@ -189,13 +189,19 @@
 
 /* --- 持仓份额行内编辑(R7.1) --- */
 .pred-share-estimated {
+  /* 2026-11-19:原先 inline + nowrap 会横向溢出「份额」列, 盖住成本/现净值列。
+     改为块级并允许换行, 始终收在本单元格内。 */
+  display: block;
+  max-width: 100%;
+  margin: 4px 0 0;
+  padding: 0 4px;
   font-size: 11px;
+  line-height: 1.5;
   color: var(--color-warning, #f59e0b);
   border: 1px dashed var(--color-warning, #f59e0b);
   border-radius: 4px;
-  padding: 0 4px;
-  margin-left: 8px;
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-all;
 }
 .pred-share-edit-input {
   width: 110px;
