@@ -345,7 +345,7 @@ class TestMigrationSnapshotEastmoney:
             "2026-11-18,1487.00,1499.00,1502.00,1480.00,23150,3478123456.00",
             "2026-11-19,1499.00,1505.00,1508.00,1495.00,18000,2700000000.00",
         ]
-        with patch("src.core.data_guard.providers.eastmoney.em_get",
+        with patch("src.core.data_source_v2.em_get",
                    return_value=self._fake_em_get(klines)):
             rows = ds2._kline_em_fallback("600519", "daily", 2)
         assert len(rows) == 2
@@ -360,7 +360,7 @@ class TestMigrationSnapshotEastmoney:
         """旧契约: em_get 异常 → warning + [](不抛出)。"""
         from src.core import data_source_v2 as ds2
 
-        with patch("src.core.data_guard.providers.eastmoney.em_get",
+        with patch("src.core.data_source_v2.em_get",
                    side_effect=RuntimeError("em down")):
             assert ds2._kline_em_fallback("600519", "daily", 5) == []
 
@@ -530,3 +530,184 @@ class TestMigrationSnapshotIndex:
             rows = ds2.get_index_realtime()
         assert rows == []
         mock_health.record_failure.assert_called_once_with("index_realtime", "net down")
+
+
+# ── M4-A 绞杀迁移快照: 榜单/研报/热搜/北向 ──────────────────────────────
+
+class TestMigrationSnapshotRankingEM:
+    """M4-A: 东财榜单迁移(含 M-04 '-'→None 语义与新浪降级编排)。"""
+
+    def test_snapshot_with_delisted_dash_becomes_none(self):
+        from src.core import data_source_v2 as ds2
+
+        diff = [
+            {"f12": "600519", "f14": "贵州茅台", "f2": 1499.0, "f3": 0.6,
+             "f4": 9.0, "f5": 23150, "f6": 3478123456.0, "f15": 1505.0,
+             "f16": 1488.0, "f17": 1491.0, "f18": 1490.0},
+            {"f12": "000007", "f14": "退市股", "f2": "-", "f3": "-",
+             "f4": "-", "f5": "-", "f6": "-", "f15": "-", "f16": "-",
+             "f17": "-", "f18": "-"},
+        ]
+        fake = type("R", (), {"json": lambda s: {"data": {"diff": diff}}})()
+        with patch("src.core.data_source_v2.em_get", return_value=fake), \
+             patch.object(ds2, "_cache_get", return_value=None), \
+             patch.object(ds2, "_cache_set"):
+            rows = ds2.get_stock_ranking_em("f3", 0, 2)
+        assert rows[0]["price"] == 1499.0 and rows[0]["change_pct"] == 0.6
+        # M-04: 退市/停牌股数值缺失 → None, 不填 0
+        assert rows[1]["price"] is None and rows[1]["change_pct"] is None
+        assert rows[1]["code"] == "000007" and rows[1]["name"] == "退市股"
+
+    def test_em_error_falls_back_to_sina_with_source_mark(self):
+        from src.core import data_source_v2 as ds2
+
+        sina_rows = [{"code": "000001", "name": "平安银行", "price": 10.0}]
+        with patch("src.core.data_source_v2.em_get",
+                   side_effect=RuntimeError("em down")), \
+             patch("src.core.data_guard.providers.sina.requests.get"), \
+             patch("src.core.data_guard.providers.sina.fetch_stock_ranking_raw",
+                   return_value=sina_rows), \
+             patch.object(ds2, "_cache_get", return_value=None), \
+             patch.object(ds2, "_cache_set"), \
+             patch.object(ds2, "_mark_source") as mock_mark:
+            rows = ds2.get_stock_ranking_em("f3", 0, 1)
+        assert rows == sina_rows
+        mock_mark.assert_any_call("stock_ranking", "sina")
+
+
+class TestMigrationSnapshotRankingSina:
+    """M4-A: 新浪榜单迁移(data_health 三态口径)。"""
+
+    def _sina_items(self):
+        return [{"code": "600519", "name": "贵州茅台", "trade": "1499.00",
+                 "changepercent": "0.60", "pricechange": "9.00",
+                 "volume": "23150", "amount": "3478123456",
+                 "high": "1505.00", "low": "1488.00", "open": "1491.00",
+                 "settlement": "1490.00"}]
+
+    def test_snapshot_exact_and_health_success(self):
+        import json as _json
+
+        from src.core import data_source_v2 as ds2
+
+        fake_resp = type("R", (), {"json": lambda s: _json.loads(_json.dumps(self._sina_items()))})()
+        fake_resp.encoding = ""
+        with patch("src.core.data_guard.providers.sina.requests.get",
+                   return_value=fake_resp), \
+             patch("src.core.data_source_v2.data_health") as mock_health:
+            rows = ds2._get_stock_ranking_sina("f3", 0, 1)
+        assert rows[0] == {
+            "code": "600519", "name": "贵州茅台", "price": 1499.0,
+            "change_pct": 0.6, "change": 9.0, "volume": 23150.0,
+            "amount": 3478123456.0, "high": 1505.0, "low": 1488.0,
+            "open": 1491.0, "prev_close": 1490.0,
+        }
+        mock_health.record_success.assert_called_once_with("stock_ranking_sina", 1)
+
+    def test_exception_records_failure(self):
+        from src.core import data_source_v2 as ds2
+
+        with patch("src.core.data_guard.providers.sina.requests.get",
+                   side_effect=RuntimeError("sina down")), \
+             patch("src.core.data_source_v2.data_health") as mock_health:
+            rows = ds2._get_stock_ranking_sina("f3", 0, 1)
+        assert rows == []
+        mock_health.record_failure.assert_called_once_with("stock_ranking_sina", "sina down")
+
+
+class TestMigrationSnapshotResearch:
+    """M4-A: 东财研报迁移。"""
+
+    def test_snapshot_exact(self):
+        from src.core import data_source_v2 as ds2
+
+        payload = {"data": [{
+            "title": "白酒龙头深度", "emRatingName": "买入",
+            "predictNextTwoYearEps": 55.2, "orgSName": "中信证券",
+            "publishDate": "2026-11-18 08:00",
+        }]}
+        fake = type("R", (), {"json": lambda s: payload})()
+        with patch("src.core.data_source_v2.em_get", return_value=fake):
+            rows = ds2.get_research_reports("600519", 1, 10)
+        assert rows == [{
+            "title": "白酒龙头深度", "rating": "买入", "eps_predict": 55.2,
+            "org_name": "中信证券", "publish_date": "2026-11-18",
+        }]
+
+    def test_exception_returns_empty(self):
+        from src.core import data_source_v2 as ds2
+
+        with patch("src.core.data_source_v2.em_get",
+                   side_effect=RuntimeError("report down")):
+            assert ds2.get_research_reports("600519") == []
+
+
+class TestMigrationSnapshotThs:
+    """M4-A: 同花顺涨停池 + 北向迁移(status_code 异常/健康度/缓存口径)。"""
+
+    def test_hot_stocks_snapshot_with_unix_seal_time(self):
+        from datetime import datetime as _dt
+
+        from src.core import data_source_v2 as ds2
+
+        # Windows mktime 对 strptime 默认 1900 年会溢出, 用当天时间构造 epoch
+        seal_ts = int(_dt.now().replace(hour=9, minute=35, second=0,
+                                        microsecond=0).timestamp())
+        payload = {"status_code": 0, "data": {"info": [{
+            "code": "600519", "name": "贵州茅台", "latest": "1499.00",
+            "change_rate": "10.00", "volume": "23150",
+            "reason_type": "白酒概念", "first_limit_up_time": seal_ts,
+            "open_num": 1,
+        }]}}
+        fake = type("R", (), {"json": lambda s: payload})()
+        with patch("src.core.data_guard.providers.ths.requests.get", return_value=fake), \
+             patch("src.core.data_source_v2.data_health") as mock_health, \
+             patch.object(ds2, "_cache_get", return_value=None), \
+             patch.object(ds2, "_cache_set"):
+            rows = ds2.get_hot_stocks_ths()
+        assert rows == [{
+            "code": "600519", "name": "贵州茅台", "price": 1499.0,
+            "change_pct": 10.0, "volume": 23150.0, "reason": "白酒概念",
+            "limit_up_time": "09:35:00", "open_times": 1,
+        }]
+        mock_health.record_success.assert_called_once_with("hot_stocks_ths", 1)
+
+    def test_bad_status_code_records_failure(self):
+        from src.core import data_source_v2 as ds2
+
+        payload = {"status_code": 1, "status_msg": "filter参数不合法"}
+        fake = type("R", (), {"json": lambda s: payload})()
+        with patch("src.core.data_guard.providers.ths.requests.get", return_value=fake), \
+             patch("src.core.data_source_v2.data_health") as mock_health, \
+             patch.object(ds2, "_cache_get", return_value=None):
+            rows = ds2.get_hot_stocks_ths()
+        assert rows == []
+        assert "status_code=1" in mock_health.record_failure.call_args.args[1]
+
+    def test_northbound_snapshot(self):
+        from src.core import data_source_v2 as ds2
+
+        payload = {"data": {"list": [{
+            "date": "2026-11-18", "sh_net_inflow": 12.5,
+            "sz_net_inflow": -3.2, "net_inflow": 9.3,
+        }]}}
+        fake = type("R", (), {"json": lambda s: payload})()
+        with patch("src.core.data_guard.providers.ths.requests.get", return_value=fake):
+            assert ds2.get_northbound_flow() == {
+                "date": "2026-11-18", "sh_net_inflow": 12.5,
+                "sz_net_inflow": -3.2, "total_net_inflow": 9.3,
+            }
+
+    def test_northbound_empty_list_returns_empty_dict(self):
+        from src.core import data_source_v2 as ds2
+
+        fake = type("R", (), {"json": lambda s: {"data": {"list": []}}})()
+        with patch("src.core.data_guard.providers.ths.requests.get", return_value=fake):
+            assert ds2.get_northbound_flow() == {}
+
+    def test_northbound_exception_returns_empty_dict(self):
+        from src.core import data_source_v2 as ds2
+
+        with patch("src.core.data_guard.providers.ths.requests.get",
+                   side_effect=RuntimeError("ths down")):
+            assert ds2.get_northbound_flow() == {}

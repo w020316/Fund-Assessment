@@ -10,8 +10,17 @@ get_kline_mootdx 等内部调用方与既有测试的 patch 路径不受影响)�
 from __future__ import annotations
 
 from src.core.data_guard.contract import KlineContract, normalize_kline_row
-from src.core.data_source_v2 import _em_secid, _safe_float, em_get
+from src.core.data_source_v2 import (
+    _em_secid,
+    _opt_float,
+    _safe_float,
+    _safe_str,
+)
 from loguru import logger
+
+# em_get 走模块属性查找(_ds2.em_get): 既有测试以 monkeypatch.setattr(ds2,
+# "em_get", ...) 为契约, 迁移后 patch 目标不变(调用时解析, 值绑定会失配)
+from src.core import data_source_v2 as _ds2
 
 
 def fetch_kline_raw(symbol: str, period: str = "daily", count: int = 30) -> list[dict]:
@@ -30,7 +39,7 @@ def fetch_kline_raw(symbol: str, period: str = "daily", count: int = 30) -> list
         "end": "20500101",
     }
     try:
-        resp = em_get(url, params=params)
+        resp = _ds2.em_get(url, params=params)
         data = resp.json()
         klines = data.get("data", {}).get("klines", [])
         result: list[dict] = []
@@ -50,6 +59,84 @@ def fetch_kline_raw(symbol: str, period: str = "daily", count: int = 30) -> list
     except Exception as e:  # noqa: BLE001 - 与迁移前行为逐位一致: 失败返回 []
         logger.warning(f"_kline_em_fallback failed: {e}")
         return []
+
+
+def fetch_stock_ranking_raw(sort_field: str, sort_order: int, count: int) -> list[dict]:
+    """东财 A 股榜单取数+解析(原 get_stock_ranking_em 主体, 无缓存/无降级)。
+
+    M-04 语义保持: 停牌/退市股 f2/f3 等返回 "-" 时 → None(缺失), 不填 0。
+    异常向上抛出, 由门面统一降级到新浪并记录来源。
+    """
+    url = "https://push2.eastmoney.com/api/qt/clist/get"
+    params = {
+        "pn": 1,
+        "pz": count,
+        # 2026-11-14: 东财 clist 的 po=1 是降序、po=0 是升序，而本模块沿用新浪
+        # 约定 sort_order=0 表示降序。原样透传会得到"涨幅最低/成交额最低"（含退市股），
+        # 之前 push2 被误判不可用、总走新浪兜底所以没暴露。
+        "po": 0 if sort_order else 1,
+        "np": 1,
+        "fltt": 2,
+        "invt": 2,
+        "fid": sort_field,
+        "fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23",
+        "fields": "f2,f3,f4,f5,f6,f12,f14,f15,f16,f17,f18",
+    }
+    resp = _ds2.em_get(url, params=params)
+    data = resp.json()
+    items = data.get("data", {}).get("diff", [])
+    result: list[dict] = []
+    for item in items:
+        result.append({
+            "code": _safe_str(item.get("f12", "")),
+            "name": _safe_str(item.get("f14", "")),
+            "price": _opt_float(item.get("f2")),
+            "change_pct": _opt_float(item.get("f3")),
+            "change": _opt_float(item.get("f4")),
+            "volume": _opt_float(item.get("f5")),
+            "amount": _opt_float(item.get("f6")),
+            "high": _opt_float(item.get("f15")),
+            "low": _opt_float(item.get("f16")),
+            "open": _opt_float(item.get("f17")),
+            "prev_close": _opt_float(item.get("f18")),
+        })
+    return result
+
+
+def fetch_research_reports_raw(stock_code: str, page: int, page_size: int) -> list[dict]:
+    """东财研报取数+解析(原 get_research_reports 主体, 无缓存)。异常向上抛出。"""
+    url = "https://reportapi.eastmoney.com/report/list"
+    params = {
+        "industryCode": "*",
+        "pageSize": str(page_size),
+        "industry": "*",
+        "rating": "*",
+        "ratingChange": "*",
+        "beginTime": "",
+        "endTime": "",
+        "pageNo": str(page),
+        "fields": "",
+        "qType": 0,
+        "orgCode": "",
+        "code": stock_code,
+        "rcode": "",
+        "p": str(page),
+        "pageNum": str(page),
+        "pageNumber": str(page),
+    }
+    resp = _ds2.em_get(url, params=params)
+    data = resp.json()
+    items = data.get("data", [])
+    result: list[dict] = []
+    for item in items:
+        result.append({
+            "title": _safe_str(item.get("title")),
+            "rating": _safe_str(item.get("emRatingName", item.get("rating", ""))),
+            "eps_predict": _safe_float(item.get("predictNextTwoYearEps", 0)),
+            "org_name": _safe_str(item.get("orgSName", "")),
+            "publish_date": _safe_str(item.get("publishDate", ""))[:10],
+        })
+    return result
 
 
 class EastmoneyProvider:

@@ -53,3 +53,42 @@ def fetch_kline_raw(symbol: str, period: str = "daily", count: int = 30) -> list
     except Exception as e:  # noqa: BLE001 - 与迁移前行为逐位一致: 失败返回 []
         logger.warning(f"_kline_sina_fallback failed: {e}")
         return []
+
+
+def fetch_stock_ranking_raw(sort_field: str = "f3", sort_order: int = 0, count: int = 10) -> list[dict]:
+    """新浪 A 股榜单取数+解析(原 _get_stock_ranking_sina 主体, 无健康度副作用)。
+
+    异常向上抛出, 由门面统一 record_failure 并返回 [](行为逐位一致)。
+    """
+    url = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData"
+    params = {
+        "page": 1,
+        "num": count,
+        "sort": "changepercent" if sort_field == "f3" else "amount",
+        "asc": sort_order,
+        "node": "hs_a",
+        "symbol": "",
+        "_s_r_a": "auto",
+    }
+    resp = requests.get(url, params=params, timeout=5, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://finance.sina.com.cn/",
+    })
+    resp.encoding = "gbk"
+    items = resp.json()
+    result: list[dict] = []
+    for item in items:
+        result.append({
+            "code": _safe_str(item.get("code", "")),
+            "name": _safe_str(item.get("name", "")),
+            "price": _safe_float(item.get("trade", 0)),
+            "change_pct": _safe_float(item.get("changepercent", 0)),
+            "change": _safe_float(item.get("pricechange", 0)),
+            "volume": _safe_float(item.get("volume", 0)),
+            "amount": _safe_float(item.get("amount", 0)),
+            "high": _safe_float(item.get("high", 0)),
+            "low": _safe_float(item.get("low", 0)),
+            "open": _safe_float(item.get("open", 0)),
+            "prev_close": _safe_float(item.get("settlement", 0)),
+        })
+    return result

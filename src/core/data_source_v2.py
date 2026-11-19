@@ -462,56 +462,27 @@ def get_index_realtime() -> list[dict]:
 
 
 def get_stock_ranking_em(sort_field: str = "f3", sort_order: int = 0, count: int = 10) -> list[dict]:
+    """东财榜单门面(M4-A 绞杀迁移): 取数+解析在
+    data_guard.providers.eastmoney.fetch_stock_ranking_raw; 缓存/来源标记/
+    新浪降级编排保留于此, 签名/输出/来源口径零变更。"""
     cache_key = f"stock_ranking_{sort_field}_{sort_order}_{count}"
     cached = _cache_get(cache_key)
     if cached is not None:
         return cached
-    url = "https://push2.eastmoney.com/api/qt/clist/get"
-    params = {
-        "pn": 1,
-        "pz": count,
-        # 2026-11-14: 东财 clist 的 po=1 是降序、po=0 是升序，而本模块沿用新浪
-        # 约定 sort_order=0 表示降序。原样透传会得到"涨幅最低/成交额最低"（含退市股），
-        # 之前 push2 被误判不可用、总走新浪兜底所以没暴露。
-        "po": 0 if sort_order else 1,
-        "np": 1,
-        "fltt": 2,
-        "invt": 2,
-        "fid": sort_field,
-        "fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23",
-        "fields": "f2,f3,f4,f5,f6,f12,f14,f15,f16,f17,f18",
-    }
+    from src.core.data_guard.providers.eastmoney import (
+        fetch_stock_ranking_raw as em_fetch_stock_ranking_raw,
+    )
+
     try:
-        resp = em_get(url, params=params)
-        data = resp.json()
-        items = data.get("data", {}).get("diff", [])
-        result: list[dict] = []
-        for item in items:
-            # M-04(2026-11-17):东财 clist 对退市/停牌股会把 f2/f3 等直接返回 "-",
-            # 实测 100 行样本里 **21 行 f2='-'**(PT金田A/国华退/ST星源…)。
-            # 旧实现 `_safe_float(item.get("f2", 0))` 一律填 0 → 前端渲染成
-            # "价格 0.00 / 涨幅 0.00%", 把"没拿到"画成"今天不涨不跌"。
-            # 口径与 30abf5c(宽表改 None)对齐: 数值缺失 → None, code/name 仍是字符串。
-            result.append({
-                "code": _safe_str(item.get("f12", "")),
-                "name": _safe_str(item.get("f14", "")),
-                "price": _opt_float(item.get("f2")),
-                "change_pct": _opt_float(item.get("f3")),
-                "change": _opt_float(item.get("f4")),
-                "volume": _opt_float(item.get("f5")),
-                "amount": _opt_float(item.get("f6")),
-                "high": _opt_float(item.get("f15")),
-                "low": _opt_float(item.get("f16")),
-                "open": _opt_float(item.get("f17")),
-                "prev_close": _opt_float(item.get("f18")),
-            })
-        if result:
-            _cache_set(cache_key, result, 15)
-            _mark_source("stock_ranking", "eastmoney")
-            _mark_source(f"stock_ranking:{sort_field}:{sort_order}", "eastmoney")
-            return result
+        result = em_fetch_stock_ranking_raw(sort_field, sort_order, count)
     except Exception as e:
         logger.warning(f"get_stock_ranking_em failed: {e}")
+        result = None
+    if result:
+        _cache_set(cache_key, result, 15)
+        _mark_source("stock_ranking", "eastmoney")
+        _mark_source(f"stock_ranking:{sort_field}:{sort_order}", "eastmoney")
+        return result
     result = _get_stock_ranking_sina(sort_field, sort_order, count)
     _cache_set(cache_key, result, 15)
     source = "sina" if result else "unavailable"
@@ -521,170 +492,73 @@ def get_stock_ranking_em(sort_field: str = "f3", sort_order: int = 0, count: int
 
 
 def _get_stock_ranking_sina(sort_field: str = "f3", sort_order: int = 0, count: int = 10) -> list[dict]:
+    """新浪榜单门面(M4-A 绞杀迁移): 取数+解析在
+    data_guard.providers.sina.fetch_stock_ranking_raw; data_health 口径零变更。"""
+    from src.core.data_guard.providers.sina import (
+        fetch_stock_ranking_raw as sina_fetch_stock_ranking_raw,
+    )
+
     try:
-        url = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData"
-        params = {
-            "page": 1,
-            "num": count,
-            "sort": "changepercent" if sort_field == "f3" else "amount",
-            "asc": sort_order,
-            "node": "hs_a",
-            "symbol": "",
-            "_s_r_a": "auto",
-        }
-        resp = requests.get(url, params=params, timeout=5, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://finance.sina.com.cn/",
-        })
-        resp.encoding = "gbk"
-        items = resp.json()
-        result: list[dict] = []
-        for item in items:
-            result.append({
-                "code": _safe_str(item.get("code", "")),
-                "name": _safe_str(item.get("name", "")),
-                "price": _safe_float(item.get("trade", 0)),
-                "change_pct": _safe_float(item.get("changepercent", 0)),
-                "change": _safe_float(item.get("pricechange", 0)),
-                "volume": _safe_float(item.get("volume", 0)),
-                "amount": _safe_float(item.get("amount", 0)),
-                "high": _safe_float(item.get("high", 0)),
-                "low": _safe_float(item.get("low", 0)),
-                "open": _safe_float(item.get("open", 0)),
-                "prev_close": _safe_float(item.get("settlement", 0)),
-            })
-        if result:
-            data_health.record_success("stock_ranking_sina", len(result))
-        else:
-            data_health.record_failure("stock_ranking_sina", "empty result")
-        return result
+        result = sina_fetch_stock_ranking_raw(sort_field, sort_order, count)
     except Exception as e:
         logger.warning(f"_get_stock_ranking_sina failed: {e}")
         data_health.record_failure("stock_ranking_sina", str(e))
         return []
+    if result:
+        data_health.record_success("stock_ranking_sina", len(result))
+    else:
+        data_health.record_failure("stock_ranking_sina", "empty result")
+    return result
 
 
 def get_research_reports(stock_code: str = "", page: int = 1, page_size: int = 10) -> list[dict]:
-    url = "https://reportapi.eastmoney.com/report/list"
-    params = {
-        "industryCode": "*",
-        "pageSize": str(page_size),
-        "industry": "*",
-        "rating": "*",
-        "ratingChange": "*",
-        "beginTime": "",
-        "endTime": "",
-        "pageNo": str(page),
-        "fields": "",
-        "qType": 0,
-        "orgCode": "",
-        "code": stock_code,
-        "rcode": "",
-        "p": str(page),
-        "pageNum": str(page),
-        "pageNumber": str(page),
-    }
+    """东财研报门面(M4-A 绞杀迁移): 取数+解析在
+    data_guard.providers.eastmoney.fetch_research_reports_raw, 行为零变更。"""
+    from src.core.data_guard.providers.eastmoney import fetch_research_reports_raw
+
     try:
-        resp = em_get(url, params=params)
-        data = resp.json()
-        items = data.get("data", [])
-        result: list[dict] = []
-        for item in items:
-            result.append({
-                "title": _safe_str(item.get("title")),
-                "rating": _safe_str(item.get("emRatingName", item.get("rating", ""))),
-                "eps_predict": _safe_float(item.get("predictNextTwoYearEps", 0)),
-                "org_name": _safe_str(item.get("orgSName", "")),
-                "publish_date": _safe_str(item.get("publishDate", ""))[:10],
-            })
-        return result
+        return fetch_research_reports_raw(stock_code, page, page_size)
     except Exception as e:
         logger.warning(f"get_research_reports failed: {e}")
         return []
 
 
 def _ths_time(value: Any) -> str:
-    """同花顺封板时间是 unix 秒（新版）或 HH:MM:SS 字符串（旧版）。"""
-    try:
-        return datetime.fromtimestamp(int(value)).strftime("%H:%M:%S")
-    except (TypeError, ValueError, OSError):
-        return _safe_str(value)
+    """同花顺时间(M4-A 已迁 data_guard.providers.ths.ths_time), 门面保留兼容。"""
+    from src.core.data_guard.providers.ths import ths_time
+
+    return ths_time(value)
 
 
 def get_hot_stocks_ths() -> list[dict]:
+    """同花顺涨停池门面(M4-A 绞杀迁移): 取数+解析在
+    data_guard.providers.ths.fetch_hot_stocks_raw; 缓存与 data_health 口径零变更。"""
+    from src.core.data_guard.providers.ths import fetch_hot_stocks_raw
+
     cached = _cache_get("hot_stocks_ths")
     if cached is not None:
         return cached
-    url = "https://data.10jqka.com.cn/dataapi/limit_up/limit_up_pool"
-    params = {
-        "field": "199112,10,9001,330323,330324,330325,9002,330329,133971,133970,1968584,3475914",
-        # 2026-11-14: 上游把 filter 从日期式 GHS3A_YYYYMMDD 改成了市场集合式，
-        # 旧参数直接返回 "filter参数不合法"，涨停池因此长期为空。
-        "filter": "HS,GEM2STAR",
-        "page": 1,
-        "limit": 30,
-        "order_field": "330324",
-        "order_type": 0,
-    }
     try:
-        resp = requests.get(url, params=params, timeout=5, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://data.10jqka.com.cn/",
-        })
-        data = resp.json()
-        if data.get("status_code") not in (0, None):
-            raise ValueError(f"status_code={data.get('status_code')} {data.get('status_msg', '')}")
-        body = data.get("data") or {}
-        items = body.get("info") or body.get("list") or []
-        result: list[dict] = []
-        for item in items:
-            result.append({
-                "code": _safe_str(item.get("code", item.get("股票代码", ""))),
-                "name": _safe_str(item.get("name", item.get("股票简称", ""))),
-                "price": _safe_float(item.get("latest", item.get("latest_price", item.get("最新价", 0)))),
-                "change_pct": _safe_float(item.get("change_rate", item.get("change_pct", item.get("涨跌幅", 0)))),
-                # 新版响应不再给成交额，保持 0 并在前端按缺失处理，不拿封单额冒充
-                "volume": _safe_float(item.get("volume", item.get("成交额", 0))),
-                "reason": _safe_str(item.get("reason_type", item.get("reason", item.get("涨停原因", "")))),
-                "limit_up_time": _ths_time(item.get("first_limit_up_time", item.get("首次封板时间", ""))),
-                "open_times": _safe_int(item.get("open_num", item.get("open_limit_up_times", item.get("开板次数", 0)))),
-            })
-        _cache_set("hot_stocks_ths", result, 30)
-        if result:
-            data_health.record_success("hot_stocks_ths", len(result))
-        else:
-            data_health.record_failure("hot_stocks_ths", "empty result")
-        return result
+        result = fetch_hot_stocks_raw()
     except Exception as e:
         logger.warning(f"get_hot_stocks_ths failed: {e}")
         data_health.record_failure("hot_stocks_ths", str(e))
         return []
+    _cache_set("hot_stocks_ths", result, 30)
+    if result:
+        data_health.record_success("hot_stocks_ths", len(result))
+    else:
+        data_health.record_failure("hot_stocks_ths", "empty result")
+    return result
 
 
 def get_northbound_flow() -> dict:
-    url = "https://data.10jqka.com.cn/dataapi/hsgt/hsgt_detail"
-    params = {
-        "field": "199112,10,9001,330323,330324,330325,9002,330329",
-        "filter": "HS_HSGT",
-        "page": 1,
-        "limit": 1,
-    }
+    """北向资金门面(M4-A 绞杀迁移): 取数+解析在
+    data_guard.providers.ths.fetch_northbound_raw, 行为零变更。"""
+    from src.core.data_guard.providers.ths import fetch_northbound_raw
+
     try:
-        resp = requests.get(url, params=params, timeout=5, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://data.10jqka.com.cn/",
-        })
-        data = resp.json()
-        items = data.get("data", {}).get("list", [])
-        if items:
-            item = items[0]
-            return {
-                "date": _safe_str(item.get("date", item.get("日期", ""))),
-                "sh_net_inflow": _safe_float(item.get("sh_net_inflow", item.get("沪股通净流入", 0))),
-                "sz_net_inflow": _safe_float(item.get("sz_net_inflow", item.get("深股通净流入", 0))),
-                "total_net_inflow": _safe_float(item.get("net_inflow", item.get("北向资金净流入", 0))),
-            }
-        return {}
+        return fetch_northbound_raw()
     except Exception as e:
         logger.warning(f"get_northbound_flow failed: {e}")
         return {}
