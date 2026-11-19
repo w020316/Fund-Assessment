@@ -204,7 +204,7 @@ body.hud-theme .fw-header {
    - 只作用于详情面板，避免影响表格内的紧凑按钮
    ============================================================ */
 @media (max-width: 768px) {
-  body.hud-theme #stockDetailPanel .btn { min-height: 48px; padding-left: 18px; padding-right: 18px; }
+  body.hud-theme #stockDetailPanel .btn { min-height: 48px; padding-left: 16px; padding-right: 16px; }
 }
 
 /* ============================================================

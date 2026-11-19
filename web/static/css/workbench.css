@@ -445,7 +445,7 @@
   flex: 0 0 auto;
   width: 4px;
   height: 4px;
-  margin-top: 6px;
+  margin-top: 8px;
   border-radius: 50%;
   background: var(--wb-accent);
   opacity: .8;
@@ -1199,10 +1199,10 @@
 .qf-flow-row:hover { background: var(--qf-panel-hover); }
 .qf-flow-row:focus-visible { outline: 2px solid var(--qf-neon-cyan); outline-offset: 1px; }
 .qf-flow-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.qf-flow-name span { margin-left: 6px; color: var(--qf-text-muted); font: 11px/1.4 var(--qf-font-mono); }
+.qf-flow-name span { margin-left: 8px; color: var(--qf-text-muted); font: 11px/1.4 var(--qf-font-mono); }
 .qf-flow-streak {
   justify-self: start;
-  padding: 1px 6px;
+  padding: 1px 8px;
   border-radius: 5px;
   background: var(--qf-panel-accent-soft);
   color: var(--qf-neon-cyan);

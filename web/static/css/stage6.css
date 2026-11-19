@@ -40,7 +40,7 @@
   gap: 8px; flex-wrap: wrap;
 }
 .st6-estimate-name { font-size: 14px; font-weight: 600; }
-.st6-estimate-code { font-size: 11px; color: var(--text-muted, #8b92a8); margin-left: 6px; }
+.st6-estimate-code { font-size: 11px; color: var(--text-muted, #8b92a8); margin-left: 8px; }
 .st6-estimate-pct { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .st6-estimate-grid {
   display: grid; grid-template-columns: 1fr 1fr;
@@ -66,7 +66,7 @@
 .st6-conf-low .st6-conf-dot { background: var(--hud-up, #F87171); }
 .st6-stale-mark {
   font-size: 11px; color: var(--color-warning, #f59e0b); border: 1px dashed var(--color-warning, #f59e0b);
-  border-radius: 4px; padding: 1px 6px;
+  border-radius: 4px; padding: 1px 8px;
 }
 
 /* ===== STAGE6: risk-panel ===== 风险页 */
@@ -76,7 +76,7 @@
 }
 .st6-window-tab {
   min-height: 44px; min-width: 44px; display: inline-flex; align-items: center;
-  justify-content: center; padding: 8px 14px; border-radius: 6px;
+  justify-content: center; padding: 8px 16px; border-radius: 6px;
   cursor: pointer; font-size: 13px; color: var(--text-secondary, #c3c9d9);
   background: rgba(255,255,255,0.03); border: 1px solid transparent;
 }
@@ -114,7 +114,7 @@
 .st6-rb-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .st6-rb-label { font-size: 12px; color: var(--text-muted, #8b92a8); }
 .st6-rb-input {
-  width: 84px; min-height: 44px; padding: 6px 10px; border-radius: 6px;
+  width: 84px; min-height: 44px; padding: 8px 12px; border-radius: 6px;
   border: 1px solid var(--border, rgba(255,255,255,0.12));
   background: rgba(255,255,255,0.03); color: var(--text-primary, #e8ecf5);
   font-size: 13px; font-variant-numeric: tabular-nums;
@@ -151,7 +151,7 @@
 }
 .st6-xray-table-wrap { overflow-x: auto; max-width: 100%; }
 .st6-xray-table { min-width: 420px; width: 100%; }
-.st6-xray-table td, .st6-xray-table th { font-size: 12px; padding: 6px 8px; }
+.st6-xray-table td, .st6-xray-table th { font-size: 12px; padding: 8px 8px; }
 .st6-cell-heat-0 { background: transparent; }
 .st6-cell-heat-1 { background: rgba(245, 158, 11, 0.15); }
 .st6-cell-heat-2 { background: rgba(245, 158, 11, 0.30); }
@@ -217,7 +217,7 @@
   background: rgba(255, 255, 255, 0.02);
 }
 .st6-group-manage-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
-.st6-group-manage-title span { font-size: 11px; font-weight: 400; color: var(--text-muted, #8b92a8); margin-left: 6px; }
+.st6-group-manage-title span { font-size: 11px; font-weight: 400; color: var(--text-muted, #8b92a8); margin-left: 8px; }
 .st6-group-manage-list { display: flex; flex-direction: column; gap: 6px; }
 .st6-group-manage-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .st6-group-manage-id { font-size: 11px; color: var(--text-muted, #8b92a8); min-width: 64px; }

@@ -93,7 +93,7 @@ body.hud-theme .logo-icon{
   box-shadow:0 0 0 1px rgba(34,227,255,.35),0 0 22px rgba(34,227,255,.22);
 }
 body.hud-theme .index-item{
-  padding:4px 10px;border-radius:6px;background:rgba(255,255,255,.03);
+  padding:4px 12px;border-radius:6px;background:rgba(255,255,255,.03);
   transition:background var(--duration-base) var(--qf-ease-standard);
 }
 body.hud-theme .index-item:hover{background:rgba(255,255,255,.06)}
@@ -154,13 +154,13 @@ body.hud-theme .card-title::before{
 body.hud-theme .table-wrap{border-radius:12px}
 body.hud-theme table{font-variant-numeric:tabular-nums slashed-zero}
 body.hud-theme th{
-  height:40px;padding:0 14px;
+  height:40px;padding:0 16px;
   background:#0F1826;color:var(--qf-text-secondary);
   font:500 12px/20px var(--qf-font-body);letter-spacing:.03em;
   border-bottom:1px solid var(--qf-line-1);position:sticky;top:0;z-index:1;
 }
 body.hud-theme td{
-  height:44px;padding:0 14px;border-bottom:1px solid rgba(28,42,61,.7);
+  height:44px;padding:0 16px;border-bottom:1px solid rgba(28,42,61,.7);
 }
 body.hud-theme tr:hover td{background:rgba(255,255,255,.035)}
 body.hud-theme tr:nth-child(even) td{background:transparent}
@@ -220,7 +220,7 @@ body.hud-theme .btn-danger{
   background:rgba(255,90,95,.12);border-color:rgba(255,90,95,.40);color:#FF8589;
 }
 body.hud-theme .btn-danger:hover{background:rgba(255,90,95,.20)}
-body.hud-theme .btn-sm{height:32px;min-height:44px;padding:0 14px;border-radius:8px;font-size:13px}
+body.hud-theme .btn-sm{height:32px;min-height:44px;padding:0 16px;border-radius:8px;font-size:13px}
 
 /* ---------- 8. 表单 ---------- */
 body.hud-theme .input,
@@ -326,8 +326,8 @@ body.hud-theme textarea:focus-visible{box-shadow:0 0 0 3px rgba(34,227,255,.14),
 /* 平板 769–1200：侧栏由存量规则折叠为图标轨（60px），此处只做视觉收口 */
 @media (max-width:1200px) and (min-width:769px){
   /* 必须在这里把宽度还原成 60px：上面的 200px 覆盖优先级高于存量媒体查询 */
-  body.hud-theme .sidebar{width:60px;min-width:60px;padding:12px 6px}
-  body.hud-theme .nav-item{padding:0 6px;justify-content:center}
+  body.hud-theme .sidebar{width:60px;min-width:60px;padding:12px 8px}
+  body.hud-theme .nav-item{padding:0 8px;justify-content:center}
   body.hud-theme .content{padding:24px}
   body.hud-theme .card{padding:20px}
   body.hud-theme .topbar{height:60px;min-height:60px;padding:0 24px}

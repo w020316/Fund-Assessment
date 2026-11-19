@@ -59,7 +59,7 @@
 
 .pred-card .pred-llm {
   margin-top: 8px;
-  padding-top: 6px;
+  padding-top: 8px;
   border-top: 1px dashed var(--border, #2a3142);
   font-size: 12px;
   line-height: 1.7;
@@ -122,7 +122,7 @@
   color: var(--color-warning, #f59e0b);
   border: 1px dashed var(--color-warning, #f59e0b);
   border-radius: 4px;
-  padding: 1px 6px;
+  padding: 1px 8px;
 }
 
 /* 30 日走势条(纯 CSS div, 无 CDN) */
@@ -147,7 +147,7 @@
 /* --- 板块二级页表格 --- */
 .pred-sector-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .pred-sector-table th, .pred-sector-table td {
-  padding: 8px 10px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border, #2a3142);
   text-align: right;
   white-space: nowrap;
@@ -184,7 +184,7 @@
   color: var(--text-muted, #8b92a8);
   border-top: 1px dashed var(--border, #2a3142);
   margin-top: 8px;
-  padding-top: 6px;
+  padding-top: 8px;
 }
 
 /* --- 持仓份额行内编辑(R7.1) --- */
@@ -194,7 +194,7 @@
   border: 1px dashed var(--color-warning, #f59e0b);
   border-radius: 4px;
   padding: 0 4px;
-  margin-left: 6px;
+  margin-left: 8px;
   white-space: nowrap;
 }
 .pred-share-edit-input {
