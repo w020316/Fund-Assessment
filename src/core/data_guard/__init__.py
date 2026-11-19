@@ -4,6 +4,12 @@
 M1: contract(缺失=None 禁 0 兜底的结构性拒绝);
 M2: providers/tencent(quote) + providers/eastmoney(kline) + SourceRouter 门面。
 data_source_v2 保持既有门面角色, API 路径与函数签名不变(M3 起绞杀者迁移)。
+
+接入状态(2026-11-19 r8 更正):
+- **当前仅路由层可用**: SourceRouter/Contract 尚未被 data_source_v2 生产门面调用,
+  门面仍返回 provider 的原始 dict(局部由 _sanitize_kline_rows/_opt_float 兜住缺失值)。
+- 「缺失值 0 兜底结构性拒绝」在契约层已成立, 但**对线上接口尚未生效**;
+  M5 接入(门面出口统一 normalize)需行为变更评审, 已列入 backlog, 不得据此宣称已机制化。
 """
 from src.core.data_guard.contract import (
     KlineContract,
