@@ -1450,6 +1450,30 @@ class TestMigrationSnapshotGlobalPanel:
         assert rows[0]["source"] == "新浪财经"
         m_mark.assert_called_once_with("global_news", "sina")
 
+    def test_core_indices_cover_a_hk_us(self):
+        """核心指数覆盖 A股/港股/美股: A股 → CN/CNY, 港/美币种各自补全。"""
+        from src.core import data_source_v2 as ds2
+
+        assert dict(ds2._GLOBAL_INDEX_CODES).get("sh000001") == "上证指数"
+        quotes = [
+            {"code": "000001", "name": "上证指数", "price": 3549.1, "change_pct": 0.5},
+            {"code": "HSI", "name": "恒生指数", "price": 23350.0,
+             "change_pct": 1.28, "currency": ""},
+            {"code": "DJI", "name": "道琼斯", "price": 52900.0,
+             "change_pct": 1.14, "currency": ""},
+        ]
+        with patch.object(ds2, "_tencent_global_quote", return_value=quotes), \
+             patch.object(ds2, "_cache_get", return_value=None), \
+             patch.object(ds2, "_cache_set"):
+            rows = ds2.get_global_indices()
+        by_name = {r["name"]: r for r in rows}
+        assert by_name["上证指数"]["market"] == "CN"
+        assert by_name["上证指数"]["currency"] == "CNY"
+        assert by_name["恒生指数"]["market"] == "HK"
+        assert by_name["恒生指数"]["currency"] == "HKD"
+        assert by_name["道琼斯"]["market"] == "US"
+        assert by_name["道琼斯"]["currency"] == "USD"
+
 
 class TestMigrationSnapshotMinuteSeries:
     """M4-D: 三源分钟线取数+解析迁移后行为逐位一致。"""
