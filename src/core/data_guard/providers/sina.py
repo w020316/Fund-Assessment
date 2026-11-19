@@ -10,6 +10,9 @@ M4-C(2026-11-19): 板块群三路新浪取数+解析体迁入(板块资金/旧�
 
 M4-D(2026-11-19): 新浪 1 分钟 K 线取数+解析体迁入; 分钟多源回退链与
 「窗口端点可算」接纳判定保留在 data_source_v2 门面。
+
+M4-F(2026-11-19): 异动扫描的新浪涨跌幅榜候选取数+解析体迁入;
+候选池降级编排与判定仍保留在 data_source_v2 门面。
 """
 from __future__ import annotations
 
@@ -21,6 +24,7 @@ import requests
 from src.core.data_source_v2 import (
     ANOMALY_WINDOW_MINUTES,
     _minute_index,
+    _opt_float,
     _prefix_code,
     _safe_float,
     _safe_str,
@@ -337,6 +341,39 @@ def fetch_minute_series_raw(
         timeout=5,
     )
     return parse_minutes(resp.json() or [])
+
+
+def fetch_anomaly_screen_sina_raw(per_side: int) -> list[dict]:
+    """新浪当日涨跌幅榜候选取数+解析(原 data_source_v2._screen_sina_change 主体)。
+
+    降级口径: 当日涨跌幅(非短时涨速), 覆盖度更差, 由门面在 _meta 标注
+    screen_source=sina_changepercent。新浪无「量比/1分钟涨速」字段 → None。
+    异常向上抛出, 由门面记 warning。
+    """
+    url = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData"
+    rows: list[dict] = []
+    for asc in (0, 1):  # 0=降序(涨幅榜) 1=升序(跌幅榜)
+        resp = requests.get(url, params={
+            "page": 1, "num": per_side, "sort": "changepercent", "asc": asc,
+            "node": "hs_a", "symbol": "", "_s_r_a": "auto",
+        }, timeout=5, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://finance.sina.com.cn/",
+        })
+        resp.encoding = "gbk"
+        for item in resp.json() or []:
+            rows.append({
+                "code": _safe_str(item.get("code")),
+                "name": _safe_str(item.get("name")),
+                "price": _opt_float(item.get("trade")),
+                "change_pct": _opt_float(item.get("changepercent")),
+                "volume": _opt_float(item.get("volume")),
+                "amount": _opt_float(item.get("amount")),
+                "turnover_pct": _opt_float(item.get("turnoverratio")),
+                "volume_ratio": None,  # 新浪排行无「量比」字段，如实留空不猜
+                "speed_1min_pct": None,
+            })
+    return rows
 
 
 def fetch_global_news_raw() -> list[dict]:

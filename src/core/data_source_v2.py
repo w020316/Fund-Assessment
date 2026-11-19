@@ -2473,68 +2473,26 @@ def get_stock_minute_series(code: str, window_minutes: int = ANOMALY_WINDOW_MINU
 
 
 def _screen_em_speed(per_side: int) -> list[dict]:
-    """东财涨速榜候选（fid=f22），附带量比/换手率/成交额用于「放量」佐证。
+    """东财涨速榜候选门面(M4-F 绞杀迁移): 请求+解析在
+    data_guard.providers.eastmoney.fetch_anomaly_screen_em_raw, 行为零变更。
 
     不复用 get_stock_ranking_em：那个函数是既有端点的契约（只回 11 个字段），
     这里需要 f8/f10 才有「放量」上下文。宁可多一个专用请求，也不改既有契约。
     """
-    url = "https://push2.eastmoney.com/api/qt/clist/get"
-    rows: list[dict] = []
-    for order in (1, 0):  # 1=降序(拉高) 0=升序(砸盘)
-        params = {
-            "pn": 1,
-            "pz": per_side,
-            "po": order,
-            "np": 1,
-            "fltt": 2,
-            "invt": 2,
-            "fid": "f22",
-            "fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23",
-            "fields": "f2,f3,f5,f6,f8,f10,f12,f14,f22",
-        }
-        resp = em_get(url, params=params)
-        items = ((resp.json() or {}).get("data") or {}).get("diff") or []
-        for item in items:
-            rows.append({
-                "code": _safe_str(item.get("f12")),
-                "name": _safe_str(item.get("f14")),
-                "price": _opt_float(item.get("f2")),
-                "change_pct": _opt_float(item.get("f3")),
-                "volume": _opt_float(item.get("f5")),
-                "amount": _opt_float(item.get("f6")),
-                "turnover_pct": _opt_float(item.get("f8")),
-                "volume_ratio": _opt_float(item.get("f10")),
-                "speed_1min_pct": _opt_float(item.get("f22")),
-            })
-    return rows
+    from src.core.data_guard.providers.eastmoney import fetch_anomaly_screen_em_raw
+
+    return fetch_anomaly_screen_em_raw(per_side)
 
 
 def _screen_sina_change(per_side: int) -> list[dict]:
-    """新浪当日涨跌幅榜候选（降级口径：当日涨跌幅，非短时涨速）。"""
-    url = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData"
-    rows: list[dict] = []
-    for asc in (0, 1):  # 0=降序(涨幅榜) 1=升序(跌幅榜)
-        resp = requests.get(url, params={
-            "page": 1, "num": per_side, "sort": "changepercent", "asc": asc,
-            "node": "hs_a", "symbol": "", "_s_r_a": "auto",
-        }, timeout=5, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://finance.sina.com.cn/",
-        })
-        resp.encoding = "gbk"
-        for item in resp.json() or []:
-            rows.append({
-                "code": _safe_str(item.get("code")),
-                "name": _safe_str(item.get("name")),
-                "price": _opt_float(item.get("trade")),
-                "change_pct": _opt_float(item.get("changepercent")),
-                "volume": _opt_float(item.get("volume")),
-                "amount": _opt_float(item.get("amount")),
-                "turnover_pct": _opt_float(item.get("turnoverratio")),
-                "volume_ratio": None,  # 新浪排行无「量比」字段，如实留空不猜
-                "speed_1min_pct": None,
-            })
-    return rows
+    """新浪当日涨跌幅榜候选门面(M4-F 绞杀迁移): 请求+解析在
+    data_guard.providers.sina.fetch_anomaly_screen_sina_raw, 行为零变更。
+
+    降级口径：当日涨跌幅，非短时涨速。
+    """
+    from src.core.data_guard.providers.sina import fetch_anomaly_screen_sina_raw
+
+    return fetch_anomaly_screen_sina_raw(per_side)
 
 
 def _screen_candidates(per_side: int = ANOMALY_SCREEN_PER_SIDE) -> tuple[list[dict], str]:

@@ -1561,3 +1561,119 @@ class TestMigrationSnapshotMinuteSeries:
         assert sorted(prices) == [14 * 60 + 56, 14 * 60 + 57, 15 * 60]
         assert (14 * 60 + 58) not in prices
         assert day == "2026-11-06"
+
+
+# ── M4-F 绞杀迁移快照: 异动扫描候选池 ──────────────────────────────────
+
+class TestMigrationSnapshotAnomalyScreenEM:
+    """M4-F: 东财涨速榜候选取数+解析迁移后行为逐位一致。"""
+
+    def _diff_row(self, code: str, f10=None) -> dict:
+        return {"f12": code, "f14": f"股{code}", "f2": 10.46, "f3": 15.26,
+                "f5": 1000, "f6": 2e8, "f8": 12.5, "f10": f10, "f22": 1.9}
+
+    def test_provider_snapshot_two_orders_and_none(self):
+        """provider 直测: 降序/升序各一次, f10='-' 如实转 None。"""
+        from src.core.data_guard.providers.eastmoney import fetch_anomaly_screen_em_raw
+
+        calls: list[int] = []
+
+        def fake_em_get(url, params=None, **kw):
+            po = (params or {}).get("po")
+            calls.append(po)
+            row = (self._diff_row("300118", f10=2.1) if po == 1
+                   else self._diff_row("600715", f10="-"))
+            return _em_json({"data": {"diff": [row]}})
+
+        with patch("src.core.data_source_v2.em_get", side_effect=fake_em_get):
+            rows = fetch_anomaly_screen_em_raw(8)
+        assert calls == [1, 0], "升降序必须各请求一次"
+        assert rows[0] == {
+            "code": "300118", "name": "股300118", "price": 10.46,
+            "change_pct": 15.26, "volume": 1000.0, "amount": 2e8,
+            "turnover_pct": 12.5, "volume_ratio": 2.1, "speed_1min_pct": 1.9,
+        }
+        assert rows[1]["volume_ratio"] is None  # 缺失不填 0
+
+    def test_provider_empty_returns_empty(self):
+        from src.core.data_guard.providers.eastmoney import fetch_anomaly_screen_em_raw
+
+        with patch("src.core.data_source_v2.em_get",
+                   return_value=_em_json({"data": {"diff": []}})):
+            assert fetch_anomaly_screen_em_raw(8) == []
+
+    def test_facade_dedupes_and_marks_eastmoney_speed(self):
+        """门面: 两方向重复代码按 code 去重, 来源标 eastmoney_speed。"""
+        from src.core import data_source_v2 as ds2
+
+        def fake_em_get(url, params=None, **kw):
+            return _em_json({"data": {"diff": [self._diff_row("300118", f10=2.1)]}})
+
+        with patch.object(ds2, "_check_em_available", return_value=True), \
+             patch.object(ds2, "em_get", side_effect=fake_em_get):
+            candidates, source = ds2._screen_candidates(8)
+        assert source == "eastmoney_speed"
+        assert len(candidates) == 1, "同一代码出现在两个方向时必须去重"
+
+
+class TestMigrationSnapshotAnomalyScreenSina:
+    """M4-F: 新浪涨跌幅榜候选取数+解析与降级编排迁移后行为逐位一致。"""
+
+    def _sina_rows(self, code: str) -> list[dict]:
+        return [{
+            "code": code, "name": f"股{code}", "trade": "10.46",
+            "changepercent": "15.26", "volume": "1000", "amount": "2e8",
+            "turnoverratio": "12.5",
+        }]
+
+    def test_provider_sina_mapping_snapshot(self):
+        """provider 直测: 量比/1分钟涨速无字段 → None(不猜)。"""
+        from src.core.data_guard.providers.sina import fetch_anomaly_screen_sina_raw
+
+        def fake_get(url, params=None, **kw):
+            code = "300118" if (params or {}).get("asc") == 0 else "600715"
+            return type("R", (), {"encoding": "", "json": lambda s: self._sina_rows(code)})()
+
+        with patch("src.core.data_guard.providers.sina.requests.get", side_effect=fake_get):
+            rows = fetch_anomaly_screen_sina_raw(8)
+        assert rows == [
+            {"code": "300118", "name": "股300118", "price": 10.46,
+             "change_pct": 15.26, "volume": 1000.0, "amount": 2e8,
+             "turnover_pct": 12.5, "volume_ratio": None, "speed_1min_pct": None},
+            {"code": "600715", "name": "股600715", "price": 10.46,
+             "change_pct": 15.26, "volume": 1000.0, "amount": 2e8,
+             "turnover_pct": 12.5, "volume_ratio": None, "speed_1min_pct": None},
+        ]
+
+    def test_facade_em_empty_falls_to_sina(self):
+        from src.core import data_source_v2 as ds2
+
+        fake = type("R", (), {"encoding": "",
+                              "json": lambda s: self._sina_rows("300118")})()
+        with patch.object(ds2, "_check_em_available", return_value=True), \
+             patch.object(ds2, "em_get",
+                          return_value=_em_json({"data": {"diff": []}})), \
+             patch("src.core.data_guard.providers.sina.requests.get", return_value=fake):
+            candidates, source = ds2._screen_candidates(8)
+        assert source == "sina_changepercent"
+        assert candidates[0]["code"] == "300118"
+
+    def test_facade_em_unavailable_skips_em(self):
+        """东财被判定不可用 → 不得再打东财; 直接新浪降级。"""
+        from src.core import data_source_v2 as ds2
+
+        em_calls: list[int] = []
+        fake = type("R", (), {"encoding": "",
+                              "json": lambda s: self._sina_rows("300118")})()
+
+        def count_em(url, params=None, **kw):
+            em_calls.append(1)
+            return _em_json({"data": {"diff": []}})
+
+        with patch.object(ds2, "_check_em_available", return_value=False), \
+             patch.object(ds2, "em_get", side_effect=count_em), \
+             patch("src.core.data_guard.providers.sina.requests.get", return_value=fake):
+            candidates, source = ds2._screen_candidates(8)
+        assert em_calls == [], "东财不可用时不得发请求"
+        assert source == "sina_changepercent"
+        assert len(candidates) == 1

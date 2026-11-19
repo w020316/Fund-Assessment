@@ -16,6 +16,9 @@ M4-D(2026-11-19): 市场广度(ulist 聚合家数/北交所家数/全市场 tota
 
 M4-E(2026-11-19): 全球指数全景(m:100 缩放/区域分组)与全球快讯取数+解析体
 迁入; 健康度/来源标记/缓存与新浪快讯降级编排仍保留在门面。
+
+M4-F(2026-11-19): 异动扫描的东财涨速榜候选取数+解析体迁入;
+候选池降级编排(Eastmoney → 新浪)与判定/窗口自算仍保留在门面。
 """
 from __future__ import annotations
 
@@ -866,6 +869,44 @@ def fetch_world_indices_raw() -> list[dict]:
             "change_pct": _ds2._em_scale(row.get("f3"), precision),
         })
     return result
+
+
+def fetch_anomaly_screen_em_raw(per_side: int) -> list[dict]:
+    """东财涨速榜候选取数+解析(原 data_source_v2._screen_em_speed 主体)。
+
+    fid=f22(1 分钟涨速), 降序取拉高候选、升序取砸盘候选各 per_side 只;
+    附带量比/换手率/成交额用于「放量」佐证。f22 只作筛选, 不作判定依据。
+    异常向上抛出, 由门面记 warning 后降级新浪。
+    """
+    url = "https://push2.eastmoney.com/api/qt/clist/get"
+    rows: list[dict] = []
+    for order in (1, 0):  # 1=降序(拉高) 0=升序(砸盘)
+        params = {
+            "pn": 1,
+            "pz": per_side,
+            "po": order,
+            "np": 1,
+            "fltt": 2,
+            "invt": 2,
+            "fid": "f22",
+            "fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23",
+            "fields": "f2,f3,f5,f6,f8,f10,f12,f14,f22",
+        }
+        resp = _ds2.em_get(url, params=params)
+        items = ((resp.json() or {}).get("data") or {}).get("diff") or []
+        for item in items:
+            rows.append({
+                "code": _safe_str(item.get("f12")),
+                "name": _safe_str(item.get("f14")),
+                "price": _opt_float(item.get("f2")),
+                "change_pct": _opt_float(item.get("f3")),
+                "volume": _opt_float(item.get("f5")),
+                "amount": _opt_float(item.get("f6")),
+                "turnover_pct": _opt_float(item.get("f8")),
+                "volume_ratio": _opt_float(item.get("f10")),
+                "speed_1min_pct": _opt_float(item.get("f22")),
+            })
+    return rows
 
 
 class EastmoneyProvider:
