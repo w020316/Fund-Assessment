@@ -270,6 +270,24 @@ def map_detail_quote(q: dict) -> dict:
     }
 
 
+def fetch_sector_ranking_tencent_raw() -> list[dict]:
+    """腾讯板块占位 stub(原 data_source_v2._get_sector_ranking_tencent 主体)。
+
+    历史上探测过 future2 指数接口后未启用, 恒返回 []。原样迁移保持
+    行为零变更(含异常只记 warning 的语义)。"""
+    try:
+        url = "https://qt.gtimg.cn/q=future2sh000001,future2sz399001"
+        resp = requests.get(url, timeout=5, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://gu.qq.com/",
+        })
+        resp.encoding = "gbk"
+        return []
+    except Exception as e:
+        logger.warning(f"_get_sector_ranking_tencent failed: {e}")
+        return []
+
+
 class TencentProvider:
     """腾讯行情(qt.gtimg.cn)。priority 10: 个股实时行情首选源。"""
 

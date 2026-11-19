@@ -1148,3 +1148,122 @@ class TestMigrationSnapshotFinancialMootdxPatch:
 
         with patch.object(ds2, "_mootdx_client", return_value=None):
             assert ds2._financial_snapshot_mootdx("600519") == {}
+
+
+_SECTOR_DIFF_ROW = {
+    "f12": "BK0475", "f14": "银行", "f3": 1.2, "f2": 8.0, "f62": 1e8,
+    "f184": 2.0, "f66": 0, "f69": 0, "f72": 0, "f75": 0,
+    "f78": 0, "f81": 0, "f84": 0, "f87": 0,
+}
+
+
+class TestMigrationSnapshotSectorEM:
+    """M4-C: 板块群东财两跳 clist(行业→概念)取数+解析迁移。"""
+
+    def test_provider_snapshot_industry_fs(self):
+        """provider 直测: fs 参数化 + _map_sector_row 映射逐位一致。"""
+        from src.core.data_guard.providers.eastmoney import fetch_sector_ranking_em_raw
+
+        resp = _em_json({"data": {"diff": [dict(_SECTOR_DIFF_ROW)]}})
+        with patch("src.core.data_source_v2.em_get", return_value=resp):
+            rows = fetch_sector_ranking_em_raw("m:90+t:2")
+        assert rows == [{
+            "code": "BK0475", "name": "银行", "change_pct": 1.2, "price": 8.0,
+            "main_net_inflow": 1e8, "main_inflow_pct": 2.0,
+            "super_large_net": 0.0, "super_large_pct": 0.0,
+            "large_net": 0.0, "large_pct": 0.0,
+            "medium_net": 0.0, "medium_pct": 0.0,
+            "small_net": 0.0, "small_pct": 0.0,
+        }]
+
+    def test_industry_empty_falls_to_concept(self):
+        """行业口径空 → 概念口径兜底, 来源仍标 eastmoney。"""
+        from src.core import data_source_v2 as ds2
+
+        calls: list[str] = []
+
+        def fake_em_get(url, params=None, **kw):
+            calls.append((params or {}).get("fs"))
+            if (params or {}).get("fs") == "m:90+t:2":
+                return _em_json({"data": {"diff": []}})
+            return _em_json({"data": {"diff": [dict(_SECTOR_DIFF_ROW)]}})
+
+        ds2._cache.clear()
+        with patch.object(ds2, "em_get", side_effect=fake_em_get):
+            rows = ds2.get_sector_ranking()
+        assert calls == ["m:90+t:2", "m:90+t:3"], f"降级顺序异常: {calls}"
+        assert rows[0]["name"] == "银行"
+        assert ds2.get_last_source("sector_ranking") == "eastmoney"
+
+    def test_em_both_empty_goes_sina_chain(self):
+        """东财两跳全空 → 新浪板块资金链路接管, 来源标 sina。"""
+        from src.core import data_source_v2 as ds2
+
+        ds2._cache.clear()  # 上一个用例可能已把结果写进 30s TTL 缓存
+        sina_rows = [{"category": "new_dl", "name": "电力", "avg_changeratio": "0.012",
+                      "avg_price": "8.1", "netamount": "1e8", "ratioamount": "0.03"}]
+        with patch.object(ds2, "em_get",
+                          return_value=_em_json({"data": {"diff": []}})), \
+             patch("src.core.data_guard.providers.sina.requests.get",
+                   return_value=type("R", (), {"json": lambda s: sina_rows})()):
+            rows = ds2.get_sector_ranking()
+        assert rows[0]["name"] == "电力"
+        assert rows[0]["main_net_inflow"] == 1e8
+        assert ds2.get_last_source("sector_ranking") == "sina"
+
+
+class TestMigrationSnapshotSectorSina:
+    """M4-C: 板块群新浪三路(资金/旧接口/hangye_zjh)取数+解析迁移。"""
+
+    def test_newfljk_parse_snapshot(self):
+        """newFLJK 文本正则解析: 列表字段语义 + 涨跌幅降序 + top50 截断。"""
+        from src.core.data_guard.providers.sina import fetch_sector_ranking_sina_raw
+
+        text = ('var class="";'
+                '参考Element1={"new_dl":"~,电力,8.10,8.10,0.012"};'
+                '参考Element2={"new_xh":"~,券商,12.30,12.30,5.000"};')
+        with patch("src.core.data_guard.providers.sina.requests.get",
+                   return_value=type("R", (), {"text": text})()):
+            rows = fetch_sector_ranking_sina_raw()
+        assert [r["name"] for r in rows] == ["券商", "电力"]  # 按涨跌幅降序
+        assert rows[0]["change_pct"] == 5.0 and rows[0]["price"] == 12.3
+        assert rows[0]["main_net_inflow"] == 0  # 旧接口无资金字段
+
+    def test_newfljk_empty_falls_to_v2(self):
+        """旧接口无有效行 → hangye_zjh(v2)接管。"""
+        from src.core import data_source_v2 as ds2
+
+        v2_rows = [{"code": "new_dl", "name": "电力", "changepercent": "1.23",
+                    "trade": "8.10", "symbol": "sh000001"}]
+        with patch("src.core.data_guard.providers.sina.requests.get",
+                   side_effect=[type("R", (), {"text": "var class=\"\";"})(),
+                                type("R", (), {"json": lambda s: v2_rows})()]):
+            rows = ds2._get_sector_ranking_sina()
+        assert rows[0]["name"] == "电力"
+        assert rows[0]["change_pct"] == 1.23
+
+    def test_sector_page_raw_retry_then_none(self):
+        """全量分页单页: 空页重试 1 次(共 2 请求)后仍空 → None(fail-closed)。"""
+        from src.core.data_guard.providers.eastmoney import fetch_sector_page_raw
+
+        calls: list[int] = []
+
+        def fake_em_get(url, params=None, **kw):
+            calls.append((params or {}).get("pn"))
+            return _em_json({"data": {"total": 496, "diff": []}})
+
+        with patch("src.core.data_source_v2.em_get", side_effect=fake_em_get), \
+             patch("src.core.data_guard.providers.eastmoney.time.sleep"):
+            out = fetch_sector_page_raw(1, attempts=2)
+        assert out is None
+        assert calls == [1, 1], "空页必须原地重试一次"
+
+    def test_sector_page_raw_success(self):
+        """单页成功 → (rows, total), 行结构经 _map_sector_row。"""
+        from src.core.data_guard.providers.eastmoney import fetch_sector_page_raw
+
+        resp = _em_json({"data": {"total": 496, "diff": [dict(_SECTOR_DIFF_ROW)]}})
+        with patch("src.core.data_source_v2.em_get", return_value=resp):
+            rows, total = fetch_sector_page_raw(1)
+        assert total == 496
+        assert rows[0]["name"] == "银行" and rows[0]["main_net_inflow"] == 1e8

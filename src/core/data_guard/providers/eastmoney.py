@@ -603,6 +603,57 @@ def fetch_fund_history_lsjz_raw(code: str, start_date: str | None, end_date: str
     return rows
 
 
+def fetch_sector_page_raw(page: int, attempts: int = 2) -> tuple[list[dict], int] | None:
+    """板块全量分页单页取数+解析(原 data_source_v2._fetch_sector_page 主体)。
+
+    重试 1 次仍失败/空页 → None(调用方据此 fail-closed)。URL/分页常量/
+    字段映射经 _ds2 属性调用, 保证 patch ds2.em_get 与常量契约不变。
+    """
+    base = {
+        "pz": _ds2._SECTOR_PAGE_SIZE, "po": 1, "np": 1, "fltt": 2, "invt": 2,
+        "fid": "f3", "fs": "m:90+t:2", "fields": _ds2._SECTOR_FIELDS,
+    }
+    for attempt in range(max(1, attempts)):
+        try:
+            resp = _ds2.em_get(_ds2._SECTOR_URL, params=dict(base, pn=page))
+            data = (resp.json() or {}).get("data") or {}
+            items = data.get("diff") or []
+            if isinstance(items, list) and items:
+                total = int(_safe_float(data.get("total") or 0))
+                return [_ds2._map_sector_row(item) for item in items if isinstance(item, dict)], total
+            logger.warning(f"sector_ranking_full 第 {page} 页为空(第 {attempt + 1} 次)")
+        except Exception as e:
+            logger.warning(f"sector_ranking_full 第 {page} 页失败(第 {attempt + 1} 次): {e}")
+        if attempt + 1 < attempts:
+            time.sleep(0.3)
+    logger.warning(f"sector_ranking_full 第 {page} 页重试后仍失败, fail-closed")
+    return None
+
+
+def fetch_sector_ranking_em_raw(fs: str) -> list[dict]:
+    """板块排行单跳 clist 取数+解析(原 data_source_v2
+    ._fetch_sector_ranking_uncached 的行业/概念两个分支公共体)。
+
+    fs="m:90+t:2" 行业 / "m:90+t:3" 概念。返回解析结果(可能为空, 由门面
+    决定是否降级下一跳); 网络异常向上抛出, 健康度/缓存/来源标记保留在门面。
+    """
+    params = {
+        "pn": 1,
+        "pz": 50,
+        "po": 1,
+        "np": 1,
+        "fltt": 2,
+        "invt": 2,
+        "fid": "f3",
+        "fs": fs,
+        "fields": "f2,f3,f4,f12,f14,f62,f184,f66,f69,f72,f75,f78,f81,f84,f87",
+    }
+    resp = _ds2.em_get(_ds2._SECTOR_URL, params=params)
+    data = resp.json()
+    items = data.get("data", {}).get("diff", [])
+    return [_ds2._map_sector_row(item) for item in items]
+
+
 class EastmoneyProvider:
     """东方财富(push2his 日 K)。priority 10: K 线首选源。"""
 

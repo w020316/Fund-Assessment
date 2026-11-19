@@ -961,29 +961,11 @@ _SECTOR_URL = "https://push2.eastmoney.com/api/qt/clist/get"
 
 
 def _fetch_sector_page(page: int, attempts: int = 2) -> tuple[list[dict], int] | None:
-    """取一页;返回 (rows, total)。重试 1 次仍失败/空页 → None(调用方据此 fail-closed)。
+    """板块全量分页单页门面(M4-C 绞杀迁移): 取数+解析在
+    data_guard.providers.eastmoney.fetch_sector_page_raw, 行为零变更。"""
+    from src.core.data_guard.providers.eastmoney import fetch_sector_page_raw
 
-    实测该接口偶发 Read timeout, 一次抖动就打掉整个评分太脆;重试仍失败才放弃。
-    """
-    base = {
-        "pz": _SECTOR_PAGE_SIZE, "po": 1, "np": 1, "fltt": 2, "invt": 2,
-        "fid": "f3", "fs": "m:90+t:2", "fields": _SECTOR_FIELDS,
-    }
-    for attempt in range(max(1, attempts)):
-        try:
-            resp = em_get(_SECTOR_URL, params=dict(base, pn=page))
-            data = (resp.json() or {}).get("data") or {}
-            items = data.get("diff") or []
-            if isinstance(items, list) and items:
-                total = int(_safe_float(data.get("total") or 0))
-                return [_map_sector_row(item) for item in items if isinstance(item, dict)], total
-            logger.warning(f"sector_ranking_full 第 {page} 页为空(第 {attempt + 1} 次)")
-        except Exception as e:
-            logger.warning(f"sector_ranking_full 第 {page} 页失败(第 {attempt + 1} 次): {e}")
-        if attempt + 1 < attempts:
-            time.sleep(0.3)
-    logger.warning(f"sector_ranking_full 第 {page} 页重试后仍失败, fail-closed")
-    return None
+    return fetch_sector_page_raw(page, attempts)
 
 
 def _fetch_sector_ranking_pages() -> list[dict]:
@@ -1015,43 +997,18 @@ def _fetch_sector_ranking_pages() -> list[dict]:
 
 
 def _fetch_sector_ranking_uncached() -> list[dict]:
-    """真正的取数链(东财行业 → 东财概念 → 新浪板块资金 → 新浪旧接口)。"""
+    """真正的取数链(东财行业 → 东财概念 → 新浪板块资金 → 新浪旧接口)。
+
+    M4-C 绞杀迁移: 两跳东财 clist 的取数+解析在
+    data_guard.providers.eastmoney.fetch_sector_ranking_em_raw(fs);
+    健康度/缓存/来源标记/降级编排保留于此, 行为零变更。
+    """
+    from src.core.data_guard.providers.eastmoney import fetch_sector_ranking_em_raw
+
     # 优先使用行业板块(m:90+t:2),而非概念板块(m:90+t:3)
     # 注:东财 API fs 参数, m:90+t:2=行业板块, m:90+t:3=概念板块
-    url = "https://push2.eastmoney.com/api/qt/clist/get"
-    params = {
-        "pn": 1,
-        "pz": 50,
-        "po": 1,
-        "np": 1,
-        "fltt": 2,
-        "invt": 2,
-        "fid": "f3",
-        "fs": "m:90+t:2",
-        "fields": "f2,f3,f4,f12,f14,f62,f184,f66,f69,f72,f75,f78,f81,f84,f87",
-    }
     try:
-        resp = em_get(url, params=params)
-        data = resp.json()
-        items = data.get("data", {}).get("diff", [])
-        result: list[dict] = []
-        for item in items:
-            result.append({
-                "code": _safe_str(item.get("f12", "")),
-                "name": _safe_str(item.get("f14", "")),
-                "change_pct": _safe_float(item.get("f3", 0)),
-                "price": _safe_float(item.get("f2", 0)),
-                "main_net_inflow": _safe_float(item.get("f62", 0)),
-                "main_inflow_pct": _safe_float(item.get("f184", 0)),
-                "super_large_net": _safe_float(item.get("f66", 0)),
-                "super_large_pct": _safe_float(item.get("f69", 0)),
-                "large_net": _safe_float(item.get("f72", 0)),
-                "large_pct": _safe_float(item.get("f75", 0)),
-                "medium_net": _safe_float(item.get("f78", 0)),
-                "medium_pct": _safe_float(item.get("f81", 0)),
-                "small_net": _safe_float(item.get("f84", 0)),
-                "small_pct": _safe_float(item.get("f87", 0)),
-            })
+        result = fetch_sector_ranking_em_raw("m:90+t:2")
         if result:
             data_health.record_success("sector_ranking", len(result))
             _cache_set("sector_ranking", result, 30)
@@ -1060,30 +1017,8 @@ def _fetch_sector_ranking_uncached() -> list[dict]:
     except Exception as e:
         logger.warning(f"get_sector_ranking industry failed: {e}")
     # 降级:尝试概念板块(m:90+t:3)
-    params2 = dict(params)
-    params2["fs"] = "m:90+t:3"
     try:
-        resp = em_get(url, params=params2)
-        data = resp.json()
-        items = data.get("data", {}).get("diff", [])
-        result2: list[dict] = []
-        for item in items:
-            result2.append({
-                "code": _safe_str(item.get("f12", "")),
-                "name": _safe_str(item.get("f14", "")),
-                "change_pct": _safe_float(item.get("f3", 0)),
-                "price": _safe_float(item.get("f2", 0)),
-                "main_net_inflow": _safe_float(item.get("f62", 0)),
-                "main_inflow_pct": _safe_float(item.get("f184", 0)),
-                "super_large_net": _safe_float(item.get("f66", 0)),
-                "super_large_pct": _safe_float(item.get("f69", 0)),
-                "large_net": _safe_float(item.get("f72", 0)),
-                "large_pct": _safe_float(item.get("f75", 0)),
-                "medium_net": _safe_float(item.get("f78", 0)),
-                "medium_pct": _safe_float(item.get("f81", 0)),
-                "small_net": _safe_float(item.get("f84", 0)),
-                "small_pct": _safe_float(item.get("f87", 0)),
-            })
+        result2 = fetch_sector_ranking_em_raw("m:90+t:3")
         if result2:
             data_health.record_success("sector_ranking", len(result2))
             _cache_set("sector_ranking", result2, 30)
@@ -1111,19 +1046,19 @@ _sina_fund_failed_at: float = 0.0
 
 
 def _get_sector_ranking_sina_fund() -> list[dict]:
-    """新浪板块资金流（东财 clist 不可用时的真实资金兜底）。
+    """新浪板块资金门面(M4-C 绞杀迁移): 请求+解析在
+    data_guard.providers.sina.fetch_sector_fund_raw; A-15 冷却状态
+    (_sina_fund_failed_at, conftest/既有测试的契约目标)与只试行业口径的
+    收敛编排保留于此, 行为零变更。
 
     上游 ``MoneyFlow.ssl_bkzj_bk`` 与东财行业板块口径接近（fenlei=2 为行业），
     返回 netamount/ratioamount，可填 main_net_inflow / main_inflow_pct，
     不再是"50 行资金全 0"的假数据。超大/大/中/小单拆分明细上游不给，保持 0
     并由路由层记入 unavailable_fields，避免被读成"真的为 0"。
     """
+    from src.core.data_guard.providers.sina import fetch_sector_fund_raw
+
     global _sina_fund_failed_at
-    url = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/MoneyFlow.ssl_bkzj_bk"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Referer": "https://finance.sina.com.cn/",
-    }
     # A-15(2026-11-17):旧实现顺序试 fenlei=2 → fenlei=0, 各 6s 超时, 最坏 12s
     # 只为了拿"同一份板块列表"的两种分类口径。现在:
     #   ① 只试行业口径 fenlei=2(与东财 m:90+t:2 对齐), 失败就**本次放弃**,
@@ -1136,155 +1071,54 @@ def _get_sector_ranking_sina_fund() -> list[dict]:
         return []
     for fenlei in (2,):  # 2=行业(对齐东财 m:90+t:2)
         try:
-            resp = requests.get(url, params={
-                "page": 1, "num": 100, "sort": "netamount", "asc": 0, "fenlei": fenlei,
-            }, timeout=6, headers=headers)
-            items = resp.json()
-            if not isinstance(items, list) or not items:
-                _sina_fund_failed_at = time.monotonic()
-                logger.warning(f"_get_sector_ranking_sina_fund fenlei={fenlei} 返回空, 进入冷却")
-                return []
-            result: list[dict] = []
-            for item in items:
-                code = _safe_str(item.get("category"))
-                name = _safe_str(item.get("name"))
-                if not code or not name:
-                    continue
-                result.append({
-                    "code": code,
-                    "name": name,
-                    "change_pct": round(_safe_float(item.get("avg_changeratio")) * 100, 2),
-                    "price": round(_safe_float(item.get("avg_price")), 2),
-                    "main_net_inflow": _safe_float(item.get("netamount")),
-                    "main_inflow_pct": round(_safe_float(item.get("ratioamount")) * 100, 2),
-                    "super_large_net": 0,
-                    "super_large_pct": 0,
-                    "large_net": 0,
-                    "large_pct": 0,
-                    "medium_net": 0,
-                    "medium_pct": 0,
-                    "small_net": 0,
-                    "small_pct": 0,
-                })
-            if result:
-                _sina_fund_failed_at = 0.0
-                # 与东财口径对齐：按涨跌幅降序，而非上游的净流入排序
-                result.sort(key=lambda x: x["change_pct"], reverse=True)
-                return result[:50]
-            _sina_fund_failed_at = time.monotonic()
-            return []
+            result = fetch_sector_fund_raw(fenlei)
         except Exception as e:
             _sina_fund_failed_at = time.monotonic()
             logger.warning(f"_get_sector_ranking_sina_fund fenlei={fenlei} failed: {e}")
+            continue
+        if not result:
+            _sina_fund_failed_at = time.monotonic()
+            logger.warning(f"_get_sector_ranking_sina_fund fenlei={fenlei} 返回空, 进入冷却")
+            return []
+        _sina_fund_failed_at = 0.0
+        return result
     return []
 
 
 def _get_sector_ranking_sina() -> list[dict]:
+    """新浪旧接口门面(M4-C 绞杀迁移): 请求+解析在
+    data_guard.providers.sina.fetch_sector_ranking_sina_raw; 空结果/异常
+    降级 v2 的编排保留于此, 行为零变更。"""
+    from src.core.data_guard.providers.sina import fetch_sector_ranking_sina_raw
+
     try:
-        url = "https://money.finance.sina.com.cn/q/view/newFLJK.php?param=class"
-        resp = requests.get(url, timeout=5, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://finance.sina.com.cn/",
-        })
-        resp.encoding = "gbk"
-        text = resp.text
-        import json as _json
-        result: list[dict] = []
-        for m in re.finditer(r'=\s*(\{[^;]*\})\s*;?', text):
-            try:
-                data = _json.loads(m.group(1))
-            except Exception:
-                continue
-            for k, v in data.items():
-                if not isinstance(v, str):
-                    continue
-                parts = v.split(",")
-                if len(parts) < 5:
-                    continue
-                try:
-                    name = parts[1] if len(parts) > 1 else ""
-                    change_pct = _safe_float(parts[4]) if len(parts) > 4 else 0
-                    avg_price = _safe_float(parts[3]) if len(parts) > 3 else 0
-                    result.append({
-                        "code": k,
-                        "name": name,
-                        "change_pct": round(change_pct, 2),
-                        "price": round(avg_price, 2),
-                        "main_net_inflow": 0,
-                        "main_inflow_pct": 0,
-                        "super_large_net": 0,
-                        "super_large_pct": 0,
-                        "large_net": 0,
-                        "large_pct": 0,
-                        "medium_net": 0,
-                        "medium_pct": 0,
-                        "small_net": 0,
-                        "small_pct": 0,
-                    })
-                except (ValueError, IndexError):
-                    continue
+        result = fetch_sector_ranking_sina_raw()
         if not result:
             return _get_sector_ranking_sina_v2()
-        result.sort(key=lambda x: x["change_pct"], reverse=True)
-        return result[:50]
+        return result
     except Exception as e:
         logger.warning(f"_get_sector_ranking_sina failed: {e}")
     return _get_sector_ranking_sina_v2()
 
 
 def _get_sector_ranking_sina_v2() -> list[dict]:
+    """新浪 hangye_zjh 门面(M4-C 绞杀迁移): 请求+解析在
+    data_guard.providers.sina.fetch_sector_ranking_sina_v2_raw, 行为零变更。"""
+    from src.core.data_guard.providers.sina import fetch_sector_ranking_sina_v2_raw
+
     try:
-        url = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData"
-        params = {
-            "page": 1,
-            "num": 50,
-            "sort": "changepercent",
-            "asc": 0,
-            "node": "hangye_zjh",
-            "_s_r_a": "auto",
-        }
-        resp = requests.get(url, params=params, timeout=5, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://finance.sina.com.cn/",
-        })
-        resp.encoding = "gbk"
-        items = resp.json()
-        result: list[dict] = []
-        for item in items:
-            result.append({
-                "code": _safe_str(item.get("code", item.get("symbol", ""))),
-                "name": _safe_str(item.get("name", "")),
-                "change_pct": _safe_float(item.get("changepercent", 0)),
-                "price": _safe_float(item.get("trade", item.get("price", 0))),
-                "main_net_inflow": 0,
-                "main_inflow_pct": 0,
-                "super_large_net": 0,
-                "super_large_pct": 0,
-                "large_net": 0,
-                "large_pct": 0,
-                "medium_net": 0,
-                "medium_pct": 0,
-                "small_net": 0,
-                "small_pct": 0,
-            })
-        return result[:50]
+        return fetch_sector_ranking_sina_v2_raw()
     except Exception as e:
         logger.warning(f"_get_sector_ranking_sina_v2 failed: {e}")
         return []
 
 
 def _get_sector_ranking_tencent() -> list[dict]:
-    try:
-        url = "https://qt.gtimg.cn/q=future2sh000001,future2sz399001"
-        resp = requests.get(url, timeout=5, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://gu.qq.com/",
-        })
-        resp.encoding = "gbk"
-        return []
-    except Exception as e:
-        logger.warning(f"_get_sector_ranking_tencent failed: {e}")
-        return []
+    """腾讯板块 stub 门面(M4-C 绞杀迁移): 取数在
+    data_guard.providers.tencent.fetch_sector_ranking_tencent_raw, 行为零变更。"""
+    from src.core.data_guard.providers.tencent import fetch_sector_ranking_tencent_raw
+
+    return fetch_sector_ranking_tencent_raw()
 
 
 def _get_capital_flow_fallback(stock_code: str) -> dict:

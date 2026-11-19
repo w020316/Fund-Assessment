@@ -4,9 +4,13 @@
 fetch_kline_raw 为 _kline_sina_fallback 的取数+解析本体(逐行原样迁移,
 仍用 _safe_float 0 兜底, 下游 _sanitize_kline_rows 负责 0 价清洗),
 data_source_v2 保留同名私有门面, 签名/输出行为零变更。
+
+M4-C(2026-11-19): 板块群三路新浪取数+解析体迁入(板块资金/旧接口/newFLJK
+兜底), 冷却状态(_sina_fund_failed_at)与降级编排保留在 data_source_v2 门面。
 """
 from __future__ import annotations
 
+import json
 import re
 
 import requests
@@ -133,3 +137,143 @@ def fetch_stock_news_raw(stock_code: str, page: int = 1, page_size: int = 10) ->
             "publish_time": pub_time,
         })
     return result
+
+
+def fetch_sector_fund_raw(fenlei: int) -> list[dict]:
+    """新浪板块资金(MoneyFlow.ssl_bkzj_bk)取数+解析(原
+    data_source_v2._get_sector_ranking_sina_fund 的单跳请求+解析体)。
+
+    fenlei=2 为行业口径(对齐东财 m:90+t:2)。返回按涨跌幅降序的 top50;
+    响应非列表/为空或无有效行 → [](门面据此进入冷却); 网络异常向上抛出。
+    requests 经模块对象调用, 既有测试 patch ds2.requests.get 的契约不变。
+    """
+    url = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/MoneyFlow.ssl_bkzj_bk"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://finance.sina.com.cn/",
+    }
+    resp = requests.get(url, params={
+        "page": 1, "num": 100, "sort": "netamount", "asc": 0, "fenlei": fenlei,
+    }, timeout=6, headers=headers)
+    items = resp.json()
+    if not isinstance(items, list) or not items:
+        return []
+    result: list[dict] = []
+    for item in items:
+        code = _safe_str(item.get("category"))
+        name = _safe_str(item.get("name"))
+        if not code or not name:
+            continue
+        result.append({
+            "code": code,
+            "name": name,
+            "change_pct": round(_safe_float(item.get("avg_changeratio")) * 100, 2),
+            "price": round(_safe_float(item.get("avg_price")), 2),
+            "main_net_inflow": _safe_float(item.get("netamount")),
+            "main_inflow_pct": round(_safe_float(item.get("ratioamount")) * 100, 2),
+            "super_large_net": 0,
+            "super_large_pct": 0,
+            "large_net": 0,
+            "large_pct": 0,
+            "medium_net": 0,
+            "medium_pct": 0,
+            "small_net": 0,
+            "small_pct": 0,
+        })
+    if not result:
+        return []
+    # 与东财口径对齐：按涨跌幅降序，而非上游的净流入排序
+    result.sort(key=lambda x: x["change_pct"], reverse=True)
+    return result[:50]
+
+
+def fetch_sector_ranking_sina_raw() -> list[dict]:
+    """新浪旧接口(newFLJK.php param=class)取数+解析(原
+    data_source_v2._get_sector_ranking_sina 的请求+解析体)。
+
+    返回按涨跌幅降序的 top50; 无有效行 → [](门面降级 v2); 异常向上抛出。
+    """
+    url = "https://money.finance.sina.com.cn/q/view/newFLJK.php?param=class"
+    resp = requests.get(url, timeout=5, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://finance.sina.com.cn/",
+    })
+    resp.encoding = "gbk"
+    text = resp.text
+    result: list[dict] = []
+    for m in re.finditer(r'=\s*(\{[^;]*\})\s*;?', text):
+        try:
+            data = json.loads(m.group(1))
+        except Exception:
+            continue
+        for k, v in data.items():
+            if not isinstance(v, str):
+                continue
+            parts = v.split(",")
+            if len(parts) < 5:
+                continue
+            try:
+                name = parts[1] if len(parts) > 1 else ""
+                change_pct = _safe_float(parts[4]) if len(parts) > 4 else 0
+                avg_price = _safe_float(parts[3]) if len(parts) > 3 else 0
+                result.append({
+                    "code": k,
+                    "name": name,
+                    "change_pct": round(change_pct, 2),
+                    "price": round(avg_price, 2),
+                    "main_net_inflow": 0,
+                    "main_inflow_pct": 0,
+                    "super_large_net": 0,
+                    "super_large_pct": 0,
+                    "large_net": 0,
+                    "large_pct": 0,
+                    "medium_net": 0,
+                    "medium_pct": 0,
+                    "small_net": 0,
+                    "small_pct": 0,
+                })
+            except (ValueError, IndexError):
+                continue
+    if not result:
+        return []
+    result.sort(key=lambda x: x["change_pct"], reverse=True)
+    return result[:50]
+
+
+def fetch_sector_ranking_sina_v2_raw() -> list[dict]:
+    """新浪 Market_Center.getHQNodeData(hangye_zjh)取数+解析(原
+    data_source_v2._get_sector_ranking_sina_v2 主体)。异常向上抛出。"""
+    url = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData"
+    params = {
+        "page": 1,
+        "num": 50,
+        "sort": "changepercent",
+        "asc": 0,
+        "node": "hangye_zjh",
+        "_s_r_a": "auto",
+    }
+    resp = requests.get(url, params=params, timeout=5, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://finance.sina.com.cn/",
+    })
+    resp.encoding = "gbk"
+    items = resp.json()
+    result: list[dict] = []
+    for item in items:
+        result.append({
+            "code": _safe_str(item.get("code", item.get("symbol", ""))),
+            "name": _safe_str(item.get("name", "")),
+            "change_pct": _safe_float(item.get("changepercent", 0)),
+            "price": _safe_float(item.get("trade", item.get("price", 0))),
+            "main_net_inflow": 0,
+            "main_inflow_pct": 0,
+            "super_large_net": 0,
+            "super_large_pct": 0,
+            "large_net": 0,
+            "large_pct": 0,
+            "medium_net": 0,
+            "medium_pct": 0,
+            "small_net": 0,
+            "small_pct": 0,
+        })
+    return result[:50]
