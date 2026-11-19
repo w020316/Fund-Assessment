@@ -46,3 +46,15 @@ def test_view_holdings_uses_percent_fields_without_rescaling():
 def test_large_negative_amounts_use_same_money_format():
     src = INDEX.read_text(encoding="utf-8", errors="replace")
     assert "Math.abs(c) > 10000" in src, "负的大额金额会绕过 fmtMoney, 同列混用两种格式"
+
+
+def test_fund_positions_have_local_backup_and_manual_restore():
+    """Render 免费实例重部署会清空持仓文件: 必须有本机备份 + 手动一键恢复。"""
+    src = INDEX.read_text(encoding="utf-8", errors="replace")
+    load_body = _function_body(src, "loadFundData")
+    assert "fund_positions_backup_v1" in load_body, "加载成功后未写入本机备份"
+    restore_body = _function_body(src, "restoreFundPositionsFromBackup")
+    assert "admin_token" in restore_body, "恢复写操作必须检查管理员 Token"
+    assert "'/api/fund/positions'" in restore_body, "恢复未调用持仓写端点"
+    # 不允许自动写: loadFundData 内不得直接 POST 持仓端点
+    assert "method: 'POST'" not in load_body

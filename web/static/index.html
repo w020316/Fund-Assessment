@@ -2442,6 +2442,9 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
             <!-- ===== STAGE6: groups ===== 批次B 功能#8:分组筛选条 + 管理面板(由 stage6-portfolio.js 渲染) -->
             <div class="st6-group-bar" id="st6GroupBar" role="toolbar" aria-label="持仓分组筛选"></div>
             <div class="st6-group-manage" id="st6GroupManage" hidden></div>
+            <!-- 2026-11-19: Render 免费实例磁盘会被重新部署清空; 服务端持仓为空时,
+                 用浏览器上次成功加载的备份提供一键恢复(不自动写, 需管理员 Token)。 -->
+            <div id="fundRestoreBanner" style="display:none;margin-bottom:8px;padding:8px 12px;border:1px solid var(--color-warning,#f59e0b);border-radius:6px;background:rgba(245,158,11,0.08);font-size:12px;color:var(--text-secondary);"></div>
             <!-- ===== STAGE5: fund-cards ===== 桌面保留表格(P1-1);<768px 由下方卡片列表替代 -->
             <div class="table-wrap" tabindex="0" id="fundPositionTableWrap" style="max-height:400px;overflow-y:auto;">
               <table>
@@ -6032,6 +6035,33 @@ async function loadFundData() {
   const positions = data.positions || [];
   const summary = data.summary || {};
 
+  // 2026-11-19: Render 免费实例重新部署会清空磁盘, 持仓文件随之丢失。
+  // 这里把每次成功加载的持仓精简备份到 localStorage; 服务端为空时提供一键恢复
+  // (只提示、不自动写, 写操作仍受管理员 Token 保护)。
+  try {
+    const banner = document.getElementById('fundRestoreBanner');
+    if (positions.length) {
+      const slim = positions.map(p => ({
+        fund_code: p.fund_code, fund_name: p.fund_name,
+        shares: p.shares, cost_nav: p.cost_nav,
+        buy_date: p.buy_date || '', note: p.note || ''
+      }));
+      localStorage.setItem('fund_positions_backup_v1', JSON.stringify({ ts: Date.now(), positions: slim }));
+      if (banner) { banner.style.display = 'none'; banner.innerHTML = ''; }
+    } else {
+      let backup = null;
+      try { backup = JSON.parse(localStorage.getItem('fund_positions_backup_v1') || 'null'); } catch (e) { backup = null; }
+      if (banner && backup && Array.isArray(backup.positions) && backup.positions.length) {
+        const t = new Date(backup.ts || Date.now()).toLocaleString('zh-CN');
+        banner.innerHTML = `本机备份有 <b>${backup.positions.length}</b> 只持仓（${escapeHtml(t)}），服务器当前为空。`
+          + '<button class="btn btn-sm btn-primary" style="margin-left:8px;padding:2px 10px;min-height:28px;" onclick="restoreFundPositionsFromBackup()">恢复到服务器</button>';
+        banner.style.display = 'block';
+      } else if (banner) {
+        banner.style.display = 'none'; banner.innerHTML = '';
+      }
+    }
+  } catch (e) { /* localStorage 不可用不影响主流程 */ }
+
   // 阶段四 P0:后端缺失时返回 null,前端必须显示"数据缺失"(不再显示 0.0000/+0.00)
   const totalMvMissing = summary.total_market_value == null;
   const totalPnlMissing = summary.total_pnl == null;
@@ -6115,6 +6145,32 @@ async function loadFundData() {
   }).join('');
   // ===== STAGE6: groups ===== 批次B 功能#8:按分组重排 + 分组小计(失败静默,不影响持仓展示)
   if (window.St6Groups) window.St6Groups.applyGroups(positions);
+}
+
+// 2026-11-19: 从本机 localStorage 备份恢复持仓(服务端因重新部署清空时使用)。
+// 不自动执行: 写操作必须由用户点击, 且依赖 localStorage 中的管理员 Token。
+async function restoreFundPositionsFromBackup() {
+  let backup = null;
+  try { backup = JSON.parse(localStorage.getItem('fund_positions_backup_v1') || 'null'); } catch (e) { backup = null; }
+  const positions = (backup && Array.isArray(backup.positions)) ? backup.positions : [];
+  if (!positions.length) {
+    showToast('本机没有可用备份', 'error');
+    return;
+  }
+  if (!localStorage.getItem('admin_token')) {
+    showToast('恢复需要管理员 Token，请先在「设置 → 管理密码」中配置', 'error');
+    return;
+  }
+  const resp = await api('/api/fund/positions', {
+    method: 'POST',
+    body: JSON.stringify({ positions: positions })
+  });
+  if (resp && resp.success) {
+    showToast('已从本机备份恢复 ' + positions.length + ' 只持仓', 'success');
+    loadFundData();
+  } else {
+    showToast('恢复失败: ' + ((resp && resp.message) || '未知错误'), 'error');
+  }
 }
 
 async function loadFundAdvice() {
