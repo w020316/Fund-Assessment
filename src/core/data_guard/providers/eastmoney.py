@@ -139,6 +139,60 @@ def fetch_research_reports_raw(stock_code: str, page: int, page_size: int) -> li
     return result
 
 
+def fetch_latest_trade_date_raw(report_name: str, sort_column: str = "TRADE_DATE") -> str:
+    """取东财报表最近一条记录的交易日(原 _em_latest_trade_date 主体)。
+
+    异常向上抛出, 由门面记录并返回 ""(行为逐位一致)。
+    """
+    resp = _ds2.em_get("https://datacenter-web.eastmoney.com/api/data/v1/get", params={
+        "reportName": report_name,
+        "columns": sort_column,
+        "pageSize": 1,
+        "pageNumber": 1,
+        "sortColumns": sort_column,
+        "sortTypes": -1,
+    })
+    items = (resp.json().get("result") or {}).get("data") or []
+    return _safe_str(items[0].get(sort_column, ""))[:10] if items else ""
+
+
+def fetch_dragon_tiger_raw() -> list[dict]:
+    """龙虎榜取数+解析(原 get_dragon_tiger 主体, 无缓存/无降级)。
+
+    交易日取返回集里的最近一天(周末写死"今天"必空); 异常向上抛出,
+    由门面降级到 sina 诚实空列表(不用涨幅榜冒充)。
+    """
+    url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+    params = {
+        "sortColumns": "TRADE_DATE",
+        "sortTypes": -1,
+        "pageSize": 100,
+        "pageNumber": 1,
+        "reportName": "RPT_BILLBOARD_DAILYDETAILS",
+        "columns": "ALL",
+    }
+    resp = _ds2.em_get(url, params=params)
+    data = resp.json()
+    items = data.get("result", {}).get("data", [])
+    if items:
+        latest = _safe_str(items[0].get("TRADE_DATE", ""))[:10]
+        items = [it for it in items if _safe_str(it.get("TRADE_DATE", ""))[:10] == latest][:30]
+    result: list[dict] = []
+    for item in items:
+        result.append({
+            "code": _safe_str(item.get("SECURITY_CODE", "")),
+            "name": _safe_str(item.get("SECURITY_NAME_ABBR", "")),
+            "price": _safe_float(item.get("CLOSE_PRICE", 0)),
+            "change_pct": _safe_float(item.get("CHANGE_RATE", 0)),
+            "reason": _safe_str(item.get("EXPLANATION", "")),
+            "buy_amount": _safe_float(item.get("TOTAL_BUY", 0)),
+            "sell_amount": _safe_float(item.get("TOTAL_SELL", 0)),
+            "net_amount": _safe_float(item.get("TOTAL_NET", 0)),
+            "trade_date": _safe_str(item.get("TRADE_DATE", ""))[:10],
+        })
+    return result
+
+
 class EastmoneyProvider:
     """东方财富(push2his 日 K)。priority 10: K 线首选源。"""
 

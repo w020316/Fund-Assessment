@@ -711,3 +711,80 @@ class TestMigrationSnapshotThs:
         with patch("src.core.data_guard.providers.ths.requests.get",
                    side_effect=RuntimeError("ths down")):
             assert ds2.get_northbound_flow() == {}
+
+
+# ── M4-B1 绞杀迁移快照: 最新交易日 + 龙虎榜 ────────────────────────────
+
+def _em_json(payload: dict):
+    return type("R", (), {"json": lambda s: payload})()
+
+
+class TestMigrationSnapshotTradeDate:
+    """M4-B1: 东财报表最近交易日迁移。"""
+
+    def test_snapshot_exact(self):
+        from src.core import data_source_v2 as ds2
+
+        payload = {"result": {"data": [{"TRADE_DATE": "2026-11-18 00:00:00"}]}}
+        with patch("src.core.data_source_v2.em_get",
+                   return_value=_em_json(payload)):
+            assert ds2._em_latest_trade_date("RPT_X") == "2026-11-18"
+
+    def test_empty_data_returns_empty_string(self):
+        from src.core import data_source_v2 as ds2
+
+        with patch("src.core.data_source_v2.em_get",
+                   return_value=_em_json({"result": None})):
+            assert ds2._em_latest_trade_date("RPT_X") == ""
+
+    def test_exception_returns_empty_string(self):
+        from src.core import data_source_v2 as ds2
+
+        with patch("src.core.data_source_v2.em_get",
+                   side_effect=RuntimeError("em down")):
+            assert ds2._em_latest_trade_date("RPT_X") == ""
+
+
+class TestMigrationSnapshotDragonTiger:
+    """M4-B1: 龙虎榜迁移(最近交易日过滤 + 新浪诚实空降级)。"""
+
+    def _payload(self, rows: list[dict]) -> dict:
+        return {"result": {"data": rows}}
+
+    def test_snapshot_filters_latest_trade_date(self):
+        from src.core import data_source_v2 as ds2
+
+        rows = [
+            {"SECURITY_CODE": "600519", "SECURITY_NAME_ABBR": "贵州茅台",
+             "CLOSE_PRICE": "1499.00", "CHANGE_RATE": "10.00",
+             "EXPLANATION": "日涨幅偏离值达7%", "TOTAL_BUY": "1.2e8",
+             "TOTAL_SELL": "3.0e7", "TOTAL_NET": "9.0e7",
+             "TRADE_DATE": "2026-11-18 00:00:00"},
+            {"SECURITY_CODE": "000001", "SECURITY_NAME_ABBR": "平安银行",
+             "CLOSE_PRICE": "10.00", "CHANGE_RATE": "1.00",
+             "EXPLANATION": "", "TOTAL_BUY": "0", "TOTAL_SELL": "0",
+             "TOTAL_NET": "0",
+             "TRADE_DATE": "2026-11-17 00:00:00"},  # 非最近交易日 → 过滤
+        ]
+        with patch("src.core.data_source_v2.em_get",
+                   return_value=_em_json(self._payload(rows))), \
+             patch.object(ds2, "_cache_get", return_value=None), \
+             patch.object(ds2, "_cache_set"):
+            out = ds2.get_dragon_tiger()
+        assert len(out) == 1
+        assert out[0] == {
+            "code": "600519", "name": "贵州茅台", "price": 1499.0,
+            "change_pct": 10.0, "reason": "日涨幅偏离值达7%",
+            "buy_amount": 1.2e8, "sell_amount": 3.0e7, "net_amount": 9.0e7,
+            "trade_date": "2026-11-18",
+        }
+
+    def test_em_error_falls_back_to_honest_empty(self):
+        """旧契约: 东财失败 → 新浪诚实空列表(不用涨幅榜冒充)。"""
+        from src.core import data_source_v2 as ds2
+
+        with patch("src.core.data_source_v2.em_get",
+                   side_effect=RuntimeError("em down")), \
+             patch.object(ds2, "_cache_get", return_value=None), \
+             patch.object(ds2, "_cache_set"):
+            assert ds2.get_dragon_tiger() == []
