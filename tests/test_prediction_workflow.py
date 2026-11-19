@@ -33,7 +33,31 @@ WORKFLOW = ROOT / ".github/workflows/prediction.yml"
 #: 不属于"执行步"的步骤: 判定点本身与汇总步
 _NON_EXEC_STEPS = {"Resolve task kind", "Guard secrets", "Summary"}
 
-BASH = shutil.which("bash") or shutil.which("sh")
+
+def _find_usable_bash() -> str | None:
+    """找到**真的能执行**的 POSIX bash, 找不到返回 None。
+
+    Windows 上 `shutil.which("bash")` 可能解析到 WSL 启动器 stub
+    (C:\\Windows\\system32\\bash.EXE): 本机未安装 WSL 发行版时它只会打印
+    本地化(非 UTF-8)错误后退出, 脚本完全不执行 —— 与"没找到 bash"等价,
+    必须按不可用跳过, 而不是让行为级断言误报失败(r7 阶段一 Q1)。
+    用 `exit 7` 探针验证解释器真的把脚本跑起来了。
+    """
+    for cand in (shutil.which("bash"), shutil.which("sh")):
+        if not cand:
+            continue
+        try:
+            probe = subprocess.run(
+                [cand, "-c", "exit 7"], capture_output=True, timeout=15,
+            )
+            if probe.returncode == 7:
+                return cand
+        except (OSError, subprocess.SubprocessError):
+            continue
+    return None
+
+
+BASH = _find_usable_bash()
 
 _EXPR = re.compile(r"\$\{\{[^}]*\}\}")
 
@@ -108,7 +132,11 @@ def test_summary_always_runs_and_uses_same_verdict():
     assert "exit 1" in run
 
 
-@pytest.mark.skipif(not BASH, reason="需要 bash/sh 才能执行 guard 脚本")
+@pytest.mark.skipif(
+    not BASH,
+    reason="需要真实 POSIX bash(如 Git Bash/GitHub Actions)才能行为级执行 guard 脚本;"
+    " 本机仅有不可用的 WSL 启动器 stub 时按环境缺失跳过",
+)
 def test_guard_script_behaviour_matrix(tmp_path):
     """真的跑一遍 guard 脚本, 覆盖 secrets 缺失/齐全两种组合。"""
     script = _expand_github_expressions(_step("Guard secrets")["run"])
@@ -126,7 +154,8 @@ def test_guard_script_behaviour_matrix(tmp_path):
     env_missing["ADMIN_TOKEN"] = ""
     env_missing["GITHUB_OUTPUT"] = "out_missing"
     proc = subprocess.run(
-        [BASH, "-c", script], env=env_missing, capture_output=True, text=True,
+        [BASH, "-c", script], env=env_missing, capture_output=True,
+        encoding="utf-8", errors="replace",
         cwd=str(tmp_path),
     )
     assert proc.returncode == 1, f"secrets 缺失必须失败, 实际 rc={proc.returncode}\n{proc.stderr}"
@@ -140,7 +169,8 @@ def test_guard_script_behaviour_matrix(tmp_path):
     env_ready["ADMIN_TOKEN"] = "token"
     env_ready["GITHUB_OUTPUT"] = "out_ready"
     proc = subprocess.run(
-        [BASH, "-c", script], env=env_ready, capture_output=True, text=True,
+        [BASH, "-c", script], env=env_ready, capture_output=True,
+        encoding="utf-8", errors="replace",
         cwd=str(tmp_path),
     )
     assert proc.returncode == 0, f"secrets 齐全不应失败\n{proc.stderr}"
