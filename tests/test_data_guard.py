@@ -1267,3 +1267,128 @@ class TestMigrationSnapshotSectorSina:
             rows, total = fetch_sector_page_raw(1)
         assert total == 496
         assert rows[0]["name"] == "银行" and rows[0]["main_net_inflow"] == 1e8
+
+
+# ── M4-D 绞杀迁移快照: 市场情绪/广度 + 分钟线 ──────────────────────────
+
+class TestMigrationSnapshotMarketSentiment:
+    """M4-D: ulist 聚合家数/北交所/total 与指数代理迁移后行为逐位一致。"""
+
+    def test_provider_breadth_raw_snapshot(self):
+        """provider 直测: ulist 聚合字段 f104/f105/f106 → (涨, 跌, 平)。"""
+        from src.core.data_guard.providers.eastmoney import fetch_ulist_breadth_raw
+
+        payload = {"data": {"diff": [{"f104": 598, "f105": 1688, "f106": 69}]}}
+        with patch("src.core.data_source_v2.em_get", return_value=_em_json(payload)):
+            assert fetch_ulist_breadth_raw("1.000001") == (598, 1688, 69)
+
+    def test_facade_counts_snapshot_exact(self):
+        """门面端到端: 沪 598/1688/69 + 深 638/2237/64 = 1236/3925/133,
+        total 5564 减北交所 366 → coverage 95.1% → 偏空, ratio 0.233。"""
+        from src.core import data_source_v2 as ds2
+
+        def fake_em_get(url, params=None, **kw):
+            if "ulist.np" in url:
+                secids = str((params or {}).get("secids", ""))
+                row = ({"f104": 598, "f105": 1688, "f106": 69} if secids.startswith("1.")
+                       else {"f104": 638, "f105": 2237, "f106": 64})
+                return _em_json({"data": {"diff": [row]}})
+            if (params or {}).get("fs") == "m:0+t:81+s:2048":
+                return _em_json({"data": {"total": 366, "diff": []}})
+            return _em_json({"data": {"total": 5564, "diff": []}})
+
+        with patch.object(ds2, "em_get", side_effect=fake_em_get), \
+             patch.object(ds2, "_cache_get", return_value=None), \
+             patch.object(ds2, "_cache_set") as m_cache:
+            out = ds2.get_market_sentiment()
+        assert out == {
+            "rise_count": 1236, "fall_count": 3925, "flat_count": 133,
+            "sentiment": "偏空", "ratio": 0.233, "basis": "counts",
+            "counts_available": True, "counts_basis": "counts",
+        }
+        m_cache.assert_called_once_with("market_sentiment", out, 30)
+
+    def test_facade_index_proxy_snapshot(self):
+        """东财全失败 → 腾讯 sh000001 -1.08% → index_proxy / 计数 None(非 0)。"""
+        from src.core import data_source_v2 as ds2
+        from src.core.data_guard.providers import tencent as tp
+
+        values = ["0"] * 40
+        values[32] = "-1.08"
+        text = f'v_sh000001="{"~".join(values)}";'
+        fake_resp = type("R", (), {"encoding": "", "text": text})()
+        with patch.object(ds2, "em_get", side_effect=RuntimeError("em down")), \
+             patch.object(tp.requests, "get", return_value=fake_resp), \
+             patch.object(ds2, "_cache_get", return_value=None), \
+             patch.object(ds2, "_cache_set"):
+            out = ds2.get_market_sentiment()
+        assert out == {
+            "rise_count": None, "fall_count": None, "flat_count": None,
+            "sentiment": "偏空", "ratio": 0.35, "basis": "index_proxy",
+            "counts_available": False, "counts_basis": "unavailable",
+        }
+
+
+class TestMigrationSnapshotMinuteSeries:
+    """M4-D: 三源分钟线取数+解析迁移后行为逐位一致。"""
+
+    def test_em_snapshot_limit_scales_and_close_column(self):
+        """东财: lmt=window+4, 取第 3 列收盘价, >15:00 补点剔除。"""
+        from src.core import data_source_v2 as ds2
+
+        captured = {}
+        klines = [
+            "2026-11-06 14:58,1451.00,1451.00,1451.00,1451.00,8,1160705.00",
+            "2026-11-06 15:00,1451.00,1453.00,1453.00,1451.00,2826,410617808.00",
+            "2026-11-06 15:30,1453.00,1453.00,1453.00,1453.00,0,0.00",
+        ]
+
+        def fake_em_get(url, params=None, **kw):
+            captured.update(params or {})
+            return _em_json({"data": {"klines": klines}})
+
+        with patch.object(ds2, "em_get", side_effect=fake_em_get):
+            prices, day = ds2._minutes_from_em("300118", 30)
+        assert captured["lmt"] == "34"
+        assert day == "2026-11-06"
+        assert prices == {14 * 60 + 58: 1451.0, 15 * 60: 1453.0}
+
+    def test_tencent_snapshot_accepted_without_fallback(self):
+        """腾讯: 收盘后 1529 补点剔除; 窗口端点齐全 → 直接采纳不回退。"""
+        from src.core import data_source_v2 as ds2
+        from src.core.data_guard.providers import tencent as tp
+
+        payload = {"data": {"sz300118": {"data": {"date": "20261106", "data": [
+            "1455 10.00 1 1", "1500 10.30 2 2", "1529 10.30 2 2",
+        ]}}}}
+        fake_resp = type("R", (), {"json": lambda s: payload})()
+        with patch.object(tp.requests, "get", return_value=fake_resp), \
+             patch.object(ds2, "_minutes_from_em",
+                          side_effect=AssertionError("端点齐全不应回退")), \
+             patch.object(ds2, "_minutes_from_sina",
+                          side_effect=AssertionError("端点齐全不应回退")):
+            prices, source, day = ds2.get_stock_minute_series("300118", 5)
+        assert source == "tencent" and day == "2026-11-06"
+        assert prices == {14 * 60 + 55: 10.0, 15 * 60: 10.3}
+
+    def test_sina_snapshot_gap_not_filled(self):
+        """新浪: datalen=window+6, 零成交分钟跳空不插值。"""
+        from src.core.data_guard.providers.sina import fetch_minute_series_raw
+
+        bars = [
+            {"day": "2026-11-06 14:56:00", "close": "1451.880"},
+            {"day": "2026-11-06 14:57:00", "close": "1451.000"},
+            {"day": "2026-11-06 15:00:00", "close": "1453.000"},
+        ]
+        captured = {}
+
+        def fake_get(url, params=None, **kw):
+            captured.update(params or {})
+            return type("R", (), {"json": lambda s: bars})()
+
+        with patch("src.core.data_guard.providers.sina.requests.get", side_effect=fake_get):
+            prices, day = fetch_minute_series_raw("300118", 30)
+        assert captured["datalen"] == "36"
+        assert sorted(prices) == [14 * 60 + 56, 14 * 60 + 57, 15 * 60]
+        assert (14 * 60 + 58) not in prices
+        assert day == "2026-11-06"

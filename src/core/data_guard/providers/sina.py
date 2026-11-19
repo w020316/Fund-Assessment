@@ -7,6 +7,9 @@ data_source_v2 保留同名私有门面, 签名/输出行为零变更。
 
 M4-C(2026-11-19): 板块群三路新浪取数+解析体迁入(板块资金/旧接口/newFLJK
 兜底), 冷却状态(_sina_fund_failed_at)与降级编排保留在 data_source_v2 门面。
+
+M4-D(2026-11-19): 新浪 1 分钟 K 线取数+解析体迁入; 分钟多源回退链与
+「窗口端点可算」接纳判定保留在 data_source_v2 门面。
 """
 from __future__ import annotations
 
@@ -15,8 +18,17 @@ import re
 
 import requests
 
-from src.core.data_source_v2 import _prefix_code, _safe_float, _safe_str
+from src.core.data_source_v2 import (
+    ANOMALY_WINDOW_MINUTES,
+    _minute_index,
+    _prefix_code,
+    _safe_float,
+    _safe_str,
+)
 from loguru import logger
+
+# _ANOMALY_CLOSE_MINUTE 等常量保留在门面, 经 _ds2 属性调用保证 patch 契约不变
+from src.core import data_source_v2 as _ds2
 
 
 def fetch_kline_raw(symbol: str, period: str = "daily", count: int = 30) -> list[dict]:
@@ -277,3 +289,51 @@ def fetch_sector_ranking_sina_v2_raw() -> list[dict]:
             "small_pct": 0,
         })
     return result[:50]
+
+
+def parse_minutes(bars: list[dict]) -> tuple[dict[int, float], str]:
+    """新浪 1 分钟 K 线 → ({分钟序号: 价格}, 日期)。
+
+    条目形如 {'day': '2026-11-06 14:51:00', 'close': '1449.500', ...}。
+    新浪会丢弃零成交分钟，序列可能跳空 —— 由门面 compute_window_change 的
+    「端点必须存在」规则兜住，不做插值。
+    """
+    prices: dict[int, float] = {}
+    day = ""
+    for bar in bars or []:
+        stamp = str(bar.get("day") or "")
+        if len(stamp) < 16:
+            continue
+        day = stamp[:10]
+        idx = _minute_index(stamp[11:16].replace(":", ""))
+        if idx is None or idx > _ds2._ANOMALY_CLOSE_MINUTE:
+            continue
+        try:
+            price = float(bar.get("close"))
+        except (TypeError, ValueError):
+            continue
+        if price > 0:
+            prices[idx] = price
+    return prices, day
+
+
+def fetch_minute_series_raw(
+    code: str,
+    window_minutes: int = ANOMALY_WINDOW_MINUTES,
+) -> tuple[dict[int, float], str]:
+    """新浪 1 分钟 K 线取数+解析(原 data_source_v2._minutes_from_sina 主体)。
+
+    datalen 必须随 window 缩放(window+6), 否则 window>5 时取点不足。
+    异常向上抛出, 由门面记 debug 并按回退链收尾。
+    """
+    resp = requests.get(
+        "https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getKLineData",
+        params={"symbol": _prefix_code(code), "scale": 1, "ma": "no",
+                "datalen": str(window_minutes + 6)},
+        headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://finance.sina.com.cn/",
+        },
+        timeout=5,
+    )
+    return parse_minutes(resp.json() or [])

@@ -9,6 +9,10 @@ get_kline_mootdx 等内部调用方与既有测试的 patch 路径不受影响)�
 
 M4-B3(2026-11-19): EM 财务快照/公司资料/基金实时备源 fundgz/基金历史
 (pingzhongdata + f10/lsjz 分页)解析体迁入, 门面同名私有转发, 行为零变更。
+
+M4-D(2026-11-19): 市场广度(ulist 聚合家数/北交所家数/全市场 total)与
+分钟线(1 分钟 K 线)取数+解析体迁入; 自洽校验/fail-closed 编排/回退链
+仍保留在 data_source_v2 门面。
 """
 from __future__ import annotations
 
@@ -20,8 +24,10 @@ from datetime import datetime, timedelta, timezone
 
 from src.core.data_guard.contract import KlineContract, normalize_kline_row
 from src.core.data_source_v2 import (
+    ANOMALY_WINDOW_MINUTES,
     _em_secid,
     _has_meaningful_value,
+    _minute_index,
     _opt_float,
     _safe_float,
     _safe_int,
@@ -652,6 +658,126 @@ def fetch_sector_ranking_em_raw(fs: str) -> list[dict]:
     data = resp.json()
     items = data.get("data", {}).get("diff", [])
     return [_ds2._map_sector_row(item) for item in items]
+
+
+def fetch_ulist_breadth_raw(secid: str, attempts: int = 2) -> tuple[int, int, int] | None:
+    """ulist.np 单市场涨跌家数聚合取数+解析(原 data_source_v2._ulist_breadth_one)。
+
+    取 (涨, 跌, 平) 家数; 失败重试 1 次(实测沪市偶发连接被关闭)。
+    字段常量经 _ds2 属性调用, 既有 patch ds2._ULIST_FIELDS 契约不变。
+    """
+    url = "https://push2.eastmoney.com/api/qt/ulist.np/get"
+    params = {"fltt": 2, "invt": 2, "fields": _ds2._ULIST_FIELDS, "secids": secid}
+    for attempt in range(max(1, attempts)):
+        try:
+            resp = _ds2.em_get(url, params=params)
+            data = resp.json().get("data") or {}
+            diff = data.get("diff")
+            row = None
+            if isinstance(diff, list) and diff:
+                row = diff[0]
+            elif isinstance(diff, dict) and diff:
+                row = next(iter(diff.values()))
+            if isinstance(row, dict):
+                up = _opt_float(row.get("f104"))
+                down = _opt_float(row.get("f105"))
+                flat = _opt_float(row.get("f106"))
+                if up is not None and down is not None and flat is not None:
+                    return int(up), int(down), int(flat)
+            logger.warning(f"ulist breadth {secid} 第 {attempt + 1} 次无有效字段: {str(data)[:120]}")
+        except Exception as e:
+            logger.warning(f"ulist breadth {secid} 第 {attempt + 1} 次失败: {e}")
+        if attempt + 1 < attempts:
+            _ds2.time.sleep(0.4)
+    return None
+
+
+def fetch_bj_exchange_total_raw() -> int | None:
+    """北交所家数取数+解析(原 data_source_v2._bj_exchange_total)。
+
+    clist 的 `fs` 把北交所也算进 `total`, 而 ulist 的沪/深聚合家数**不含**北交所,
+    因此自洽校验前需减掉本值。取不到时返回 None, 调用方退回原始 total;
+    异常就地吞掉(与迁移前行为逐位一致)。
+    """
+    try:
+        resp = _ds2.em_get("https://push2.eastmoney.com/api/qt/clist/get", params={
+            "pn": 1, "pz": 1, "po": 1, "np": 1, "fltt": 2, "invt": 2, "fid": "f3",
+            "fs": "m:0+t:81+s:2048", "fields": "f2,f3,f12,f14",
+        })
+        total = _opt_float((resp.json().get("data") or {}).get("total"))
+        return int(total) if total is not None else None
+    except Exception as e:
+        logger.warning(f"北交所家数获取失败(按原始 total 校验): {e}")
+        return None
+
+
+def fetch_market_total_count_raw() -> int:
+    """全市场总家数(clist total)取数+解析(原 get_market_sentiment 内联块)。
+
+    只作自洽校验分母, 不用于统计涨跌家数(clist pz 有服务端上限)。
+    异常向上抛出, 由门面走指数代理兜底。
+    """
+    url = "https://push2.eastmoney.com/api/qt/clist/get"
+    params = {
+        "pn": 1, "pz": 1, "po": 1, "np": 1,
+        "fltt": 2, "invt": 2, "fid": "f3",
+        "fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048",
+        "fields": "f2,f3,f12,f14",
+    }
+    resp = _ds2.em_get(url, params=params)
+    data = resp.json()
+    return int(_safe_float(data.get("data", {}).get("total", 0)))
+
+
+def parse_minutes(klines: list[str]) -> tuple[dict[int, float], str]:
+    """东财 1 分钟 K 线 → ({分钟序号: 价格}, 日期)。
+
+    行格式: '2026-11-06 14:58,1451.00,1451.00,1451.00,1451.00,8,1160705.00'
+    （时间,开,收,高,低,量,额）→ 取第 3 列（收盘价）。
+    """
+    prices: dict[int, float] = {}
+    day = ""
+    for row in klines or []:
+        cols = str(row).split(",")
+        if len(cols) < 3:
+            continue
+        stamp = cols[0].strip()
+        if len(stamp) < 16:
+            continue
+        day = stamp[:10]
+        idx = _minute_index(stamp[11:16].replace(":", ""))
+        if idx is None or idx > _ds2._ANOMALY_CLOSE_MINUTE:
+            continue
+        try:
+            price = float(cols[2])
+        except (TypeError, ValueError):
+            continue
+        if price > 0:
+            prices[idx] = price
+    return prices, day
+
+
+def fetch_minute_series_raw(
+    code: str,
+    window_minutes: int = ANOMALY_WINDOW_MINUTES,
+) -> tuple[dict[int, float], str]:
+    """东财 1 分钟 K 线取数+解析(原 data_source_v2._minutes_from_em 主体)。
+
+    lmt 必须随 window 缩放(window+4), 否则 window>5 时取点不足、端点缺失。
+    异常向上抛出, 由门面回退下一源。
+    """
+    secid = _em_secid(code)
+    resp = _ds2.em_get("https://push2his.eastmoney.com/api/qt/stock/kline/get", {
+        "secid": secid,
+        "fields1": "f1,f2,f3,f4,f5,f6",
+        "fields2": "f51,f52,f53,f54,f55,f56,f57",
+        "klt": "1",
+        "fqt": "1",
+        "lmt": str(window_minutes + 4),
+        "end": "20500101",
+    })
+    klines = ((resp.json() or {}).get("data") or {}).get("klines") or []
+    return parse_minutes(klines)
 
 
 class EastmoneyProvider:

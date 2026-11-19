@@ -7,6 +7,9 @@ fetch_quotes_raw, data_source_v2 保留同名门面(缓存/TTL/签名/行为零�
 
 M4-B3(2026-11-19): 基金实时主源(qt.gtimg.cn jj 前缀)/腾讯财务快照/
 详情页行情字段映射解析体迁入, 门面同名转发, 行为零变更。
+
+M4-D(2026-11-19): 市场情绪指数代理(指数涨跌幅)与腾讯分时取数+解析体迁入,
+情绪判定语义与「腾讯→东财→新浪」分钟回退链保留在 data_source_v2 门面。
 """
 from __future__ import annotations
 
@@ -14,7 +17,14 @@ import requests
 from loguru import logger
 
 from src.core.data_guard.contract import QuoteContract, normalize_quote
-from src.core.data_source_v2 import _opt_float, _prefix_code, _safe_float, _safe_str
+from src.core.data_source_v2 import (
+    ANOMALY_WINDOW_MINUTES,
+    _minute_index,
+    _opt_float,
+    _prefix_code,
+    _safe_float,
+    _safe_str,
+)
 
 # 财务快照需复用行情门面(含缓存): 经 _ds2 属性调用, 既有测试
 # patch ds2.get_realtime_quote_tencent 的契约不变
@@ -286,6 +296,87 @@ def fetch_sector_ranking_tencent_raw() -> list[dict]:
     except Exception as e:
         logger.warning(f"_get_sector_ranking_tencent failed: {e}")
         return []
+
+
+def fetch_index_change_pct_raw(codes: list[str]) -> dict[str, float]:
+    """腾讯指数涨跌幅取数+解析(原 get_market_sentiment 的指数代理分支)。
+
+    返回 {code: 涨跌幅%}; 段内字段不足(len<=32)的指数不出现, 门面据此
+    维持 unavailable 结论。异常向上抛出, 由门面记 warning 后兜底。
+    """
+    url = f"https://qt.gtimg.cn/q={','.join(codes)}"
+    resp = requests.get(url, timeout=5, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://gu.qq.com/",
+    })
+    resp.encoding = "gbk"
+    text = resp.text
+    changes: dict[str, float] = {}
+    for segment in text.split(";"):
+        segment = segment.strip()
+        if not segment or "~" not in segment:
+            continue
+        eq_idx = segment.index("=")
+        val = segment[eq_idx + 1:].strip().strip('"').strip("'")
+        if not val or "~" not in val:
+            continue
+        parts = val.split("~")
+        if len(parts) > 32:
+            for code in codes:
+                if code in segment:
+                    changes[code] = _safe_float(parts[32])
+                    break
+    return changes
+
+
+def parse_minutes(payload: list[str]) -> tuple[dict[int, float], str]:
+    """腾讯分时 → ({分钟序号: 价格}, 'YYYY-MM-DD')。
+
+    行格式: '0931 1450.98 4465 646486481.69'（时间 价格 累计量 累计额）。
+    实测收盘后会补 1529/1530 等冗余点，一律按 > 15:00 剔除。
+    """
+    prices: dict[int, float] = {}
+    for row in payload or []:
+        parts = str(row).split()
+        if len(parts) < 2:
+            continue
+        idx = _minute_index(parts[0])
+        if idx is None or idx > _ds2._ANOMALY_CLOSE_MINUTE:
+            continue
+        try:
+            price = float(parts[1])
+        except (TypeError, ValueError):
+            continue
+        if price > 0:
+            prices[idx] = price
+    return prices, ""
+
+
+def fetch_minute_series_raw(
+    code: str,
+    window_minutes: int = ANOMALY_WINDOW_MINUTES,
+) -> tuple[dict[int, float], str]:
+    """腾讯分时取数+解析(原 data_source_v2._minutes_from_tencent 主体)。
+
+    腾讯分时返回全天序列, 窗口端点由门面 compute_window_change 精确截取,
+    无需按 window 限量(window_minutes 仅为与另两源签名对齐)。
+    异常向上抛出, 由门面回退下一源。
+    """
+    resp = requests.get(
+        "https://web.ifzq.gtimg.cn/appstock/app/minute/query",
+        params={"code": _prefix_code(code)},
+        headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://gu.qq.com/",
+        },
+        timeout=5,
+    )
+    node = ((resp.json() or {}).get("data") or {}).get(_prefix_code(code)) or {}
+    inner = node.get("data") or {}
+    prices, _ = parse_minutes(inner.get("data") or [])
+    raw_date = str(inner.get("date") or "")
+    day = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:8]}" if len(raw_date) == 8 else ""
+    return prices, day
 
 
 class TencentProvider:

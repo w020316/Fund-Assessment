@@ -1671,51 +1671,25 @@ _COUNTS_RATIO_MAX = 1.15
 
 
 def _ulist_breadth_one(secid: str, attempts: int = 2) -> tuple[int, int, int] | None:
-    """取单个市场的 (涨, 跌, 平) 家数;失败重试 1 次(实测沪市偶发连接被关闭)。"""
-    url = "https://push2.eastmoney.com/api/qt/ulist.np/get"
-    params = {"fltt": 2, "invt": 2, "fields": _ULIST_FIELDS, "secids": secid}
-    for attempt in range(max(1, attempts)):
-        try:
-            resp = em_get(url, params=params)
-            data = resp.json().get("data") or {}
-            diff = data.get("diff")
-            row = None
-            if isinstance(diff, list) and diff:
-                row = diff[0]
-            elif isinstance(diff, dict) and diff:
-                row = next(iter(diff.values()))
-            if isinstance(row, dict):
-                up = _opt_float(row.get("f104"))
-                down = _opt_float(row.get("f105"))
-                flat = _opt_float(row.get("f106"))
-                if up is not None and down is not None and flat is not None:
-                    return int(up), int(down), int(flat)
-            logger.warning(f"ulist breadth {secid} 第 {attempt + 1} 次无有效字段: {str(data)[:120]}")
-        except Exception as e:
-            logger.warning(f"ulist breadth {secid} 第 {attempt + 1} 次失败: {e}")
-        if attempt + 1 < attempts:
-            time.sleep(0.4)
-    return None
+    """单市场 (涨, 跌, 平) 家数门面(M4-D 绞杀迁移): 请求+解析在
+    data_guard.providers.eastmoney.fetch_ulist_breadth_raw, 行为零变更。"""
+    from src.core.data_guard.providers.eastmoney import fetch_ulist_breadth_raw
+
+    return fetch_ulist_breadth_raw(secid, attempts)
 
 
 def _bj_exchange_total() -> int | None:
-    """北交所家数(clist `m:0+t:81+s:2048`)。
+    """北交所家数门面(M4-D 绞杀迁移): 请求+解析在
+    data_guard.providers.eastmoney.fetch_bj_exchange_total_raw, 行为零变更。
 
     P1 补正: clist 的 `fs` 把北交所也算进 `total`, 而 ulist 的沪/深聚合家数**不含**北交所。
     实测同一时刻: clist total 5930、北交所 366、沪深 5564、ulist 合计 5294 → 5294/5564=95.1%
     (直接拿 5930 当分母会算成 89.3%, 误判为"只统计到一部分")。
     取不到北交所家数时返回 None, 调用方退回原始 total。
     """
-    try:
-        resp = em_get("https://push2.eastmoney.com/api/qt/clist/get", params={
-            "pn": 1, "pz": 1, "po": 1, "np": 1, "fltt": 2, "invt": 2, "fid": "f3",
-            "fs": "m:0+t:81+s:2048", "fields": "f2,f3,f12,f14",
-        })
-        total = _opt_float((resp.json().get("data") or {}).get("total"))
-        return int(total) if total is not None else None
-    except Exception as e:
-        logger.warning(f"北交所家数获取失败(按原始 total 校验): {e}")
-        return None
+    from src.core.data_guard.providers.eastmoney import fetch_bj_exchange_total_raw
+
+    return fetch_bj_exchange_total_raw()
 
 
 def _market_breadth_counts() -> tuple[int, int, int] | None:
@@ -1754,16 +1728,10 @@ def get_market_sentiment() -> dict:
         # clist 只用来拿**总家数**(自洽校验的分母), 不再用它统计涨跌家数:
         # pz 有服务端上限(实测 pz=6000 仍只回 100 行)且 fid=f3 降序 → 前 100 行
         # 全是上涨股, 统计出来必然是 100/0/0。
-        url = "https://push2.eastmoney.com/api/qt/clist/get"
-        params = {
-            "pn": 1, "pz": 1, "po": 1, "np": 1,
-            "fltt": 2, "invt": 2, "fid": "f3",
-            "fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048",
-            "fields": "f2,f3,f12,f14",
-        }
-        resp = em_get(url, params=params)
-        data = resp.json()
-        total_count = int(_safe_float(data.get("data", {}).get("total", 0)))
+        # M4-D: 请求+解析在 providers.eastmoney.fetch_market_total_count_raw
+        from src.core.data_guard.providers.eastmoney import fetch_market_total_count_raw
+
+        total_count = fetch_market_total_count_raw()
         breadth = _market_breadth_counts()
         if breadth is None:
             # 单市缺失: fail-closed, 由下面的指数代理兜底出结论
@@ -1818,33 +1786,19 @@ def get_market_sentiment() -> dict:
         logger.warning(f"get_market_sentiment em failed: {e}")
     if result["sentiment"] == "--":
         try:
-            url = "https://qt.gtimg.cn/q=sh000001,sz399001"
-            resp = requests.get(url, timeout=5, headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Referer": "https://gu.qq.com/",
-            })
-            resp.encoding = "gbk"
-            text = resp.text
-            for segment in text.split(";"):
-                segment = segment.strip()
-                if not segment or "~" not in segment:
-                    continue
-                eq_idx = segment.index("=")
-                val = segment[eq_idx + 1:].strip().strip('"').strip("'")
-                if not val or "~" not in val:
-                    continue
-                parts = val.split("~")
-                if len(parts) > 32:
-                    chg = _safe_float(parts[32])
-                    if "sh000001" in segment:
-                        # 计数缺失：三个 count 一律 None（不是 0），并标注结论来源。
-                        if chg > 0.3:
-                            result = {"rise_count": None, "fall_count": None, "flat_count": None, "sentiment": "偏多", "ratio": 0.65, "basis": "index_proxy", "counts_available": False}
-                        elif chg < -0.3:
-                            result = {"rise_count": None, "fall_count": None, "flat_count": None, "sentiment": "偏空", "ratio": 0.35, "basis": "index_proxy", "counts_available": False}
-                        else:
-                            result = {"rise_count": None, "fall_count": None, "flat_count": None, "sentiment": "中性", "ratio": 0.5, "basis": "index_proxy", "counts_available": False}
-                        break
+            # M4-D: 指数涨跌幅的请求+解析在 providers.tencent.fetch_index_change_pct_raw,
+            # 阈值判定与结论来源标注仍保留在门面
+            from src.core.data_guard.providers.tencent import fetch_index_change_pct_raw
+
+            chg = fetch_index_change_pct_raw(["sh000001", "sz399001"]).get("sh000001")
+            if chg is not None:
+                # 计数缺失：三个 count 一律 None（不是 0），并标注结论来源。
+                if chg > 0.3:
+                    result = {"rise_count": None, "fall_count": None, "flat_count": None, "sentiment": "偏多", "ratio": 0.65, "basis": "index_proxy", "counts_available": False}
+                elif chg < -0.3:
+                    result = {"rise_count": None, "fall_count": None, "flat_count": None, "sentiment": "偏空", "ratio": 0.35, "basis": "index_proxy", "counts_available": False}
+                else:
+                    result = {"rise_count": None, "fall_count": None, "flat_count": None, "sentiment": "中性", "ratio": 0.5, "basis": "index_proxy", "counts_available": False}
         except Exception as e:
             logger.warning(f"get_market_sentiment tencent fallback failed: {e}")
     # 指数代理分支会整体重建 result(不带 counts_basis), 用局部变量回写,
@@ -2613,128 +2567,51 @@ def classify_anomaly(
 
 
 def _parse_tx_minutes(payload: list[str]) -> tuple[dict[int, float], str]:
-    """腾讯分时 → ({分钟序号: 价格}, 'YYYY-MM-DD')。
+    """腾讯分时解析门面(M4-D 绞杀迁移): 解析体在
+    data_guard.providers.tencent.parse_minutes, 输出逐位一致。"""
+    from src.core.data_guard.providers.tencent import parse_minutes
 
-    行格式: '0931 1450.98 4465 646486481.69'（时间 价格 累计量 累计额）。
-    实测收盘后会补 1529/1530 等冗余点，一律按 > 15:00 剔除。
-    """
-    prices: dict[int, float] = {}
-    for row in payload or []:
-        parts = str(row).split()
-        if len(parts) < 2:
-            continue
-        idx = _minute_index(parts[0])
-        if idx is None or idx > _ANOMALY_CLOSE_MINUTE:
-            continue
-        try:
-            price = float(parts[1])
-        except (TypeError, ValueError):
-            continue
-        if price > 0:
-            prices[idx] = price
-    return prices, ""
+    return parse_minutes(payload)
 
 
 def _parse_em_minutes(klines: list[str]) -> tuple[dict[int, float], str]:
-    """东财 1 分钟 K 线 → ({分钟序号: 价格}, 日期)。
+    """东财 1 分钟 K 线解析门面(M4-D 绞杀迁移): 解析体在
+    data_guard.providers.eastmoney.parse_minutes, 输出逐位一致。"""
+    from src.core.data_guard.providers.eastmoney import parse_minutes
 
-    行格式: '2026-11-06 14:58,1451.00,1451.00,1451.00,1451.00,8,1160705.00'
-    （时间,开,收,高,低,量,额）→ 取第 3 列（收盘价）。
-    """
-    prices: dict[int, float] = {}
-    day = ""
-    for row in klines or []:
-        cols = str(row).split(",")
-        if len(cols) < 3:
-            continue
-        stamp = cols[0].strip()
-        if len(stamp) < 16:
-            continue
-        day = stamp[:10]
-        idx = _minute_index(stamp[11:16].replace(":", ""))
-        if idx is None or idx > _ANOMALY_CLOSE_MINUTE:
-            continue
-        try:
-            price = float(cols[2])
-        except (TypeError, ValueError):
-            continue
-        if price > 0:
-            prices[idx] = price
-    return prices, day
+    return parse_minutes(klines)
 
 
 def _parse_sina_minutes(bars: list[dict]) -> tuple[dict[int, float], str]:
-    """新浪 1 分钟 K 线 → ({分钟序号: 价格}, 日期)。
+    """新浪 1 分钟 K 线解析门面(M4-D 绞杀迁移): 解析体在
+    data_guard.providers.sina.parse_minutes, 输出逐位一致。"""
+    from src.core.data_guard.providers.sina import parse_minutes
 
-    条目形如 {'day': '2026-11-06 14:51:00', 'close': '1449.500', ...}。
-    新浪会丢弃零成交分钟，序列可能跳空 —— 由 compute_window_change 的
-    「端点必须存在」规则兜住，不做插值。
-    """
-    prices: dict[int, float] = {}
-    day = ""
-    for bar in bars or []:
-        stamp = str(bar.get("day") or "")
-        if len(stamp) < 16:
-            continue
-        day = stamp[:10]
-        idx = _minute_index(stamp[11:16].replace(":", ""))
-        if idx is None or idx > _ANOMALY_CLOSE_MINUTE:
-            continue
-        try:
-            price = float(bar.get("close"))
-        except (TypeError, ValueError):
-            continue
-        if price > 0:
-            prices[idx] = price
-    return prices, day
+    return parse_minutes(bars)
 
 
 def _minutes_from_em(code: str, window_minutes: int = ANOMALY_WINDOW_MINUTES) -> tuple[dict[int, float], str]:
-    secid = _em_secid(code)
-    resp = em_get("https://push2his.eastmoney.com/api/qt/stock/kline/get", {
-        "secid": secid,
-        "fields1": "f1,f2,f3,f4,f5,f6",
-        "fields2": "f51,f52,f53,f54,f55,f56,f57",
-        "klt": "1",
-        "fqt": "1",
-        "lmt": str(window_minutes + 4),
-        "end": "20500101",
-    })
-    klines = ((resp.json() or {}).get("data") or {}).get("klines") or []
-    return _parse_em_minutes(klines)
+    """东财分钟线门面(M4-D 绞杀迁移): 请求+解析在
+    data_guard.providers.eastmoney.fetch_minute_series_raw, 行为零变更。"""
+    from src.core.data_guard.providers.eastmoney import fetch_minute_series_raw
+
+    return fetch_minute_series_raw(code, window_minutes)
 
 
 def _minutes_from_tencent(code: str, window_minutes: int = ANOMALY_WINDOW_MINUTES) -> tuple[dict[int, float], str]:
-    # 腾讯分时返回全天序列，窗口端点由 compute_window_change 精确截取，无需按 window 限量。
-    resp = requests.get(
-        "https://web.ifzq.gtimg.cn/appstock/app/minute/query",
-        params={"code": _prefix_code(code)},
-        headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://gu.qq.com/",
-        },
-        timeout=5,
-    )
-    node = ((resp.json() or {}).get("data") or {}).get(_prefix_code(code)) or {}
-    inner = node.get("data") or {}
-    prices, _ = _parse_tx_minutes(inner.get("data") or [])
-    raw_date = str(inner.get("date") or "")
-    day = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:8]}" if len(raw_date) == 8 else ""
-    return prices, day
+    """腾讯分时门面(M4-D 绞杀迁移): 请求+解析在
+    data_guard.providers.tencent.fetch_minute_series_raw, 行为零变更。"""
+    from src.core.data_guard.providers.tencent import fetch_minute_series_raw
+
+    return fetch_minute_series_raw(code, window_minutes)
 
 
 def _minutes_from_sina(code: str, window_minutes: int = ANOMALY_WINDOW_MINUTES) -> tuple[dict[int, float], str]:
-    resp = requests.get(
-        "https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getKLineData",
-        params={"symbol": _prefix_code(code), "scale": 1, "ma": "no",
-                "datalen": str(window_minutes + 6)},
-        headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://finance.sina.com.cn/",
-        },
-        timeout=5,
-    )
-    return _parse_sina_minutes(resp.json() or [])
+    """新浪分钟线门面(M4-D 绞杀迁移): 请求+解析在
+    data_guard.providers.sina.fetch_minute_series_raw, 行为零变更。"""
+    from src.core.data_guard.providers.sina import fetch_minute_series_raw
+
+    return fetch_minute_series_raw(code, window_minutes)
 
 
 def get_stock_minute_series(code: str, window_minutes: int = ANOMALY_WINDOW_MINUTES) -> tuple[dict[int, float], str, str]:
