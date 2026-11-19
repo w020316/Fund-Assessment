@@ -149,6 +149,8 @@
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
+  /* r7 CLS 修复(F-1): 骨架态 58px → 终态 90px, 预留终态高度消除数据晚到下推 */
+  min-height: 90px;
 }
 
 #page-workbench .wb-idx {
@@ -224,6 +226,8 @@
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 8px;
+  /* r7 CLS 修复(F-1): 骨架态 58px → 终态 76px, 预留终态高度消除数据晚到下推 */
+  min-height: 76px;
 }
 
 #page-workbench .wb-stat {
@@ -286,6 +290,21 @@
 #page-workbench .wb-span-5 { grid-column: span 5; }
 #page-workbench .wb-span-7 { grid-column: span 7; }
 #page-workbench .wb-span-12 { grid-column: span 12; }
+
+/* r7 CLS 修复(F-1 第2轮): 面板加载态骨架按终态高度预留。
+   实测(1440px): 骨架态统一 115px vs 终态 承接/情绪 415 · 相位/梯队 313 ·
+   热度/热门 260。骨架块高度 = 终态面板高 − 面板头 38 − 上下 padding 24 − 边框。
+   JS 渲染时整块替换 #wb*Body 的 innerHTML, 骨架自然消失, 终态布局零影响;
+   数据行数随行情波动, 预留值取实测终态(见 docs/quality-stage5-2026-11-19-r7.md)。 */
+@media (min-width: 941px) {
+  /* 双 id 特异性: 需压过后文 #page-workbench .wb-skel 的 58px(同特异性后者赢) */
+  #page-workbench #wbHoldBody .wb-skel,
+  #page-workbench #wbRadarBody .wb-skel { min-height: 351px; }
+  #page-workbench #wbPhaseBody .wb-skel,
+  #page-workbench #wbLadderBody .wb-skel { min-height: 249px; }
+  #page-workbench #wbSectorBody .wb-skel,
+  #page-workbench #wbHotBody .wb-skel { min-height: 196px; }
+}
 
 #page-workbench .wb-ph {
   display: flex;
