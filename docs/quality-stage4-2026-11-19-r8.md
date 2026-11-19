@@ -28,13 +28,14 @@
 
 | 探测 | 结果 |
 |---|---|
-| `GET /api/health` | 200；`version=ca84b9b`（=HEAD）；`degraded=false`；冷唤醒 44.0s |
+| `GET /api/health` | 200；`version=ca84b9b`（探测时 HEAD；最终代码部署 `7fa5fd7` 已复核）；`degraded=false`；冷唤醒 44.0s |
 | `GET /api/market/stock_anomaly?window=5` | 200 / **9.48s**；scanned=16、unavailable=0、items=0；`degraded=true`（涨速榜降级为当日涨跌幅榜，如实标注） |
 | `GET /api/review/board` | 200 / 6.41s |
 | `GET /api/global/dashboard` | 200 / 2.60s |
 | `GET /api/fund/positions`（匿名） | 401（鉴权保护生效） |
 | `POST /api/strategy/validate`（无令牌/错令牌） | **401 / 401**（fail-closed 正确） |
-| `POST /api/strategy/validate`（正确令牌） | 待用户提供线上 `ADMIN_TOKEN` 后补测（本地 dev 写链路已受控验证） |
+| `POST /api/strategy/validate`（正确令牌） | **200 / 1.34s**，`data` 正常返回（无持久化写入） |
+| `GET /api/fund/positions`（正确令牌） | **200 / 1.58s**，返回持仓结构（2 个分组键） |
 
 ## 三、问题清单
 
@@ -81,6 +82,6 @@
 - 24 个页面容器全部可达可用；12/12 主路径走通；API 面 100% 保留。
 - r7 的 CLS 痛点已闭环；本轮新增的「异动无法判定」空态已修复并线上生效。
 - 待完善：端点稳态性能（I-2）、策略进度反馈（I-3）、`#connStatus` 语义（I-5）、N-1~N-3 功能增强。
-- 线上写端点正确令牌链路：待提供 `ADMIN_TOKEN` 后补测；其余匿名面与鉴权拒绝面已实测。
+- 线上鉴权面已完整实测：匿名/错令牌 401、正确令牌写动词 200（`POST /api/strategy/validate` 1.34s）与受保护读 200。
 
 > 本报告由 AI 协作生成，关键决策请由工程负责人复核。
