@@ -360,40 +360,11 @@ def _mootdx_client() -> Any:
 
 
 def _kline_em_fallback(symbol: str, period: str, count: int) -> list[dict]:
-    url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
-    secid = _em_secid(symbol)
-    klt_map = {"daily": "101", "weekly": "102", "monthly": "103"}
-    klt = klt_map.get(period, "101")
-    params = {
-        "secid": secid,
-        "fields1": "f1,f2,f3,f4,f5,f6",
-        "fields2": "f51,f52,f53,f54,f55,f56,f57",
-        "klt": klt,
-        "fqt": "1",
-        "lmt": str(count),
-        "end": "20500101",
-    }
-    try:
-        resp = em_get(url, params=params)
-        data = resp.json()
-        klines = data.get("data", {}).get("klines", [])
-        result: list[dict] = []
-        for line in klines:
-            parts = line.split(",")
-            if len(parts) >= 7:
-                result.append({
-                    "date": parts[0],
-                    "open": _safe_float(parts[1]),
-                    "close": _safe_float(parts[2]),
-                    "high": _safe_float(parts[3]),
-                    "low": _safe_float(parts[4]),
-                    "volume": _safe_float(parts[5]),
-                    "amount": _safe_float(parts[6]),
-                })
-        return result
-    except Exception as e:
-        logger.warning(f"_kline_em_fallback failed: {e}")
-        return []
+    """东财 K 线门面(M3-B 绞杀迁移): 取数+解析在
+    data_guard.providers.eastmoney.fetch_kline_raw, 签名/输出行为零变更。"""
+    from src.core.data_guard.providers.eastmoney import fetch_kline_raw
+
+    return fetch_kline_raw(symbol, period, count)
 
 
 def _kline_sina_fallback(symbol: str, period: str = "daily", count: int = 30) -> list[dict]:
@@ -488,72 +459,19 @@ def get_kline_mootdx(symbol: str, period: str = "daily", count: int = 120) -> li
 
 
 def get_realtime_quote_tencent(codes: list[str]) -> list[dict]:
+    """腾讯批量行情门面(M3-A 绞杀迁移): 缓存/TTL 保留于此, 取数+解析在
+    data_guard.providers.tencent.fetch_quotes_raw, 签名与输出行为零变更。"""
     if not codes:
         return []
     cache_key = "quotes_" + "_".join(sorted(codes))
     cached = _cache_get(cache_key)
     if cached is not None:
         return cached
-    prefixed = ",".join(_prefix_code(c) for c in codes)
-    url = f"https://qt.gtimg.cn/q={prefixed}"
-    try:
-        resp = requests.get(url, timeout=5, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://gu.qq.com/",
-        })
-        resp.encoding = "gbk"
-        text = resp.text
-        result: list[dict] = []
-        for segment in text.split(";"):
-            segment = segment.strip()
-            if not segment or "~" not in segment:
-                continue
-            parts = segment.split("~")
-            if len(parts) < 48:
-                continue
-            code = _safe_str(parts[2])
-            name = _safe_str(parts[1])
-            price = _safe_float(parts[3])
-            prev_close = _safe_float(parts[4])
-            open_price = _safe_float(parts[5])
-            change = _safe_float(parts[31])
-            change_pct = _safe_float(parts[32])
-            high = _safe_float(parts[33])
-            low = _safe_float(parts[34])
-            volume = _safe_float(parts[36])
-            amount = _safe_float(parts[37])
-            turnover = _safe_float(parts[38])
-            pe_ttm = _safe_float(parts[39])
-            pb = _safe_float(parts[46])
-            total_mv = _safe_float(parts[45])
-            circ_mv = _safe_float(parts[44])
-            high_limit = _safe_float(parts[47]) if len(parts) > 47 else 0.0
-            low_limit = _safe_float(parts[48]) if len(parts) > 48 else 0.0
-            result.append({
-                "code": code,
-                "name": name,
-                "price": price,
-                "prev_close": prev_close,
-                "open": open_price,
-                "change": change,
-                "change_pct": change_pct,
-                "high": high,
-                "low": low,
-                "volume": volume,
-                "amount": amount,
-                "turnover": turnover,
-                "pe_ttm": pe_ttm,
-                "pb": pb,
-                "total_market_value": total_mv,
-                "circ_market_value": circ_mv,
-                "high_limit": high_limit,
-                "low_limit": low_limit,
-            })
-        _cache_set(cache_key, result, 5)
-        return result
-    except Exception as e:
-        logger.warning(f"get_realtime_quote_tencent failed: {e}")
-        return []
+    from src.core.data_guard.providers.tencent import fetch_quotes_raw
+
+    result = fetch_quotes_raw(codes)
+    _cache_set(cache_key, result, 5)
+    return result
 
 
 def get_index_realtime() -> list[dict]:
