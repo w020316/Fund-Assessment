@@ -958,3 +958,193 @@ class TestMigrationSnapshotNews:
         assert rows[0]["title"] == "新浪新闻"
         assert rows[0]["publish_time"].startswith("20")  # ctime 时间戳转换
         m_mark.assert_called_once_with("news", "sina")
+
+
+class TestMigrationSnapshotCompanyInfo:
+    """M4-B3: 公司资料(f170 双字段复用怪癖原样保留)。"""
+
+    def test_snapshot_exact(self):
+        from src.core import data_source_v2 as ds2
+
+        payload = {"data": {
+            "f57": "600519", "f58": "贵州茅台", "f84": "1256197800",
+            "f116": "1880317300000", "f117": "1880317300000",
+            "f162": "31.25", "f167": "21.5", "f170": "0.61",
+            "f171": "1.14", "f168": "0.18", "f50": "1.35", "f187": "8.3",
+        }}
+        with patch("src.core.data_source_v2.em_get", return_value=_em_json(payload)):
+            out = ds2.get_company_info("600519")
+        assert out == {
+            "code": "600519", "name": "贵州茅台", "total_shares": 1256197800.0,
+            "circ_market_value": 1880317300000.0, "total_market_value": 1880317300000.0,
+            "roe": 31.25, "pe_ttm": 21.5,
+            # 历史怪癖: f170 同时作为 5 分钟涨跌与当日涨跌返回
+            "change_pct_5min": 0.61, "change_pct": 0.61,
+            "amplitude": 1.14, "turnover_rate": 0.18, "volume_ratio": 1.35,
+            "pb": 8.3,
+        }
+
+    def test_empty_data_returns_empty(self):
+        from src.core import data_source_v2 as ds2
+
+        with patch("src.core.data_source_v2.em_get",
+                   return_value=_em_json({"data": {}})):
+            assert ds2.get_company_info("600519") == {}
+
+    def test_exception_returns_empty(self):
+        from src.core import data_source_v2 as ds2
+
+        with patch("src.core.data_source_v2.em_get",
+                   side_effect=RuntimeError("em down")):
+            assert ds2.get_company_info("600519") == {}
+
+
+class TestMigrationSnapshotFinancialEm:
+    """M4-B3: EM 财务快照(f185→profit_yoy)与三级 failover 编排。"""
+
+    def test_snapshot_profit_yoy_from_f185(self):
+        from src.core import data_source_v2 as ds2
+
+        payload = {"data": {"f9": 21.5, "f23": 8.3, "f20": "1880317300000",
+                            "f115": "1880317300000", "f162": 31.25,
+                            "f186": 91.5, "f187": 52.3, "f183": 15.2, "f185": 18.7}}
+        with patch("src.core.data_source_v2.em_get", return_value=_em_json(payload)), \
+             patch.object(ds2, "_financial_snapshot_mootdx", return_value={}):
+            out = ds2.get_financial_snapshot("600519")
+        assert out["profit_yoy"] == 18.7   # f185 映射 profit_yoy
+        assert out["revenue_yoy"] == 15.2  # f183 映射 revenue_yoy
+        assert out["pe_ttm"] == 21.5
+
+    def test_all_none_em_snapshot_falls_through_to_tencent(self):
+        """EM 返回 data 为空 → 快照 {}, failover 继续走腾讯路径。"""
+        from src.core import data_source_v2 as ds2
+
+        with patch("src.core.data_source_v2.em_get",
+                   return_value=_em_json({"data": {}})), \
+             patch.object(ds2, "_financial_snapshot_mootdx", return_value={}), \
+             patch.object(ds2, "_financial_snapshot_tencent",
+                          return_value={"code": "600519", "pe_ttm": None,
+                                        "pb": None, "total_mv": 1923.45,
+                                        "circ_mv": 1923.45}):
+            out = ds2.get_financial_snapshot("600519")
+        assert out["total_mv"] == 1923.45  # 来自腾讯, 而非 EM 的空快照
+
+
+class TestMigrationSnapshotDetailQuote:
+    """M4-B3: 详情页行情字段映射(providers.tencent.map_detail_quote)。"""
+
+    def test_provider_pure_mapping(self):
+        from src.core.data_guard.providers.tencent import map_detail_quote
+
+        out = map_detail_quote(SAMPLE_QUOTE)
+        assert out["name"] == "贵州茅台"
+        assert out["quote"] == SAMPLE_QUOTE  # 全字段透传, 0 兜底仅在缺失时生效
+
+    def test_missing_fields_default_to_zero(self):
+        from src.core.data_guard.providers.tencent import map_detail_quote
+
+        out = map_detail_quote({"code": "600519", "name": "贵州茅台"})
+        assert out["quote"]["price"] == 0.0       # 缺失字段 0 兜底(迁移前行为)
+        assert out["quote"]["high_limit"] == 0.0
+        assert out["name"] == "贵州茅台"
+
+    def test_via_get_stock_detail(self):
+        """端到端: 详情页 quote 区块经 provider 映射后结构逐位一致。"""
+        from src.core import data_source_v2 as ds2
+
+        with patch.object(ds2, "get_realtime_quote_tencent",
+                          return_value=[SAMPLE_QUOTE]), \
+             patch.object(ds2, "get_financial_snapshot", return_value={}), \
+             patch.object(ds2, "get_capital_flow_detail", return_value={}), \
+             patch.object(ds2, "get_kline_summary", return_value={}), \
+             patch.object(ds2, "_cache_get", return_value=None):
+            out = ds2.get_stock_detail("600519")
+        assert out["quote"] == SAMPLE_QUOTE
+        assert out["name"] == "贵州茅台"
+        assert out["financial"] == {} and out["capital_flow"] == {}
+        assert out["kline_summary"] == {}
+
+
+class TestMigrationSnapshotFundRealtimeTencent:
+    """M4-B3: 腾讯基金主源解析体(estimated_nav 兜底 + source 标注)。"""
+
+    def test_snapshot_estimated_nav_falls_back_to_nav(self):
+        """estimated_nav=0(未开盘估值缺失) → 回退为 nav, 不返回 0 估值。"""
+        from src.core import data_source_v2 as ds2
+
+        text = ('v_jj161725="161725~招商中证白酒~0.0000~x~x~1.20~2.50~1.50~'
+                '2026-10-28 15:00:00~";')
+        fake = type("R", (), {"text": text, "encoding": "gbk"})()
+        with patch("src.core.data_guard.providers.tencent.requests.get",
+                   return_value=fake), \
+             patch.object(ds2._EM_SESSION, "get",
+                          side_effect=RuntimeError("no fundgz")):
+            rows = ds2.get_fund_realtime_tencent(["161725"])
+        assert len(rows) == 1
+        assert rows[0]["estimated_nav"] == 1.2  # 兜底为 nav 而非 0
+        assert rows[0]["source"] == "tencent"
+        assert rows[0]["change"] == pytest.approx(0.0177, abs=1e-4)  # 1.20-1.20/1.015 反推
+
+
+class TestMigrationSnapshotFundHistory:
+    """M4-B3: pingzhong 累计净值对齐 + lsjz PageSize 响应字段生效。"""
+
+    def test_pingzhong_acc_nav_aligned_and_missing_pct_none(self):
+        """acc 仅对单位净值已有日期回填; equityReturn 缺失 → None(排序后回填)。"""
+        from src.core import data_source_v2 as ds2
+
+        # 北京时间 2026-11-18 00:00 +08 → UTC 毫秒(验证 _CST 时区语义)
+        import datetime as _dt
+        cst = _dt.timezone(_dt.timedelta(hours=8))
+        d2 = int(_dt.datetime(2026, 11, 18, tzinfo=cst).timestamp() * 1000)
+        d1 = int(_dt.datetime(2026, 11, 17, tzinfo=cst).timestamp() * 1000)
+        js = (f'Data_netWorthTrend = [{{"x":{d1},"y":2.808,"equityReturn":0.5}},'
+              f'{{"x":{d2},"y":2.79,"equityReturn":""}}];'
+              f'Data_ACWorthTrend = [[{d1},2.83],[{d2},2.81],[{d1 - 86400000},2.80]];')
+        fake = type("R", (), {"text": js})()
+        with patch.object(ds2._EM_SESSION, "get", return_value=fake):
+            rows = ds2._fetch_fund_history_pingzhong("110022")
+        by_date = {r["date"]: r for r in rows}
+        assert by_date["2026-11-18"]["nav"] == 2.79
+        assert by_date["2026-11-18"]["acc_nav"] == 2.81  # 累计净值按日期对齐
+        assert by_date["2026-11-17"]["acc_nav"] == 2.83
+        assert by_date["2026-11-18"]["change_pct"] is None  # 空串 → None(门面回填)
+        # acc 中单位净值没有的日期(11-16)不产生新行
+        assert "2026-11-16" not in by_date
+
+    def test_lsjz_honors_payload_page_size(self):
+        """响应 PageSize 非 20 时按响应值翻页(服务端分页参数生效语义)。"""
+        import json as _json
+
+        from src.core import data_source_v2 as ds2
+
+        pages = {}
+
+        def _fake_get(url, params=None, timeout=None, headers=None):
+            idx = params["pageIndex"]
+            body = {
+                "TotalCount": 60, "PageSize": 50,
+                "Data": {"LSJZList": [
+                    {"FSRQ": f"2026-11-{16 - i:02d}", "DWJZ": "1.1",
+                     "LJJZ": "1.2", "JZZZL": 0.5}
+                    for i in range(50 if idx == 1 else 10)
+                ]},
+            }
+            pages[idx] = len(body["Data"]["LSJZList"])
+            return type("R", (), {"text": "jQuery(" + _json.dumps(body) + ")"})()
+
+        with patch.object(ds2._EM_SESSION, "get", side_effect=_fake_get):
+            rows = ds2._fetch_fund_history_lsjz("110022", None, "2026-11-19")
+        assert set(pages) == {1, 2}      # 60 条 / 50 每页 → 2 页
+        assert len(rows) == 60
+        assert rows[0]["date"] == "2026-11-16"  # 首页(倒序)保持原始顺序
+
+
+class TestMigrationSnapshotFinancialMootdxPatch:
+    """M4-B3: mootdx 快照门面转发保持既有 patch 契约(ds2._mootdx_client)。"""
+
+    def test_client_none_returns_empty(self):
+        from src.core import data_source_v2 as ds2
+
+        with patch.object(ds2, "_mootdx_client", return_value=None):
+            assert ds2._financial_snapshot_mootdx("600519") == {}

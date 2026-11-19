@@ -9,7 +9,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, wait
 from concurrent.futures import TimeoutError as FuturesTimeoutError
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any
 
 import requests
@@ -770,30 +770,10 @@ def get_stock_detail(code: str) -> dict:
         try:
             quotes = get_realtime_quote_tencent([code])
             if quotes:
-                q = quotes[0]
-                return {
-                    "quote": {
-                        "code": _safe_str(q.get("code")),
-                        "name": _safe_str(q.get("name")),
-                        "price": _safe_float(q.get("price")),
-                        "prev_close": _safe_float(q.get("prev_close")),
-                        "open": _safe_float(q.get("open")),
-                        "high": _safe_float(q.get("high")),
-                        "low": _safe_float(q.get("low")),
-                        "change": _safe_float(q.get("change")),
-                        "change_pct": _safe_float(q.get("change_pct")),
-                        "volume": _safe_float(q.get("volume")),
-                        "amount": _safe_float(q.get("amount")),
-                        "turnover": _safe_float(q.get("turnover")),
-                        "pe_ttm": _safe_float(q.get("pe_ttm")),
-                        "pb": _safe_float(q.get("pb")),
-                        "total_market_value": _safe_float(q.get("total_market_value")),
-                        "circ_market_value": _safe_float(q.get("circ_market_value")),
-                        "high_limit": _safe_float(q.get("high_limit")),
-                        "low_limit": _safe_float(q.get("low_limit")),
-                    },
-                    "name": _safe_str(q.get("name")),
-                }
+                # M4-B3: 字段映射体迁入 providers.tencent.map_detail_quote, 行为零变更
+                from src.core.data_guard.providers.tencent import map_detail_quote
+
+                return map_detail_quote(quotes[0])
         except Exception as e:
             logger.warning(f"get_stock_detail quote failed: {e}")
         return {"quote": {}, "name": ""}
@@ -1597,98 +1577,27 @@ def _has_meaningful_value(snapshot: dict) -> bool:
 
 
 def _financial_snapshot_mootdx(stock_code: str) -> dict:
-    client = _mootdx_client()
-    if client is None:
-        return {}
-    try:
-        market = 1 if _market_of(stock_code) == "sh" else 0
-        df = client.finance(symbol=stock_code, market=market)
-        if df is None or df.empty:
-            return {}
-        row = df.iloc[0]
-        snapshot = {
-            "code": stock_code,
-            "report_date": _safe_str(row.get("report_date", ""))[:10],
-            "eps": _opt_float(row.get("basic_eps")),
-            "bvps": _opt_float(row.get("bvps")),
-            "roe": _opt_float(row.get("roe")),
-            "revenue": _opt_float(row.get("total_operating_revenue")),
-            "revenue_yoy": _opt_float(row.get("yysr_yoy")),
-            "profit": _opt_float(row.get("parent_net_profit")),
-            "profit_yoy": _opt_float(row.get("jlr_yoy")),
-            "gross_margin": _opt_float(row.get("gross_profit_ratio")),
-            "net_margin": _opt_float(row.get("net_profit_ratio")),
-        }
-        # 全 None 说明该标的无财报（ETF/指数/债券），交给下一数据源
-        if not _has_meaningful_value(snapshot):
-            return {}
-        return snapshot
-    except Exception as e:
-        logger.warning(f"_financial_snapshot_mootdx failed: {e}")
-        return {}
+    """mootdx 财务快照门面(M4-B3 绞杀迁移): 取数+解析在
+    data_guard.providers.mootdx.fetch_financial_snapshot_raw, 行为零变更。"""
+    from src.core.data_guard.providers.mootdx import fetch_financial_snapshot_raw
+
+    return fetch_financial_snapshot_raw(stock_code)
 
 
 def _financial_snapshot_em(stock_code: str) -> dict:
-    url = "https://push2.eastmoney.com/api/qt/stock/get"
-    secid = _em_secid(stock_code)
-    params = {
-        "secid": secid,
-        "fields": "f9,f23,f20,f115,f116,f117,f162,f163,f167,f173,f183,f186,f187,f188",
-    }
-    try:
-        resp = em_get(url, params=params)
-        data = resp.json().get("data", {})
-        if not data:
-            return {}
-        snapshot = {
-            "code": stock_code,
-            "pe_ttm": _opt_float(data.get("f9")),
-            "pb": _opt_float(data.get("f23")),
-            "total_mv": _opt_float(data.get("f20")),
-            "circ_mv": _opt_float(data.get("f115")),
-            "roe": _opt_float(data.get("f162")),
-            "gross_margin": _opt_float(data.get("f186")),
-            "net_margin": _opt_float(data.get("f187")),
-            "revenue_yoy": _opt_float(data.get("f183")),
-            "profit_yoy": _opt_float(data.get("f185")),
-        }
-        if not _has_meaningful_value(snapshot):
-            return {}
-        return snapshot
-    except Exception as e:
-        logger.warning(f"_financial_snapshot_em failed: {e}")
-        return {}
+    """EM 财务快照门面(M4-B3 绞杀迁移): 取数+解析在
+    data_guard.providers.eastmoney.fetch_financial_snapshot_em_raw, 行为零变更。"""
+    from src.core.data_guard.providers.eastmoney import fetch_financial_snapshot_em_raw
+
+    return fetch_financial_snapshot_em_raw(stock_code)
 
 
 def _financial_snapshot_tencent(stock_code: str) -> dict:
-    try:
-        quotes = get_realtime_quote_tencent([stock_code])
-        if not quotes:
-            return {}
-        q = quotes[0]
-        pe_ttm = _opt_float(q.get("pe_ttm"))
-        pb = _opt_float(q.get("pb"))
-        total_mv = _opt_float(q.get("total_market_value"))
-        circ_mv = _opt_float(q.get("circ_market_value"))
-        # 腾讯对 ETF/指数把 PE/PB 直接给 0（不是"缺失"，是该品类没有 PE/PB）。
-        # 0 不是有效估值，一律转 None，前端显示"—"，避免"PE 0.00"误导。
-        if pe_ttm == 0:
-            pe_ttm = None
-        if pb == 0:
-            pb = None
-        # 三者全空/0 才认为无数据
-        if not any(v for v in (pe_ttm, pb, total_mv)):
-            return {}
-        return {
-            "code": stock_code,
-            "pe_ttm": pe_ttm,
-            "pb": pb,
-            "total_mv": total_mv,
-            "circ_mv": circ_mv,
-        }
-    except Exception as e:
-        logger.warning(f"_financial_snapshot_tencent failed: {e}")
-        return {}
+    """腾讯财务快照门面(M4-B3 绞杀迁移): 取数+解析在
+    data_guard.providers.tencent.fetch_financial_snapshot_tencent_raw, 行为零变更。"""
+    from src.core.data_guard.providers.tencent import fetch_financial_snapshot_tencent_raw
+
+    return fetch_financial_snapshot_tencent_raw(stock_code)
 
 
 def get_financial_snapshot(stock_code: str) -> dict:
@@ -1702,32 +1611,13 @@ def get_financial_snapshot(stock_code: str) -> dict:
 
 
 def get_company_info(stock_code: str) -> dict:
-    url = "https://push2.eastmoney.com/api/qt/stock/get"
-    secid = _em_secid(stock_code)
-    params = {
-        "secid": secid,
-        "fields": "f57,f58,f84,f116,f117,f162,f167,f170,f171,f173,f187,f188,f190,f192",
-    }
+    """公司资料门面(M4-B3 绞杀迁移): 取数+解析在
+    data_guard.providers.eastmoney.fetch_company_info_raw; 异常记录并返回
+    {} 保留于此, 行为零变更。"""
+    from src.core.data_guard.providers.eastmoney import fetch_company_info_raw
+
     try:
-        resp = em_get(url, params=params)
-        data = resp.json().get("data", {})
-        if not data:
-            return {}
-        return {
-            "code": _safe_str(data.get("f57", "")),
-            "name": _safe_str(data.get("f58", "")),
-            "total_shares": _safe_float(data.get("f84", 0)),
-            "circ_market_value": _safe_float(data.get("f116", 0)),
-            "total_market_value": _safe_float(data.get("f117", 0)),
-            "roe": _safe_float(data.get("f162", 0)),
-            "pe_ttm": _safe_float(data.get("f167", 0)),
-            "change_pct_5min": _safe_float(data.get("f170", 0)),
-            "change_pct": _safe_float(data.get("f170", 0)),
-            "amplitude": _safe_float(data.get("f171", 0)),
-            "turnover_rate": _safe_float(data.get("f168", 0)),
-            "volume_ratio": _safe_float(data.get("f50", 0)),
-            "pb": _safe_float(data.get("f187", 0)),
-        }
+        return fetch_company_info_raw(stock_code)
     except Exception as e:
         logger.warning(f"get_company_info failed: {e}")
         return {}
@@ -1755,124 +1645,24 @@ def get_hot_stocks_signal_fallback() -> list[dict]:
         return []
 
 
-# 2026-11-10 双上游改造: fundgz 响应为 `jsonpgz({...});` 形式, 用正则抽出花括号内的 JSON 体
-_FUNDGZ_JSON_RE = re.compile(r"\{.*\}", re.S)
+# 2026-11-10 双上游改造: fundgz 响应为 `jsonpgz({...});` 形式(M4-B3 起正则
+# 与解析体均在 data_guard.providers.eastmoney), 门面仅保留同名转发。
 
 
 def _fetch_fund_realtime_fundgz(codes: list[str]) -> list[dict]:
-    """天天基金 fundgz 备源: 逐 code 拉取估值/净值, 返回结构与腾讯主源完全同构。
+    """天天基金 fundgz 备源门面(M4-B3 绞杀迁移): 请求+解析在
+    data_guard.providers.eastmoney.fetch_fund_realtime_fundgz_raw, 行为零变更。"""
+    from src.core.data_guard.providers.eastmoney import fetch_fund_realtime_fundgz_raw
 
-    - 仅作为 get_fund_realtime_tencent 的缺失 code 补齐通道, 单个 code 失败
-      (网络/解析/字段缺失)只记 warning 并继续下一个, 整体永不抛出。
-    - R-06 延续: dwjz<=0 视为无有效净值, 该条直接丢弃, 不返回 nav=0 假行情。
-    """
-    if not codes:
-        return []
-    import json
-    result: list[dict] = []
-    for code in codes:
-        try:
-            url = f"https://fundgz.1234567.com.cn/js/{code}.js?rt={int(time.time() * 1000)}"
-            resp = _EM_SESSION.get(url, timeout=5, headers={
-                "Referer": "https://fund.eastmoney.com/",
-            })
-            m = _FUNDGZ_JSON_RE.search(resp.text or "")
-            if not m:
-                logger.warning(f"fundgz: {code} 响应中未找到 JSON, 跳过")
-                continue
-            data = json.loads(m.group(0))
-            nav = _safe_float(data.get("dwjz"))
-            if nav <= 0:
-                # R-06: 与主源一致, 无有效净值时丢弃该条
-                logger.warning(f"fundgz: {code} 无有效净值, 丢弃该条")
-                continue
-            change_pct_raw = _safe_float(data.get("gszzl"))
-            if abs(change_pct_raw) <= 20:
-                change_pct = change_pct_raw
-            else:
-                # 异常值(>20%): 与腾讯路径的合理性防御一致, 直接置 0
-                change_pct = 0.0
-            estimated = _safe_float(data.get("gsz"))
-            change = round(nav * change_pct / 100, 4)
-            result.append({
-                "code": _safe_str(data.get("fundcode"), code),
-                "name": _safe_str(data.get("name")),
-                "nav": nav,
-                "estimated_nav": estimated if estimated > 0 else nav,
-                "change": change,
-                "change_pct": round(change_pct, 2),
-                "update_time": _safe_str(data.get("gztime")),
-                "source": "fundgz",
-            })
-        except Exception as e:
-            logger.warning(f"fundgz: {code} 获取失败: {e}")
-            continue
-    return result
+    return fetch_fund_realtime_fundgz_raw(codes)
 
 
 def _fetch_fund_realtime_tencent_inner(codes: list[str]) -> list[dict]:
-    """腾讯 qt.gtimg.cn 主源: 请求+解析, 返回原始条目(不含 source 字段)。
+    """腾讯基金主源门面(M4-B3 绞杀迁移): 请求+解析在
+    data_guard.providers.tencent.fetch_fund_realtime_raw, 行为零变更。"""
+    from src.core.data_guard.providers.tencent import fetch_fund_realtime_raw
 
-    网络异常向上抛出, 由 get_fund_realtime_tencent 统一捕获后走备源合并。
-    """
-    prefixed = ",".join("jj" + c for c in codes)
-    url = f"https://qt.gtimg.cn/q={prefixed}"
-    resp = requests.get(url, timeout=5, headers={
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Referer": "https://gu.qq.com/",
-    })
-    resp.encoding = "gbk"
-    text = resp.text
-    result: list[dict] = []
-    for segment in text.split(";"):
-        segment = segment.strip()
-        if not segment or "~" not in segment:
-            continue
-        parts = segment.split("~")
-        if len(parts) < 9:
-            continue
-        raw_code = _safe_str(parts[0]).split("=")[-1].strip('"').strip()
-        name = _safe_str(parts[1])
-        estimated_nav = _safe_float(parts[2])
-        nav = _safe_float(parts[5])
-        if nav <= 0:
-            # 2026-11-05 R-06: 字段缺失/全零时不再返回 nav=0.00 的"假行情"。
-            # 0 净值与"真实净值缺失"无法区分, 下游会把盈亏静默算成 0,
-            # 因此该条直接丢弃, 由调用方按"无行情"分支处理。
-            logger.warning(f"fund_realtime: {raw_code} 无有效净值, 丢弃该条")
-            continue
-        # Tencent 基金接口 parts[7] 是涨跌幅百分比(如 1.566 表示 1.566%),
-        # 不是绝对涨跌额。原代码误将其当作绝对值再除以 (nav-change) 反推百分比,
-        # 导致出现 135% 这种荒谬结果。
-        change_pct_raw = _safe_float(parts[7])
-        if abs(change_pct_raw) <= 20:
-            # 合理范围(基金单日涨跌幅不会超过 20%),parts[7] 即百分比
-            change_pct = change_pct_raw
-            # 反推绝对涨跌额: change = nav - nav/(1+pct/100)
-            if change_pct != 0:
-                prev_nav = nav / (1 + change_pct / 100)
-                change = round(nav - prev_nav, 4)
-            else:
-                change = 0.0
-        else:
-            # 异常值(>20%): 可能字段格式变更,降级为绝对值再算百分比
-            change = change_pct_raw
-            prev_nav = nav - change
-            if prev_nav > 0:
-                change_pct = change / prev_nav * 100
-            else:
-                change_pct = 0.0
-        update_time = _safe_str(parts[8])
-        result.append({
-            "code": raw_code,
-            "name": name,
-            "nav": nav,
-            "estimated_nav": estimated_nav if estimated_nav > 0 else nav,
-            "change": round(change, 4),
-            "change_pct": round(change_pct, 2),
-            "update_time": update_time,
-        })
-    return result
+    return fetch_fund_realtime_raw(codes)
 
 
 def get_fund_realtime_tencent(codes: list[str]) -> list[dict]:
@@ -1921,15 +1711,15 @@ def get_fund_realtime_tencent(codes: list[str]) -> list[dict]:
 # 且返回按日期倒序。历史实现只取第 1 页 → 任何窗口都只剩最近 ~20 个交易日,倒序输入
 # 又让收益/回撤/夏普符号反转。修复为「pingzhongdata 单请求全量 + lsjz 分页兜底」,
 # 统一在本地做去重、升序排序与窗口过滤,窗口语义不再依赖上游行为。
+# (M4-B3 起两路取数+解析体均在 data_guard.providers.eastmoney, 门面保留
+#  同名私有转发与窗口/排序/去重编排。)
 _HISTORY_PERIOD_DAYS: dict[str, int] = {
     "1m": 30, "3m": 90, "6m": 180, "1y": 365, "3y": 1095, "all": 0,
 }
+# lsjz 分页参数(M4-B3 起由 providers.eastmoney 经 _ds2 属性调用):
+# 保留在门面作为既有测试读取/patch 的契约目标
 _LSJZ_PAGE_SIZE: int = 20
 _LSJZ_MAX_PAGES: int = 40  # 安全上限 800 条(≈3.2 年);MAX 窗口由 pingzhongdata 全量兜底
-_CST = timezone(timedelta(hours=8))  # 东财 pingzhongdata 时间戳为北京时间零点
-
-_PZ_NAV_RE = re.compile(r"Data_netWorthTrend\s*=\s*(\[.*?\]);", re.S)
-_PZ_ACC_RE = re.compile(r"Data_ACWorthTrend\s*=\s*(\[.*?\]);", re.S)
 
 
 def _history_start_date(period: str) -> str | None:
@@ -1970,95 +1760,20 @@ def _normalize_history(rows: list[dict], start_date: str | None = None) -> list[
     return result
 
 
-def _ts_to_date(ts_ms: Any) -> str:
-    """北京时间毫秒时间戳 → YYYY-MM-DD(Render 为 UTC,不能直接用本地时区)。"""
-    try:
-        return datetime.fromtimestamp(float(ts_ms) / 1000.0, tz=_CST).strftime("%Y-%m-%d")
-    except (TypeError, ValueError, OSError, OverflowError):
-        return ""
-
-
 def _fetch_fund_history_pingzhong(code: str) -> list[dict]:
-    """东财 pingzhongdata:单请求返回全量历史(单位净值 + 累计净值),MAX 窗口不截断。"""
-    url = f"https://fund.eastmoney.com/pingzhongdata/{code}.js"
-    resp = _EM_SESSION.get(url, timeout=10, headers={"Referer": "https://fund.eastmoney.com/"})
-    text = resp.text or ""
-    m_nav = _PZ_NAV_RE.search(text)
-    if not m_nav:
-        return []
-    import json
+    """东财 pingzhongdata 门面(M4-B3 绞杀迁移): 请求+解析在
+    data_guard.providers.eastmoney.fetch_fund_history_pingzhong_raw, 行为零变更。"""
+    from src.core.data_guard.providers.eastmoney import fetch_fund_history_pingzhong_raw
 
-    rows: dict[str, dict] = {}
-    for item in json.loads(m_nav.group(1)):
-        date_str = _ts_to_date(item.get("x"))
-        nav = _safe_float(item.get("y"))
-        if not date_str or nav <= 0:
-            continue
-        raw_pct = item.get("equityReturn")
-        rows[date_str] = {
-            "date": date_str,
-            "nav": nav,
-            "acc_nav": nav,
-            "change_pct": None if raw_pct in (None, "") else _safe_float(raw_pct),
-        }
-    m_acc = _PZ_ACC_RE.search(text)
-    if m_acc:
-        for pair in json.loads(m_acc.group(1)):
-            if not isinstance(pair, (list, tuple)) or len(pair) < 2:
-                continue
-            date_str = _ts_to_date(pair[0])
-            acc = _safe_float(pair[1])
-            if date_str in rows and acc > 0:
-                rows[date_str]["acc_nav"] = acc
-    return list(rows.values())
+    return fetch_fund_history_pingzhong_raw(code)
 
 
 def _fetch_fund_history_lsjz(code: str, start_date: str | None, end_date: str) -> list[dict]:
-    """东财 f10/lsjz 分页历史:按 TotalCount 翻页(固定 20 条/页,pageSize 无效)。"""
-    url = "https://api.fund.eastmoney.com/f10/lsjz"
-    import json
+    """东财 f10/lsjz 门面(M4-B3 绞杀迁移): 请求+分页解析在
+    data_guard.providers.eastmoney.fetch_fund_history_lsjz_raw, 行为零变更。"""
+    from src.core.data_guard.providers.eastmoney import fetch_fund_history_lsjz_raw
 
-    rows: list[dict] = []
-    page_size = _LSJZ_PAGE_SIZE
-    total_pages = 1
-    page_index = 1
-    while page_index <= min(total_pages, _LSJZ_MAX_PAGES):
-        params = {
-            "callback": "jQuery",
-            "fundCode": code,
-            "pageIndex": page_index,
-            "pageSize": page_size,
-            "startDate": start_date or "",
-            "endDate": end_date,
-        }
-        resp = _EM_SESSION.get(url, params=params, timeout=8, headers={
-            "Referer": "https://fund.eastmoney.com/",
-        })
-        payload = json.loads(re.sub(r"^jQuery\(", "", resp.text).rstrip(")"))
-        if page_index == 1:
-            total = int(_safe_float(payload.get("TotalCount"), 0))
-            page_size = int(_safe_float(payload.get("PageSize"), _LSJZ_PAGE_SIZE)) or _LSJZ_PAGE_SIZE
-            total_pages = max(1, math.ceil(total / page_size))
-            if total_pages > _LSJZ_MAX_PAGES:
-                logger.warning(
-                    f"get_fund_history {code}: TotalCount={total} 超过分页上限,"
-                    f"仅取最近 {_LSJZ_MAX_PAGES * page_size} 条"
-                )
-        items = (payload.get("Data") or {}).get("LSJZList") or []
-        if not items:
-            break
-        for item in items:
-            rows.append({
-                "date": _safe_str(item.get("FSRQ"))[:10],
-                "nav": _safe_float(item.get("DWJZ")),
-                "acc_nav": _safe_float(item.get("LJJZ")),
-                "change_pct": item.get("JZZZL"),
-            })
-        if len(items) < page_size:
-            break
-        page_index += 1
-        time.sleep(0.05)
-    return rows
+    return fetch_fund_history_lsjz_raw(code, start_date, end_date)
 
 
 def get_fund_history_tencent(code: str, period: str = "1y") -> list[dict]:

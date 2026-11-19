@@ -6,12 +6,22 @@ fetch_kline_raw, data_source_v2 保留同名私有门面(签名/行为零变更,
 get_kline_mootdx 等内部调用方与既有测试的 patch 路径不受影响)。
 解析逻辑逐行原样迁移(仍用 _safe_float 0 兜底, 下游 _sanitize_kline_rows
 负责 0 价清洗), 语义变更留给 M4 契约层收口。
+
+M4-B3(2026-11-19): EM 财务快照/公司资料/基金实时备源 fundgz/基金历史
+(pingzhongdata + f10/lsjz 分页)解析体迁入, 门面同名私有转发, 行为零变更。
 """
 from __future__ import annotations
+
+import json
+import math
+import re
+import time
+from datetime import datetime, timedelta, timezone
 
 from src.core.data_guard.contract import KlineContract, normalize_kline_row
 from src.core.data_source_v2 import (
     _em_secid,
+    _has_meaningful_value,
     _opt_float,
     _safe_float,
     _safe_int,
@@ -22,6 +32,18 @@ from loguru import logger
 # em_get 走模块属性查找(_ds2.em_get): 既有测试以 monkeypatch.setattr(ds2,
 # "em_get", ...) 为契约, 迁移后 patch 目标不变(调用时解析, 值绑定会失配)
 from src.core import data_source_v2 as _ds2
+
+# 天天基金 fundgz 响应为 `jsonpgz({...});` 形式, 用正则抽出花括号内的 JSON 体
+_FUNDGZ_JSON_RE = re.compile(r"\{.*\}", re.S)
+
+# 基金历史 pingzhongdata: 北京时间毫秒时间戳与单位/累计净值数组正则
+_CST = timezone(timedelta(hours=8))  # 东财 pingzhongdata 时间戳为北京时间零点
+_PZ_NAV_RE = re.compile(r"Data_netWorthTrend\s*=\s*(\[.*?\]);", re.S)
+_PZ_ACC_RE = re.compile(r"Data_ACWorthTrend\s*=\s*(\[.*?\]);", re.S)
+
+# f10/lsjz 的服务端分页: pageSize 参数被忽略, 固定 20 条/页(实测)。
+# 分页上限常量保留在 data_source_v2 门面(既有测试契约目标), 此处经
+# _ds2 属性调用, 保证 patch ds2._LSJZ_* 仍然生效
 
 
 def fetch_kline_raw(symbol: str, period: str = "daily", count: int = 30) -> list[dict]:
@@ -339,10 +361,6 @@ def fetch_shareholder_count_raw(stock_code: str) -> dict | None:
 
 def fetch_stock_news_raw(stock_code: str, page: int = 1, page_size: int = 10) -> list[dict]:
     """东财个股新闻(jsonp)取数+解析(原 get_stock_news 主体, 无来源标记)。异常向上抛出。"""
-    import json
-    import re
-    import time
-
     url = "https://search-api-web.eastmoney.com/search/jsonp"
     cb = f"jQuery{int(time.time() * 1000)}"
     params = {
@@ -364,6 +382,225 @@ def fetch_stock_news_raw(stock_code: str, page: int = 1, page_size: int = 10) ->
             "publish_time": _safe_str(art.get("date", "")),
         })
     return result
+
+
+def fetch_financial_snapshot_em_raw(stock_code: str) -> dict:
+    """EM 财务快照取数+解析(原 data_source_v2._financial_snapshot_em 主体)。
+
+    f185 映射 profit_yoy; 全 None 快照 → {} 交给下一数据源(tencent)。
+    异常就地吞掉返回 {}(与迁移前行为逐位一致)。
+    """
+    url = "https://push2.eastmoney.com/api/qt/stock/get"
+    secid = _em_secid(stock_code)
+    params = {
+        "secid": secid,
+        "fields": "f9,f23,f20,f115,f116,f117,f162,f163,f167,f173,f183,f186,f187,f188",
+    }
+    try:
+        resp = _ds2.em_get(url, params=params)
+        data = resp.json().get("data", {})
+        if not data:
+            return {}
+        snapshot = {
+            "code": stock_code,
+            "pe_ttm": _opt_float(data.get("f9")),
+            "pb": _opt_float(data.get("f23")),
+            "total_mv": _opt_float(data.get("f20")),
+            "circ_mv": _opt_float(data.get("f115")),
+            "roe": _opt_float(data.get("f162")),
+            "gross_margin": _opt_float(data.get("f186")),
+            "net_margin": _opt_float(data.get("f187")),
+            "revenue_yoy": _opt_float(data.get("f183")),
+            "profit_yoy": _opt_float(data.get("f185")),
+        }
+        if not _has_meaningful_value(snapshot):
+            return {}
+        return snapshot
+    except Exception as e:
+        logger.warning(f"_financial_snapshot_em failed: {e}")
+        return {}
+
+
+def fetch_company_info_raw(stock_code: str) -> dict:
+    """公司资料取数+解析(原 data_source_v2.get_company_info 主体)。
+
+    历史怪癖原样保留: f170 同时作为 change_pct_5min 与 change_pct 返回;
+    缺失字段用 _safe_float(x, 0) 兜 0(与迁移前一致, 语义收口留给 M4)。
+    异常向上抛出, 由门面记录并返回 {}。
+    """
+    url = "https://push2.eastmoney.com/api/qt/stock/get"
+    secid = _em_secid(stock_code)
+    params = {
+        "secid": secid,
+        "fields": "f57,f58,f84,f116,f117,f162,f167,f170,f171,f173,f187,f188,f190,f192",
+    }
+    resp = _ds2.em_get(url, params=params)
+    data = resp.json().get("data", {})
+    if not data:
+        return {}
+    return {
+        "code": _safe_str(data.get("f57", "")),
+        "name": _safe_str(data.get("f58", "")),
+        "total_shares": _safe_float(data.get("f84", 0)),
+        "circ_market_value": _safe_float(data.get("f116", 0)),
+        "total_market_value": _safe_float(data.get("f117", 0)),
+        "roe": _safe_float(data.get("f162", 0)),
+        "pe_ttm": _safe_float(data.get("f167", 0)),
+        "change_pct_5min": _safe_float(data.get("f170", 0)),
+        "change_pct": _safe_float(data.get("f170", 0)),
+        "amplitude": _safe_float(data.get("f171", 0)),
+        "turnover_rate": _safe_float(data.get("f168", 0)),
+        "volume_ratio": _safe_float(data.get("f50", 0)),
+        "pb": _safe_float(data.get("f187", 0)),
+    }
+
+
+def fetch_fund_realtime_fundgz_raw(codes: list[str]) -> list[dict]:
+    """天天基金 fundgz 备源: 逐 code 拉取估值/净值(原
+    data_source_v2._fetch_fund_realtime_fundgz 主体)。
+
+    返回结构与腾讯主源完全同构。单个 code 失败(网络/解析/字段缺失)只记
+    warning 并继续下一个, 整体永不抛出。R-06: dwjz<=0 视为无有效净值,
+    该条直接丢弃, 不返回 nav=0 假行情。gszzl 超过 ±20 钳为 0。
+    会话经 _ds2._EM_SESSION 属性调用, 既有测试 patch 目标不变。
+    """
+    if not codes:
+        return []
+    result: list[dict] = []
+    for code in codes:
+        try:
+            url = f"https://fundgz.1234567.com.cn/js/{code}.js?rt={int(time.time() * 1000)}"
+            resp = _ds2._EM_SESSION.get(url, timeout=5, headers={
+                "Referer": "https://fund.eastmoney.com/",
+            })
+            m = _FUNDGZ_JSON_RE.search(resp.text or "")
+            if not m:
+                logger.warning(f"fundgz: {code} 响应中未找到 JSON, 跳过")
+                continue
+            data = json.loads(m.group(0))
+            nav = _safe_float(data.get("dwjz"))
+            if nav <= 0:
+                # R-06: 与主源一致, 无有效净值时丢弃该条
+                logger.warning(f"fundgz: {code} 无有效净值, 丢弃该条")
+                continue
+            change_pct_raw = _safe_float(data.get("gszzl"))
+            if abs(change_pct_raw) <= 20:
+                change_pct = change_pct_raw
+            else:
+                # 异常值(>20%): 与腾讯路径的合理性防御一致, 直接置 0
+                change_pct = 0.0
+            estimated = _safe_float(data.get("gsz"))
+            change = round(nav * change_pct / 100, 4)
+            result.append({
+                "code": _safe_str(data.get("fundcode"), code),
+                "name": _safe_str(data.get("name")),
+                "nav": nav,
+                "estimated_nav": estimated if estimated > 0 else nav,
+                "change": change,
+                "change_pct": round(change_pct, 2),
+                "update_time": _safe_str(data.get("gztime")),
+                "source": "fundgz",
+            })
+        except Exception as e:
+            logger.warning(f"fundgz: {code} 获取失败: {e}")
+            continue
+    return result
+
+
+def _ts_to_date(ts_ms) -> str:
+    """北京时间毫秒时间戳 → YYYY-MM-DD(Render 为 UTC, 不能直接用本地时区)。"""
+    try:
+        return datetime.fromtimestamp(float(ts_ms) / 1000.0, tz=_CST).strftime("%Y-%m-%d")
+    except (TypeError, ValueError, OSError, OverflowError):
+        return ""
+
+
+def fetch_fund_history_pingzhong_raw(code: str) -> list[dict]:
+    """东财 pingzhongdata 基金历史取数+解析(原
+    data_source_v2._fetch_fund_history_pingzhong 主体)。
+
+    单请求返回全量历史(单位净值 + 累计净值), MAX 窗口不截断。
+    累计净值仅对单位净值已有的日期对齐回填。异常向上抛出。
+    """
+    url = f"https://fund.eastmoney.com/pingzhongdata/{code}.js"
+    resp = _ds2._EM_SESSION.get(url, timeout=10, headers={"Referer": "https://fund.eastmoney.com/"})
+    text = resp.text or ""
+    m_nav = _PZ_NAV_RE.search(text)
+    if not m_nav:
+        return []
+    rows: dict[str, dict] = {}
+    for item in json.loads(m_nav.group(1)):
+        date_str = _ts_to_date(item.get("x"))
+        nav = _safe_float(item.get("y"))
+        if not date_str or nav <= 0:
+            continue
+        raw_pct = item.get("equityReturn")
+        rows[date_str] = {
+            "date": date_str,
+            "nav": nav,
+            "acc_nav": nav,
+            "change_pct": None if raw_pct in (None, "") else _safe_float(raw_pct),
+        }
+    m_acc = _PZ_ACC_RE.search(text)
+    if m_acc:
+        for pair in json.loads(m_acc.group(1)):
+            if not isinstance(pair, (list, tuple)) or len(pair) < 2:
+                continue
+            date_str = _ts_to_date(pair[0])
+            acc = _safe_float(pair[1])
+            if date_str in rows and acc > 0:
+                rows[date_str]["acc_nav"] = acc
+    return list(rows.values())
+
+
+def fetch_fund_history_lsjz_raw(code: str, start_date: str | None, end_date: str) -> list[dict]:
+    """东财 f10/lsjz 分页历史取数+解析(原 data_source_v2._fetch_fund_history_lsjz 主体)。
+
+    按 TotalCount 翻页(固定 20 条/页, pageSize 参数无效)。异常向上抛出。
+    """
+    url = "https://api.fund.eastmoney.com/f10/lsjz"
+
+    rows: list[dict] = []
+    page_size = _ds2._LSJZ_PAGE_SIZE
+    total_pages = 1
+    page_index = 1
+    while page_index <= min(total_pages, _ds2._LSJZ_MAX_PAGES):
+        params = {
+            "callback": "jQuery",
+            "fundCode": code,
+            "pageIndex": page_index,
+            "pageSize": page_size,
+            "startDate": start_date or "",
+            "endDate": end_date,
+        }
+        resp = _ds2._EM_SESSION.get(url, params=params, timeout=8, headers={
+            "Referer": "https://fund.eastmoney.com/",
+        })
+        payload = json.loads(re.sub(r"^jQuery\(", "", resp.text).rstrip(")"))
+        if page_index == 1:
+            total = int(_safe_float(payload.get("TotalCount"), 0))
+            page_size = int(_safe_float(payload.get("PageSize"), _ds2._LSJZ_PAGE_SIZE)) or _ds2._LSJZ_PAGE_SIZE
+            total_pages = max(1, math.ceil(total / page_size))
+            if total_pages > _ds2._LSJZ_MAX_PAGES:
+                logger.warning(
+                    f"get_fund_history {code}: TotalCount={total} 超过分页上限,"
+                    f"仅取最近 {_ds2._LSJZ_MAX_PAGES * page_size} 条"
+                )
+        items = (payload.get("Data") or {}).get("LSJZList") or []
+        if not items:
+            break
+        for item in items:
+            rows.append({
+                "date": _safe_str(item.get("FSRQ"))[:10],
+                "nav": _safe_float(item.get("DWJZ")),
+                "acc_nav": _safe_float(item.get("LJJZ")),
+                "change_pct": item.get("JZZZL"),
+            })
+        if len(items) < page_size:
+            break
+        page_index += 1
+        time.sleep(0.05)
+    return rows
 
 
 class EastmoneyProvider:
