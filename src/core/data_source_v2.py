@@ -368,42 +368,11 @@ def _kline_em_fallback(symbol: str, period: str, count: int) -> list[dict]:
 
 
 def _kline_sina_fallback(symbol: str, period: str = "daily", count: int = 30) -> list[dict]:
-    sina_code = _prefix_code(symbol)
-    scale_map = {"daily": "240", "weekly": "1200", "monthly": "5200"}
-    scale = scale_map.get(period, "240")
-    url = "https://quotes.sina.cn/cn/api/jsonp_v2.php/var=/CN_MarketDataService.getKLineData"
-    params = {
-        "symbol": sina_code,
-        "scale": scale,
-        "ma": "no",
-        "datalen": str(count),
-    }
-    try:
-        resp = requests.get(url, params=params, timeout=5, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://finance.sina.com.cn/",
-        })
-        text = resp.text
-        m = re.search(r'\((.*)\)', text, re.DOTALL)
-        if not m:
-            return []
-        import json as _json
-        items = _json.loads(m.group(1))
-        result: list[dict] = []
-        for item in items:
-            result.append({
-                "date": _safe_str(item.get("day", ""))[:10],
-                "open": _safe_float(item.get("open")),
-                "high": _safe_float(item.get("high")),
-                "low": _safe_float(item.get("low")),
-                "close": _safe_float(item.get("close")),
-                "volume": _safe_float(item.get("volume")),
-                "amount": 0.0,
-            })
-        return result
-    except Exception as e:
-        logger.warning(f"_kline_sina_fallback failed: {e}")
-        return []
+    """新浪 K 线门面(M3-C 绞杀迁移): 取数+解析在
+    data_guard.providers.sina.fetch_kline_raw, 签名/输出行为零变更。"""
+    from src.core.data_guard.providers.sina import fetch_kline_raw
+
+    return fetch_kline_raw(symbol, period, count)
 
 
 def _sanitize_kline_rows(rows: list[dict]) -> list[dict]:
@@ -430,6 +399,11 @@ def _sanitize_kline_rows(rows: list[dict]) -> list[dict]:
 
 
 def get_kline_mootdx(symbol: str, period: str = "daily", count: int = 120) -> list[dict]:
+    """mootdx K 线门面(M3-D 绞杀迁移): 解析体在
+    data_guard.providers.mootdx.parse_bars; client 获取与 mootdx→东财→新浪
+    降级编排保留于此, 签名/输出行为零变更。"""
+    from src.core.data_guard.providers.mootdx import parse_bars
+
     category_map = {"daily": 9, "weekly": 5, "monthly": 6}
     category = category_map.get(period, 9)
     client = _mootdx_client()
@@ -438,18 +412,7 @@ def get_kline_mootdx(symbol: str, period: str = "daily", count: int = 120) -> li
             market = 1 if symbol.startswith("6") or symbol.startswith("9") else 0
             df = client.bars(symbol=symbol, category=category, market=market, offset=count)
             if df is not None and not df.empty:
-                result: list[dict] = []
-                for _, row in df.iterrows():
-                    result.append({
-                        "date": _safe_str(row.get("datetime", ""))[:10],
-                        "open": _safe_float(row.get("open")),
-                        "high": _safe_float(row.get("high")),
-                        "low": _safe_float(row.get("low")),
-                        "close": _safe_float(row.get("close")),
-                        "volume": _safe_float(row.get("vol")),
-                        "amount": _safe_float(row.get("amount")),
-                    })
-                return _sanitize_kline_rows(result)
+                return _sanitize_kline_rows(parse_bars(df))
         except Exception as e:
             logger.warning(f"get_kline_mootdx mootdx failed, fallback to em: {e}")
     em_result = _kline_em_fallback(symbol, period, count)
@@ -475,60 +438,27 @@ def get_realtime_quote_tencent(codes: list[str]) -> list[dict]:
 
 
 def get_index_realtime() -> list[dict]:
+    """指数行情门面(M3-E 绞杀迁移): 取数+解析在
+    data_guard.providers.tencent.fetch_index_quotes_raw; 缓存与 data_health
+    副作用保留于此, 签名/输出/健康度行为零变更。"""
+    from src.core.data_guard.providers.tencent import fetch_index_quotes_raw
+
     cached = _cache_get("index_realtime")
     if cached is not None:
         return cached
-    # 2026-11-08：用户反馈"行情页只有三个指数，数据不全"。
-    # 补沪深300/中证500/科创50/上证50/中小100，覆盖大盘-中盘-成长-蓝筹四个维度。
-    # 全部为腾讯行情源实测可用的代码（返回字段长度 > 40，含名称与涨跌幅）。
-    codes = [
-        "sh000001",  # 上证指数
-        "sz399001",  # 深证成指
-        "sz399006",  # 创业板指
-        "sh000300",  # 沪深300
-        "sh000905",  # 中证500
-        "sh000688",  # 科创50
-        "sh000016",  # 上证50
-        "sz399005",  # 中小100
-    ]
-    prefixed = ",".join(codes)
-    url = f"https://qt.gtimg.cn/q={prefixed}"
     try:
-        resp = requests.get(url, timeout=5, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://gu.qq.com/",
-        })
-        resp.encoding = "gbk"
-        text = resp.text
-        result: list[dict] = []
-        for segment in text.split(";"):
-            segment = segment.strip()
-            if not segment or "~" not in segment:
-                continue
-            parts = segment.split("~")
-            if len(parts) < 40:
-                continue
-            result.append({
-                "code": _safe_str(parts[2]),
-                "name": _safe_str(parts[1]),
-                "price": _safe_float(parts[3]),
-                "change": _safe_float(parts[31]),
-                "change_pct": _safe_float(parts[32]),
-                "volume": _safe_float(parts[36]),
-                "amount": _safe_float(parts[37]),
-            })
-        result = [r for r in result if r.get("code")]
-        if result:
-            data_health.record_success("index_realtime", len(result))
-        else:
-            # 上游 200 但解析不出条目(字段变更/被风控降级页)也算失败,否则健康度会假绿
-            data_health.record_failure("index_realtime", "empty result")
-        _cache_set("index_realtime", result, 5)
-        return result
+        result = fetch_index_quotes_raw()
     except Exception as e:
         logger.warning(f"get_index_realtime failed: {e}")
         data_health.record_failure("index_realtime", str(e))
         return []
+    if result:
+        # 上游 200 但解析不出条目(字段变更/被风控降级页)也算失败,否则健康度会假绿
+        data_health.record_success("index_realtime", len(result))
+    else:
+        data_health.record_failure("index_realtime", "empty result")
+    _cache_set("index_realtime", result, 5)
+    return result
 
 
 def get_stock_ranking_em(sort_field: str = "f3", sort_order: int = 0, count: int = 10) -> list[dict]:

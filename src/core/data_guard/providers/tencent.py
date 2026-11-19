@@ -79,6 +79,51 @@ def fetch_quotes_raw(codes: list[str]) -> list[dict]:
         return []
 
 
+def fetch_index_quotes_raw() -> list[dict]:
+    """指数行情取数+解析(原 data_source_v2.get_index_realtime 主体, 无缓存/无健康度副作用)。
+
+    覆盖 8 指数(上证/深证/创业板/沪深300/中证500/科创50/上证50/中小100),
+    全部为腾讯行情源实测可用代码(字段长度 > 40)。异常向上抛出, 由门面
+    统一记 data_health 并返回 [](与迁移前行为逐位一致)。
+    """
+    codes = [
+        "sh000001",  # 上证指数
+        "sz399001",  # 深证成指
+        "sz399006",  # 创业板指
+        "sh000300",  # 沪深300
+        "sh000905",  # 中证500
+        "sh000688",  # 科创50
+        "sh000016",  # 上证50
+        "sz399005",  # 中小100
+    ]
+    prefixed = ",".join(codes)
+    url = f"https://qt.gtimg.cn/q={prefixed}"
+    resp = requests.get(url, timeout=5, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://gu.qq.com/",
+    })
+    resp.encoding = "gbk"
+    text = resp.text
+    result: list[dict] = []
+    for segment in text.split(";"):
+        segment = segment.strip()
+        if not segment or "~" not in segment:
+            continue
+        parts = segment.split("~")
+        if len(parts) < 40:
+            continue
+        result.append({
+            "code": _safe_str(parts[2]),
+            "name": _safe_str(parts[1]),
+            "price": _safe_float(parts[3]),
+            "change": _safe_float(parts[31]),
+            "change_pct": _safe_float(parts[32]),
+            "volume": _safe_float(parts[36]),
+            "amount": _safe_float(parts[37]),
+        })
+    return [r for r in result if r.get("code")]
+
+
 class TencentProvider:
     """腾讯行情(qt.gtimg.cn)。priority 10: 个股实时行情首选源。"""
 

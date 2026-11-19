@@ -363,3 +363,170 @@ class TestMigrationSnapshotEastmoney:
         with patch("src.core.data_guard.providers.eastmoney.em_get",
                    side_effect=RuntimeError("em down")):
             assert ds2._kline_em_fallback("600519", "daily", 5) == []
+
+
+# ── M3-C/D/E 绞杀迁移快照 ──────────────────────────────────────────────
+
+class TestMigrationSnapshotSina:
+    """M3-C: 新浪 K 线解析体迁移后行为逐位一致。"""
+
+    def test_snapshot_exact(self):
+        import json as _json
+
+        from src.core import data_source_v2 as ds2
+
+        items = [
+            {"day": "2026-11-18 15:00:00", "open": "1487.00", "high": "1502.00",
+             "low": "1480.00", "close": "1499.00", "volume": "23150"},
+            {"day": "2026-11-19 15:00:00", "open": "1499.00", "high": "1508.00",
+             "low": "1495.00", "close": "1505.00", "volume": "18000"},
+        ]
+        text = f'var =({ _json.dumps(items) });'
+        fake_resp = type("R", (), {"text": text})()
+        with patch("src.core.data_guard.providers.sina.requests.get",
+                   return_value=fake_resp):
+            rows = ds2._kline_sina_fallback("600519", "daily", 2)
+        assert len(rows) == 2
+        # date 截断到 10 位, amount 恒 0.0(新浪接口无成交额字段)
+        assert rows[0] == {
+            "date": "2026-11-18", "open": 1487.0, "high": 1502.0,
+            "low": 1480.0, "close": 1499.0, "volume": 23150.0, "amount": 0.0,
+        }
+        assert rows[1]["date"] == "2026-11-19" and rows[1]["close"] == 1505.0
+
+    def test_no_jsonp_parens_returns_empty(self):
+        from src.core import data_source_v2 as ds2
+
+        fake_resp = type("R", (), {"text": "no parens here"})()
+        with patch("src.core.data_guard.providers.sina.requests.get",
+                   return_value=fake_resp):
+            assert ds2._kline_sina_fallback("600519", "daily", 5) == []
+
+    def test_exception_returns_empty_list(self):
+        from src.core import data_source_v2 as ds2
+
+        with patch("src.core.data_guard.providers.sina.requests.get",
+                   side_effect=RuntimeError("sina down")):
+            assert ds2._kline_sina_fallback("600519", "daily", 5) == []
+
+
+class TestMigrationSnapshotMootdx:
+    """M3-D: mootdx 解析体迁移后行为逐位一致(含 sanitize 0 价行丢弃)。"""
+
+    def _fake_df(self):
+        import pandas as pd
+        return pd.DataFrame([
+            {"datetime": "2026-11-18 15:00", "open": 1487.0, "high": 1502.0,
+             "low": 1480.0, "close": 1499.0, "vol": 23150, "amount": 3.4e9},
+            {"datetime": "2026-11-19 15:00", "open": 0.0, "high": 0.0,
+             "low": 0.0, "close": 0.0, "vol": 0, "amount": 0.0},  # 停牌 0 价行
+        ])
+
+    def test_parse_bars_snapshot(self):
+        from src.core.data_guard.providers.mootdx import parse_bars
+
+        rows = parse_bars(self._fake_df())
+        assert rows[0] == {
+            "date": "2026-11-18", "open": 1487.0, "high": 1502.0,
+            "low": 1480.0, "close": 1499.0, "volume": 23150.0,
+            "amount": 3.4e9,
+        }
+        assert rows[1]["close"] == 0.0  # parse 层原样保留 0(与迁移前一致)
+
+    def test_facade_sanitizes_zero_rows(self):
+        """门面 sanitize: 0 价行丢弃, 存活行 OHLC 缺失用 close 兜底。"""
+        from src.core import data_source_v2 as ds2
+
+        client = type("C", (), {})()
+        client.bars = lambda **kw: self._fake_df()
+        with patch.object(ds2, "_mootdx_client", return_value=client):
+            rows = ds2.get_kline_mootdx("600519", "daily", 5)
+        assert len(rows) == 1
+        assert rows[0]["date"] == "2026-11-18" and rows[0]["close"] == 1499.0
+
+    def test_client_none_falls_back_to_em(self):
+        """client 不可用 → 东财降级(不触新浪)。"""
+        from src.core import data_source_v2 as ds2
+
+        em_rows = [{"date": "2026-11-18", "open": 1487.0, "close": 1499.0,
+                    "high": 1502.0, "low": 1480.0, "volume": 23150.0,
+                    "amount": 3.4e9}]
+        with patch.object(ds2, "_mootdx_client", return_value=None), \
+             patch.object(ds2, "_kline_em_fallback", return_value=em_rows) as m_em, \
+             patch.object(ds2, "_kline_sina_fallback") as m_sina:
+            rows = ds2.get_kline_mootdx("600519", "daily", 5)
+        assert len(rows) == 1 and rows[0]["close"] == 1499.0
+        m_em.assert_called_once()
+        m_sina.assert_not_called()
+
+    def test_em_empty_falls_back_to_sina(self):
+        """东财空 → 新浪兜底。"""
+        from src.core import data_source_v2 as ds2
+
+        sina_rows = [{"date": "2026-11-18", "open": 1487.0, "close": 1499.0,
+                      "high": 1502.0, "low": 1480.0, "volume": 23150.0,
+                      "amount": 0.0}]
+        with patch.object(ds2, "_mootdx_client", return_value=None), \
+             patch.object(ds2, "_kline_em_fallback", return_value=[]), \
+             patch.object(ds2, "_kline_sina_fallback", return_value=sina_rows):
+            rows = ds2.get_kline_mootdx("600519", "daily", 5)
+        assert len(rows) == 1 and rows[0]["close"] == 1499.0
+
+
+class TestMigrationSnapshotIndex:
+    """M3-E: 腾讯指数解析体迁移后行为逐位一致(含 data_health 副作用口径)。"""
+
+    def _index_segment(self, code: str, name: str) -> str:
+        values = {
+            1: name, 2: code, 3: "3549.10", 31: "-38.73", 32: "-1.08",
+            36: "347812345", 37: "47812345678.00",
+        }
+        fields = [values.get(i, "0") for i in range(45)]
+        return f'v_sh{code}="{"~".join(fields)}";'
+
+    def test_snapshot_exact_and_health_success(self):
+        from src.core import data_source_v2 as ds2
+
+        text = ";".join([
+            self._index_segment("sh000001", "上证指数"),
+            self._index_segment("sz399001", "深证成指"),
+        ]) + ";"
+        fake_resp = type("R", (), {"encoding": "", "text": text})()
+        with patch("src.core.data_guard.providers.tencent.requests.get",
+                   return_value=fake_resp), \
+             patch("src.core.data_source_v2.data_health") as mock_health, \
+             patch.object(ds2, "_cache_get", return_value=None), \
+             patch.object(ds2, "_cache_set"):
+            rows = ds2.get_index_realtime()
+        assert len(rows) == 2
+        assert rows[0] == {
+            "code": "sh000001", "name": "上证指数", "price": 3549.10,
+            "change": -38.73, "change_pct": -1.08,
+            "volume": 347812345.0, "amount": 47812345678.00,
+        }
+        mock_health.record_success.assert_called_once_with("index_realtime", 2)
+
+    def test_empty_result_records_failure(self):
+        from src.core import data_source_v2 as ds2
+
+        fake_resp = type("R", (), {"encoding": "", "text": "no segments"})()
+        with patch("src.core.data_guard.providers.tencent.requests.get",
+                   return_value=fake_resp), \
+             patch("src.core.data_source_v2.data_health") as mock_health, \
+             patch.object(ds2, "_cache_get", return_value=None), \
+             patch.object(ds2, "_cache_set"):
+            rows = ds2.get_index_realtime()
+        assert rows == []
+        mock_health.record_failure.assert_called_once_with("index_realtime", "empty result")
+
+    def test_exception_records_failure_and_returns_empty(self):
+        from src.core import data_source_v2 as ds2
+
+        with patch("src.core.data_guard.providers.tencent.requests.get",
+                   side_effect=RuntimeError("net down")), \
+             patch("src.core.data_source_v2.data_health") as mock_health, \
+             patch.object(ds2, "_cache_get", return_value=None), \
+             patch.object(ds2, "_cache_set"):
+            rows = ds2.get_index_realtime()
+        assert rows == []
+        mock_health.record_failure.assert_called_once_with("index_realtime", "net down")
