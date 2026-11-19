@@ -6,7 +6,6 @@
 """
 from __future__ import annotations
 
-import math
 
 from src.utils.convert import opt_float, safe_float, safe_int, safe_str
 

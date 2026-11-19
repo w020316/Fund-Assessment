@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
-from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends
+from fastapi import APIRouter, Depends
 from loguru import logger
 from pydantic import BaseModel
 
@@ -19,8 +17,9 @@ router = APIRouter()
 
 _HAS_MONITOR = False
 try:
-    from src.analysis.capital_flow import analyze_capital_flow
-    from src.strategies.stock_monitor import AlertType, StockMonitor
+    # 可用性探测导入: 导入成功才置 _HAS_MONITOR(StockMonitor 在后续运行时引用)
+    from src.analysis.capital_flow import analyze_capital_flow  # noqa: F401
+    from src.strategies.stock_monitor import AlertType, StockMonitor  # noqa: F401
     _HAS_MONITOR = True
 except ImportError as e:
     logger.warning(f"import monitor modules failed: {e}")

@@ -974,7 +974,7 @@ class TestAnalyzeFundHoldingsExtended:
             {"code": "", "name": "未知", "weight": 5.0},
         ]
         with patch.object(fund_holdings, "get_fund_holdings", return_value=mock_holdings):
-            with patch.object(fund_holdings.ds2, "get_realtime_quote_tencent") as mock_quote:
+            with patch.object(fund_holdings.ds2, "get_realtime_quote_tencent") as _mock_quote:
                 with patch.object(fund_holdings.ds2, "get_sector_ranking", return_value=[]):
                     with patch.object(fund_holdings.ds2, "_parallel_fetch", return_value={"quotes": [], "sectors": []}):
                         result = await analyze_fund_holdings("110022")

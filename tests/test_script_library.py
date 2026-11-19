@@ -11,7 +11,6 @@
 """
 from __future__ import annotations
 
-import pytest
 
 from src.analysis.script_library import (
     _fill_template,

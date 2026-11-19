@@ -27,7 +27,6 @@ def analyze_capital_flow(stock_code: str) -> dict:
         flow_df = ak.stock_individual_fund_flow(stock=stock_code, market=market)
         if flow_df is not None and not flow_df.empty:
             latest = flow_df.iloc[-1]
-            col_map = {c: c.strip() for c in flow_df.columns}
             flow_df.columns = [c.strip() for c in flow_df.columns]
 
             for key, possible_cols in [

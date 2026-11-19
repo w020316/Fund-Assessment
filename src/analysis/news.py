@@ -112,8 +112,6 @@ def _score_positive_count(news_list: list[dict]) -> float:
 
 
 def _score_sentiment_value(sentiment: float) -> float:
-    mapped = (sentiment + 1) / 2 * 40
-
     if sentiment > 0.5:
         return 40.0
     elif sentiment > 0.2:

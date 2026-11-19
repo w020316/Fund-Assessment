@@ -16,7 +16,6 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Any
 
 import requests
 from fastapi import APIRouter, Depends, Query

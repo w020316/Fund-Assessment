@@ -14,11 +14,9 @@ from unittest.mock import patch
 
 import pytest
 
-from src.analysis import fund_advisor
 from src.analysis.fund_advisor import (
     _build_market_signal,
     _build_pnl_signal,
-    _build_sector_signal,
     _infer_sectors_from_name,
     _merge_signals,
     generate_fund_advice,

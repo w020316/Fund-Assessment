@@ -15,7 +15,7 @@ get_jobs 包装方法因 next_run_time 在 start 前不可用,使用 start→sto
 from __future__ import annotations
 
 from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 

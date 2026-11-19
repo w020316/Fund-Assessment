@@ -47,6 +47,20 @@ include = ["src*", "web*", "config*"]
 [tool.setuptools.package-data]
 config = ["*.yaml"]
 
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint.per-file-ignores]
+# 公共 API 门面: 有意的 re-export(历轮教训: 自动修复误删 re-export, 改为显式豁免)
+"src/core/__init__.py" = ["F401", "F403"]
+"src/agents/__init__.py" = ["F401"]
+# 路由注册必须晚于中间件注册与 sys.path 准备(lazy import 冷启动优化), E402 为结构性必然
+"web/api.py" = ["E402"]
+"web/routes/dashboard.py" = ["E402"]
+# settings 依赖 load_dotenv() 先执行, 属刻意的环境准备顺序
+"src/core/ai_service.py" = ["E402"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]

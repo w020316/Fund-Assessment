@@ -10,9 +10,7 @@ from __future__ import annotations
 
 from dataclasses import is_dataclass
 from datetime import datetime, timedelta
-from unittest.mock import patch
 
-import pytest
 
 from src.monitor.alert import AlertInfo, AlertLevel, AlertManager
 

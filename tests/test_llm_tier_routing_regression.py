@@ -27,7 +27,7 @@ import pytest
 import requests
 
 from src.core import llm_task_tier as tier_mod
-from src.core.llm_router import LLMProvider, LLMResponse, LLMRouter, ProviderType
+from src.core.llm_router import LLMResponse, LLMRouter
 
 # 线上等价 4 Provider 环境（PRD §1）
 _ONLINE_ENV = {

@@ -1695,7 +1695,6 @@ class TestProtocolSwitchIsObservable:
 
     @staticmethod
     def _build(monkeypatch, protocol):
-        import importlib
 
         from src.core import llm_router as lr
 

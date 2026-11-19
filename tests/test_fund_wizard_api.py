@@ -90,7 +90,6 @@ class TestNavConfidence:
         # 周一收盘后,最新净值日期仍是上周五 → 与"最近交易日"(周一)比滞后 1 天?
         # 规则口径:与最近交易日(工作日回退)比较。周一的最近交易日=周一,
         # 上周五净值 → lag=3 → low。这正是"盘后未更新"的真实语义。
-        from web.routes.fund import _nav_confidence
         conf, reason = _nav_confidence("2026-10-23 15:00", _dt.date(2026, 10, 26))
         assert conf == "low"
         assert "3" in reason

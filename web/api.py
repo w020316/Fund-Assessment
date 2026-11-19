@@ -44,10 +44,9 @@ _HAS_CORE = False
 async def lifespan(_app: FastAPI):
     global _HAS_AKSHARE, _HAS_CORE
     # 异步加载重依赖(不阻塞事件循环,其他请求可先响应)
-    akshare = None
     try:
-        import akshare as _ak
-        akshare = _ak
+        # 导入本身即完成延迟加载(模块驻留 sys.modules 供后续使用)
+        import akshare  # noqa: F401
         _HAS_AKSHARE = True
         logger.info("akshare loaded successfully")
     except ImportError as e:
@@ -260,7 +259,6 @@ from web.routes import data_health as data_health_route
 from web.routes import fund as fund_route
 from web.routes import global_market as global_route
 from web.routes import holdings as holdings_route
-from web.routes import dashboard as dashboard_route
 from web.routes import evolution as evolution_route
 from web.routes import market as market_route
 from web.routes import monitor as monitor_route
@@ -424,7 +422,6 @@ def _get_cache_stats() -> dict:
     except Exception:
         pass
     try:
-        from src.core.cache import DataCache
         # 用临时实例获取默认统计(实际命中率在各路由的 DataCache 实例中)
         # 此处仅返回 LLM 缓存统计,DataCache 统计需通过依赖注入获取
         stats["data_cache_note"] = "per-instance stats, see route logs"

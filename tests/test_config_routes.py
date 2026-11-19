@@ -80,7 +80,7 @@ class TestUpdateSettings:
     def test_update_settings_merges_and_masks(self, client):
         """更新配置: 合并后返回脱敏结果"""
         existing = {"app": {"name": "QuantFlow"}, "broker": {"api_key": "sk-1234567890abcdef"}}
-        with patch("web.routes.config._load_yaml", return_value=existing) as mock_load, \
+        with patch("web.routes.config._load_yaml", return_value=existing) as _mock_load, \
              patch("web.routes.config._save_yaml") as mock_save:
             resp = client.put("/api/config/settings", json={
                 "settings": {"app": {"name": "NewApp"}}

@@ -408,7 +408,6 @@ async def get_market_assessment() -> dict[str, Any]:
     )
 
     score = thermometer.get("score", 50)
-    level = thermometer.get("level", "中性")
 
     # A-08(2026-11-17):四维全缺时 thermometer 的 score 只是占位值, 不能再拿它
     # 分支出"市场震荡,方向不明,观望为主"这种结论 —— 那是用缺失数据下判断。

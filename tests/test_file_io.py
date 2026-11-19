@@ -21,7 +21,6 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-import pytest
 
 from src.utils.file_io import atomic_write_json, safe_read_json
 

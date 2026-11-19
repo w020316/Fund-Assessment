@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Generator
 
-import numpy as np
 import pandas as pd
 import akshare as ak
 from loguru import logger

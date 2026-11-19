@@ -12,7 +12,7 @@ import requests
 from dotenv import load_dotenv
 from loguru import logger
 
-from src.core.data_validator import get_data_validator, ValidationResult
+from src.core.data_validator import get_data_validator
 
 from src.core.data_source_v2 import (
     _parallel_fetch,
@@ -258,7 +258,6 @@ def _build_analysis_prompt(stock_code: str, stock_data: dict[str, Any], search_n
     quote = stock_data.get("quote", {})
     financial = stock_data.get("financial", {})
     capital_flow = stock_data.get("capital_flow", {})
-    company = stock_data.get("company", {})
     margin = stock_data.get("margin", {})
     shareholder = stock_data.get("shareholder", {})
     kline = stock_data.get("kline_daily", [])

@@ -13,7 +13,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import sys
 import threading
 import time
 from pathlib import Path
@@ -118,7 +117,6 @@ def _fake_loader_factory(slope: float = 0.005, days: int = 100):
     """合成净值装载器(每日稳定斜率, 可注入涨/跌)。"""
 
     def loader(code: str, period: str) -> list[dict]:
-        import numpy as np
 
         drift = slope * (1.0 + (abs(hash(code)) % 3) * 0.1)
         return [{"date": f"d{j}", "nav": float(1.0 + j * drift)} for j in range(days)]
@@ -286,7 +284,6 @@ class TestErrorPathsAndZeroWrite:
         assert not strategy_route._BACKTEST_GUARD.locked()
 
     def test_timeout_503_and_lock_released(self, client, evolution_store, monkeypatch):
-        import asyncio
         import web.routes.evolution as evolution_route
 
         monkeypatch.setattr(evolution_route, "EVOLUTION_TIMEOUT_SECONDS", 0.2)
@@ -308,7 +305,8 @@ class TestErrorPathsAndZeroWrite:
         assert _tree_snapshot(evolution_store) == before
 
     def test_data_unavailable_503_and_zero_write(self, client, evolution_store):
-        monkey_loader = lambda code, period: [{"date": "d1", "nav": 1.0}]  # 样本 <30 日
+        def monkey_loader(code, period):
+            return [{"date": "d1", "nav": 1.0}]  # 样本 <30 日
 
         orig_loader = evolution._default_nav_loader
         evolution._default_nav_loader = monkey_loader

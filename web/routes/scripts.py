@@ -15,7 +15,6 @@ from pydantic import BaseModel
 from src.utils.auth import require_admin
 
 from src.analysis import script_library as sl
-from src.utils.convert import safe_float as _safe_float, safe_str as _safe_str
 
 router = APIRouter()
 

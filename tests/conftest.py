@@ -28,7 +28,6 @@ def _snapshot_protected_file() -> dict | None:
     p = _PROTECTED_POSITIONS_FILE
     if not p.exists():
         return None
-    import os as _os
     st = p.stat()
     digest = hashlib.sha256(p.read_bytes()).hexdigest()
     return {"mtime_ns": st.st_mtime_ns, "size": st.st_size, "sha256": digest}

@@ -49,7 +49,7 @@ class TestComputeRiskMetrics:
     def test_sortino_downside_only(self):
         """Sortino 仅用负收益日: {+10%, +10%, -20%} → 下行 std 来自 -20%。"""
         m = prisk.compute_risk_metrics([1.0, 1.1, 1.21, 0.968])
-        downside = [-0.20]
+        _downside = [-0.20]  # 文档化负收益日构成, 断言用不到
         # 负收益日仅 1 个(<2)→ 下行波动按 0 处理 → sortino None(fail-closed)
         assert m["sortino"] is None
 

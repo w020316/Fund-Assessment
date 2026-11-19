@@ -1,5 +1,4 @@
 """数据质量校验器测试"""
-import pytest
 from src.core.data_validator import DataValidator, QualityLevel, QualityIssue, ValidationResult
 
 

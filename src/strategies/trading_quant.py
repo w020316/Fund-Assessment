@@ -2,14 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import yaml
 from src.analysis.technical import rsi as ta_rsi, macd as ta_macd
 import akshare as ak
 from loguru import logger
 from enum import Enum
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 class Signal(str, Enum):

@@ -14,7 +14,6 @@ import threading
 import time
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from src.core import data_source_v2 as ds2
 
@@ -282,7 +281,7 @@ class TestCheckEmAvailableLocking:
         """
         call_count = 0
         count_lock = threading.Lock()
-        original_get = ds2._EM_SESSION.get
+        _original_get = ds2._EM_SESSION.get
 
         def _counting_get(*args, **kwargs):
             nonlocal call_count

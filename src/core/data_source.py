@@ -11,7 +11,6 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
-import numpy as np
 import pandas as pd
 from loguru import logger
 

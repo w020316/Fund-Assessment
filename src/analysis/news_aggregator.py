@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import difflib
 from datetime import datetime
-from typing import Any
 
 from loguru import logger
 

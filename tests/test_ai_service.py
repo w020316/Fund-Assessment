@@ -484,7 +484,7 @@ class TestSearchNews:
         """Tavily 有结果时优先返回,不调用 tinyfish"""
         monkeypatch.setattr(ai_service, "_get_tavily_api_key", lambda: "tavily-key")
         monkeypatch.setattr(ai_service, "_get_tinyfish_api_key", lambda: "tinyfish-key")
-        with patch.object(ai_service, "_search_tavily", return_value=[{"title": "tavily 结果"}]) as mock_tavily:
+        with patch.object(ai_service, "_search_tavily", return_value=[{"title": "tavily 结果"}]) as _mock_tavily:
             with patch.object(ai_service, "_search_tinyfish", return_value=[{"title": "tinyfish 结果"}]) as mock_tiny:
                 result = search_news("白酒")
         assert len(result) == 1

@@ -111,7 +111,6 @@ class TestSectorRankingFallbackChain:
 
     def test_single_flight_releases_after_failure(self, monkeypatch):
         """取数抛异常时锁必须释放, 否则后续请求永久等待。"""
-        import threading
 
         ds2._cache.clear()
         monkeypatch.setattr(ds2, "_fetch_sector_ranking_uncached",

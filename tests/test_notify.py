@@ -12,7 +12,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
-import urllib.parse
 from unittest.mock import patch, MagicMock
 
 import pytest

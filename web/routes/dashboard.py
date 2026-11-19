@@ -19,9 +19,10 @@ router = APIRouter()
 
 _HAS_CORE = False
 try:
-    from src.core.data_source import DataSourceManager
-    from src.core.executor import SimulatedBroker, TradeExecutor
-    from src.core.risk_manager import RiskManager
+    # 可用性探测导入: 导入成功才置 _HAS_CORE, 符号本身通过 web.api.app_state 注入使用
+    from src.core.data_source import DataSourceManager  # noqa: F401
+    from src.core.executor import SimulatedBroker, TradeExecutor  # noqa: F401
+    from src.core.risk_manager import RiskManager  # noqa: F401
     _HAS_CORE = True
 except ImportError as e:
     logger.warning(f"import src.core failed: {e}")

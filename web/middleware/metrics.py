@@ -22,7 +22,6 @@ import time
 from collections import defaultdict
 from typing import Any
 
-from loguru import logger
 
 
 class RequestMetrics:

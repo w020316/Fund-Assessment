@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-import numpy as np
 import pandas as pd
 import akshare as ak
 from loguru import logger

@@ -879,7 +879,6 @@ def search_stock(keyword: str) -> list[dict]:
             parts = entry.split(",")
             if len(parts) < 8:
                 continue
-            full_code = _safe_str(parts[0])
             name = _safe_str(parts[4])
             raw_code = _safe_str(parts[3])
             if not raw_code or not name:
@@ -1535,8 +1534,6 @@ def _get_sector_ranking_sina() -> list[dict]:
                     name = parts[1] if len(parts) > 1 else ""
                     change_pct = _safe_float(parts[4]) if len(parts) > 4 else 0
                     avg_price = _safe_float(parts[3]) if len(parts) > 3 else 0
-                    volume = _safe_float(parts[6]) if len(parts) > 6 else 0
-                    amount = _safe_float(parts[7]) if len(parts) > 7 else 0
                     result.append({
                         "code": k,
                         "name": name,
@@ -1626,7 +1623,6 @@ def _get_capital_flow_fallback(stock_code: str) -> dict:
             return {}
         q = quotes[0]
         price = _safe_float(q.get("price"))
-        prev_close = _safe_float(q.get("prev_close"))
         volume = _safe_float(q.get("volume"))
         amount = _safe_float(q.get("amount"))
         change_pct = _safe_float(q.get("change_pct"))
@@ -1806,7 +1802,6 @@ def _get_block_trades_fallback(stock_code: str) -> list[dict]:
             return []
         q = quotes[0]
         price = _safe_float(q.get("price", 0))
-        name = _safe_str(q.get("name", ""))
         if price <= 0:
             return []
         result: list[dict] = []
@@ -2291,7 +2286,6 @@ def _fetch_fund_realtime_tencent_inner(codes: list[str]) -> list[dict]:
         name = _safe_str(parts[1])
         estimated_nav = _safe_float(parts[2])
         nav = _safe_float(parts[5])
-        acc_nav = _safe_float(parts[6])
         if nav <= 0:
             # 2026-11-05 R-06: 字段缺失/全零时不再返回 nav=0.00 的"假行情"。
             # 0 净值与"真实净值缺失"无法区分, 下游会把盈亏静默算成 0,

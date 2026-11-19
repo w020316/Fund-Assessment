@@ -14,13 +14,11 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from pathlib import Path
 import threading
-from unittest.mock import MagicMock
 
 import pytest
 
 from src.core.executor import (
     Balance,
-    BrokerAPI,
     LiveBroker,
     LogNotifier,
     Order,

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import numpy as np
 import pandas as pd
 from src.analysis.technical import rsi as ta_rsi, macd as ta_macd
 import akshare as ak

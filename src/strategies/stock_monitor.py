@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
-import numpy as np
 import pandas as pd
 from src.analysis.technical import rsi as ta_rsi
 import akshare as ak

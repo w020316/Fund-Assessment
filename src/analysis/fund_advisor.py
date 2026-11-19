@@ -24,7 +24,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from loguru import logger
 
 from src.core.data_source_v2 import (
     _parallel_fetch,

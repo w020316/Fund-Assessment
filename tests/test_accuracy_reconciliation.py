@@ -19,7 +19,6 @@ if _PROJECT_ROOT not in sys.path:
 
 from src.core.prediction_store import PredictionStore  # noqa: E402
 from web.api import app  # noqa: E402
-from web.routes import prediction as prediction_routes  # noqa: E402
 from src.core import prediction_service as svc  # noqa: E402
 
 client = TestClient(app)

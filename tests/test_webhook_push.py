@@ -404,7 +404,7 @@ class TestWebhookTestRoute:
         _enable_push(monkeypatch, tmp_path)
         class _Resp:
             status_code = 200
-        with patch("src.core.webhook_push.httpx.post", return_value=_Resp()) as fake:
+        with patch("src.core.webhook_push.httpx.post", return_value=_Resp()) as _fake:
             resp = client.post("/api/portfolio/webhook/test")
         assert resp.status_code == 200
         data = resp.json()

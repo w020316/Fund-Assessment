@@ -47,7 +47,7 @@ class TestInitialization:
     def test_init_creates_parent_dir(self, tmp_path: Path):
         """父目录不存在时应自动创建"""
         db_path = tmp_path / "sub" / "nested" / "risk.db"
-        rm = RiskManager(db_path=db_path)
+        _rm = RiskManager(db_path=db_path)
         assert db_path.exists()
 
     def test_state_persists_across_instances(self, tmp_path: Path):
