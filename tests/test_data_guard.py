@@ -1362,6 +1362,29 @@ class TestMigrationSnapshotGlobalQuote:
             "currency": "USD",
         }]
 
+    def test_a_share_composite_currency_cleared(self):
+        """A股指数 parts[35] 是「价格/成交量/成交额」复合串 → 必须置空(否则币种泄漏为脏串)。"""
+        from src.core.data_guard.providers.tencent import fetch_global_quotes_raw
+
+        values = ["0"] * 37
+        values[1] = "上证指数"
+        values[2] = "000001"
+        values[3] = "3577.62"
+        values[4] = "3587.83"
+        values[5] = "3585.00"
+        values[31] = "-10.21"
+        values[32] = "-0.28"
+        values[33] = "3584.28"
+        values[34] = "3547.94"
+        values[35] = "3577.62/412912755/636909057689"
+        text = f'v_sh000001="{"~".join(values)}";'
+        fake_resp = type("R", (), {"encoding": "", "text": text})()
+        with patch("src.core.data_guard.providers.tencent.requests.get",
+                   return_value=fake_resp):
+            rows = fetch_global_quotes_raw(["sh000001"])
+        assert rows[0]["currency"] == ""
+        assert rows[0]["price"] == 3577.62
+
     def test_facade_cache_hit_single_request(self):
         """门面缓存: 10s TTL 内第二次调用不得重复请求上游。"""
         from src.core import data_source_v2 as ds2

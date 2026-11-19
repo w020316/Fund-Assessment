@@ -338,12 +338,16 @@ def fetch_global_quotes_raw(codes: list[str]) -> list[dict]:
         high = _safe_float(parts[33]) if len(parts) > 33 else 0.0
         low = _safe_float(parts[34]) if len(parts) > 34 else 0.0
         currency = _safe_str(parts[35]) if len(parts) > 35 else ""
-        # 港股指数的 parts[35] 可能是价格而非币种,数字则置空
-        try:
-            float(currency)
+        # 港股指数的 parts[35] 可能是价格而非币种,数字则置空;
+        # A股指数(sh/sz)该字段是「价格/成交量/成交额」复合串(实测),同样置空
+        if "/" in currency:
             currency = ""
-        except (ValueError, TypeError) as e:
-            logger.warning(f"parse index currency field failed: {e}")
+        else:
+            try:
+                float(currency)
+                currency = ""
+            except (ValueError, TypeError) as e:
+                logger.warning(f"parse index currency field failed: {e}")
         # 涨跌额兜底:接口未返回时用 price - prev_close
         if change == 0.0 and price != 0.0 and prev_close != 0.0:
             change = round(price - prev_close, 4)
