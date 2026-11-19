@@ -349,6 +349,41 @@ def test_northbound_net_discontinued_returns_empty(monkeypatch):
     assert ds2.get_northbound_flow_realtime() == {}
 
 
+def test_northbound_queries_only_northbound_rows(monkeypatch):
+    """必须按 MUTUAL_TYPE=005(北向)过滤, 否则会读到南向(006)的净额并当成北向。"""
+    captured = {}
+
+    def fake_get(url, params=None, **kwargs):
+        captured.update(params or {})
+        return _FakeResp({"result": {"data": [{
+            "TRADE_DATE": "2026-11-19 00:00:00", "MUTUAL_TYPE": "005",
+            "NET_DEAL_AMT": None, "DEAL_AMT": 210136.09,
+        }]}})
+
+    monkeypatch.setattr(ds2, "_cache_get", lambda key: None)
+    monkeypatch.setattr(ds2, "_cache_set", lambda key, val, ttl: None)
+    monkeypatch.setattr(ds2, "em_get", fake_get)
+
+    assert ds2.get_northbound_flow_realtime() == {}
+    assert 'MUTUAL_TYPE="005"' in captured.get("filter", "")
+
+
+def test_northbound_never_uses_fund_inflow_as_net(monkeypatch):
+    """FUND_INFLOW 是北向成交额, 不能当净流入兜底(2026-11-19 线上实走发现)。
+
+    实走线上曾返回"今日净流入 +3958.92亿" —— 净额停更后 FUND_INFLOW(成交额)
+    被误当净额输出。净额缺失必须返回空, 由前端显示「—」+ 停更说明。
+    """
+    monkeypatch.setattr(ds2, "_cache_get", lambda key: None)
+    monkeypatch.setattr(ds2, "_cache_set", lambda key, val, ttl: None)
+    monkeypatch.setattr(ds2, "em_get", lambda *a, **k: _FakeResp({"result": {"data": [{
+        "TRADE_DATE": "2026-11-19 00:00:00", "DEAL_AMT": 395892.0,
+        "NET_DEAL_AMT": None, "FUND_INFLOW": 395892.0,
+    }]}}))
+
+    assert ds2.get_northbound_flow_realtime() == {}
+
+
 def test_northbound_resumes_with_total_only(monkeypatch):
     """上游若恢复净额但无沪深拆分, 返回合计并把 sh_sz_split_available 标 False。"""
     monkeypatch.setattr(ds2, "_cache_get", lambda key: None)

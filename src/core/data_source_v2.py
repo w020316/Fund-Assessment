@@ -1782,14 +1782,18 @@ def get_northbound_flow_realtime() -> dict:
             "pageNumber": 1,
             "reportName": "RPT_MUTUAL_DEAL_HISTORY",
             "columns": "ALL",
+            # 2026-11-19: 必须只取北向(005)。不加 filter 时 items[0] 是南向(006),
+            # NET_DEAL_AMT=3958.92(百万元) 被当成"北向净流入 3958.92 亿"对外输出。
+            "filter": '(MUTUAL_TYPE="005")',
         })
         items = ((resp.json().get("result") or {}).get("data")) or []
         if items:
             item = items[0]
             # 字段名为 None 时 _opt_float 返回 None, 区别于"真实净额为 0"
             total_net = _opt_float(item.get("NET_DEAL_AMT"))
-            if total_net is None:
-                total_net = _opt_float(item.get("FUND_INFLOW"))
+            # 2026-11-19: 不得用 FUND_INFLOW 兜底 —— 该字段是北向**成交额**
+            # (实走线上返回 3958.92 亿), 当成净流入会显示"今日净流入 +3958.92亿"
+            # 的荒谬数值。净额缺失就按"已停止披露"处理, 由前端渲染「—」+ 说明。
             if total_net:
                 result = {
                     "date": _safe_str(item.get("TRADE_DATE", ""))[:10]
