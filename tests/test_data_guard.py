@@ -1329,6 +1329,128 @@ class TestMigrationSnapshotMarketSentiment:
         }
 
 
+class TestMigrationSnapshotGlobalQuote:
+    """M4-E: 国际行情(腾讯)取数/解析/缓存与 ETF 映射迁移后逐位一致。"""
+
+    def _segment(self, code: str) -> str:
+        values = ["0"] * 37  # 末尾多留一格, 避免闭引号混入币种字段
+        values[1] = "测试指数"
+        values[2] = f"{code}.OQ"
+        values[3] = "100.0"
+        values[4] = "98.0"
+        values[5] = "99.0"
+        values[6] = "1000"
+        values[31] = "2.0"
+        values[32] = "2.04"
+        values[33] = "101.0"
+        values[34] = "97.0"
+        values[35] = "USD"
+        return f'v_us{code}="{"~".join(values)}";'
+
+    def test_provider_parse_snapshot(self):
+        """provider 直测: 字段索引/币种/涨跌额逐位一致。"""
+        from src.core.data_guard.providers.tencent import fetch_global_quotes_raw
+
+        fake_resp = type("R", (), {"encoding": "", "text": self._segment("ZZT1")})()
+        with patch("src.core.data_guard.providers.tencent.requests.get",
+                   return_value=fake_resp):
+            rows = fetch_global_quotes_raw(["usZZT1"])
+        assert rows == [{
+            "code": "ZZT1.OQ", "name": "测试指数", "price": 100.0,
+            "prev_close": 98.0, "open": 99.0, "high": 101.0, "low": 97.0,
+            "change": 2.0, "change_pct": 2.04, "volume": 1000.0,
+            "currency": "USD",
+        }]
+
+    def test_facade_cache_hit_single_request(self):
+        """门面缓存: 10s TTL 内第二次调用不得重复请求上游。"""
+        from src.core import data_source_v2 as ds2
+
+        ds2._cache.clear()  # 防止其他用例的同键残留
+        fake_resp = type("R", (), {"encoding": "", "text": self._segment("ZZT2")})()
+        with patch("src.core.data_guard.providers.tencent.requests.get",
+                   return_value=fake_resp) as mock_get:
+            out1 = ds2._tencent_global_quote(["usZZT2"])
+            out2 = ds2._tencent_global_quote(["usZZT2"])
+        assert mock_get.call_count == 1, "第二次调用必须命中缓存"
+        assert out2 == out1 and out1[0]["price"] == 100.0
+
+    def test_sector_etf_mapping_missing_kept_none(self):
+        """行业 ETF: 11 条固定; 上游缺失保持 None(不伪造 0)。"""
+        from src.core import data_source_v2 as ds2
+
+        quotes = [{"code": "XLK.AM", "name": "科技ETF-SPDR", "price": 100.0,
+                   "change_pct": 1.01}]
+        with patch.object(ds2, "_tencent_global_quote", return_value=quotes), \
+             patch.object(ds2, "_cache_get", return_value=None), \
+             patch.object(ds2, "_cache_set"):
+            rows = ds2.get_global_sector_etfs()
+        assert len(rows) == 11
+        by_sector = {r["sector"]: r for r in rows}
+        assert by_sector["科技"]["price"] == 100.0
+        assert by_sector["科技"]["change_pct"] == 1.01
+        assert by_sector["金融"]["price"] is None
+        assert by_sector["金融"]["change_pct"] is None
+
+
+class TestMigrationSnapshotGlobalPanel:
+    """M4-E: 全球指数全景与全球快讯迁移后逐位一致。"""
+
+    def test_world_indices_scaling_region_and_none(self):
+        rows = [
+            {"f1": 2, "f2": 5886043, "f3": -134, "f4": -80159,
+             "f12": "N225", "f14": "日经225"},
+            {"f1": 2, "f2": "-", "f3": "-", "f4": "-",
+             "f12": "FTSE", "f14": "英国富时100"},
+        ]
+        from src.core import data_source_v2 as ds2
+
+        ds2._cache.clear()
+        with patch.object(ds2, "em_get",
+                          return_value=_em_json({"data": {"diff": rows}})), \
+             patch.object(ds2, "_cache_set"):
+            out = ds2.get_global_indices_world()
+        assert len(out) == len(ds2._GLOBAL_WORLD_INDICES)
+        by_code = {r["code"]: r for r in out}
+        assert by_code["N225"]["price"] == 58860.43
+        assert by_code["N225"]["change_pct"] == -1.34
+        assert by_code["N225"]["region"] == "asia"
+        assert by_code["N225"]["region_label"] == "亚太"
+        assert by_code["FTSE"]["price"] is None  # 缺失不填 0
+
+    def test_global_news_em_success_then_sina_fallback(self):
+        """东财快讯成功标 eastmoney; 东财空响应 → 新浪兜底标 sina。"""
+        from src.core import data_source_v2 as ds2
+
+        em_payload = {"data": {"news_list": [{
+            "title": "快讯A", "digest": "摘要", "mediaName": "证券时报",
+            "showTime": "2026-11-19 10:00", "newsUrl": "https://x",
+        }]}}
+        with patch.object(ds2, "em_get", return_value=_em_json(em_payload)), \
+             patch.object(ds2, "_cache_get", return_value=None), \
+             patch.object(ds2, "_mark_source") as m_mark:
+            rows = ds2.get_global_news()
+        assert rows == [{
+            "title": "快讯A", "content": "摘要", "source": "证券时报",
+            "publish_time": "2026-11-19 10:00", "url": "https://x",
+        }]
+        m_mark.assert_called_once_with("global_news", "eastmoney")
+
+        sina_payload = {"result": {"data": [{
+            "title": "新浪快讯", "intro": "简介", "author": "新浪财经",
+            "ctime": "1700000000", "url": "https://y",
+        }]}}
+        fake = type("R", (), {"encoding": "", "json": lambda s: sina_payload})()
+        with patch.object(ds2, "em_get", return_value=_em_json({"data": {}})), \
+             patch("src.core.data_guard.providers.sina.requests.get", return_value=fake), \
+             patch.object(ds2, "_cache_get", return_value=None), \
+             patch.object(ds2, "_mark_source") as m_mark:
+            rows = ds2.get_global_news()
+        assert rows[0]["title"] == "新浪快讯"
+        assert rows[0]["source"] == "新浪财经"
+        m_mark.assert_called_once_with("global_news", "sina")
+
+
 class TestMigrationSnapshotMinuteSeries:
     """M4-D: 三源分钟线取数+解析迁移后行为逐位一致。"""
 

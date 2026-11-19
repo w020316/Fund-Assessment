@@ -1302,41 +1302,16 @@ def _get_stock_news_sina(stock_code: str, page: int = 1, page_size: int = 10) ->
 
 
 def get_global_news() -> list[dict]:
+    """全球快讯门面(M4-E 绞杀迁移): 东财取数+解析在
+    providers.eastmoney.fetch_global_news_raw, 新浪降级在
+    providers.sina.fetch_global_news_raw; 健康度/来源标记/缓存编排保留于此。"""
     cached = _cache_get("global_news")
     if cached is not None:
         return cached
-    url = "https://np-weblist.eastmoney.com/comm/web/getNewsByColumns"
-    params = {
-        "client": "web",
-        "biz": "web_news_col",
-        "column": "350,351,352,353",
-        "order": 1,
-        "needInteractData": 0,
-        "page_index": 1,
-        "page_size": 20,
-    }
+    from src.core.data_guard.providers.eastmoney import fetch_global_news_raw
+
     try:
-        resp = em_get(url, params=params)
-        data = resp.json()
-        if not data or not isinstance(data, dict):
-            raise ValueError("empty response")
-        news_data = data.get("data") or {}
-        items = news_data.get("news_list", []) if isinstance(news_data, dict) else []
-        if not items:
-            items = news_data.get("list", []) if isinstance(news_data, dict) else []
-        if not items:
-            items = news_data if isinstance(news_data, list) else []
-        result: list[dict] = []
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            result.append({
-                "title": _safe_str(item.get("title", "")),
-                "content": _safe_str(item.get("content", item.get("digest", "")))[:200],
-                "source": _safe_str(item.get("source", item.get("mediaName", ""))),
-                "publish_time": _safe_str(item.get("showTime", item.get("publishTime", ""))),
-                "url": _safe_str(item.get("url", item.get("newsUrl", ""))),
-            })
+        result = fetch_global_news_raw()
         if result:
             data_health.record_success("global_news", len(result))
             _mark_source("global_news", "eastmoney")
@@ -1354,42 +1329,12 @@ def get_global_news() -> list[dict]:
 
 
 def _get_global_news_sina() -> list[dict]:
+    """新浪全球快讯门面(M4-E 绞杀迁移): 取数+解析在
+    data_guard.providers.sina.fetch_global_news_raw, 行为零变更。"""
+    from src.core.data_guard.providers.sina import fetch_global_news_raw as sina_global_news_raw
+
     try:
-        url = "https://feed.mix.sina.com.cn/api/roll/get"
-        params = {
-            "pageid": "153",
-            "lid": "2516",
-            "num": 20,
-            "r": str(random.random()),
-        }
-        resp = requests.get(url, params=params, timeout=5, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://finance.sina.com.cn/",
-        })
-        resp.encoding = "utf-8"
-        data = resp.json()
-        items = data.get("result", {}).get("data", [])
-        result: list[dict] = []
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            title = _safe_str(item.get("title", ""))
-            if not title:
-                continue
-            pub_time = _safe_str(item.get("ctime", ""))
-            if pub_time and pub_time.isdigit():
-                try:
-                    pub_time = datetime.fromtimestamp(int(pub_time)).strftime("%Y-%m-%d %H:%M")
-                except Exception as e:
-                    logger.warning(f"parse news publish_time timestamp failed: {e}")
-            result.append({
-                "title": title,
-                "content": _safe_str(item.get("intro", item.get("summary", "")))[:200],
-                "source": _safe_str(item.get("author", item.get("media_name", ""))),
-                "publish_time": pub_time,
-                "url": _safe_str(item.get("url", item.get("wap_url", ""))),
-            })
-        return result
+        return sina_global_news_raw()
     except Exception as e:
         logger.warning(f"_get_global_news_sina failed: {e}")
         return []
@@ -2081,70 +2026,19 @@ _HK_HOT_CODES: list[tuple[str, str]] = [
 
 
 def _tencent_global_quote(codes: list[str]) -> list[dict]:
-    """通用:从腾讯 qt.gtimg.cn 拉取国际行情(美股/港股/国际指数)。
-
-    codes 是已带前缀的腾讯代码列表(如 usAAPL, hk00700, usDJI)。
-    返回统一字段:code/name/price/prev_close/change/change_pct/high/low/open/currency。
-    """
+    """通用国际行情门面(M4-E 绞杀迁移): 请求+解析在
+    data_guard.providers.tencent.fetch_global_quotes_raw; 缓存/TTL 保留于此,
+    行为零变更(codes 已带 us/hk/sh/sz 前缀)。"""
     if not codes:
         return []
     cache_key = "global_quote_" + "_".join(sorted(codes))
     cached = _cache_get(cache_key)
     if cached is not None:
         return cached
-    prefixed = ",".join(codes)
-    url = f"https://qt.gtimg.cn/q={prefixed}"
+    from src.core.data_guard.providers.tencent import fetch_global_quotes_raw
+
     try:
-        resp = requests.get(url, timeout=5, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://gu.qq.com/",
-        })
-        resp.encoding = "gbk"
-        text = resp.text
-        result: list[dict] = []
-        for segment in text.split(";"):
-            segment = segment.strip()
-            if not segment or "~" not in segment:
-                continue
-            parts = segment.split("~")
-            if len(parts) < 35:
-                continue
-            name = _safe_str(parts[1])
-            code = _safe_str(parts[2])
-            price = _safe_float(parts[3])
-            prev_close = _safe_float(parts[4])
-            open_price = _safe_float(parts[5])
-            volume = _safe_float(parts[6]) if len(parts) > 6 else 0.0
-            change = _safe_float(parts[31]) if len(parts) > 31 else 0.0
-            change_pct = _safe_float(parts[32]) if len(parts) > 32 else 0.0
-            high = _safe_float(parts[33]) if len(parts) > 33 else 0.0
-            low = _safe_float(parts[34]) if len(parts) > 34 else 0.0
-            currency = _safe_str(parts[35]) if len(parts) > 35 else ""
-            # 港股指数的 parts[35] 可能是价格而非币种,数字则置空
-            try:
-                float(currency)
-                currency = ""
-            except (ValueError, TypeError) as e:
-                logger.warning(f"parse index currency field failed: {e}")
-            # 涨跌额兜底:接口未返回时用 price - prev_close
-            if change == 0.0 and price != 0.0 and prev_close != 0.0:
-                change = round(price - prev_close, 4)
-            if change_pct == 0.0 and prev_close != 0.0:
-                change_pct = round((price - prev_close) / prev_close * 100, 3)
-            result.append({
-                "code": code,
-                "name": name,
-                "price": price,
-                "prev_close": prev_close,
-                "open": open_price,
-                "high": high,
-                "low": low,
-                "change": change,
-                "change_pct": change_pct,
-                "volume": volume,
-                "currency": currency,
-            })
-        result = [r for r in result if r.get("code") or r.get("price")]
+        result = fetch_global_quotes_raw(codes)
         _cache_set(cache_key, result, 10)
         return result
     except Exception as e:
@@ -2153,29 +2047,15 @@ def _tencent_global_quote(codes: list[str]) -> list[dict]:
 
 
 def get_global_indices() -> list[dict]:
-    """获取国际指数实时行情(道琼斯/纳斯达克/标普500/恒生/国企)。"""
+    """获取核心指数实时行情(映射体 M4-E 迁入 providers.tencent)。"""
     cached = _cache_get("global_indices")
     if cached is not None:
         return cached
+    from src.core.data_guard.providers.tencent import map_global_index_quotes
+
     codes = [code for code, _ in _GLOBAL_INDEX_CODES]
-    result = _tencent_global_quote(codes)
-    # 补全中文名 + 标记市场 + 补全币种
-    for item in result:
-        # 腾讯返回的 code 可能是 HSI/HSCEI/.DJI 等,用名称匹配请求代码
-        name = item.get("name", "")
-        for req_code, cn_name in _GLOBAL_INDEX_CODES:
-            if name == cn_name or name in cn_name or cn_name in name:
-                if not item.get("name"):
-                    item["name"] = cn_name
-                if req_code.startswith("us"):
-                    item["market"] = "US"
-                    item["currency"] = item.get("currency") or "USD"
-                elif req_code.startswith("hk"):
-                    item["market"] = "HK"
-                    item["currency"] = item.get("currency") or "HKD"
-                break
-        if not item.get("market"):
-            item["market"] = "GLOBAL"
+    # 补全中文名 + 标记市场 + 补全币种(映射体在 provider)
+    result = map_global_index_quotes(_tencent_global_quote(codes))
     _cache_set("global_indices", result, 10)
     return result
 
@@ -2188,19 +2068,10 @@ def get_us_stock_realtime(symbols: list[str]) -> list[dict]:
     """
     if not symbols:
         return []
+    from src.core.data_guard.providers.tencent import map_us_quotes
+
     codes = [f"us{s.upper()}" for s in symbols]
-    result = _tencent_global_quote(codes)
-    # 统一 code 字段为大写美股代码(腾讯返回的 code 可能带交易所后缀如 AAPL.OQ)
-    for item in result:
-        raw = item.get("code", "")
-        # 去掉交易所后缀(如 AAPL.OQ → AAPL)
-        clean = raw.split(".")[0].upper()
-        if clean:
-            item["code"] = clean
-        item["market"] = "US"
-        if not item.get("currency"):
-            item["currency"] = "USD"
-    return result
+    return map_us_quotes(_tencent_global_quote(codes))
 
 
 def get_hk_stock_realtime(codes: list[str]) -> list[dict]:
@@ -2211,19 +2082,10 @@ def get_hk_stock_realtime(codes: list[str]) -> list[dict]:
     """
     if not codes:
         return []
+    from src.core.data_guard.providers.tencent import map_hk_quotes
+
     prefixed = [f"hk{c}" for c in codes]
-    result = _tencent_global_quote(prefixed)
-    # 统一 code 字段为 5 位数字
-    for item in result:
-        raw = item.get("code", "")
-        clean = raw.replace("hk", "").lstrip("0")
-        if not clean:
-            clean = "0"
-        item["code"] = clean.zfill(5)
-        item["market"] = "HK"
-        if not item.get("currency"):
-            item["currency"] = "HKD"
-    return result
+    return map_hk_quotes(_tencent_global_quote(prefixed))
 
 
 def get_us_hot_stocks() -> list[dict]:
@@ -2358,47 +2220,18 @@ def _em_scale(value: Any, precision: Any) -> float | None:
 def get_global_indices_world() -> list[dict]:
     """全球指数全景(东财 fs=m:100 精选 ~18 个，含区域分组)。
 
+    取数+缩放+区域分组在 providers.eastmoney.fetch_world_indices_raw(M4-E);
+    健康度/来源标记/缓存/fail-closed 判定保留于此。
     返回字段: code/name/region/region_label/price/change/change_pct，
     缺失 → None(不填 0)。上游失败返回 []。
     """
     cached = _cache_get("global_indices_world")
     if cached is not None:
         return cached
-    url = "https://push2.eastmoney.com/api/qt/ulist.np/get"
-    secids = ",".join(f"100.{code}" for code, _, _ in _GLOBAL_WORLD_INDICES)
-    params = {
-        "fields": "f1,f2,f3,f4,f12,f14",
-        "secids": secids,
-        # 注意：不加 fltt=2 —— 加了东财会返回已缩放浮点(f2=58860.43)，
-        # _em_scale 会再除一次 100 造成 100 倍错误；保持原始整数自己缩放。
-    }
-    result: list[dict] = []
+    from src.core.data_guard.providers.eastmoney import fetch_world_indices_raw
+
     try:
-        resp = em_get(url, params=params)
-        payload = resp.json().get("data") or {}
-        rows = payload.get("diff") or []
-        if isinstance(rows, dict):
-            rows = list(rows.values())
-        by_code = {row.get("f12"): row for row in rows if isinstance(row, dict)}
-        for em_code, cn_name, region in _GLOBAL_WORLD_INDICES:
-            row = by_code.get(em_code)
-            if not row:
-                result.append({
-                    "code": em_code, "name": cn_name, "region": region,
-                    "region_label": _REGION_LABELS[region],
-                    "price": None, "change": None, "change_pct": None,
-                })
-                continue
-            precision = row.get("f1")
-            result.append({
-                "code": em_code,
-                "name": row.get("f14") or cn_name,
-                "region": region,
-                "region_label": _REGION_LABELS[region],
-                "price": _em_scale(row.get("f2"), precision),
-                "change": _em_scale(row.get("f4"), precision),
-                "change_pct": _em_scale(row.get("f3"), precision),
-            })
+        result = fetch_world_indices_raw()
         usable = [r for r in result if r.get("price") is not None]
         if not usable:
             data_health.record_failure("global_indices_world", "all fields empty")
@@ -2415,32 +2248,18 @@ def get_global_indices_world() -> list[dict]:
 
 
 def get_global_sector_etfs() -> list[dict]:
-    """全球行业板块(11 只 SPDR 行业 ETF 代理，GICS 口径，腾讯源)。"""
+    """全球行业板块(11 只 SPDR 行业 ETF 代理，GICS 口径，腾讯源)。
+
+    取数在 _tencent_global_quote; 映射体在 providers.tencent.map_sector_etfs(M4-E);
+    健康度/来源标记/缓存保留于此。
+    """
     cached = _cache_get("global_sector_etfs")
     if cached is not None:
         return cached
+    from src.core.data_guard.providers.tencent import map_sector_etfs
+
     codes = [code for code, _ in _GLOBAL_SECTOR_ETFS]
-    quotes = _tencent_global_quote(codes)
-    by_code = {q.get("code"): q for q in quotes}
-    result: list[dict] = []
-    for tencent_code, sector_cn in _GLOBAL_SECTOR_ETFS:
-        # 腾讯返回的 code 形如 XLK.AM，按前缀匹配
-        q = next((v for k, v in by_code.items()
-                  if str(k).split(".")[0].upper() == tencent_code[2:].upper()), None)
-        if not q:
-            result.append({
-                "code": tencent_code[2:], "sector": sector_cn,
-                "name": f"{sector_cn}ETF-SPDR",
-                "price": None, "change_pct": None,
-            })
-            continue
-        result.append({
-            "code": tencent_code[2:],
-            "sector": sector_cn,
-            "name": q.get("name") or f"{sector_cn}ETF-SPDR",
-            "price": q.get("price") if q.get("price") else None,
-            "change_pct": q.get("change_pct") if q.get("price") else None,
-        })
+    result = map_sector_etfs(_tencent_global_quote(codes))
     usable = [r for r in result if r.get("price") is not None]
     if usable:
         data_health.record_success("global_sector_etfs", len(usable))

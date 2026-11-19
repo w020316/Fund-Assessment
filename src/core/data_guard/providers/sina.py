@@ -337,3 +337,49 @@ def fetch_minute_series_raw(
         timeout=5,
     )
     return parse_minutes(resp.json() or [])
+
+
+def fetch_global_news_raw() -> list[dict]:
+    """新浪全球滚动快讯取数+解析(原 data_source_v2._get_global_news_sina 主体)。
+
+    标题为空丢弃; ctime 为秒级时间戳时转 'YYYY-MM-DD HH:MM'。
+    异常向上抛出, 由门面记 warning 并按「全源失败」收尾。
+    """
+    import random
+    from datetime import datetime
+
+    url = "https://feed.mix.sina.com.cn/api/roll/get"
+    params = {
+        "pageid": "153",
+        "lid": "2516",
+        "num": 20,
+        "r": str(random.random()),
+    }
+    resp = requests.get(url, params=params, timeout=5, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://finance.sina.com.cn/",
+    })
+    resp.encoding = "utf-8"
+    data = resp.json()
+    items = data.get("result", {}).get("data", [])
+    result: list[dict] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        title = _safe_str(item.get("title", ""))
+        if not title:
+            continue
+        pub_time = _safe_str(item.get("ctime", ""))
+        if pub_time and pub_time.isdigit():
+            try:
+                pub_time = datetime.fromtimestamp(int(pub_time)).strftime("%Y-%m-%d %H:%M")
+            except Exception as e:
+                logger.warning(f"parse news publish_time timestamp failed: {e}")
+        result.append({
+            "title": title,
+            "content": _safe_str(item.get("intro", item.get("summary", "")))[:200],
+            "source": _safe_str(item.get("author", item.get("media_name", ""))),
+            "publish_time": pub_time,
+            "url": _safe_str(item.get("url", item.get("wap_url", ""))),
+        })
+    return result

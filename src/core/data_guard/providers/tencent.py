@@ -10,6 +10,10 @@ M4-B3(2026-11-19): 基金实时主源(qt.gtimg.cn jj 前缀)/腾讯财务快照/
 
 M4-D(2026-11-19): 市场情绪指数代理(指数涨跌幅)与腾讯分时取数+解析体迁入,
 情绪判定语义与「腾讯→东财→新浪」分钟回退链保留在 data_source_v2 门面。
+
+M4-E(2026-11-19): 国际行情(qt.gtimg.cn 美股/港股/全球指数)取数+解析体与
+指数/美股/港股/行业 ETF 的后处理映射迁入; 缓存、健康度、来源标记与
+并行聚合编排保留在 data_source_v2 门面。
 """
 from __future__ import annotations
 
@@ -296,6 +300,154 @@ def fetch_sector_ranking_tencent_raw() -> list[dict]:
     except Exception as e:
         logger.warning(f"_get_sector_ranking_tencent failed: {e}")
         return []
+
+
+def fetch_global_quotes_raw(codes: list[str]) -> list[dict]:
+    """腾讯国际行情取数+解析(原 data_source_v2._tencent_global_quote 主体, 无缓存)。
+
+    codes 是已带前缀的腾讯代码(usAAPL / hk00700 / usDJI / hkHSI / sh000001)。
+    返回统一字段:code/name/price/prev_close/open/high/low/change/change_pct/volume/currency。
+    异常向上抛出, 由门面记 warning 并返回 [](与迁移前行为逐位一致)。
+    """
+    if not codes:
+        return []
+    prefixed = ",".join(codes)
+    url = f"https://qt.gtimg.cn/q={prefixed}"
+    resp = requests.get(url, timeout=5, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://gu.qq.com/",
+    })
+    resp.encoding = "gbk"
+    text = resp.text
+    result: list[dict] = []
+    for segment in text.split(";"):
+        segment = segment.strip()
+        if not segment or "~" not in segment:
+            continue
+        parts = segment.split("~")
+        if len(parts) < 35:
+            continue
+        name = _safe_str(parts[1])
+        code = _safe_str(parts[2])
+        price = _safe_float(parts[3])
+        prev_close = _safe_float(parts[4])
+        open_price = _safe_float(parts[5])
+        volume = _safe_float(parts[6]) if len(parts) > 6 else 0.0
+        change = _safe_float(parts[31]) if len(parts) > 31 else 0.0
+        change_pct = _safe_float(parts[32]) if len(parts) > 32 else 0.0
+        high = _safe_float(parts[33]) if len(parts) > 33 else 0.0
+        low = _safe_float(parts[34]) if len(parts) > 34 else 0.0
+        currency = _safe_str(parts[35]) if len(parts) > 35 else ""
+        # 港股指数的 parts[35] 可能是价格而非币种,数字则置空
+        try:
+            float(currency)
+            currency = ""
+        except (ValueError, TypeError) as e:
+            logger.warning(f"parse index currency field failed: {e}")
+        # 涨跌额兜底:接口未返回时用 price - prev_close
+        if change == 0.0 and price != 0.0 and prev_close != 0.0:
+            change = round(price - prev_close, 4)
+        if change_pct == 0.0 and prev_close != 0.0:
+            change_pct = round((price - prev_close) / prev_close * 100, 3)
+        result.append({
+            "code": code,
+            "name": name,
+            "price": price,
+            "prev_close": prev_close,
+            "open": open_price,
+            "high": high,
+            "low": low,
+            "change": change,
+            "change_pct": change_pct,
+            "volume": volume,
+            "currency": currency,
+        })
+    return [r for r in result if r.get("code") or r.get("price")]
+
+
+def map_global_index_quotes(quotes: list[dict]) -> list[dict]:
+    """国际/核心指数补全中文名+市场+币种(原 get_global_indices 映射体)。
+
+    腾讯返回的 code 可能是 HSI/.DJI/000001 等, 用名称匹配请求代码;
+    sh/sz 前缀为 A 股指数(market=CN, currency=CNY)。
+    清单常量经 _ds2 属性调用, 既有 patch ds2._GLOBAL_INDEX_CODES 契约不变。
+    """
+    for item in quotes:
+        name = item.get("name", "")
+        for req_code, cn_name in _ds2._GLOBAL_INDEX_CODES:
+            if name == cn_name or name in cn_name or cn_name in name:
+                if not item.get("name"):
+                    item["name"] = cn_name
+                if req_code.startswith("us"):
+                    item["market"] = "US"
+                    item["currency"] = item.get("currency") or "USD"
+                elif req_code.startswith("hk"):
+                    item["market"] = "HK"
+                    item["currency"] = item.get("currency") or "HKD"
+                elif req_code.startswith(("sh", "sz")):
+                    item["market"] = "CN"
+                    item["currency"] = item.get("currency") or "CNY"
+                break
+        if not item.get("market"):
+            item["market"] = "GLOBAL"
+    return quotes
+
+
+def map_us_quotes(quotes: list[dict]) -> list[dict]:
+    """美股后处理(原 get_us_stock_realtime 映射体): 去交易所后缀 + US/USD。"""
+    for item in quotes:
+        raw = item.get("code", "")
+        # 去掉交易所后缀(如 AAPL.OQ → AAPL)
+        clean = raw.split(".")[0].upper()
+        if clean:
+            item["code"] = clean
+        item["market"] = "US"
+        if not item.get("currency"):
+            item["currency"] = "USD"
+    return quotes
+
+
+def map_hk_quotes(quotes: list[dict]) -> list[dict]:
+    """港股后处理(原 get_hk_stock_realtime 映射体): code 补齐 5 位 + HK/HKD。"""
+    for item in quotes:
+        raw = item.get("code", "")
+        clean = raw.replace("hk", "").lstrip("0")
+        if not clean:
+            clean = "0"
+        item["code"] = clean.zfill(5)
+        item["market"] = "HK"
+        if not item.get("currency"):
+            item["currency"] = "HKD"
+    return quotes
+
+
+def map_sector_etfs(quotes: list[dict]) -> list[dict]:
+    """行业板块 ETF 代理映射(原 get_global_sector_etfs 映射体)。
+
+    固定 11 条(GICS 口径); 缺失保持 None(不伪造 0)。
+    ETF 清单常量经 _ds2 属性调用, 既有 patch 契约不变。
+    """
+    by_code = {q.get("code"): q for q in quotes}
+    result: list[dict] = []
+    for tencent_code, sector_cn in _ds2._GLOBAL_SECTOR_ETFS:
+        # 腾讯返回的 code 形如 XLK.AM，按前缀匹配
+        q = next((v for k, v in by_code.items()
+                  if str(k).split(".")[0].upper() == tencent_code[2:].upper()), None)
+        if not q:
+            result.append({
+                "code": tencent_code[2:], "sector": sector_cn,
+                "name": f"{sector_cn}ETF-SPDR",
+                "price": None, "change_pct": None,
+            })
+            continue
+        result.append({
+            "code": tencent_code[2:],
+            "sector": sector_cn,
+            "name": q.get("name") or f"{sector_cn}ETF-SPDR",
+            "price": q.get("price") if q.get("price") else None,
+            "change_pct": q.get("change_pct") if q.get("price") else None,
+        })
+    return result
 
 
 def fetch_index_change_pct_raw(codes: list[str]) -> dict[str, float]:

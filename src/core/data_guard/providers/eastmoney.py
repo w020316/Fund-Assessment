@@ -13,6 +13,9 @@ M4-B3(2026-11-19): EM 财务快照/公司资料/基金实时备源 fundgz/基金
 M4-D(2026-11-19): 市场广度(ulist 聚合家数/北交所家数/全市场 total)与
 分钟线(1 分钟 K 线)取数+解析体迁入; 自洽校验/fail-closed 编排/回退链
 仍保留在 data_source_v2 门面。
+
+M4-E(2026-11-19): 全球指数全景(m:100 缩放/区域分组)与全球快讯取数+解析体
+迁入; 健康度/来源标记/缓存与新浪快讯降级编排仍保留在门面。
 """
 from __future__ import annotations
 
@@ -778,6 +781,91 @@ def fetch_minute_series_raw(
     })
     klines = ((resp.json() or {}).get("data") or {}).get("klines") or []
     return parse_minutes(klines)
+
+
+def fetch_global_news_raw() -> list[dict]:
+    """东财全球快讯取数+解析(原 get_global_news 的 EM 分支)。
+
+    news_list / list / 顶层数组三种响应结构都兼容; 无条目 → []。
+    响应非 dict → ValueError(与迁移前一致, 门面据此降级新浪快讯);
+    网络异常向上抛出。
+    """
+    url = "https://np-weblist.eastmoney.com/comm/web/getNewsByColumns"
+    params = {
+        "client": "web",
+        "biz": "web_news_col",
+        "column": "350,351,352,353",
+        "order": 1,
+        "needInteractData": 0,
+        "page_index": 1,
+        "page_size": 20,
+    }
+    resp = _ds2.em_get(url, params=params)
+    data = resp.json()
+    if not data or not isinstance(data, dict):
+        raise ValueError("empty response")
+    news_data = data.get("data") or {}
+    items = news_data.get("news_list", []) if isinstance(news_data, dict) else []
+    if not items:
+        items = news_data.get("list", []) if isinstance(news_data, dict) else []
+    if not items:
+        items = news_data if isinstance(news_data, list) else []
+    result: list[dict] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        result.append({
+            "title": _safe_str(item.get("title", "")),
+            "content": _safe_str(item.get("content", item.get("digest", "")))[:200],
+            "source": _safe_str(item.get("source", item.get("mediaName", ""))),
+            "publish_time": _safe_str(item.get("showTime", item.get("publishTime", ""))),
+            "url": _safe_str(item.get("url", item.get("newsUrl", ""))),
+        })
+    return result
+
+
+def fetch_world_indices_raw() -> list[dict]:
+    """东财 m:100 全球指数精选取数+解析(原 get_global_indices_world 主体)。
+
+    返回固定精选清单(缺失行 price/change/change_pct 均为 None, 不伪造 0);
+    是否 fail-closed 由门面按「有用行数」判定。缩放走门面 _em_scale(纯函数),
+    清单/区域标签常量经 _ds2 属性调用, 既有 patch 契约不变。
+    """
+    url = "https://push2.eastmoney.com/api/qt/ulist.np/get"
+    secids = ",".join(f"100.{code}" for code, _, _ in _ds2._GLOBAL_WORLD_INDICES)
+    params = {
+        "fields": "f1,f2,f3,f4,f12,f14",
+        "secids": secids,
+        # 注意：不加 fltt=2 —— 加了东财会返回已缩放浮点(f2=58860.43)，
+        # _em_scale 会再除一次 100 造成 100 倍错误；保持原始整数自己缩放。
+    }
+    resp = _ds2.em_get(url, params=params)
+    payload = resp.json().get("data") or {}
+    rows = payload.get("diff") or []
+    if isinstance(rows, dict):
+        rows = list(rows.values())
+    by_code = {row.get("f12"): row for row in rows if isinstance(row, dict)}
+    result: list[dict] = []
+    for em_code, cn_name, region in _ds2._GLOBAL_WORLD_INDICES:
+        row = by_code.get(em_code)
+        if not row:
+            result.append({
+                "code": em_code, "name": cn_name, "region": region,
+                "region_label": _ds2._REGION_LABELS[region],
+                "price": None, "change": None, "change_pct": None,
+            })
+            continue
+        precision = row.get("f1")
+        result.append({
+            "code": em_code,
+            "name": row.get("f14") or cn_name,
+            "region": region,
+            "region_label": _ds2._REGION_LABELS[region],
+            "price": _ds2._em_scale(row.get("f2"), precision),
+            "change": _ds2._em_scale(row.get("f4"), precision),
+            "change_pct": _ds2._em_scale(row.get("f3"), precision),
+        })
+    return result
 
 
 class EastmoneyProvider:
