@@ -1339,38 +1339,20 @@ def _get_capital_flow_fallback(stock_code: str) -> dict:
 
 
 def get_capital_flow_detail(stock_code: str) -> dict:
+    """个股资金流门面(M4-B2 绞杀迁移): 取数+解析在
+    data_guard.providers.eastmoney.fetch_capital_flow_raw。
+
+    行为保持: 成功路径不写缓存; klines 空 → 直接 {} 不走 fallback(与迁移前
+    一致); 异常才走估算 fallback 并缓存。"""
+    from src.core.data_guard.providers.eastmoney import fetch_capital_flow_raw
+
     cache_key = f"capital_flow_{stock_code}"
     cached = _cache_get(cache_key)
     if cached is not None:
         return cached
-    secid = _em_secid(stock_code)
-    url = "https://push2.eastmoney.com/api/qt/stock/fflow/kline/get"
-    params = {
-        "secid": secid,
-        "fields1": "f1,f2,f3,f7",
-        "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63",
-        "klt": 101,
-        "lmt": 30,
-    }
     try:
-        resp = em_get(url, params=params)
-        data = resp.json()
-        klines = data.get("data", {}).get("klines", [])
-        if not klines:
-            return {}
-        latest = klines[-1]
-        parts = latest.split(",")
-        if len(parts) < 7:
-            return {}
-        return {
-            "date": parts[0],
-            "main_net_inflow": _safe_float(parts[1]),
-            "small_net_inflow": _safe_float(parts[2]),
-            "medium_net_inflow": _safe_float(parts[3]),
-            "large_net_inflow": _safe_float(parts[4]),
-            "super_large_net_inflow": _safe_float(parts[5]),
-            "main_inflow_pct": _safe_float(parts[6]) if len(parts) > 6 else 0.0,
-        }
+        # None(klines 空) → {} 不走 fallback 不写缓存; 异常才走估算 fallback 并缓存
+        return fetch_capital_flow_raw(stock_code) or {}
     except Exception as e:
         logger.warning(f"get_capital_flow_detail failed: {e}")
     result = _get_capital_flow_fallback(stock_code)
@@ -1379,51 +1361,21 @@ def get_capital_flow_detail(stock_code: str) -> dict:
 
 
 def get_margin_trading(stock_code: str) -> dict:
+    """融资融券门面(M4-B2 绞杀迁移): 取数+解析在
+    data_guard.providers.eastmoney.fetch_margin_trading_raw; 非法代码拒绝与
+    诚实空 fallback 保留于此, 行为零变更。"""
+    from src.core.data_guard.providers.eastmoney import fetch_margin_trading_raw
+
     if not _is_stock_code(stock_code):
         logger.warning(f"get_margin_trading 拒绝非法股票代码: {stock_code!r}")
         return {}
-    # 2026-11-15 实测:旧报表 RPT_RZRQ_LSHJ 已下线("报表配置不存在"),
-    # 东财现用 RPTA_WEB_RZRQ_GGMX(融资融券个股明细),筛选列/日期列均换了名字。
-    url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
-    params = {
-        "sortColumns": "DATE",
-        "sortTypes": -1,
-        "pageSize": 10,
-        "pageNumber": 1,
-        "reportName": "RPTA_WEB_RZRQ_GGMX",
-        "columns": "ALL",
-        "filter": f'(SCODE="{stock_code}")',
-    }
     try:
-        resp = em_get(url, params=params)
-        data = resp.json()
-        items = data.get("result", {}).get("data", [])
-        if not items:
-            return _get_margin_trading_fallback(stock_code)
-        item = items[0]
-        # 2026-11-17 单位校准(实测 RPTA_WEB_RZRQ_GGMX, 600519, 2026-11-16):
-        #   RZYE=14788586340(元)  RQYE=322111545(元)
-        #   RQYL=221550(股)       RQMCL=2900(股)       SPJ=1453.9(收盘价)
-        #   且 RQYE / RQYL = 1453.9 = SPJ ⇒ 结论:
-        #     RZRQYE/RZYE/RZMRE 是**元**, RQYL/RQMCL 是**股**;
-        #   该报表**没有**融券"额"字段。
-        # 旧实现把 RQMCL(股数) 塞进 short_sell(金额), 等于把"2900 股"报成
-        # "融券卖出 2900 元"(差 1453 倍), 前端表格里还标着金额列。
-        # 因此:
-        #   short_sell        —— 金额语义, 上游无此字段 → 恒为 None(诚实空值, 不填 0);
-        #   short_sell_volume —— 融券卖出**量(股)**, 缺失时 None(不是 0)。
-        return {
-            "code": _safe_str(item.get("SCODE", "")),
-            "trade_date": _safe_str(item.get("DATE", ""))[:10],
-            "margin_buy": _safe_float(item.get("RZMRE", 0)),
-            "margin_balance": _safe_float(item.get("RZYE", 0)),
-            "short_sell": None,
-            "short_sell_volume": _opt_float(item.get("RQMCL")),
-            "short_balance": _safe_float(item.get("RQYE", 0)),
-            "total_balance": _safe_float(item.get("RZRQYE", 0)),
-        }
+        result = fetch_margin_trading_raw(stock_code)
     except Exception as e:
         logger.warning(f"get_margin_trading failed: {e}")
+        result = None
+    if result is not None:
+        return result
     return _get_margin_trading_fallback(stock_code)
 
 
@@ -1439,50 +1391,21 @@ def _get_margin_trading_fallback(stock_code: str) -> dict:
 
 
 def get_block_trades(stock_code: str) -> list[dict]:
+    """大宗交易门面(M4-B2 绞杀迁移): 取数+解析在
+    data_guard.providers.eastmoney.fetch_block_trades_raw; 非法代码拒绝与
+    诚实空 fallback 保留于此, 行为零变更。"""
+    from src.core.data_guard.providers.eastmoney import fetch_block_trades_raw
+
     if not _is_stock_code(stock_code):
         logger.warning(f"get_block_trades 拒绝非法股票代码: {stock_code!r}")
         return []
-    # 2026-11-15 实测:旧报表 RPT_DABLOCKTRADE 已下线;现用 RPT_DATA_BLOCKTRADE,
-    # 成交量/溢价字段改名为 DEAL_VOLUME / PREMIUM_RATIO。
-    url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
-    params = {
-        "sortColumns": "TRADE_DATE",
-        "sortTypes": -1,
-        "pageSize": 20,
-        "pageNumber": 1,
-        "reportName": "RPT_DATA_BLOCKTRADE",
-        "columns": "ALL",
-        "filter": f'(SECURITY_CODE="{stock_code}")',
-    }
     try:
-        resp = em_get(url, params=params)
-        data = resp.json()
-        items = data.get("result", {}).get("data", [])
-        result: list[dict] = []
-        for item in items:
-            # 2026-11-17 口径校准(实测 RPT_DATA_BLOCKTRADE, 300003, 2026-11-16):
-            #   DEAL_PRICE=9.92, CLOSE_PRICE=12.02, PRE_CLOSE_PRICE=12.09
-            #   PREMIUM_RATIO=-0.174708818636  == 9.92/12.02 - 1   (基准=收盘价, 小数)
-            #   DISCOUNT_RATIO=-17.948717948718 == 9.92/12.09 - 1  (基准=昨收, 百分数)
-            # ⇒ PREMIUM_RATIO 是**小数**, 乘 100 才是百分数; 且两者基准不同, 不可互换。
-            #   旧实现直接透传小数, 前端"折溢率"列比真实值小 100 倍(-0.17% vs -17.47%)。
-            # DEAL_VOLUME 单位是**股**(不是手): DEAL_AMT / DEAL_PRICE == DEAL_VOLUME。
-            premium_raw = _opt_float(item.get("PREMIUM_RATIO"))
-            result.append({
-                "code": _safe_str(item.get("SECURITY_CODE", "")),
-                "name": _safe_str(item.get("SECURITY_NAME_ABBR", "")),
-                "trade_date": _safe_str(item.get("TRADE_DATE", ""))[:10],
-                "price": _safe_float(item.get("DEAL_PRICE", 0)),
-                "volume": _safe_float(item.get("DEAL_VOLUME", 0)),
-                "amount": _safe_float(item.get("DEAL_AMT", 0)),
-                "premium_pct": round(premium_raw * 100, 2) if premium_raw is not None else None,
-                "buyer": _safe_str(item.get("BUYER_NAME", "")),
-                "seller": _safe_str(item.get("SELLER_NAME", "")),
-            })
-        if result:
-            return result
+        result = fetch_block_trades_raw(stock_code)
     except Exception as e:
         logger.warning(f"get_block_trades failed: {e}")
+        result = []
+    if result:
+        return result
     return _get_block_trades_fallback(stock_code)
 
 
@@ -1503,43 +1426,21 @@ def _get_block_trades_fallback(stock_code: str) -> list[dict]:
 
 
 def get_shareholder_count(stock_code: str) -> dict:
+    """股东户数门面(M4-B2 绞杀迁移): 取数+解析在
+    data_guard.providers.eastmoney.fetch_shareholder_count_raw; 非法代码拒绝与
+    诚实空 fallback(不再造假估算)保留于此, 行为零变更。"""
+    from src.core.data_guard.providers.eastmoney import fetch_shareholder_count_raw
+
     if not _is_stock_code(stock_code):
         logger.warning(f"get_shareholder_count 拒绝非法股票代码: {stock_code!r}")
         return {}
-    url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
-    params = {
-        "sortColumns": "END_DATE",
-        "sortTypes": -1,
-        "pageSize": 5,
-        "pageNumber": 1,
-        "reportName": "RPT_F10_EH_HOLDERNUM",
-        "columns": "ALL",
-        "filter": f'(SECURITY_CODE="{stock_code}")',
-    }
     try:
-        resp = em_get(url, params=params)
-        data = resp.json()
-        items = data.get("result", {}).get("data", [])
-        if not items:
-            return _get_shareholder_count_fallback(stock_code)
-        item = items[0]
-        # 2026-11-15 实测:东财股东户数字段已由 HOLDER_NUM 改名 HOLDER_TOTAL_NUM,
-        # 环比也直接给出 TOTAL_NUM_RATIO(%),无需再比上期计算。
-        curr_count = _safe_float(item.get("HOLDER_TOTAL_NUM", 0))
-        if curr_count <= 0:
-            return _get_shareholder_count_fallback(stock_code)
-        change_pct = item.get("TOTAL_NUM_RATIO")
-        if change_pct is None:
-            prev_count = _safe_float(items[1].get("HOLDER_TOTAL_NUM", 0)) if len(items) > 1 else 0
-            change_pct = ((curr_count - prev_count) / prev_count * 100) if prev_count else 0.0
-        return {
-            "code": _safe_str(item.get("SECURITY_CODE", "")),
-            "end_date": _safe_str(item.get("END_DATE", ""))[:10],
-            "holder_num": _safe_int(curr_count),
-            "change_pct": round(_safe_float(change_pct), 2),
-        }
+        result = fetch_shareholder_count_raw(stock_code)
     except Exception as e:
         logger.warning(f"get_shareholder_count failed: {e}")
+        result = None
+    if result is not None:
+        return result
     return _get_shareholder_count_fallback(stock_code)
 
 
@@ -1554,33 +1455,20 @@ def _get_shareholder_count_fallback(stock_code: str) -> dict:
 
 
 def get_stock_news(stock_code: str, page: int = 1, page_size: int = 10) -> list[dict]:
-    url = "https://search-api-web.eastmoney.com/search/jsonp"
-    cb = f"jQuery{int(time.time() * 1000)}"
-    params = {
-        "cb": cb,
-        "param": f'{{"uid":"","keyword":"{stock_code}","type":["cmsArticleWebOld"],"client":"web","clientType":"web","clientVersion":"curr","param":{{"cmsArticleWebOld":{{"searchScope":"default","sort":"default","pageIndex":{page},"pageSize":{page_size},"preTag":"","postTag":""}}}}}}',
-    }
+    """个股新闻门面(M4-B2 绞杀迁移): 东财 jsonp 取数+解析在
+    data_guard.providers.eastmoney.fetch_stock_news_raw, 新浪降级在
+    data_guard.providers.sina.fetch_stock_news_raw; _mark_source 编排保留于此,
+    行为零变更。"""
+    from src.core.data_guard.providers.eastmoney import fetch_stock_news_raw
+
     try:
-        resp = em_get(url, params=params)
-        text = resp.text
-        json_str = re.sub(rf"^{cb}\(", "", text).rstrip(")")
-        import json
-        data = json.loads(json_str)
-        articles = data.get("result", {}).get("cmsArticleWebOld", {}).get("list", [])
-        result: list[dict] = []
-        for art in articles:
-            result.append({
-                "title": _safe_str(art.get("title", "")),
-                "content": _safe_str(art.get("content", ""))[:200],
-                "url": _safe_str(art.get("url", "")),
-                "source": _safe_str(art.get("mediaName", "")),
-                "publish_time": _safe_str(art.get("date", "")),
-            })
-        if result:
-            _mark_source("news", "eastmoney")
-            return result
+        result = fetch_stock_news_raw(stock_code, page, page_size)
     except Exception as e:
         logger.warning(f"get_stock_news failed: {e}")
+        result = []
+    if result:
+        _mark_source("news", "eastmoney")
+        return result
     result = _get_stock_news_sina(stock_code, page, page_size)
     if result:
         _mark_source("news", "sina")
@@ -1588,42 +1476,12 @@ def get_stock_news(stock_code: str, page: int = 1, page_size: int = 10) -> list[
 
 
 def _get_stock_news_sina(stock_code: str, page: int = 1, page_size: int = 10) -> list[dict]:
+    """新浪新闻门面(M4-B2 绞杀迁移): 取数+解析在
+    data_guard.providers.sina.fetch_stock_news_raw, 行为零变更。"""
+    from src.core.data_guard.providers.sina import fetch_stock_news_raw as sina_news_raw
+
     try:
-        url = "https://feed.mix.sina.com.cn/api/roll/get"
-        params = {
-            "pageid": "153",
-            "lid": "2516",
-            "num": page_size,
-            "page": page,
-            "r": str(random.random()),
-        }
-        resp = requests.get(url, params=params, timeout=5, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://finance.sina.com.cn/",
-        })
-        resp.encoding = "utf-8"
-        data = resp.json()
-        items = data.get("result", {}).get("data", [])
-        result: list[dict] = []
-        for item in items:
-            title = _safe_str(item.get("title", ""))
-            if not title:
-                continue
-            pub_time = _safe_str(item.get("ctime", ""))
-            if pub_time and pub_time.isdigit():
-                try:
-                    pub_time = datetime.fromtimestamp(int(pub_time)).strftime("%Y-%m-%d %H:%M")
-                except Exception as e:
-                    logger.warning(f"parse news publish_time timestamp failed: {e}")
-            result.append({
-                "title": title,
-                "content": _safe_str(item.get("intro", item.get("summary", "")))[:200],
-                "url": _safe_str(item.get("url", item.get("wap_url", ""))),
-                "source": _safe_str(item.get("author", item.get("media_name", ""))),
-                "publish_time": pub_time,
-            })
-        if result:
-            return result
+        return sina_news_raw(stock_code, page, page_size)
     except Exception as e:
         logger.warning(f"_get_stock_news_sina failed: {e}")
     return []

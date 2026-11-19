@@ -14,6 +14,7 @@ from src.core.data_source_v2 import (
     _em_secid,
     _opt_float,
     _safe_float,
+    _safe_int,
     _safe_str,
 )
 from loguru import logger
@@ -189,6 +190,178 @@ def fetch_dragon_tiger_raw() -> list[dict]:
             "sell_amount": _safe_float(item.get("TOTAL_SELL", 0)),
             "net_amount": _safe_float(item.get("TOTAL_NET", 0)),
             "trade_date": _safe_str(item.get("TRADE_DATE", ""))[:10],
+        })
+    return result
+
+
+def fetch_capital_flow_raw(stock_code: str) -> dict | None:
+    """个股资金流取数+解析(原 get_capital_flow_detail 主体, 无缓存/无降级)。
+
+    klines 空/字段不足 → None(门面直接返回 {}, 不走 fallback, 与迁移前一致);
+    异常向上抛出 → 门面走估算 fallback。
+    """
+    secid = _em_secid(stock_code)
+    url = "https://push2.eastmoney.com/api/qt/stock/fflow/kline/get"
+    params = {
+        "secid": secid,
+        "fields1": "f1,f2,f3,f7",
+        "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63",
+        "klt": 101,
+        "lmt": 30,
+    }
+    resp = _ds2.em_get(url, params=params)
+    data = resp.json()
+    klines = data.get("data", {}).get("klines", [])
+    if not klines:
+        return None
+    latest = klines[-1]
+    parts = latest.split(",")
+    if len(parts) < 7:
+        return None
+    return {
+        "date": parts[0],
+        "main_net_inflow": _safe_float(parts[1]),
+        "small_net_inflow": _safe_float(parts[2]),
+        "medium_net_inflow": _safe_float(parts[3]),
+        "large_net_inflow": _safe_float(parts[4]),
+        "super_large_net_inflow": _safe_float(parts[5]),
+        "main_inflow_pct": _safe_float(parts[6]) if len(parts) > 6 else 0.0,
+    }
+
+
+def fetch_margin_trading_raw(stock_code: str) -> dict | None:
+    """融资融券取数+解析(原 get_margin_trading 主体, 无降级)。
+
+    2026-11-17 单位校准保留: short_sell 金额语义上游无字段 → 恒 None;
+    RQMCL 是股数填 short_sell_volume, 缺失时 None(不是 0)。
+    items 空 → None(门面走诚实空 fallback); 异常向上抛出。
+    """
+    url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+    params = {
+        "sortColumns": "DATE",
+        "sortTypes": -1,
+        "pageSize": 10,
+        "pageNumber": 1,
+        "reportName": "RPTA_WEB_RZRQ_GGMX",
+        "columns": "ALL",
+        "filter": f'(SCODE="{stock_code}")',
+    }
+    resp = _ds2.em_get(url, params=params)
+    data = resp.json()
+    items = data.get("result", {}).get("data", [])
+    if not items:
+        return None
+    item = items[0]
+    return {
+        "code": _safe_str(item.get("SCODE", "")),
+        "trade_date": _safe_str(item.get("DATE", ""))[:10],
+        "margin_buy": _safe_float(item.get("RZMRE", 0)),
+        "margin_balance": _safe_float(item.get("RZYE", 0)),
+        "short_sell": None,
+        "short_sell_volume": _opt_float(item.get("RQMCL")),
+        "short_balance": _safe_float(item.get("RQYE", 0)),
+        "total_balance": _safe_float(item.get("RZRQYE", 0)),
+    }
+
+
+def fetch_block_trades_raw(stock_code: str) -> list[dict]:
+    """大宗交易取数+解析(原 get_block_trades 主体, 无降级)。
+
+    2026-11-17 口径校准保留: PREMIUM_RATIO 是小数, 乘 100 才是百分数;
+    DEAL_VOLUME 单位是股。异常向上抛出。
+    """
+    url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+    params = {
+        "sortColumns": "TRADE_DATE",
+        "sortTypes": -1,
+        "pageSize": 20,
+        "pageNumber": 1,
+        "reportName": "RPT_DATA_BLOCKTRADE",
+        "columns": "ALL",
+        "filter": f'(SECURITY_CODE="{stock_code}")',
+    }
+    resp = _ds2.em_get(url, params=params)
+    data = resp.json()
+    items = data.get("result", {}).get("data", [])
+    result: list[dict] = []
+    for item in items:
+        premium_raw = _opt_float(item.get("PREMIUM_RATIO"))
+        result.append({
+            "code": _safe_str(item.get("SECURITY_CODE", "")),
+            "name": _safe_str(item.get("SECURITY_NAME_ABBR", "")),
+            "trade_date": _safe_str(item.get("TRADE_DATE", ""))[:10],
+            "price": _safe_float(item.get("DEAL_PRICE", 0)),
+            "volume": _safe_float(item.get("DEAL_VOLUME", 0)),
+            "amount": _safe_float(item.get("DEAL_AMT", 0)),
+            "premium_pct": round(premium_raw * 100, 2) if premium_raw is not None else None,
+            "buyer": _safe_str(item.get("BUYER_NAME", "")),
+            "seller": _safe_str(item.get("SELLER_NAME", "")),
+        })
+    return result
+
+
+def fetch_shareholder_count_raw(stock_code: str) -> dict | None:
+    """股东户数取数+解析(原 get_shareholder_count 主体, 无降级)。
+
+    HOLDER_TOTAL_NUM 改名语义保持; TOTAL_NUM_RATIO 缺失时用上期计算。
+    items 空/curr<=0 → None(门面走诚实空 fallback); 异常向上抛出。
+    """
+    url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+    params = {
+        "sortColumns": "END_DATE",
+        "sortTypes": -1,
+        "pageSize": 5,
+        "pageNumber": 1,
+        "reportName": "RPT_F10_EH_HOLDERNUM",
+        "columns": "ALL",
+        "filter": f'(SECURITY_CODE="{stock_code}")',
+    }
+    resp = _ds2.em_get(url, params=params)
+    data = resp.json()
+    items = data.get("result", {}).get("data", [])
+    if not items:
+        return None
+    item = items[0]
+    curr_count = _safe_float(item.get("HOLDER_TOTAL_NUM", 0))
+    if curr_count <= 0:
+        return None
+    change_pct = item.get("TOTAL_NUM_RATIO")
+    if change_pct is None:
+        prev_count = _safe_float(items[1].get("HOLDER_TOTAL_NUM", 0)) if len(items) > 1 else 0
+        change_pct = ((curr_count - prev_count) / prev_count * 100) if prev_count else 0.0
+    return {
+        "code": _safe_str(item.get("SECURITY_CODE", "")),
+        "end_date": _safe_str(item.get("END_DATE", ""))[:10],
+        "holder_num": _safe_int(curr_count),
+        "change_pct": round(_safe_float(change_pct), 2),
+    }
+
+
+def fetch_stock_news_raw(stock_code: str, page: int = 1, page_size: int = 10) -> list[dict]:
+    """东财个股新闻(jsonp)取数+解析(原 get_stock_news 主体, 无来源标记)。异常向上抛出。"""
+    import json
+    import re
+    import time
+
+    url = "https://search-api-web.eastmoney.com/search/jsonp"
+    cb = f"jQuery{int(time.time() * 1000)}"
+    params = {
+        "cb": cb,
+        "param": f'{{"uid":"","keyword":"{stock_code}","type":["cmsArticleWebOld"],"client":"web","clientType":"web","clientVersion":"curr","param":{{"cmsArticleWebOld":{{"searchScope":"default","sort":"default","pageIndex":{page},"pageSize":{page_size},"preTag":"","postTag":""}}}}}}',
+    }
+    resp = _ds2.em_get(url, params=params)
+    text = resp.text
+    json_str = re.sub(rf"^{cb}\(", "", text).rstrip(")")
+    data = json.loads(json_str)
+    articles = data.get("result", {}).get("cmsArticleWebOld", {}).get("list", [])
+    result: list[dict] = []
+    for art in articles:
+        result.append({
+            "title": _safe_str(art.get("title", "")),
+            "content": _safe_str(art.get("content", ""))[:200],
+            "url": _safe_str(art.get("url", "")),
+            "source": _safe_str(art.get("mediaName", "")),
+            "publish_time": _safe_str(art.get("date", "")),
         })
     return result
 

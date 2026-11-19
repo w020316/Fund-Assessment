@@ -788,3 +788,173 @@ class TestMigrationSnapshotDragonTiger:
              patch.object(ds2, "_cache_get", return_value=None), \
              patch.object(ds2, "_cache_set"):
             assert ds2.get_dragon_tiger() == []
+
+
+# ── M4-B2 绞杀迁移快照: 资金流/融资融券/大宗/股东/新闻 ──────────────────
+
+class TestMigrationSnapshotCapitalFlow:
+    """M4-B2: 个股资金流(空 klines 不走 fallback 的行为保持)。"""
+
+    def test_snapshot_exact(self):
+        from src.core import data_source_v2 as ds2
+
+        klines = ["2026-11-18,1.2e8,-3e7,-2e7,6e7,6e7,5.5"]
+        with patch("src.core.data_source_v2.em_get",
+                   return_value=_em_json({"data": {"klines": klines}})), \
+             patch.object(ds2, "_cache_get", return_value=None):
+            out = ds2.get_capital_flow_detail("600519")
+        assert out == {
+            "date": "2026-11-18", "main_net_inflow": 1.2e8,
+            "small_net_inflow": -3e7, "medium_net_inflow": -2e7,
+            "large_net_inflow": 6e7, "super_large_net_inflow": 6e7,
+            "main_inflow_pct": 5.5,
+        }
+
+    def test_empty_klines_returns_empty_no_fallback(self):
+        """空 klines → {} 且不走估算 fallback(与迁移前一致)。"""
+        from src.core import data_source_v2 as ds2
+
+        with patch("src.core.data_source_v2.em_get",
+                   return_value=_em_json({"data": {"klines": []}})), \
+             patch.object(ds2, "_cache_get", return_value=None), \
+             patch.object(ds2, "_get_capital_flow_fallback") as m_fb:
+            assert ds2.get_capital_flow_detail("600519") == {}
+        m_fb.assert_not_called()
+
+    def test_exception_falls_back_and_caches(self):
+        from src.core import data_source_v2 as ds2
+
+        with patch("src.core.data_source_v2.em_get",
+                   side_effect=RuntimeError("em down")), \
+             patch.object(ds2, "_cache_get", return_value=None), \
+             patch.object(ds2, "_cache_set"), \
+             patch.object(ds2, "_get_capital_flow_fallback",
+                          return_value={"date": "2026-11-18"}) as m_fb:
+            out = ds2.get_capital_flow_detail("600519")
+        assert out == {"date": "2026-11-18"}
+        m_fb.assert_called_once()
+
+
+class TestMigrationSnapshotMargin:
+    """M4-B2: 融资融券(单位校准语义 + 诚实空 fallback)。"""
+
+    def test_snapshot_short_sell_is_none(self):
+        from src.core import data_source_v2 as ds2
+
+        payload = {"result": {"data": [{
+            "SCODE": "600519", "DATE": "2026-11-16 00:00:00",
+            "RZMRE": "1.2e8", "RZYE": "14788586340", "RQMCL": "2900",
+            "RQYE": "322111545", "RZRQYE": "15110700000",
+        }]}}
+        with patch("src.core.data_source_v2.em_get", return_value=_em_json(payload)):
+            out = ds2.get_margin_trading("600519")
+        assert out["short_sell"] is None          # 金额语义上游无字段 → 诚实空
+        assert out["short_sell_volume"] == 2900.0  # RQMCL 是股数
+        assert out["margin_balance"] == 14788586340.0
+
+    def test_invalid_code_rejected(self):
+        from src.core import data_source_v2 as ds2
+
+        assert ds2.get_margin_trading("bad!") == {}
+
+    def test_exception_falls_back_to_honest_empty(self):
+        from src.core import data_source_v2 as ds2
+
+        with patch("src.core.data_source_v2.em_get",
+                   side_effect=RuntimeError("em down")):
+            assert ds2.get_margin_trading("600519") == {}
+
+
+class TestMigrationSnapshotBlockTrades:
+    """M4-B2: 大宗交易(premium 小数×100 校准)。"""
+
+    def test_snapshot_premium_percent(self):
+        from src.core import data_source_v2 as ds2
+
+        payload = {"result": {"data": [{
+            "SECURITY_CODE": "300003", "SECURITY_NAME_ABBR": "乐普医疗",
+            "TRADE_DATE": "2026-11-16 00:00:00", "DEAL_PRICE": "9.92",
+            "DEAL_VOLUME": "500000", "DEAL_AMT": "4960000",
+            "PREMIUM_RATIO": -0.174708818636,
+            "BUYER_NAME": "机构专用", "SELLER_NAME": "中信上海",
+        }]}}
+        with patch("src.core.data_source_v2.em_get", return_value=_em_json(payload)):
+            rows = ds2.get_block_trades("300003")
+        assert rows[0]["premium_pct"] == -17.47  # 小数 ×100, 不再透传
+        assert rows[0]["volume"] == 500000.0
+
+    def test_empty_falls_back_to_honest_empty(self):
+        from src.core import data_source_v2 as ds2
+
+        with patch("src.core.data_source_v2.em_get",
+                   return_value=_em_json({"result": {"data": []}})), \
+             patch.object(ds2, "_get_block_trades_fallback", return_value=[]) as m_fb:
+            assert ds2.get_block_trades("300003") == []
+        m_fb.assert_called_once()
+
+
+class TestMigrationSnapshotShareholder:
+    """M4-B2: 股东户数(环比缺失用上期计算)。"""
+
+    def test_snapshot_with_ratio_field(self):
+        from src.core import data_source_v2 as ds2
+
+        payload = {"result": {"data": [{
+            "SECURITY_CODE": "600519", "END_DATE": "2026-09-30 00:00:00",
+            "HOLDER_TOTAL_NUM": "123456", "TOTAL_NUM_RATIO": -2.5,
+        }]}}
+        with patch("src.core.data_source_v2.em_get", return_value=_em_json(payload)):
+            out = ds2.get_shareholder_count("600519")
+        assert out == {"code": "600519", "end_date": "2026-09-30",
+                       "holder_num": 123456, "change_pct": -2.5}
+
+    def test_zero_holders_falls_back_to_honest_empty(self):
+        from src.core import data_source_v2 as ds2
+
+        payload = {"result": {"data": [{"SECURITY_CODE": "600519",
+                                        "HOLDER_TOTAL_NUM": "0"}]}}
+        with patch("src.core.data_source_v2.em_get", return_value=_em_json(payload)), \
+             patch.object(ds2, "_get_shareholder_count_fallback", return_value={}) as m_fb:
+            assert ds2.get_shareholder_count("600519") == {}
+        m_fb.assert_called_once()
+
+
+class TestMigrationSnapshotNews:
+    """M4-B2: 个股新闻双源(东财 jsonp → 新浪) + _mark_source 编排。"""
+
+    def test_eastmoney_success_marks_source(self):
+        from src.core import data_source_v2 as ds2
+
+        payload = {"result": {"cmsArticleWebOld": {"list": [{
+            "title": "茅台公告", "content": "内容" * 120, "url": "https://x",
+            "mediaName": "证券时报", "date": "2026-11-18",
+        }]}}}
+        import json as _json
+        # cb 时间戳由 provider 实时生成 → 冻结 time.time + 预置匹配的 text
+        fake = type("R", (), {
+            "json": lambda s: payload,
+            "text": "jQuery1000(" + _json.dumps(payload) + ")",
+        })()
+        with patch("src.core.data_source_v2.em_get", return_value=fake), \
+             patch("time.time", return_value=1.0), \
+             patch.object(ds2, "_mark_source") as m_mark:
+            rows = ds2.get_stock_news("600519")
+        assert rows[0]["title"] == "茅台公告"
+        assert len(rows[0]["content"]) == 200  # 截断 200
+        m_mark.assert_called_once_with("news", "eastmoney")
+
+    def test_em_empty_falls_back_to_sina_and_marks(self):
+        from src.core import data_source_v2 as ds2
+
+        sina_items = [{"title": "新浪新闻", "intro": "简介", "url": "https://y",
+                       "author": "新浪财经", "ctime": "1700000000"}]
+        fake = type("R", (), {"json": lambda s: {"result": {"data": sina_items}}})()
+        with patch("src.core.data_source_v2.em_get",
+                   return_value=_em_json({"result": {}})), \
+             patch("src.core.data_guard.providers.sina.requests.get",
+                   return_value=fake), \
+             patch.object(ds2, "_mark_source") as m_mark:
+            rows = ds2.get_stock_news("600519")
+        assert rows[0]["title"] == "新浪新闻"
+        assert rows[0]["publish_time"].startswith("20")  # ctime 时间戳转换
+        m_mark.assert_called_once_with("news", "sina")
