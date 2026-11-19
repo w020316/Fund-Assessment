@@ -25,6 +25,7 @@ from pathlib import Path
 import pytest
 
 JS_DIR = Path(__file__).resolve().parents[1] / "web" / "static" / "js"
+INDEX_HTML = Path(__file__).resolve().parents[1] / "web" / "static" / "index.html"
 
 # (文件, 函数名, 空态文案 —— 用于确认"真实无数据"分支未被误删)
 SITES = [
@@ -126,6 +127,21 @@ def test_genuine_empty_state_kept(filename, func, empty_text):
         f"{filename}:{func} 丢失了真实空态文案『{empty_text}』—— "
         "修错误态不应连带删除无数据提示"
     )
+
+
+def test_anomaly_all_unavailable_not_rendered_as_no_anomaly():
+    """异动空态：分钟序列全不可用时必须走"不可用"分支，不能显示成"没有异动"。
+
+    r8 回归：后端 scanned=16/unavailable=16 时, 前端旧逻辑只看 scanned>0
+    就渲染「当前窗口内无符合条件的异动」, 把数据故障说成结论。
+    """
+    body = _extract_function(INDEX_HTML.read_text(encoding="utf-8"), "loadStockAnomaly")
+    i_unavail = body.find("unavailable >= scanned")
+    i_no_anomaly = body.find("无符合条件的异动")
+    assert i_unavail != -1, "loadStockAnomaly 缺少「unavailable >= scanned」降级分支"
+    assert i_no_anomaly != -1, "loadStockAnomaly 丢失了真实空态文案「无符合条件的异动」"
+    assert i_unavail < i_no_anomaly, "「全不可用」分支必须在「无异动」分支之前判定"
+    assert "异动数据暂不可用" in body, "全不可用状态缺少「异动数据暂不可用」文案"
 
 
 def test_no_new_unguarded_empty_data_text():

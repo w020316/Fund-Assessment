@@ -1261,8 +1261,9 @@ async def stock_anomaly(window: int = Query(5, ge=1, le=30)):
     - screen_source='sina_changepercent' 表示涨速榜不可用、退化为「当日涨跌幅榜」
       选候选，覆盖度更差 → _meta.degraded=true + degraded_reason。
     - 分钟数据取不到的个股计入 unavailable，**不填 0、不猜**。
-    - 空数组 ≠ 出错：items 为空但 scanned>0 说明「查过、确实没有异动」，
-      前端据此区分「无异动」与「数据源不可用」。
+    - 空数组 ≠ 出错：items 为空且 scanned>unavailable 说明「查过、确实没有异动」；
+      若 unavailable>=scanned（全部分钟序列取不到）则属于「无法判定」，
+      `_meta` 会给出 quality=0 + degraded_reason，前端不得显示成「无异动」。
     """
     cache_key = f"market:stock_anomaly:{window}"
     cached = cache.get(cache_key)
@@ -1287,6 +1288,7 @@ def _anomaly_meta(payload: dict, cached_hit: bool) -> dict:
     """异动端点的 _meta：把「口径 / 时间 / 覆盖度」显式化，便于前端与排查。"""
     items = payload.get("items") or []
     scanned = int(payload.get("scanned") or 0)
+    unavailable = int(payload.get("unavailable") or 0)
     screen_source = str(payload.get("screen_source") or "")
     as_of = str(payload.get("as_of") or "")
     today = (datetime.now(timezone(timedelta(hours=8)))).strftime("%Y-%m-%d")
@@ -1297,6 +1299,11 @@ def _anomaly_meta(payload: dict, cached_hit: bool) -> dict:
     if scanned == 0:
         quality = 0.0
         reason = "候选池为空（上游榜单不可用）"
+    elif not items and unavailable >= scanned:
+        # 候选池有票但分钟序列全取不到：这是「无法判定」，不是「没有异动」。
+        # 若不单独降级，items=[] + scanned>0 会被前端渲染成「确实没有异动」。
+        quality = 0.0
+        reason = "分钟序列全部不可用（上游行情接口异常），本次无法判定异动"
     elif screen_source != "eastmoney_speed":
         quality = 60.0
         reason = "涨速榜不可用，候选池退化为「当日涨跌幅榜」，短时异动可能漏检"
@@ -1308,7 +1315,7 @@ def _anomaly_meta(payload: dict, cached_hit: bool) -> dict:
         "screen_source": screen_source,
         "minute_source": payload.get("kline_source"),
         "scanned": scanned,
-        "unavailable": payload.get("unavailable"),
+        "unavailable": unavailable,
         "as_of": as_of,
         "market_closed": market_closed,
         "threshold_pct": {"surge": ds2.ANOMALY_SURGE_PCT, "dump": ds2.ANOMALY_DUMP_PCT},

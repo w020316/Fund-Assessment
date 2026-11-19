@@ -406,3 +406,34 @@ class TestEndpoint:
         assert body["data"] == []
         assert body["_meta"]["degraded"] is True
         assert "候选池为空" in body["_meta"]["degraded_reason"]
+
+    def test_all_minute_series_unavailable_is_not_no_anomaly(self, client, monkeypatch):
+        """候选池有票但分钟序列全取不到 → 必须报「无法判定」, 不能显示成「无异动」。
+
+        回归: 旧实现 scanned=16/unavailable=16/items=[] 仍给 85 分且无 reason,
+        前端据此渲染「已扫描 16 只 · 涨跌幅均未达阈值」——把数据故障说成结论。
+        """
+        monkeypatch.setattr(ds2, "get_stock_anomalies", lambda window=5: {
+            "items": [], "window_minutes": 5, "screen_source": "eastmoney_speed",
+            "kline_source": "", "scanned": 16, "unavailable": 16,
+            "as_of": "2026-11-06 15:00",
+        })
+        body = client.get("/api/market/stock_anomaly").json()
+        assert body["data"] == []
+        meta = body["_meta"]
+        assert meta["quality_score"] == 0.0
+        assert meta["degraded"] is True
+        assert "分钟序列全部不可用" in meta["degraded_reason"]
+        assert meta["unavailable"] == 16 and meta["scanned"] == 16
+
+    def test_partial_unavailable_keeps_no_anomaly_conclusion(self, client, monkeypatch):
+        """仅部分个股分钟缺失时, 仍有样本被成功判定 → 维持「无符合条件的异动」。"""
+        monkeypatch.setattr(ds2, "get_stock_anomalies", lambda window=5: {
+            "items": [], "window_minutes": 5, "screen_source": "eastmoney_speed",
+            "kline_source": "tencent", "scanned": 16, "unavailable": 3,
+            "as_of": "2026-11-19 15:00",
+        })
+        body = client.get("/api/market/stock_anomaly").json()
+        meta = body["_meta"]
+        assert meta["degraded"] is False
+        assert "degraded_reason" not in meta

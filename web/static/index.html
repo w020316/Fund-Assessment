@@ -4843,10 +4843,15 @@ async function loadStockAnomaly() {
     return;
   }
   if (items.length === 0) {
-    // 区分"数据源降级/为空"与"确实没有异动": 后者说明查询是成功的
+    // 区分三种空态: 候选池为空 / 分钟序列全不可用 / 确实没有异动
     const scanned = Number(meta.scanned || 0);
+    const unavailable = Number(meta.unavailable || 0);
     if (scanned === 0) {
       renderEmpty(body, '数据源暂不可用', escapeHtml(meta.degraded_reason || '候选池为空'));
+    } else if (unavailable >= scanned) {
+      // 扫到了候选但全部分钟序列取不到: 是"无法判定", 不能显示成"没有异动"
+      renderEmpty(body, '异动数据暂不可用',
+        escapeHtml(meta.degraded_reason || `已扫描 ${scanned} 只，但分钟行情均未取到`));
     } else {
       renderEmpty(body, '当前窗口内无符合条件的异动',
         `已扫描 ${scanned} 只活跃股 · ${meta.window_minutes || 5} 分钟内涨跌幅均未达阈值`);
