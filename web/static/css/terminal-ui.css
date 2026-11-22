@@ -1122,3 +1122,112 @@ tr:hover td { background: var(--qf-panel-hover); }
   .sf-form { grid-template-columns: 1fr; }
   .sf-run { width: 100%; }
 }
+
+/* ---------- 6. 数据质量门禁(三道防线) ---------- */
+.dqc-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--qf-panel-line);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.dqc-badge.is-unknown { color: var(--qf-text-muted); background: var(--qf-panel-tint); }
+.dqc-badge.is-ready { color: var(--qf-sem-info); border-color: rgba(90, 200, 250, .4); background: rgba(90, 200, 250, .10); }
+.dqc-badge.is-degraded { color: var(--qf-sem-warn); border-color: rgba(245, 165, 36, .4); background: var(--qf-warn-soft); }
+.dqc-badge.is-blocked { color: var(--qf-sem-critical); border-color: rgba(255, 90, 95, .42); background: rgba(255, 90, 95, .10); }
+.dqc-note {
+  margin: -4px 0 10px;
+  font-size: 11px;
+  line-height: 1.8;
+  color: var(--qf-text-muted);
+}
+.dqc-empty {
+  padding: 14px 4px;
+  font-size: 12px;
+  color: var(--qf-text-muted);
+}
+.dqc-empty.is-err { color: var(--qf-sem-warn); }
+.dqc-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.dqc-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--qf-panel-line);
+  border-radius: var(--qf-radius-sm);
+  background: var(--qf-panel-bg-2);
+}
+.dqc-item.is-pass { border-color: rgba(90, 200, 250, .22); }
+.dqc-item.is-warn { border-color: rgba(245, 165, 36, .3); }
+.dqc-item.is-fail { border-color: rgba(255, 90, 95, .32); background: rgba(255, 90, 95, .05); }
+.dqc-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--qf-text-disabled);
+}
+.dqc-item.is-pass .dqc-dot { background: var(--qf-sem-info); box-shadow: 0 0 0 3px rgba(90, 200, 250, .12); }
+.dqc-item.is-warn .dqc-dot { background: var(--qf-sem-warn); box-shadow: 0 0 0 3px rgba(245, 165, 36, .12); }
+.dqc-item.is-fail .dqc-dot { background: var(--qf-sem-critical); box-shadow: 0 0 0 3px rgba(255, 90, 95, .12); }
+.dqc-main { min-width: 0; }
+.dqc-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--qf-text-primary);
+}
+.dqc-name b {
+  font: 600 11px/1.4 var(--qf-font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--qf-text-secondary);
+}
+.dqc-desc {
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.65;
+  color: var(--qf-text-muted);
+}
+.dqc-item.is-fail .dqc-desc { color: var(--qf-sem-warn); }
+.dqc-gate {
+  margin-top: 10px;
+  padding: 9px 12px;
+  border-radius: var(--qf-radius-sm);
+  font-size: 11.5px;
+  line-height: 1.8;
+}
+.dqc-gate b { margin-right: 6px; }
+.dqc-gate.is-pass {
+  border: 1px solid rgba(90, 200, 250, .28);
+  background: rgba(90, 200, 250, .07);
+  color: var(--qf-text-secondary);
+}
+.dqc-gate.is-pass b { color: var(--qf-sem-info); }
+.dqc-gate.is-fail {
+  border: 1px solid rgba(245, 165, 36, .32);
+  background: var(--qf-warn-soft);
+  color: var(--qf-text-secondary);
+}
+.dqc-gate.is-fail b { color: var(--qf-sem-warn); }
+.dqc-foot {
+  margin-top: 8px;
+  font-size: 10.5px;
+  color: var(--qf-text-disabled);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 900px) {
+  .dqc-grid { grid-template-columns: 1fr; }
+}

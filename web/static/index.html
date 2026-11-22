@@ -1021,7 +1021,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 <!-- ===== STAGE7: global-dashboard ===== 全球市场面板 + 版本弹窗样式(引用既有 token, 红涨绿跌) -->
 <link rel="stylesheet" href="/static/css/global-market.css">
 <!-- 2026-11-22: 终端化收尾(板块三视图/行情大屏栅格/K线周期/基金徽章),须最后加载以覆盖存量布局 -->
-<link rel="stylesheet" href="/static/css/terminal-ui.css?v=20261122j">
+<link rel="stylesheet" href="/static/css/terminal-ui.css?v=20261122k">
 <!-- 性能优化:lightweight-charts 改为懒加载(仅在用户点击"走势"时加载),避免阻塞首屏 -->
 <link rel="preconnect" href="https://unpkg.com" crossorigin>
 <link rel="dns-prefetch" href="https://unpkg.com">
@@ -2813,6 +2813,18 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
             <div class="qf-page-title">深度数据</div>
             <div class="qf-page-sub">研报、龙虎榜、融资融券、大宗交易与股东户数；按标的查询，缺失字段显示「—」并标注原因。</div>
           </div>
+        </div>
+        <!-- 数据质量门禁：采集 / 数仓 / 投研三段检查；核心项缺失时只降级、不补 0 -->
+        <div class="card mb-16" id="dqcCard" role="region" aria-labelledby="dqcTitle">
+          <div class="card-title" id="dqcTitle" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span>数据质量门禁（三道防线）</span>
+            <span style="display:flex;align-items:center;gap:10px;">
+              <span class="dqc-badge is-unknown" id="dqcSummary">待检查</span>
+              <button class="btn btn-sm btn-outline" type="button" onclick="DataGate.load(true)">运行检查</button>
+            </span>
+          </div>
+          <div class="dqc-note">采集（连通 / 家数）→ 数仓（字段完整 / 复盘质量）→ 投研（资金面 / 数据源健康）：核心项缺失时情绪与次日判断只作参考，不补 0。</div>
+          <div id="dqcBody"><div class="dqc-empty">切换到本页自动检查</div></div>
         </div>
         <div class="card mb-16">
           <div class="tabs" id="dataTabs">
@@ -10155,6 +10167,8 @@ document.addEventListener('DOMContentLoaded', () => {
 <script src="/static/js/workbench.js?v=20261122i"></script>
 <!-- ===== 策略适配自检: 钱/时间/回撤三问定位(纯本机规则, 不调用 LLM) ===== -->
 <script src="/static/js/strategy-fit.js?v=20261122j"></script>
+<!-- ===== 数据质量门禁: 采集/数仓/投研三段检查(复用既有端点, 包装 switchPage 接入) ===== -->
+<script src="/static/js/data-gate.js?v=20261122l"></script>
 <!-- ===== STAGE7: global-dashboard ===== 全球市场面板(全球指数全景/行业板块/速览条;包装 switchPage 接入) ===== -->
 <script src="/static/js/global-market.js"></script>
 <!-- ===== STAGE7: version-modal ===== 版本更新弹窗(health.version vs localStorage 自动弹出;暴露 window.openVersionModal) ===== -->
