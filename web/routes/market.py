@@ -382,6 +382,36 @@ async def stock_kline(
         return {"data": [], "_meta": _build_meta("mootdx", cached=False, quality_score=0.0)}
 
 
+@router.get("/chanlun")
+async def chanlun_structure(
+    code: str = Query(..., min_length=6, max_length=10, description="股票代码"),
+    period: str = Query("daily", pattern="^(daily|weekly|monthly)$", description="周期"),
+    count: int = Query(180, ge=60, le=500, description="K 线条数"),
+):
+    """简化缠论结构：分型 / 笔 / 中枢 / MACD 面积背驰 / 买卖点观察。"""
+    cache_key = f"market:chanlun:{code}:{period}:{count}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": _build_meta("mootdx", cached=True)}
+    try:
+        rows = await asyncio.to_thread(ds2.get_kline_mootdx, code, period=period, count=count)
+        from src.analysis.chanlun import analyze_chanlun
+        data = analyze_chanlun(rows, code=code, period=period)
+        quality = 80.0 if data.get("available") else 0.0
+        cache.set(cache_key, data, ttl=300)
+        return {"data": data, "_meta": _build_meta("mootdx", cached=False, quality_score=quality)}
+    except Exception as e:
+        logger.warning(f"chanlun failed: {e}")
+        payload = {
+            "code": code, "period": period, "available": False,
+            "reason": "K 线获取失败，暂无法做结构分析",
+            "bars": [], "fractals": [], "strokes": [], "pivots": [],
+            "divergence": None, "signals": [], "summary": None,
+            "note": "简化缠论：仅供结构参考，不构成买卖建议。",
+        }
+        return {"data": payload, "_meta": _build_meta("mootdx", cached=False, quality_score=0.0)}
+
+
 @router.get("/fund_realtime")
 async def fund_realtime(codes: str = Query(..., description="基金代码，逗号分隔")):
     cache_key = f"market:fund_realtime:{codes}"

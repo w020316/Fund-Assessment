@@ -1021,7 +1021,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 <!-- ===== STAGE7: global-dashboard ===== 全球市场面板 + 版本弹窗样式(引用既有 token, 红涨绿跌) -->
 <link rel="stylesheet" href="/static/css/global-market.css">
 <!-- 2026-11-22: 终端化收尾(板块三视图/行情大屏栅格/K线周期/基金徽章),须最后加载以覆盖存量布局 -->
-<link rel="stylesheet" href="/static/css/terminal-ui.css?v=20261122k">
+<link rel="stylesheet" href="/static/css/terminal-ui.css?v=20261122m">
 <!-- 性能优化:lightweight-charts 改为懒加载(仅在用户点击"走势"时加载),避免阻塞首屏 -->
 <link rel="preconnect" href="https://unpkg.com" crossorigin>
 <link rel="dns-prefetch" href="https://unpkg.com">
@@ -2147,6 +2147,23 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
             </div>
             <svg id="klineChart" width="100%" height="300" viewBox="0 0 600 300" preserveAspectRatio="xMidYMid meet"></svg>
           </div>
+        </div>
+
+        <!-- 缠论结构（简化）：分型 / 笔 / 中枢 / MACD 面积背驰；数据来自 /api/market/chanlun -->
+        <div class="card mb-16" id="chanlunCard" role="region" aria-labelledby="chanlunTitle">
+          <div class="card-title" id="chanlunTitle" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span>缠论结构（简化）</span>
+            <span class="cl-controls">
+              <input class="input cl-code" id="clCode" value="600519" maxlength="6" inputmode="numeric" aria-label="缠论分析股票代码">
+              <select class="select cl-period" id="clPeriod" aria-label="缠论分析周期">
+                <option value="daily">日线</option>
+                <option value="weekly">周线</option>
+                <option value="monthly">月线</option>
+              </select>
+              <button class="btn btn-sm btn-primary" type="button" onclick="Chanlun.load(true)">分析结构</button>
+            </span>
+          </div>
+          <div id="clBody"><div class="cl-empty">输入代码后点击「分析结构」；当前实现分型 / 笔 / 中枢 / MACD 面积背驰，未实现线段与级别递归。</div></div>
         </div>
 
         <!-- 扫描面板 -->
@@ -10169,6 +10186,8 @@ document.addEventListener('DOMContentLoaded', () => {
 <script src="/static/js/strategy-fit.js?v=20261122j"></script>
 <!-- ===== 数据质量门禁: 采集/数仓/投研三段检查(复用既有端点, 包装 switchPage 接入) ===== -->
 <script src="/static/js/data-gate.js?v=20261122l"></script>
+<!-- ===== 缠论结构(简化): 分型/笔/中枢/MACD 背驰, 数据来自 /api/market/chanlun ===== -->
+<script src="/static/js/chanlun.js?v=20261122m"></script>
 <!-- ===== STAGE7: global-dashboard ===== 全球市场面板(全球指数全景/行业板块/速览条;包装 switchPage 接入) ===== -->
 <script src="/static/js/global-market.js"></script>
 <!-- ===== STAGE7: version-modal ===== 版本更新弹窗(health.version vs localStorage 自动弹出;暴露 window.openVersionModal) ===== -->

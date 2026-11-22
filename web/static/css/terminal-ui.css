@@ -1231,3 +1231,132 @@ tr:hover td { background: var(--qf-panel-hover); }
 @media (max-width: 900px) {
   .dqc-grid { grid-template-columns: 1fr; }
 }
+
+/* ---------- 7. 缠论结构（简化） ---------- */
+.cl-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cl-code { width: 108px; min-height: 32px; }
+.cl-period { width: 92px; min-height: 32px; }
+.cl-empty {
+  padding: 16px 4px;
+  font-size: 12px;
+  line-height: 1.9;
+  color: var(--qf-text-muted);
+}
+.cl-empty-warn b { color: var(--qf-sem-warn); }
+.cl-note { color: var(--qf-text-disabled); }
+
+.cl-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.cl-sum-item {
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--qf-panel-line);
+  border-radius: var(--qf-radius-sm);
+  background: var(--qf-panel-bg-2);
+}
+.cl-sum-k { font-size: 10.5px; color: var(--qf-text-muted); }
+.cl-sum-v {
+  margin-top: 3px;
+  font: 600 13px/1.35 var(--qf-font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--qf-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cl-sum-v.is-up { color: var(--qf-sem-up); }
+.cl-sum-v.is-down { color: var(--qf-sem-down); }
+.cl-sum-s {
+  margin-top: 3px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--qf-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cl-chart-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--qf-panel-line);
+  border-radius: var(--qf-radius-sm);
+  background: var(--qf-bg-deep);
+}
+.cl-chart { display: block; width: 100%; min-width: 660px; height: auto; }
+.cl-grid { stroke: rgba(148, 163, 184, .12); stroke-width: 1; }
+.cl-axis { fill: var(--qf-text-disabled); font: 9px var(--qf-font-mono); }
+.cl-candle-up line, .cl-candle-up rect { stroke: var(--qf-sem-up); fill: var(--qf-sem-up); }
+.cl-candle-down line, .cl-candle-down rect { stroke: var(--qf-sem-down); fill: var(--qf-sem-down); }
+.cl-candle-up rect { fill-opacity: .85; }
+.cl-candle-down rect { fill-opacity: .85; }
+.cl-stroke { fill: none; stroke: #E8C46A; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.cl-pivot rect {
+  fill: rgba(90, 200, 250, .10);
+  stroke: rgba(90, 200, 250, .55);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+.cl-pivot text { fill: var(--qf-sem-info); font: 9px var(--qf-font-mono); }
+.cl-signal circle { fill: var(--qf-text-primary); }
+.cl-signal.is-buy circle { fill: var(--qf-sem-up); }
+.cl-signal.is-sell circle { fill: var(--qf-sem-down); }
+.cl-signal text { fill: var(--qf-text-primary); font: 9px var(--qf-font-body); }
+.cl-legend {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin: 6px 0 10px;
+  font-size: 10.5px;
+  color: var(--qf-text-muted);
+}
+.cl-legend i { display: inline-block; width: 12px; height: 2px; margin-right: 4px; vertical-align: middle; }
+.cl-lg-stroke { background: #E8C46A; }
+.cl-lg-pivot { background: rgba(90, 200, 250, .7); }
+.cl-lg-up { background: var(--qf-sem-up); }
+.cl-lg-down { background: var(--qf-sem-down); }
+.cl-legend-note { margin-left: auto; color: var(--qf-text-disabled); }
+
+.cl-tables {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.cl-table-block { min-width: 0; }
+.cl-table-title { margin-bottom: 4px; font-size: 11px; color: var(--qf-text-muted); }
+.cl-table { font-size: 11.5px; }
+.cl-table th, .cl-table td { padding: 6px 8px; }
+.cl-table .cl-num { text-align: right; font-family: var(--qf-font-mono); font-variant-numeric: tabular-nums; }
+.cl-table .cl-td-note { color: var(--qf-text-muted); line-height: 1.6; }
+.cl-table .cl-td-empty { color: var(--qf-text-muted); text-align: center; }
+.cl-signal-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.cl-signal-tag.is-buy { background: rgba(248, 113, 113, .14); color: var(--qf-sem-up); }
+.cl-signal-tag.is-sell { background: rgba(52, 211, 153, .14); color: var(--qf-sem-down); }
+.cl-foot {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--qf-panel-line-dash);
+  font-size: 10.5px;
+  line-height: 1.8;
+  color: var(--qf-text-disabled);
+}
+
+@media (max-width: 900px) {
+  .cl-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cl-tables { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .cl-controls { width: 100%; }
+  .cl-code { flex: 1; width: auto; }
+  .cl-summary { grid-template-columns: 1fr 1fr; }
+}
