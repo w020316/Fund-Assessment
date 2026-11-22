@@ -288,6 +288,80 @@
     }).join('');
   }
 
+  /* ================= 渲染：市场涨跌分布条 ================= */
+  /* 单一横向条: 红(涨)/灰(平)/绿(跌) 占比 + 涨停/跌停家数。
+     家数缺失(counts_available=false 或 null)时只给文字说明, 不画条 ——
+     把缺失画成"全绿/全红"会被读成真实盘面。 */
+  function renderBreadth(board) {
+    var el = $id('wbBreadth');
+    if (!el) return;
+    var m = (board && board.market) || {};
+    var lim = (board && board.limit) || {};
+    var ok = m.counts_available !== false && isNum(m.rise_count) && isNum(m.fall_count);
+    if (!ok) {
+      el.innerHTML = '<div class="wb-breadth-empty">涨跌家数未获取 · 不绘制红绿分布（缺失不按 0 画）</div>';
+      return;
+    }
+    var up = Number(m.rise_count) || 0;
+    var flat = Number(m.flat_count) || 0;
+    var down = Number(m.fall_count) || 0;
+    var total = up + flat + down;
+    if (!total) {
+      el.innerHTML = '<div class="wb-breadth-empty">涨跌家数返回为空 · 暂不绘制分布</div>';
+      return;
+    }
+    var w = function (v) { return (v / total * 100).toFixed(2) + '%'; };
+    var ratio = (up / total * 100).toFixed(0);
+    el.innerHTML = '<div class="wb-breadth-bar" role="img" aria-label="上涨 ' + up + ' 家、平盘 ' + flat + ' 家、下跌 ' + down + ' 家">'
+      + '<i class="is-up" style="width:' + w(up) + '"></i>'
+      + '<i class="is-flat" style="width:' + w(flat) + '"></i>'
+      + '<i class="is-down" style="width:' + w(down) + '"></i>'
+      + '</div>'
+      + '<div class="wb-breadth-meta">'
+      + '<span class="is-up">涨 <b>' + up + '</b></span>'
+      + '<span>平 <b>' + flat + '</b></span>'
+      + '<span class="is-down">跌 <b>' + down + '</b></span>'
+      + '<span>上涨占比 <b>' + ratio + '%</b></span>'
+      + '<span class="wb-breadth-spacer"></span>'
+      + '<span class="is-up">涨停 <b>' + (isNum(lim.limit_up_count) ? lim.limit_up_count : '—') + '</b></span>'
+      + '<span class="is-down">跌停 <b>' + (isNum(lim.limit_down_count) ? lim.limit_down_count : '—') + '</b></span>'
+      + '</div>';
+  }
+
+  /* ================= 渲染：数据就绪门禁 ================= */
+  /* 参考数据质量"三道防线": 核心数据齐备才允许把这一屏当结论看。
+     缺失项只做提示, 不阻断其余面板(与 allSettled 的降级策略一致)。 */
+  function renderReadiness(indices, board, sectors, sectorMeta, thermo) {
+    var el = $id('wbReadyTag');
+    if (!el) return;
+    var missing = [];
+    var m = (board && board.market) || {};
+    var lim = (board && board.limit) || {};
+    if (!Array.isArray(indices) || !indices.length) missing.push('指数');
+    if (!board) missing.push('复盘');
+    else {
+      if (m.counts_available === false || !isNum(m.rise_count)) missing.push('涨跌家数');
+      if (!isNum(lim.limit_up_count) || !isNum(lim.limit_down_count)) missing.push('涨跌停');
+    }
+    if (!Array.isArray(sectors) || !sectors.length) missing.push('板块');
+    if (!thermo || thermo.score_available === false) missing.push('大盘温度');
+    if (sectorMeta && sectorMeta.degraded) missing.push('资金字段');
+
+    if (!missing.length) {
+      el.className = 'wb-tag is-ready';
+      el.textContent = '数据就绪';
+      el.title = '指数 / 复盘家数 / 涨跌停 / 板块 / 温度均可用';
+    } else if (missing.length <= 2) {
+      el.className = 'wb-tag is-warn';
+      el.textContent = '数据降级';
+      el.title = '缺失: ' + missing.join('、') + '（其余面板照常展示，缺失项不按 0 计）';
+    } else {
+      el.className = 'wb-tag is-bad';
+      el.textContent = '数据未就绪';
+      el.title = '缺失: ' + missing.join('、') + '（其余面板照常展示，缺失项不按 0 计）';
+    }
+  }
+
   /* ================= 渲染：统计条 ================= */
   function sourceLabelOf(meta) {
     var src = meta && meta.data_source;
@@ -1035,6 +1109,8 @@
       ]);
       renderHead(board, thermo);
       renderIndices(indices);
+      renderBreadth(board);
+      renderReadiness(indices, board, sectors, sectorMeta, thermo);
       renderStats(board, thermo, sectorMeta);
       renderHold(board, thermo);
       renderRadar(board, thermo);

@@ -1021,7 +1021,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 <!-- ===== STAGE7: global-dashboard ===== 全球市场面板 + 版本弹窗样式(引用既有 token, 红涨绿跌) -->
 <link rel="stylesheet" href="/static/css/global-market.css">
 <!-- 2026-11-22: 终端化收尾(板块三视图/行情大屏栅格/K线周期/基金徽章),须最后加载以覆盖存量布局 -->
-<link rel="stylesheet" href="/static/css/terminal-ui.css?v=20261122f">
+<link rel="stylesheet" href="/static/css/terminal-ui.css?v=20261122j">
 <!-- 性能优化:lightweight-charts 改为懒加载(仅在用户点击"走势"时加载),避免阻塞首屏 -->
 <link rel="preconnect" href="https://unpkg.com" crossorigin>
 <link rel="dns-prefetch" href="https://unpkg.com">
@@ -1091,6 +1091,8 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
             <span class="hud-subtab" data-page="data" role="button" tabindex="0" onclick="switchPage('data')">深度数据</span>
             <!-- ===== STAGE6-PRED: market-sector-board ===== R2.1 板块二级 tab(内容由 sector-board.js 渲染) -->
             <span class="hud-subtab" data-page="sector-board" role="button" tabindex="0" onclick="switchPage('sector-board')">板块</span>
+            <!-- 市场风格:防守/进攻归组对照(内容由 market-style.js 渲染,与板块页同源 sector_flow) -->
+            <span class="hud-subtab" data-page="market-style" role="button" tabindex="0" onclick="switchPage('market-style')">市场风格</span>
           </div>
         </div>
       </div>
@@ -1106,6 +1108,8 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
               <span class="wb-tag" id="wbSessionTag">交易时段 —</span>
               <span class="wb-tag" id="wbPhaseTag">相位 —</span>
               <span class="wb-tag" id="wbTempTag">大盘温度 —</span>
+              <!-- 就绪门禁: 指数/复盘家数/涨跌停/板块/温度齐备才显示"数据就绪", 否则标出缺失项 -->
+              <span class="wb-tag" id="wbReadyTag" title="数据就绪检查">数据就绪 —</span>
               <span class="wb-date" id="wbDate">—</span>
             </div>
             <div class="wb-head-right">
@@ -1118,6 +1122,9 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
           <div class="wb-index-grid" id="wbIndexCards" aria-live="polite">
             <div class="wb-skel"></div><div class="wb-skel"></div><div class="wb-skel"></div><div class="wb-skel"></div>
           </div>
+
+          <!-- 市场涨跌分布条: 红(涨) / 灰(平) / 绿(跌) 三段占比 + 涨停跌停家数; 家数缺失时不画条 -->
+          <div class="wb-breadth" id="wbBreadth" aria-live="polite"></div>
 
           <div class="wb-stats" id="wbStatStrip">
             <div class="wb-skel"></div><div class="wb-skel"></div><div class="wb-skel"></div>
@@ -1297,6 +1304,25 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
           <div class="sb-drawer-body" id="sbDrawerBody"><div class="pred-empty">加载中…</div></div>
           <div class="sb-drawer-foot">点击个股进入「行情总览」查看详情。缺失值显示「—」，不补 0。</div>
         </aside>
+      </div>
+
+      <!-- 市场风格页(防守/进攻归组对照;内容由 market-style.js 渲染) -->
+      <div class="page" id="page-market-style">
+        <div class="qf-page-head">
+          <div class="qf-page-head-main">
+            <div class="qf-page-title">市场风格</div>
+            <div class="qf-page-sub">把当日行业板块按「防守 / 进攻」两类归组，用同一套涨跌幅与主力净流入口径左右对照；分类是固定行业标签，不做预测、不构成投资建议。</div>
+          </div>
+          <div class="qf-page-actions">
+            <span id="msFreshness"></span>
+            <button class="btn btn-sm btn-outline" type="button" onclick="MarketStyle.load(true)">刷新</button>
+          </div>
+        </div>
+        <div class="card ms-card">
+          <div id="msBody">
+            <div class="ms-empty ms-empty-lg">切换到本页自动加载板块行情</div>
+          </div>
+        </div>
       </div>
 
       <div class="page" id="page-hud-holdings">
@@ -1653,6 +1679,23 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
           <div id="marketAssessmentBody">
             <div style="color:var(--text-muted);font-size:12px;padding:8px 0;">加载中...</div>
           </div>
+        </div>
+
+        <!-- 复盘笔记：仅写本机 localStorage，不上传；支持 Markdown 预览（参考看盘工具的随手记） -->
+        <div class="card mb-16" id="reviewNoteCard" role="region" aria-labelledby="reviewNoteTitle">
+          <div class="card-title" id="reviewNoteTitle" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span>复盘笔记</span>
+            <span class="rn-note-meta" id="reviewNoteMeta">仅存本机浏览器 · 不上传</span>
+          </div>
+          <div class="rn-toolbar">
+            <span class="rn-date" id="reviewNoteDate">—</span>
+            <div class="rn-actions">
+              <button class="btn btn-sm btn-outline" type="button" id="reviewNotePreviewBtn" onclick="ReviewDesk.toggleNotePreview(this)">预览</button>
+              <button class="btn btn-sm btn-outline" type="button" onclick="ReviewDesk.clearNote()">清空</button>
+            </div>
+          </div>
+          <textarea id="reviewNoteInput" class="rn-input" maxlength="4000" aria-label="复盘笔记正文，支持 Markdown" placeholder="写下对这一章节的判断，支持 Markdown：## 标题、- 列表、**重点**、`代码`"></textarea>
+          <div id="reviewNotePreview" class="rn-preview" hidden></div>
         </div>
 
         <!-- 开仓纪律：与工作台共用同一套规则（Workbench.disciplineChecks） -->
@@ -2053,8 +2096,30 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
             <div class="qf-page-sub">五维评估、K 线走势与条件扫描；评分与信号由规则引擎输出，仅供参考，不构成投资建议。</div>
           </div>
         </div>
+        <!-- 策略适配自检：钱 / 时间 / 回撤三问取交集；纯本机规则计算，不预测收益 -->
+        <div class="card mb-16" id="strategyFitCard" role="region" aria-labelledby="strategyFitTitle">
+          <div class="card-title" id="strategyFitTitle" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span>策略适配自检（三问定位）</span>
+            <span style="font-size:11px;color:var(--text-muted);font-weight:400;">钱 · 时间 · 回撤 → 合脚的策略</span>
+          </div>
+          <div class="sf-form">
+            <label class="sf-field" for="sfCapital"><span>可投入资金（万元）</span>
+              <input class="input" id="sfCapital" type="number" min="0" step="0.5" value="5" inputmode="decimal">
+            </label>
+            <label class="sf-field" for="sfTime"><span>每日盯盘时间（分钟）</span>
+              <input class="input" id="sfTime" type="number" min="1" step="15" value="60" inputmode="numeric">
+            </label>
+            <label class="sf-field" for="sfDrawdown"><span>可承受最大回撤（%）</span>
+              <input class="input" id="sfDrawdown" type="number" min="1" max="60" step="1" value="10" inputmode="decimal">
+            </label>
+            <button class="btn btn-sm btn-primary sf-run" type="button" id="sfRunBtn">生成适配结果</button>
+          </div>
+          <div id="sfResult" aria-live="polite">
+            <div class="sf-empty">填三个数，得到与你资金 / 时间 / 回撤匹配的策略，而不是追求“最好的策略”。</div>
+          </div>
+        </div>
+
         <div class="grid-2 mb-16">
-          <!-- 雷达图 -->
           <div class="card">
             <div class="card-title">五维评估</div>
             <div style="display:flex;align-items:center;gap:20px;">
@@ -3581,6 +3646,7 @@ function switchPage(name) {
     data:     { parent: 'hud-market' },
     // ===== STAGE6-PRED ===== 新增二级页(板块 / 今日推荐); 内容由独立 JS 渲染
     'sector-board': { parent: 'hud-market' },
+    'market-style': { parent: 'hud-market' },
     recommend: { parent: 'hud-strategy' },
     position: { parent: 'hud-holdings' },
     fund:     { parent: 'hud-holdings' },
@@ -3758,6 +3824,140 @@ const ReviewDesk = {
     }
   },
 
+  /* ===== 复盘笔记（本机 Markdown；只写 localStorage，不上传服务端） ===== */
+  _noteDate: '',
+  _noteTimer: null,
+
+  _noteKey(date) {
+    return 'qf_review_note_v1:' + (date || 'today');
+  },
+
+  loadNote(date) {
+    const input = document.getElementById('reviewNoteInput');
+    if (!input) return;
+    if (this._noteDate !== date) {
+      this._noteDate = date || '';
+      this.toggleNotePreview(null, true);
+    }
+    const dateEl = document.getElementById('reviewNoteDate');
+    if (dateEl) dateEl.textContent = date ? (date + ' · 本机笔记') : '本机笔记';
+    if (!input.dataset.noteBound) {
+      input.dataset.noteBound = '1';
+      input.addEventListener('input', () => {
+        clearTimeout(this._noteTimer);
+        this._noteTimer = setTimeout(() => this.saveNote(), 400);
+      });
+    }
+    let val = '';
+    try { val = localStorage.getItem(this._noteKey(this._noteDate)) || ''; } catch (e) { /* 隐私模式 */ }
+    input.value = val;
+    this._updateNoteMeta(val.trim() ? '已从本机载入' : '尚未记录');
+    const prev = document.getElementById('reviewNotePreview');
+    if (prev && !prev.hidden) this.renderNotePreview();
+  },
+
+  saveNote() {
+    const input = document.getElementById('reviewNoteInput');
+    if (!input) return;
+    const val = input.value || '';
+    try {
+      if (val.trim()) localStorage.setItem(this._noteKey(this._noteDate), val);
+      else localStorage.removeItem(this._noteKey(this._noteDate));
+    } catch (e) {
+      this._updateNoteMeta('本机存储不可用（隐私模式）');
+      return;
+    }
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    this._updateNoteMeta(val.trim() ? ('已保存 ' + hh + ':' + mm + ' · ' + val.length + ' 字') : '已清空');
+  },
+
+  _updateNoteMeta(text) {
+    const el = document.getElementById('reviewNoteMeta');
+    if (el) el.textContent = '仅存本机浏览器 · ' + text;
+  },
+
+  renderNotePreview() {
+    const input = document.getElementById('reviewNoteInput');
+    const prev = document.getElementById('reviewNotePreview');
+    if (!input || !prev) return;
+    const md = input.value || '';
+    prev.innerHTML = md.trim()
+      ? this._mdToHtml(md)
+      : '<span style="color:var(--text-muted);">还没有内容，切回编辑写点什么。</span>';
+  },
+
+  toggleNotePreview(btn, forceEdit) {
+    const input = document.getElementById('reviewNoteInput');
+    const prev = document.getElementById('reviewNotePreview');
+    const button = btn || document.getElementById('reviewNotePreviewBtn');
+    if (!input || !prev) return;
+    const toEdit = forceEdit === true || !prev.hidden;
+    if (toEdit) {
+      prev.hidden = true;
+      input.hidden = false;
+      if (button) button.textContent = '预览';
+    } else {
+      this.renderNotePreview();
+      prev.hidden = false;
+      input.hidden = true;
+      if (button) button.textContent = '编辑';
+    }
+  },
+
+  clearNote() {
+    const input = document.getElementById('reviewNoteInput');
+    if (!input) return;
+    const doClear = () => {
+      input.value = '';
+      try { localStorage.removeItem(this._noteKey(this._noteDate)); } catch (e) { /* 隐私模式 */ }
+      this._updateNoteMeta('已清空');
+      const prev = document.getElementById('reviewNotePreview');
+      if (prev && !prev.hidden) this.renderNotePreview();
+    };
+    if (typeof customConfirm === 'function') {
+      customConfirm('清空这篇复盘笔记？', '清空后不可恢复，仅影响本机浏览器中的内容。')
+        .then(ok => { if (ok) doClear(); })
+        .catch(() => {});
+    } else if (window.confirm('清空这篇复盘笔记？')) {
+      doClear();
+    }
+  },
+
+  /* 行内 Markdown：先整体转义，再只放开标题/列表/加粗/行内代码，避免 XSS */
+  _mdToHtml(md) {
+    const esc = (typeof escapeHtml === 'function') ? escapeHtml : (s => String(s == null ? '' : s));
+    const inline = (s) => esc(s)
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>');
+    const lines = String(md || '').replace(/\r\n/g, '\n').split('\n');
+    let html = '';
+    let inList = false;
+    const closeList = () => { if (inList) { html += '</ul>'; inList = false; } };
+    lines.forEach(line => {
+      const t = line.trim();
+      if (!t) { closeList(); return; }
+      let m = /^(#{1,3})\s+(.*)$/.exec(t);
+      if (m) {
+        closeList();
+        const tag = m[1].length >= 3 ? 'h3' : 'h2';
+        html += '<' + tag + '>' + inline(m[2]) + '</' + tag + '>';
+        return;
+      }
+      m = /^[-*]\s+(.*)$/.exec(t);
+      if (m) {
+        if (!inList) { html += '<ul>'; inList = true; }
+        html += '<li>' + inline(m[1]) + '</li>';
+        return;
+      }
+      closeList();
+      html += '<p>' + inline(t) + '</p>';
+    });
+    closeList();
+    return html;
+  },
+
   async loadBoard(force = false) {
     const resp = await api('/api/review/board' + (force ? '?refresh=1' : ''));
     const d = resp && resp.data;
@@ -3769,6 +3969,7 @@ const ReviewDesk = {
       return;
     }
     window._lastReviewBoard = d;
+    this.loadNote(d.date);
     loadReviewDiscipline();
     const limit = d.limit || {};
     const market = d.market || {};
@@ -9946,10 +10147,14 @@ document.addEventListener('DOMContentLoaded', () => {
 <script src="/static/js/prediction.js"></script>
 <!-- ===== STAGE6-PRED: 板块二级页(行情容器;复用既有 /api/market/sector_flow) ===== -->
 <script src="/static/js/sector-board.js?v=20261122c"></script>
+<!-- ===== 市场风格:防守/进攻归组对照(复用 /api/market/sector_flow, 包装 switchPage 接入) ===== -->
+<script src="/static/js/market-style.js?v=20261122i"></script>
 <!-- ===== STAGE6-PRED: 今日推荐 + 持仓份额行内编辑 + 北向/QDII 口径说明 ===== -->
 <script src="/static/js/recommendations.js?v=20261122a"></script>
 <!-- ===== STAGE7: workbench ===== 工作台一屏判读(复用既有端点;包装 switchPage 接入) ===== -->
-<script src="/static/js/workbench.js?v=20261122c"></script>
+<script src="/static/js/workbench.js?v=20261122i"></script>
+<!-- ===== 策略适配自检: 钱/时间/回撤三问定位(纯本机规则, 不调用 LLM) ===== -->
+<script src="/static/js/strategy-fit.js?v=20261122j"></script>
 <!-- ===== STAGE7: global-dashboard ===== 全球市场面板(全球指数全景/行业板块/速览条;包装 switchPage 接入) ===== -->
 <script src="/static/js/global-market.js"></script>
 <!-- ===== STAGE7: version-modal ===== 版本更新弹窗(health.version vs localStorage 自动弹出;暴露 window.openVersionModal) ===== -->
