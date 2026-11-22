@@ -53,6 +53,14 @@
     var y = function (p) { return padT + (max - p) * (H - padT - padB) / (max - min); };
     var idx = {};
     bars.forEach(function (b, i) { idx[b.date] = i; });
+    /* 结构端点可能早于可视窗口：夹到首尾，保证中枢/笔仍能画出可见部分 */
+    var clampIdx = function (date) {
+      if (idx[date] !== undefined) return idx[date];
+      if (!date) return null;
+      if (date < bars[0].date) return 0;
+      if (date > bars[n - 1].date) return n - 1;
+      return null;
+    };
 
     var grid = '';
     for (var g = 0; g <= 4; g++) {
@@ -76,8 +84,8 @@
     }).join('');
 
     var pivots = (data.pivots || []).map(function (p) {
-      var a = idx[p.start_date], b = idx[p.end_date];
-      if (a === undefined || b === undefined) return '';
+      var a = clampIdx(p.start_date), b = clampIdx(p.end_date);
+      if (a === null || b === null || b < a) return '';
       var x1 = x(a), x2 = x(b);
       var y1 = y(p.zg), y2 = y(p.zd);
       return '<g class="cl-pivot">'
@@ -87,8 +95,8 @@
     }).join('');
 
     var points = (data.strokes || []).map(function (s) {
-      var a = idx[s.start_date], b = idx[s.end_date];
-      if (a === undefined || b === undefined) return null;
+      var a = clampIdx(s.start_date), b = clampIdx(s.end_date);
+      if (a === null || b === null) return null;
       return [x(a), y(s.start_price), x(b), y(s.end_price)];
     }).filter(Boolean);
     var strokes = points.length
