@@ -38,6 +38,77 @@
 
   const DISCLAIMER = '<div class="pred-disclaimer">仅供参考, 不构成投资建议。标的由规则信号生成并经 AI 润色理由, 请独立判断并自担风险。</div>';
 
+  function hasAdminToken() {
+    try { return !!localStorage.getItem('admin_token'); } catch (e) { return false; }
+  }
+
+  function jumpToStock(code) {
+    if (!code) return;
+    if (typeof window.switchPage === 'function') window.switchPage('market');
+    const input = document.getElementById('stockSearchInput');
+    if (input) input.value = code;
+    if (typeof window.loadStockDetail === 'function') window.loadStockDetail(code);
+    const card = document.getElementById('stockSearchCard');
+    if (card && card.scrollIntoView) {
+      setTimeout(function () { card.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 60);
+    }
+  }
+
+  function openFundHoldings(code, name) {
+    if (!code) return;
+    if (typeof window.viewHoldings === 'function') window.viewHoldings(code, name || code);
+  }
+
+  async function addToWatchlist(code, name, btn) {
+    if (!code) return;
+    if (!hasAdminToken()) {
+      if (typeof showToast === 'function') showToast('加自选需要管理员 Token, 请先在设置中配置', 'error');
+      return;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = '保存中…'; }
+    const headers = { 'Content-Type': 'application/json' };
+    try {
+      const t = localStorage.getItem('admin_token');
+      if (t) headers['Authorization'] = 'Bearer ' + t;
+      const resp = await fetch('/api/monitor/watchlist', {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({ stock_code: code, rules: ['price_surge'] }),
+      });
+      const body = await resp.json().catch(function () { return {}; });
+      const ok = resp.ok && body && body.success !== false;
+      if (ok) {
+        if (btn) { btn.textContent = '已加自选'; btn.disabled = true; }
+        if (typeof showToast === 'function') showToast((name || code) + ' 已加入自选', 'success');
+      } else {
+        if (btn) { btn.disabled = false; btn.textContent = '加自选'; }
+        const msg = (body && body.detail) || (body && body.message) || ('HTTP ' + resp.status);
+        if (typeof showToast === 'function') showToast('加自选失败: ' + msg, 'error');
+      }
+    } catch (e) {
+      if (btn) { btn.disabled = false; btn.textContent = '加自选'; }
+      if (typeof showToast === 'function') showToast('加自选失败, 请检查网络后重试', 'error');
+    }
+  }
+
+  function actionButtons(it) {
+    const symbol = esc(it.symbol || '');
+    const name = esc(it.name || '');
+    const attrs = ' data-rec-symbol="' + symbol + '" data-rec-name="' + name + '"';
+    if (it.kind === 'fund') {
+      return '<div class="pred-rec-actions">'
+        + '<button type="button" class="btn btn-sm btn-outline" data-rec-action="holdings"' + attrs
+        + ' aria-label="查看 ' + name + ' 的重仓股">看重仓</button>'
+        + '</div>';
+    }
+    return '<div class="pred-rec-actions">'
+      + '<button type="button" class="btn btn-sm btn-outline" data-rec-action="chart"' + attrs
+      + ' aria-label="查看 ' + name + ' 的K线">看K线</button>'
+      + '<button type="button" class="btn btn-sm btn-outline" data-rec-action="watch"' + attrs
+      + ' aria-label="把 ' + name + ' 加入自选">加自选</button>'
+      + '</div>';
+  }
+
   function itemHTML(it) {
     const cls = it.direction === 'up' ? 'up' : 'down';
     const dirLabel = it.direction === 'up' ? '看涨' : '看跌';
@@ -50,8 +121,26 @@
       + Freshness.html({ asOf: esc(String(it.created_at || '').slice(11, 16)), note: '信号: ' + esc(it.source_signal) })
       + '</div>'
       + '<div class="pred-rec-reason">' + esc(it.reason || '—') + '</div>'
+      + actionButtons(it)
       + DISCLAIMER
       + '</div>';
+  }
+
+  function bindActions() {
+    const body = document.getElementById('predRecommendBody');
+    if (!body || body.__recActionsBound) return;
+    body.__recActionsBound = true;
+    body.addEventListener('click', function (e) {
+      const btn = e.target && e.target.closest ? e.target.closest('[data-rec-action]') : null;
+      if (!btn) return;
+      e.preventDefault();
+      const symbol = btn.getAttribute('data-rec-symbol') || '';
+      const name = btn.getAttribute('data-rec-name') || '';
+      const action = btn.getAttribute('data-rec-action');
+      if (action === 'chart') jumpToStock(symbol);
+      else if (action === 'holdings') openFundHoldings(symbol, name);
+      else if (action === 'watch') addToWatchlist(symbol, name, btn);
+    });
   }
 
   async function load() {
@@ -238,6 +327,7 @@
 
   function init() {
     wrapSwitchPage();
+    bindActions();
     observeFundTable();
     observeNorthbound();
   }

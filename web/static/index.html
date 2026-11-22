@@ -1021,7 +1021,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 <!-- ===== STAGE7: global-dashboard ===== 全球市场面板 + 版本弹窗样式(引用既有 token, 红涨绿跌) -->
 <link rel="stylesheet" href="/static/css/global-market.css">
 <!-- 2026-11-22: 终端化收尾(板块三视图/行情大屏栅格/K线周期/基金徽章),须最后加载以覆盖存量布局 -->
-<link rel="stylesheet" href="/static/css/terminal-ui.css?v=20261122d">
+<link rel="stylesheet" href="/static/css/terminal-ui.css?v=20261122e">
 <!-- 性能优化:lightweight-charts 改为懒加载(仅在用户点击"走势"时加载),避免阻塞首屏 -->
 <link rel="preconnect" href="https://unpkg.com" crossorigin>
 <link rel="dns-prefetch" href="https://unpkg.com">
@@ -3248,6 +3248,9 @@ function onMultiAgentAnalyzeClick(btn) {
 function onToggleFundChartClick(btn) {
   toggleFundChart(btn.getAttribute('data-code') || '');
 }
+function onFundPeriodClick(btn) {
+  setFundChartPeriod(btn.getAttribute('data-code') || '', btn.getAttribute('data-fund-period') || '');
+}
 function onDeleteFundPositionClick(btn) {
   deleteFundPosition(btn.getAttribute('data-code') || '');
 }
@@ -4673,7 +4676,12 @@ function renderStockDetail(d, meta) {
       <div><b style="font-size:14px;">${escapeHtml(name)}</b>
         <span style="color:var(--text-muted);font-size:12px;margin-left:6px;">${escapeHtml(d.code)}</span>
       </div>
-      <button class="btn btn-sm btn-outline" onclick="openKlineFromLastStock()">查看K线</button>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button class="btn btn-sm btn-outline" id="stockWatchBtn"
+          data-code="${escapeHtml(d.code)}" data-name="${escapeHtml(name)}" data-state="off"
+          aria-pressed="false" onclick="toggleStockWatch(this)">加自选</button>
+        <button class="btn btn-sm btn-outline" onclick="openKlineFromLastStock()">查看K线</button>
+      </div>
     </div>
     ${degraded ? '<div style="margin-bottom:8px;padding:8px 12px;border:1px dashed var(--color-warning);border-radius:6px;font-size:12px;color:var(--color-warning);">行情/财务数据缺失，以下显示“—”而非 0</div>'
       : (missing.length ? `<div style="margin-bottom:8px;padding:8px 12px;border:1px dashed var(--border-subtle, rgba(148,163,184,.35));border-radius:6px;font-size:12px;color:var(--text-muted);">该标的暂无 <b style="color:var(--text-secondary);">${escapeHtml(missingText)}</b> 数据，对应字段显示“—”（不是 0）</div>` : '')}
@@ -4714,6 +4722,79 @@ function renderStockDetail(d, meta) {
   // 区间摘要后端只等 1 秒，超时就不阻塞主响应；这里异步补拉一次。
   if (!k || !Object.keys(k).length) loadStockRangeSummary(d.code);
   loadStockFlowStreak(d.code);
+  syncStockWatchState(d.code);
+}
+
+// ===== 自选股开关(复用 /api/monitor/watchlist, 写操作需管理员 Token) =====
+let _stockWatchSeq = 0;
+
+function _setStockWatchBtn(btn, on) {
+  if (!btn) return;
+  btn.dataset.state = on ? 'on' : 'off';
+  btn.textContent = on ? '已自选' : '加自选';
+  btn.title = on ? '点击从自选股移除' : '加入自选股（需管理员 Token）';
+  btn.classList.toggle('btn-primary', on);
+  btn.classList.toggle('btn-outline', !on);
+  btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+}
+
+async function syncStockWatchState(code) {
+  const btn = document.getElementById('stockWatchBtn');
+  if (!btn || btn.getAttribute('data-code') !== code) return;
+  const seq = ++_stockWatchSeq;
+  let token = null;
+  try { token = localStorage.getItem('admin_token'); } catch (e) { token = null; }
+  if (!token) {
+    _setStockWatchBtn(btn, false);
+    btn.title = '需先配置管理员 Token 才能使用自选股';
+    return;
+  }
+  let rows = [];
+  try {
+    const data = await api('/api/monitor/watchlist');
+    rows = Array.isArray(data) ? data : [];
+  } catch (e) {
+    return; // 列表读不到不臆测状态, 保持“加自选”
+  }
+  if (seq !== _stockWatchSeq) return;
+  const current = document.getElementById('stockWatchBtn');
+  if (!current || current.getAttribute('data-code') !== code) return;
+  const on = rows.some(r => String(r.stock_code || '') === code);
+  _setStockWatchBtn(current, on);
+}
+
+async function toggleStockWatch(btn) {
+  if (!btn) return;
+  const code = btn.getAttribute('data-code') || '';
+  const name = btn.getAttribute('data-name') || code;
+  if (!code) return;
+  let token = null;
+  try { token = localStorage.getItem('admin_token'); } catch (e) { token = null; }
+  if (!token) {
+    showToast('需先配置管理员 Token 才能保存自选股', 'error');
+    return;
+  }
+  const on = btn.dataset.state === 'on';
+  btn.disabled = true;
+  try {
+    if (on) {
+      await api('/api/monitor/watchlist/' + encodeURIComponent(code), { method: 'DELETE' });
+      showToast(name + ' 已从自选移除', 'info');
+    } else {
+      await api('/api/monitor/watchlist', {
+        method: 'POST',
+        body: JSON.stringify({ stock_code: code, rules: ['price_surge'] })
+      });
+      showToast(name + ' 已加入自选', 'success');
+    }
+    _setStockWatchBtn(btn, !on);
+    if (typeof loadWatchlist === 'function') loadWatchlist();
+  } catch (e) {
+    const msg = (e && e.status === 401) ? '管理员 Token 无效或已过期' : ((e && e.message) || '请稍后重试');
+    showToast((on ? '移除失败: ' : '加自选失败: ') + msg, 'error');
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function _stockRangeHTML(k) {
@@ -6160,6 +6241,8 @@ async function loadFundData() {
   const data = await api('/api/fund/positions');
   if (!data) return;
   const positions = data.positions || [];
+  _fundPositionsByCode = {};
+  positions.forEach(p => { if (p.fund_code) _fundPositionsByCode[p.fund_code] = p; });
   const summary = data.summary || {};
 
   // 2026-11-19: Render 免费实例重新部署会清空磁盘, 持仓文件随之丢失。
@@ -6239,6 +6322,8 @@ async function loadFundData() {
     // 阶段六:名称缺失时回退显示基金代码,避免出现空白的"—"
     const safeName = escapeHtml(p.fund_name || p.fund_code || '—');
     const safeNameAttr = escapeHtml(p.fund_name || '');  // 用于 onclick 字符串字面量
+    const costNum = Number(p.cost_nav);
+    const costNavText = isFinite(costNum) && costNum > 0 ? costNum.toFixed(4) : '—';
     return `<tr data-fund-code="${escapeHtml(p.fund_code)}">
       <td>${escapeHtml(p.fund_code)}</td>
       <td>${safeName}</td>
@@ -6267,6 +6352,12 @@ async function loadFundData() {
     </tr>
     <tr id="chart-row-${p.fund_code}" data-chart-for="${escapeHtml(p.fund_code)}" style="display:none;">
       <td colspan="8" style="padding:0;border:none;">
+        <div class="fund-chart-head">
+          <span class="fund-chart-title">净值走势 · 虚线为持仓成本 ${costNavText}</span>
+          <span class="fund-chart-periods" role="group" aria-label="净值走势周期">
+            ${Object.keys(FUND_CHART_PERIODS).map(k => `<button type="button" class="fund-chart-period${k === (_fundChartPeriods[p.fund_code] || '1y') ? ' is-active' : ''}" data-code="${escapeHtml(p.fund_code)}" data-fund-period="${k}" aria-pressed="${k === (_fundChartPeriods[p.fund_code] || '1y') ? 'true' : 'false'}" onclick="onFundPeriodClick(this)">${FUND_CHART_PERIODS[k]}</button>`).join('')}
+          </span>
+        </div>
         <div id="fund-chart-${p.fund_code}" style="position:relative;overflow:hidden;height:220px;width:100%;"></div>
       </td>
     </tr>`;
@@ -6307,6 +6398,9 @@ async function loadFundAdvice() {
 }
 
 const _fundCharts = {};
+const _fundChartPeriods = {};
+let _fundPositionsByCode = {};
+const FUND_CHART_PERIODS = { '3m': '近3月', '6m': '近6月', '1y': '近1年', '3y': '近3年' };
 let _lightweightChartsLoaded = false; // lightweight-charts 库加载状态
 
 // 懒加载 lightweight-charts 库(仅在首次点击"走势"时加载,避免阻塞首屏)
@@ -6327,58 +6421,98 @@ async function toggleFundChart(fundCode) {
   if (!row) return;
   if (row.style.display === 'none') {
     row.style.display = '';
-    const container = document.getElementById(`fund-chart-${fundCode}`);
-    if (!container) return;
-    // 先销毁旧图表再清空 DOM: 否则旧 canvas 还在引用、占位文案会占满 220px，
-    // 新图表被追加到占位块下方，看起来像"图表盖住后续持仓行"（2026-11-19 线上复现）。
-    if (_fundCharts[fundCode]) {
-      try { _fundCharts[fundCode].remove(); } catch (e) { /* 已随 innerHTML 移除 */ }
-      delete _fundCharts[fundCode];
-    }
-    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px;">加载净值走势中...</div>';
-    try {
-      // 并行:加载图表库 + 获取历史数据
-      const [_, resp] = await Promise.all([
-        _loadLightweightCharts(),
-        api(`/api/fund/history?code=${fundCode}&period=1y`),
-      ]);
-      if (!resp || !resp.data || !resp.data.length) {
-        container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px;">暂无历史净值数据</div>';
-        return;
-      }
-      // 数据按日期升序排列(lightweight-charts要求)
-      const sorted = resp.data.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
-      const chartData = sorted.map(d => ({
-        time: d.date,
-        value: parseFloat(d.nav || d.acc_nav || 0)
-      }));
-      // 清掉"加载中"占位: lightweight-charts 是 append 模式，不清空会让占位块
-      // 占满 220px 高，图表被追加到其下方并溢出覆盖后续表格行。
-      container.innerHTML = '';
-      // 图表专用色（canvas 渲染不接受 CSS var()，暂不入 token）：轴/网格=#8B92A8/#2A3142，主线=#00D9FF
-      const chart = LightweightCharts.createChart(container, {
-        layout: { background: { type: 'solid', color: 'transparent' }, textColor: '#8B92A8', fontSize: 11 },
-        grid: { vertLines: { color: 'rgba(28,35,51,0.5)' }, horzLines: { color: 'rgba(28,35,51,0.5)' } },
-        rightPriceScale: { borderColor: '#2A3142' },
-        timeScale: { borderColor: '#2A3142', rightOffset: 5 },
-        crosshair: { mode: 0 },
-        handleScroll: true, handleScale: true,
-      });
-      const series = chart.addAreaSeries({
-        lineColor: '#00D9FF',
-        topColor: 'rgba(0,217,255,0.25)',
-        bottomColor: 'rgba(0,217,255,0.0)',
-        lineWidth: 2,
-      });
-      series.setData(chartData);
-      chart.timeScale().fitContent();
-      _fundCharts[fundCode] = chart;
-    } catch (e) {
-      container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px;">加载失败: ${escapeHtml(e.message || '未知错误')}</div>`;
-    }
+    await renderFundChart(fundCode);
   } else {
     row.style.display = 'none';
   }
+}
+
+const _fundChartSeq = {};
+
+async function renderFundChart(fundCode) {
+  const container = document.getElementById(`fund-chart-${fundCode}`);
+  if (!container) return;
+  const period = _fundChartPeriods[fundCode] || '1y';
+  _syncFundPeriodButtons(fundCode, period);
+  const seq = (_fundChartSeq[fundCode] = (_fundChartSeq[fundCode] || 0) + 1);
+  // 先销毁旧图表再清空 DOM: 否则旧 canvas 还在引用、占位文案会占满 220px，
+  // 新图表被追加到占位块下方，看起来像"图表盖住后续持仓行"（2026-11-19 线上复现）。
+  if (_fundCharts[fundCode]) {
+    try { _fundCharts[fundCode].remove(); } catch (e) { /* 已随 innerHTML 移除 */ }
+    delete _fundCharts[fundCode];
+  }
+  container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px;">加载净值走势中...</div>';
+  try {
+    // 并行:加载图表库 + 获取历史数据
+    const [_, resp] = await Promise.all([
+      _loadLightweightCharts(),
+      api(`/api/fund/history?code=${fundCode}&period=${period}`),
+    ]);
+    if (seq !== _fundChartSeq[fundCode]) return;
+    const raw = (resp && resp.data) || [];
+    // 上游缺失时可能返回 nav=0；0 会被画成贴底直线, 直接剔除而不是补数。
+    const points = raw
+      .map(d => ({ date: String(d.date || '').slice(0, 10), nav: parseFloat(d.nav != null ? d.nav : d.acc_nav) }))
+      .filter(d => d.date && isFinite(d.nav) && d.nav > 0)
+      .sort((a, b) => (a.date < b.date ? -1 : 1));
+    if (!points.length) {
+      container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px;">${FUND_CHART_PERIODS[period] || ''}暂无历史净值数据（上游未返回，不补数）</div>`;
+      return;
+    }
+    const chartData = points.map(d => ({ time: d.date, value: d.nav }));
+    // 清掉"加载中"占位: lightweight-charts 是 append 模式，不清空会让占位块
+    // 占满 220px 高，图表被追加到其下方并溢出覆盖后续表格行。
+    container.innerHTML = '';
+    // 图表专用色（canvas 渲染不接受 CSS var()，暂不入 token）：轴/网格=#8B92A8/#2A3142，主线=#00D9FF
+    const chart = LightweightCharts.createChart(container, {
+      layout: { background: { type: 'solid', color: 'transparent' }, textColor: '#8B92A8', fontSize: 11 },
+      grid: { vertLines: { color: 'rgba(28,35,51,0.5)' }, horzLines: { color: 'rgba(28,35,51,0.5)' } },
+      rightPriceScale: { borderColor: '#2A3142' },
+      timeScale: { borderColor: '#2A3142', rightOffset: 5 },
+      crosshair: { mode: 0 },
+      handleScroll: true, handleScale: true,
+    });
+    const series = chart.addAreaSeries({
+      lineColor: '#00D9FF',
+      topColor: 'rgba(0,217,255,0.25)',
+      bottomColor: 'rgba(0,217,255,0.0)',
+      lineWidth: 2,
+    });
+    series.setData(chartData);
+    const pos = _fundPositionsByCode[fundCode];
+    const cost = pos ? Number(pos.cost_nav) : NaN;
+    if (isFinite(cost) && cost > 0) {
+      series.createPriceLine({
+        price: cost,
+        color: '#F5A524',
+        lineWidth: 1,
+        lineStyle: 2, // dashed
+        axisLabelVisible: true,
+        title: '成本 ' + cost.toFixed(4),
+      });
+    }
+    chart.timeScale().fitContent();
+    _fundCharts[fundCode] = chart;
+  } catch (e) {
+    if (seq !== _fundChartSeq[fundCode]) return;
+    container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px;">加载失败: ${escapeHtml(e.message || '未知错误')}</div>`;
+  }
+}
+
+function _syncFundPeriodButtons(fundCode, period) {
+  const row = document.getElementById(`chart-row-${fundCode}`);
+  if (!row) return;
+  row.querySelectorAll('[data-fund-period]').forEach(btn => {
+    const on = btn.getAttribute('data-fund-period') === period;
+    btn.classList.toggle('is-active', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+}
+
+function setFundChartPeriod(fundCode, period) {
+  if (!FUND_CHART_PERIODS[period]) return;
+  _fundChartPeriods[fundCode] = period;
+  renderFundChart(fundCode);
 }
 
 /* ========== P1-3 大盘温度计 ========== */
@@ -9668,7 +9802,7 @@ document.addEventListener('DOMContentLoaded', () => {
 <!-- ===== STAGE6-PRED: 板块二级页(行情容器;复用既有 /api/market/sector_flow) ===== -->
 <script src="/static/js/sector-board.js?v=20261122c"></script>
 <!-- ===== STAGE6-PRED: 今日推荐 + 持仓份额行内编辑 + 北向/QDII 口径说明 ===== -->
-<script src="/static/js/recommendations.js"></script>
+<script src="/static/js/recommendations.js?v=20261122a"></script>
 <!-- ===== STAGE7: workbench ===== 工作台一屏判读(复用既有端点;包装 switchPage 接入) ===== -->
 <script src="/static/js/workbench.js?v=20261122c"></script>
 <!-- ===== STAGE7: global-dashboard ===== 全球市场面板(全球指数全景/行业板块/速览条;包装 switchPage 接入) ===== -->

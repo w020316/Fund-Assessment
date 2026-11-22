@@ -515,6 +515,7 @@ def test_frontend_js_files_pass_node_syntax_check():
         "web/static/js/workbench.js",
         "web/static/js/stage6-portfolio.js",
         "web/static/js/ma-optimizer.js",
+        "web/static/js/recommendations.js",
     ]
     for rel in targets:
         path = ROOT / rel
@@ -927,3 +928,55 @@ def test_layout_spacing_on_4px_grid_slice():
         css = (ROOT / rel).read_text(encoding="utf-8")
         for b in bads:
             assert b not in css, f"{rel} 出现已下网的旧值: {b}"
+
+
+# ===== 推荐可执行 / 自选开关 / 净值走势增强(2026-11-22 第三批) =====
+
+
+def test_recommendation_cards_expose_actions():
+    """推荐卡必须能直达行情/重仓并加入自选, 而不是只展示文字。"""
+    js = (ROOT / "web/static/js/recommendations.js").read_text(encoding="utf-8")
+    for needle in (
+        'data-rec-action="chart"',
+        'data-rec-action="holdings"',
+        'data-rec-action="watch"',
+        "/api/monitor/watchlist",
+        "window.loadStockDetail",
+        "window.viewHoldings",
+        "pred-rec-actions",
+    ):
+        assert needle in js, f"recommendations.js 缺少 {needle}"
+
+
+def test_stock_detail_watch_toggle_reads_existing_state():
+    """个股详情的自选按钮必须先读列表状态, 再决定加/移除, 不能盲写。"""
+    text = _index()
+    for needle in (
+        'id="stockWatchBtn"',
+        "toggleStockWatch(this)",
+        "syncStockWatchState(",
+        "async function toggleStockWatch(",
+        "/api/monitor/watchlist/",
+        "dataset.state === 'on'",
+    ):
+        assert needle in text, f"index.html 缺少 {needle}"
+    # 移除走 DELETE、新增走 POST, 不能只做单向写入
+    assert "method: 'DELETE'" in text
+    assert "method: 'POST',\n        body: JSON.stringify({ stock_code: code, rules: ['price_surge'] })" in text
+
+
+def test_fund_chart_has_period_switch_and_cost_line():
+    """基金走势: 周期切换 + 成本虚线; 上游 0 值必须剔除而不是画成贴底。"""
+    text = _index()
+    for needle in (
+        "data-fund-period=\"${k}\"",
+        "'3m': '近3月'",
+        "setFundChartPeriod(",
+        "FUND_CHART_PERIODS",
+        "series.createPriceLine(",
+        "成本 ",
+        "_fundPositionsByCode",
+        "上游未返回，不补数",
+    ):
+        assert needle in text, f"index.html 缺少 {needle}"
+    assert "period=1y`" not in text, "净值走势不应再把周期硬编码为 1y"
