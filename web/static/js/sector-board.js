@@ -1,7 +1,7 @@
 /**
  * STAGE6-PRED: sector-board.js — 行情容器"板块"二级页(R2.1)。
  *
- * - 数据源: 既有公开端点 GET /api/market/sector_flow(零新端点)
+ * - 数据源: GET /api/market/sector_flow; 点击板块下钻 GET /api/market/sector_stocks
  * - 三个视图: 涨跌榜 / 资金流 / 强弱分布
  * - 强弱分布: 横轴主力净流入、纵轴涨跌幅的四象限气泡图(不虚构板块关系)
  * - 缺失数据一律「—」并说明原因, 不按 0 计入排序与图表
@@ -19,7 +19,17 @@
     tab: 'board',
     filter: 'all',
     query: '',
-    lastError: ''
+    lastError: '',
+    drawer: {
+      seq: 0,
+      sector: '',
+      code: '',
+      loading: false,
+      items: null,
+      meta: null,
+      error: '',
+      trigger: null
+    }
   };
   var searchTimer = null;
   var CACHE_MS = 15000;
@@ -41,6 +51,15 @@
     var n = Number(v);
     var sign = signed && n > 0 ? '+' : '';
     return sign + (n / 1e8).toFixed(2) + '\u00a0亿';
+  }
+
+  function fmtAmount(v) {
+    if (!isNum(v)) return '—';
+    var n = Number(v);
+    var abs = Math.abs(n);
+    if (abs >= 1e8) return (n / 1e8).toFixed(2) + '\u00a0亿';
+    if (abs >= 1e4) return (n / 1e4).toFixed(1) + '\u00a0万';
+    return n.toFixed(0) + '\u00a0元';
   }
 
   function clsOf(v) {
@@ -194,7 +213,8 @@
     var ratioCell = ratioOk
       ? '<td class="sb-num">' + (isNum(item.large_order_ratio) ? Number(item.large_order_ratio).toFixed(2) : '—') + '</td>'
       : '<td class="sb-num">—</td>';
-    return '<tr>'
+    return '<tr class="sb-row-link" data-sb-sector="' + esc(item.sector || '') + '" data-sb-code="' + esc(item.code || '') + '"'
+      + ' tabindex="0" role="button" aria-label="查看' + esc(item.sector || '该板块') + '成分股">'
       + '<td class="sb-rank">' + (idx + 1) + '</td>'
       + '<td class="sb-name">' + esc(item.sector || '—') + '</td>'
       + '<td class="sb-num ' + clsOf(pct) + '">' + (pctKnown ? esc(fmtPct(pct)) : '—') + '</td>'
@@ -233,7 +253,8 @@
     return list.map(function (it) {
       var v = Number(it.main_net_inflow);
       var w = Math.max(2, Math.round(Math.abs(v) / maxAbs * 100));
-      return '<div class="sb-flow-row">'
+      return '<div class="sb-flow-row sb-row-link" data-sb-sector="' + esc(it.sector || '') + '" data-sb-code="' + esc(it.code || '') + '"'
+        + ' tabindex="0" role="button" aria-label="查看' + esc(it.sector || '该板块') + '成分股">'
         + '<span class="sb-flow-name" title="' + esc(it.sector || '') + '">' + esc(it.sector || '—') + '</span>'
         + '<span class="sb-flow-bar"><i class="' + clsOf(v) + '" style="width:' + w + '%"></i></span>'
         + '<span class="sb-flow-val ' + clsOf(v) + '">' + esc(fmtYi(v, true)) + '</span>'
@@ -261,6 +282,7 @@
     var total = items.reduce(function (sum, it) { return sum + Number(it.main_net_inflow); }, 0);
     var inflowCount = items.filter(function (it) { return Number(it.main_net_inflow) > 0; }).length;
     var outflowCount = items.filter(function (it) { return Number(it.main_net_inflow) < 0; }).length;
+    var src = sourceText(state.meta);
 
     el.innerHTML = '<div class="sb-flow-head">'
       + '<div><span class="sb-flow-head-label">板块主力合计</span>'
@@ -273,7 +295,7 @@
       + '<section><h3 class="sb-flow-title is-down">主力净流出 TOP8</h3>'
       + flowRows(neg, maxNeg, -1) + '</section>'
       + '</div>'
-      + '<div class="pred-muted sb-foot">资金流为东财行业板块口径；左右两栏条形各自缩放，仅用于组内比较。缺失值不补零。</div>';
+      + '<div class="pred-muted sb-foot">资金流来源：' + esc(src) + '；左右两栏条形各自缩放，仅用于组内比较。缺失值不补零。</div>';
   }
 
   function shortName(name) {
@@ -408,7 +430,9 @@
       p.y = yOf(p.pct);
       p.r = r;
       p.score = (Math.abs(p.flow) / maxFlow) * 0.65 + (Math.abs(p.pct) / maxAbsPct) * 0.35;
-      return '<g class="sb-bubble ' + cls + '" tabindex="0" role="img" aria-label="' + esc(title) + '">'
+      return '<g class="sb-bubble sb-row-link ' + cls + '" tabindex="0" role="button"'
+        + ' data-sb-sector="' + esc(p.item.sector || '') + '" data-sb-code="' + esc(p.item.code || '') + '"'
+        + ' aria-label="' + esc(title) + '，查看成分股">'
         + '<title>' + esc(title) + '</title>'
         + '<circle cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="' + r.toFixed(1) + '"/>'
         + '</g>';
@@ -540,6 +564,176 @@
     else renderTab();
   }
 
+  function openDrawer(sector, code) {
+    var d = state.drawer;
+    var panel = $('sbDrawer');
+    var backdrop = $('sbDrawerBackdrop');
+    if (!panel || !backdrop) return;
+    d.trigger = document.activeElement;
+    d.sector = sector || '';
+    d.code = code || '';
+    d.items = null;
+    d.meta = null;
+    d.error = '';
+    d.loading = true;
+    panel.hidden = false;
+    backdrop.hidden = false;
+    panel.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('sb-drawer-open');
+    renderDrawer();
+    requestAnimationFrame(function () {
+      panel.classList.add('is-open');
+      backdrop.classList.add('is-open');
+    });
+    var closeBtn = $('sbDrawerClose');
+    if (closeBtn) closeBtn.focus();
+    loadStocks();
+  }
+
+  function closeDrawer() {
+    var panel = $('sbDrawer');
+    var backdrop = $('sbDrawerBackdrop');
+    if (!panel || panel.hidden) return;
+    panel.classList.remove('is-open');
+    backdrop.classList.remove('is-open');
+    panel.hidden = true;
+    backdrop.hidden = true;
+    panel.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('sb-drawer-open');
+    var trigger = state.drawer.trigger;
+    if (trigger && typeof trigger.focus === 'function') {
+      try { trigger.focus(); } catch (e) { /* ignore */ }
+    }
+  }
+
+  function findSector(sector, code) {
+    var items = state.data || [];
+    for (var i = 0; i < items.length; i++) {
+      if (code && items[i].code === code) return items[i];
+      if (!code && sector && items[i].sector === sector) return items[i];
+    }
+    return null;
+  }
+
+  function renderDrawer() {
+    var d = state.drawer;
+    var title = $('sbDrawerTitle');
+    var sub = $('sbDrawerSub');
+    var metaEl = $('sbDrawerMeta');
+    var body = $('sbDrawerBody');
+    if (!body) return;
+    var current = findSector(d.sector, d.code);
+
+    if (title) title.textContent = d.sector || '板块成分股';
+    if (sub) {
+      var bits = [];
+      if (current) {
+        bits.push('涨跌幅 ' + fmtPct(current.change_pct));
+        bits.push('主力净流入 ' + fmtYi(current.main_net_inflow, true));
+      }
+      if (d.code) bits.push(d.code);
+      sub.textContent = bits.length ? bits.join(' · ') : '成分股';
+    }
+
+    if (metaEl) {
+      if (d.loading) {
+        metaEl.textContent = '读取成分股…';
+      } else if (d.error) {
+        metaEl.textContent = '成分股数据源暂不可用';
+      } else if (d.items && d.items.length) {
+        var asOf = d.meta && d.meta.timestamp ? String(d.meta.timestamp).slice(11, 19) : '';
+        metaEl.textContent = sourceText(d.meta) + (asOf ? ' · ' + asOf : '') + ' · ' + d.items.length + ' 只';
+      } else {
+        var unavailable = d.meta && d.meta.unavailable_fields ? d.meta.unavailable_fields : [];
+        metaEl.textContent = unavailable.length ? '上游未返回成分股' : '暂无成分股';
+      }
+    }
+
+    if (d.loading) {
+      body.innerHTML = '<div class="pred-empty">加载成分股…</div>';
+      return;
+    }
+    if (d.error) {
+      body.innerHTML = '<div class="pred-empty"><b>成分股加载失败</b><br>数据源暂不可用或请求超时。'
+        + '<button class="btn btn-sm btn-outline" type="button" data-sb-drawer-retry style="margin-left:8px;">重试</button></div>';
+      return;
+    }
+    if (!d.items || !d.items.length) {
+      body.innerHTML = '<div class="pred-empty"><b>该板块暂未返回成分股</b><br>'
+        + '可能原因：板块代码与当前资金榜口径不一致（新浪资金榜无成分股接口），或上游暂时限流。'
+        + '缺失数据不补零，也不生成示例个股。'
+        + '<button class="btn btn-sm btn-outline" type="button" data-sb-drawer-retry style="margin-left:8px;">重试</button></div>';
+      return;
+    }
+
+    var list = d.items.slice();
+    var withPct = list.filter(hasPct);
+    var noPct = list.filter(function (it) { return !hasPct(it); });
+    withPct.sort(function (a, b) { return Number(b.change_pct) - Number(a.change_pct); });
+    list = withPct.concat(noPct);
+    var rows = list.map(function (it) {
+      var code = String(it.code || '');
+      return '<tr class="sb-stock-row" data-sb-stock="' + esc(code) + '" tabindex="0" role="button"'
+        + ' aria-label="查看 ' + esc(it.name || code) + ' ' + esc(code) + ' 详情">'
+        + '<td class="sb-stock-code">' + esc(code || '—') + '</td>'
+        + '<td class="sb-stock-name">' + esc(it.name || '—') + '</td>'
+        + '<td class="sb-num">' + (isNum(it.price) ? Number(it.price).toFixed(2) : '—') + '</td>'
+        + '<td class="sb-num ' + clsOf(it.change_pct) + '">' + esc(fmtPct(it.change_pct)) + '</td>'
+        + '<td class="sb-num">' + esc(fmtAmount(it.amount)) + '</td></tr>';
+    }).join('');
+
+    body.innerHTML = '<div class="sb-drawer-table-wrap" tabindex="0">'
+      + '<table class="pred-sector-table sb-table sb-stock-table">'
+      + '<thead><tr><th>代码</th><th>名称</th><th class="sb-num">最新价</th>'
+      + '<th class="sb-num">涨跌幅</th><th class="sb-num">成交额</th></tr></thead>'
+      + '<tbody>' + rows + '</tbody></table></div>'
+      + '<div class="pred-muted sb-foot">共 ' + list.length + ' 只 · 按涨跌幅降序，缺失值排在最后 · 点击任意个股进入行情总览</div>';
+  }
+
+  async function loadStocks() {
+    var d = state.drawer;
+    if (!d.sector && !d.code) {
+      d.loading = false;
+      d.error = 'missing';
+      renderDrawer();
+      return;
+    }
+    var seq = ++d.seq;
+    d.loading = true;
+    d.error = '';
+    renderDrawer();
+    var params = ['limit=100', '_t=' + Date.now()];
+    if (d.code) params.push('code=' + encodeURIComponent(d.code));
+    if (d.sector) params.push('name=' + encodeURIComponent(d.sector));
+    var r = await fetchJSON('/api/market/sector_stocks?' + params.join('&'));
+    if (seq !== d.seq) return;
+    var body = (r && r.body) || {};
+    d.loading = false;
+    if (r && r.ok && Array.isArray(body.data)) {
+      d.items = body.data;
+      d.meta = body._meta || {};
+      d.error = '';
+    } else {
+      d.items = null;
+      d.meta = body._meta || null;
+      d.error = 'fetch-failed';
+    }
+    renderDrawer();
+  }
+
+  function jumpToStock(code) {
+    if (!code) return;
+    closeDrawer();
+    if (typeof window.switchPage === 'function') window.switchPage('market');
+    var input = $('stockSearchInput');
+    if (input) input.value = code;
+    if (typeof window.loadStockDetail === 'function') window.loadStockDetail(code);
+    var card = $('stockSearchCard');
+    if (card && card.scrollIntoView) {
+      setTimeout(function () { card.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 60);
+    }
+  }
+
   function bindUI() {
     var page = $('page-sector-board');
     if (!page || page.__sbBound) return;
@@ -555,6 +749,21 @@
         var chips = page.querySelectorAll('.sb-chip');
         for (var i = 0; i < chips.length; i++) chips[i].classList.toggle('is-active', chips[i] === chip);
         renderTab();
+        return;
+      }
+      if (t.closest && (t.closest('#sbDrawerClose') || t.closest('#sbDrawerBackdrop'))) {
+        closeDrawer();
+        return;
+      }
+      if (t.closest && t.closest('[data-sb-drawer-retry]')) { loadStocks(); return; }
+      var stockRow = t.closest ? t.closest('[data-sb-stock]') : null;
+      if (stockRow) {
+        jumpToStock(stockRow.getAttribute('data-sb-stock'));
+        return;
+      }
+      var sectorEl = t.closest ? t.closest('[data-sb-sector]') : null;
+      if (sectorEl && !sectorEl.closest('#sbDrawer')) {
+        openDrawer(sectorEl.getAttribute('data-sb-sector'), sectorEl.getAttribute('data-sb-code'));
         return;
       }
       if (t.closest && t.closest('[data-sb-retry]')) { load(true); return; }
@@ -582,6 +791,27 @@
         }, 120);
       });
     }
+
+    page.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') {
+        var panel = $('sbDrawer');
+        if (panel && !panel.hidden) { e.preventDefault(); closeDrawer(); }
+        return;
+      }
+      if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+      var t = e.target;
+      var stockRow = t.closest ? t.closest('[data-sb-stock]') : null;
+      if (stockRow) {
+        e.preventDefault();
+        jumpToStock(stockRow.getAttribute('data-sb-stock'));
+        return;
+      }
+      var sectorEl = t.closest ? t.closest('[data-sb-sector]') : null;
+      if (sectorEl && !sectorEl.closest('#sbDrawer')) {
+        e.preventDefault();
+        openDrawer(sectorEl.getAttribute('data-sb-sector'), sectorEl.getAttribute('data-sb-code'));
+      }
+    });
   }
 
   function maybeAutoLoad() {
@@ -608,7 +838,7 @@
     maybeAutoLoad();
   }
 
-  window.SectorBoard = { load: load, setTab: setTab };
+  window.SectorBoard = { load: load, setTab: setTab, openSector: openDrawer, closeDrawer: closeDrawer };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);

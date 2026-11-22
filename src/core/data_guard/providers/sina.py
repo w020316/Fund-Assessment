@@ -295,6 +295,39 @@ def fetch_sector_ranking_sina_v2_raw() -> list[dict]:
     return result[:50]
 
 
+def fetch_sector_stocks_sina_raw(node: str, count: int = 100) -> list[dict]:
+    """新浪行业板块成分股(Market_Center.getHQNodeData, node=hangye_*)。
+
+    数值缺失返回 None(不填 0), 由前端统一渲染「—」; 异常向上抛出,
+    由 data_source_v2 门面记录健康度并降级为空列表。
+    """
+    url = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData"
+    params = {
+        "page": 1,
+        "num": max(1, min(int(count), 100)),
+        "sort": "changepercent",
+        "asc": 0,
+        "node": node,
+        "_s_r_a": "auto",
+    }
+    resp = requests.get(url, params=params, timeout=6, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://finance.sina.com.cn/",
+    })
+    resp.encoding = "gbk"
+    items = resp.json()
+    result: list[dict] = []
+    for item in items:
+        result.append({
+            "code": _safe_str(item.get("code", item.get("symbol", ""))),
+            "name": _safe_str(item.get("name", "")),
+            "price": _opt_float(item.get("trade")),
+            "change_pct": _opt_float(item.get("changepercent")),
+            "amount": _opt_float(item.get("amount")),
+        })
+    return result
+
+
 def parse_minutes(bars: list[dict]) -> tuple[dict[int, float], str]:
     """新浪 1 分钟 K 线 → ({分钟序号: 价格}, 日期)。
 

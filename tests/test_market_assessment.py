@@ -274,11 +274,33 @@ class TestMarketThermometerEndToEnd:
 
         assert result["northbound"]["total_net_inflow"] == 80.0
         assert result["northbound"]["available"] is True
-        # 3个板块全部进入top_inflow(top5切片,实际只有3个)
-        assert len(result["sector_main_flow"]["top_inflow"]) == 3
-        # 按净流入降序: 白酒(15) > 半导体(10) > 房地产(-8)
+        # 流入榜只收正值: 白酒(15) > 半导体(10); 房地产(-8) 不得混进流入榜
+        assert len(result["sector_main_flow"]["top_inflow"]) == 2
         assert result["sector_main_flow"]["top_inflow"][0]["name"] == "白酒"
         assert result["sector_main_flow"]["top_inflow"][1]["name"] == "半导体"
+        # 流出榜只收负值, 并按净流出从小到大(最负在前)
+        assert len(result["sector_main_flow"]["top_outflow"]) == 1
+        assert result["sector_main_flow"]["top_outflow"][0]["name"] == "房地产"
+        assert result["sector_main_flow"]["total_net_inflow"] == 17.0
+
+    @pytest.mark.asyncio
+    async def test_capital_flow_top_outflow_excludes_zero_and_positive(self):
+        """TOP5 净流出不得把 0 和正值算进去(旧实现会虚增/虚减合计)。"""
+        mock_sectors = [
+            {"name": "流入A", "change_pct": 1.0, "main_net_inflow": 5 * 1_0000_0000},
+            {"name": "零值B", "change_pct": 0.0, "main_net_inflow": 0},
+            {"name": "流出C", "change_pct": -1.0, "main_net_inflow": -3 * 1_0000_0000},
+            {"name": "流出D", "change_pct": -2.0, "main_net_inflow": -1 * 1_0000_0000},
+        ]
+        with patch.object(market_assessment.ds2, "get_northbound_flow_realtime", return_value={}):
+            with patch.object(market_assessment.ds2, "get_sector_ranking", return_value=mock_sectors):
+                result = await get_capital_flow_overview()
+
+        smf = result["sector_main_flow"]
+        assert [x["name"] for x in smf["top_inflow"]] == ["流入A"]
+        assert [x["name"] for x in smf["top_outflow"]] == ["流出C", "流出D"]
+        assert all(x["main_net_inflow"] < 0 for x in smf["top_outflow"])
+        assert smf["total_net_inflow"] == 1.0
 
     @pytest.mark.asyncio
     async def test_capital_flow_overview_northbound_unavailable_keeps_none(self):

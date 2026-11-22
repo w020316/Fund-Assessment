@@ -959,6 +959,57 @@ def get_sector_ranking_full() -> list[dict]:
 
 _SECTOR_URL = "https://push2.eastmoney.com/api/qt/clist/get"
 
+# 板块代码两种来源: 东财 BKxxxx / 新浪 hangye_xxx。只作为上游参数, 仍需白名单校验。
+_SECTOR_STOCK_CODE_RE = re.compile(r"^(BK\d{4}|hangye_[A-Za-z0-9_]+)$")
+
+
+def get_sector_stocks(code: str = "", name: str = "", count: int = 100) -> dict[str, Any]:
+    """板块成分股(东财 BKxxxx 或新浪 hangye_*)。
+
+    代码缺失时按板块名从当前板块榜反查一次。返回
+    ``{code, source, items}``; 无可用代码/取数失败时 items 为空,
+    由路由层置 quality_score=0, 前端明确显示"成分股暂不可用"。
+    """
+    code = _safe_str(code).strip()
+    name = _safe_str(name).strip()
+    try:
+        limit = max(1, min(int(count), 100))
+    except (TypeError, ValueError):
+        limit = 100
+    if not code and name:
+        for row in get_sector_ranking():
+            if _safe_str(row.get("name")) == name:
+                code = _safe_str(row.get("code")).strip()
+                break
+    if not _SECTOR_STOCK_CODE_RE.match(code):
+        return {"code": code, "source": "", "items": []}
+
+    cache_key = f"sector_stocks:{code}:{limit}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    source = "eastmoney" if code.startswith("BK") else "sina"
+    try:
+        if source == "eastmoney":
+            from src.core.data_guard.providers.eastmoney import fetch_sector_stocks_em_raw
+            items = fetch_sector_stocks_em_raw(code, limit)
+        else:
+            from src.core.data_guard.providers.sina import fetch_sector_stocks_sina_raw
+            items = fetch_sector_stocks_sina_raw(code, limit)
+        if items:
+            data_health.record_success("sector_stocks", len(items))
+            _mark_source("sector_stocks", source)
+        else:
+            data_health.record_failure("sector_stocks", f"{code} empty")
+        result = {"code": code, "source": source, "items": items}
+        _cache_set(cache_key, result, 30)
+        return result
+    except Exception as e:
+        logger.warning(f"get_sector_stocks {code} failed: {e}")
+        data_health.record_failure("sector_stocks", str(e))
+        return {"code": code, "source": source, "items": []}
+
 
 def _fetch_sector_page(page: int, attempts: int = 2) -> tuple[list[dict], int] | None:
     """板块全量分页单页门面(M4-C 绞杀迁移): 取数+解析在

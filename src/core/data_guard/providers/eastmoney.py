@@ -666,6 +666,37 @@ def fetch_sector_ranking_em_raw(fs: str) -> list[dict]:
     return [_ds2._map_sector_row(item) for item in items]
 
 
+def fetch_sector_stocks_em_raw(board_code: str, count: int = 100) -> list[dict]:
+    """东财行业板块成分股(clist, fs=b:BKxxxx)。
+
+    停牌/退市股 f2/f3 为 "-" 时返回 None(缺失), 不使用 0 兜底;
+    异常向上抛出, 由 data_source_v2 门面记录健康度并返回空列表。
+    """
+    params = {
+        "pn": 1,
+        "pz": max(1, min(int(count), 100)),
+        "po": 1,
+        "np": 1,
+        "fltt": 2,
+        "invt": 2,
+        "fid": "f3",
+        "fs": f"b:{board_code}",
+        "fields": "f2,f3,f6,f12,f14",
+    }
+    resp = _ds2.em_get(_ds2._SECTOR_URL, params=params)
+    data = resp.json().get("data") or {}
+    items = data.get("diff") or []
+    if isinstance(items, dict):
+        items = list(items.values())
+    return [{
+        "code": _ds2._safe_str(item.get("f12", "")),
+        "name": _ds2._safe_str(item.get("f14", "")),
+        "price": _ds2._opt_float(item.get("f2")),
+        "change_pct": _ds2._opt_float(item.get("f3")),
+        "amount": _ds2._opt_float(item.get("f6")),
+    } for item in items]
+
+
 def fetch_ulist_breadth_raw(secid: str, attempts: int = 2) -> tuple[int, int, int] | None:
     """ulist.np 单市场涨跌家数聚合取数+解析(原 data_source_v2._ulist_breadth_one)。
 

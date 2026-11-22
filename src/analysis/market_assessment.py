@@ -339,10 +339,12 @@ async def get_capital_flow_overview() -> dict[str, Any]:
     northbound = fetched.get("northbound") or {}
     sector_ranking = fetched.get("sectors") or []
 
-    # 板块主力净流入Top5(正)
-    sectors_with_main = [s for s in sector_ranking if s.get("main_net_inflow")]
-    top_inflow = sorted(sectors_with_main, key=lambda x: float(x.get("main_net_inflow", 0)), reverse=True)[:5]
-    top_outflow = sorted(sectors_with_main, key=lambda x: float(x.get("main_net_inflow", 0)))[:5]
+    # 板块主力净流入TOP5: 流入榜只收 >0、流出榜只收 <0。
+    # 旧实现把 0 和反向资金也塞进两个榜, "净流出TOP5"可能混入正值并算错合计。
+    sectors_positive = [s for s in sector_ranking if float(s.get("main_net_inflow") or 0) > 0]
+    sectors_negative = [s for s in sector_ranking if float(s.get("main_net_inflow") or 0) < 0]
+    top_inflow = sorted(sectors_positive, key=lambda x: float(x.get("main_net_inflow", 0)), reverse=True)[:5]
+    top_outflow = sorted(sectors_negative, key=lambda x: float(x.get("main_net_inflow", 0)))[:5]
 
     total_sector_main_net = sum(float(s.get("main_net_inflow", 0) or 0) for s in sector_ranking)
 
@@ -374,6 +376,7 @@ async def get_capital_flow_overview() -> dict[str, Any]:
             "date": northbound.get("date", ""),
         },
         "sector_main_flow": {
+            "sector_source": ds2.get_last_source("sector_ranking", ""),
             "total_net_inflow": round(total_sector_main_net / 1_0000_0000, 2),
             "top_inflow": [
                 {

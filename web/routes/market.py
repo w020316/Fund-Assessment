@@ -280,9 +280,19 @@ class SectorFlowItem(BaseModel):
     完整度由 _flow_field_quality 如实计入(None 不算 non-zero), 前端按
     unavailable_fields / 「—」区分。"""
     sector: str
+    code: str = ""
     change_pct: float | None = None
     main_net_inflow: float | None = None
     large_order_ratio: float | None = None
+
+
+class SectorStockItem(BaseModel):
+    """板块成分股。价格/涨跌幅/成交额缺失均为 None, 不补 0。"""
+    code: str
+    name: str
+    price: float | None = None
+    change_pct: float | None = None
+    amount: float | None = None
 
 
 @router.get("/stock_realtime")
@@ -864,6 +874,7 @@ async def sector_flow():
             # C-02 收尾(2026-11-17):缺失 → None, 完整度由 _flow_field_quality 如实计入。
             result.append(SectorFlowItem(
                 sector=_safe_str(item.get("name")),
+                code=_safe_str(item.get("code")),
                 change_pct=opt_float(item.get("change_pct")),
                 main_net_inflow=opt_float(item.get("main_net_inflow")),
                 large_order_ratio=opt_float(item.get("main_inflow_pct")),
@@ -876,6 +887,48 @@ async def sector_flow():
     except Exception as e:
         logger.warning(f"sector_flow failed: {e}")
         return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
+
+
+@router.get("/sector_stocks")
+async def sector_stocks(
+    code: str = Query("", max_length=40, description="板块代码(BKxxxx / hangye_*)"),
+    name: str = Query("", max_length=40, description="板块名称(代码缺失时反查)"),
+    limit: int = Query(100, ge=1, le=100, description="最多返回条数"),
+):
+    """板块成分股。拿不到成分股时返回空列表 + quality_score=0, 不伪造。"""
+    if not code.strip() and not name.strip():
+        raise HTTPException(400, "需要提供板块代码或名称")
+    try:
+        payload = await asyncio.to_thread(ds2.get_sector_stocks, code, name, limit)
+        items = [
+            SectorStockItem(
+                code=_safe_str(it.get("code")),
+                name=_safe_str(it.get("name")),
+                price=opt_float(it.get("price")),
+                change_pct=opt_float(it.get("change_pct")),
+                amount=opt_float(it.get("amount")),
+            )
+            for it in payload.get("items") or []
+        ]
+        extra: dict = {"sector_code": payload.get("code") or code}
+        quality = 100.0 if items else 0.0
+        if not items:
+            extra["unavailable_fields"] = ["constituents"]
+        return {
+            "data": items,
+            "_meta": _build_meta(
+                payload.get("source") or "none", quality_score=quality, extra=extra
+            ),
+        }
+    except Exception as e:
+        logger.warning(f"sector_stocks failed: {e}")
+        return {
+            "data": [],
+            "_meta": _build_meta(
+                "none", quality_score=0.0,
+                extra={"unavailable_fields": ["constituents"]},
+            ),
+        }
 
 
 class ResearchReportItem(BaseModel):
@@ -1805,6 +1858,17 @@ async def check_data_quality(stock_code: str):
         "warnings": result.warnings,
         "criticals": result.criticals,
         "issues_count": len(result.issues),
+        # INFO 级问题不会进 warnings/criticals, 但同样影响质量分;
+        # 明细透出以便前端解释"扣分扣在哪", 不让 issues_count 凭空多出来。
+        "issues": [
+            {
+                "level": getattr(issue.level, "value", str(issue.level)),
+                "field": issue.field_name,
+                "message": issue.message,
+                "suggestion": issue.suggestion,
+            }
+            for issue in result.issues
+        ],
         "data_dimensions": {
             "quote": bool(data.get("quote")),
             "kline": bool(data.get("kline_daily")),

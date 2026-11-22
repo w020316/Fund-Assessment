@@ -85,6 +85,11 @@
     if (!isNum(v)) return '—';
     return (signed && v > 0 ? '+' : '') + Number(v).toFixed(2) + '亿';
   }
+  function sectorSourceText(src) {
+    if (src === 'eastmoney') return '东财行业板块口径';
+    if (src === 'sina') return '新浪板块资金口径';
+    return '行业板块主力口径';
+  }
   function fmtMoney(v) {
     if (!isNum(v)) return '—';
     var sign = v > 0 ? '+' : (v < 0 ? '-' : '');
@@ -955,7 +960,7 @@
     var maxIn = allIn.length ? Math.abs(Number(allIn[0].main_net_inflow)) : 1;
     var maxOut = allOut.length ? Math.abs(Number(allOut[0].main_net_inflow)) : 1;
 
-    if (metaEl) metaEl.textContent = d.update_time ? ('更新 ' + clockText(d.update_time)) : '东财行业板块口径';
+    if (metaEl) metaEl.textContent = d.update_time ? ('更新 ' + clockText(d.update_time)) : sectorSourceText(smf.sector_source);
 
     el.innerHTML = '<div class="wb-cap-grid">'
       + '<div class="wb-cap-kpi"><div class="wb-cap-k">北向合计</div>'
@@ -963,7 +968,7 @@
       + '<div class="wb-cap-note">' + esc(nbNote) + '</div></div>'
       + '<div class="wb-cap-kpi"><div class="wb-cap-k">板块主力合计</div>'
       + '<div class="wb-cap-v ' + clsOf(smfOk ? smf.total_net_inflow : null) + '">' + esc(totalVal) + '</div>'
-      + '<div class="wb-cap-note">' + (smfOk ? '东财行业板块口径' : '上游未返回板块资金流') + '</div></div>'
+      + '<div class="wb-cap-note">' + (smfOk ? esc(sectorSourceText(smf.sector_source)) : '上游未返回板块资金流') + '</div></div>'
       + '<div class="wb-cap-kpi"><div class="wb-cap-k">TOP5 净流入</div>'
       + '<div class="wb-cap-v ' + clsOf(allIn.length ? sumIn : null) + '">' + esc(allIn.length ? fmtYiVal(sumIn, true) : '—') + '</div>'
       + '<div class="wb-cap-note">' + (allIn.length ? ('最强 ' + esc(allIn[0].name || '—') + ' · ' + esc(pctText(allIn[0].change_pct))) : '暂无净流入板块（不是 0）') + '</div></div>'

@@ -21,6 +21,7 @@ from typing import Any
 SOURCE_LABELS: dict[str, str] = {
     "index_realtime": "指数实时行情",
     "sector_ranking": "板块资金排行",
+    "sector_stocks": "板块成分股",
     "global_news": "全球财经快讯",
     "fund_realtime": "基金实时估值",
     "fund_history": "基金历史净值",

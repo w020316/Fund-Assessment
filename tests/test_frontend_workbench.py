@@ -42,7 +42,7 @@ def test_workbench_is_default_market_landing():
     assert "workbench: { parent: 'hud-market' }," in text
     assert "'hud-market': 'workbench'," in text
     assert '<link rel="stylesheet" href="/static/css/workbench.css">' in text
-    assert '<script src="/static/js/workbench.js"></script>' in text
+    assert re.search(r'<script src="/static/js/workbench\.js(?:\?v=[^"]+)?"></script>', text)
     # 旧总览页不再默认 active，避免两页同时显示
     assert '<div class="page active" id="page-market">' not in text
 
@@ -833,6 +833,44 @@ def test_sector_board_sort_puts_missing_last_and_fmtYi_guards_null():
     assert ".concat(noPct);" in js
     assert "if (!isNum(v)) return '—';" in js
     assert "function isNum(v) { return v !== null && v !== undefined && v !== ''" in js
+
+
+def test_data_health_tab_wires_existing_quality_endpoint():
+    """深度数据「数据体检」: 复用既有 /api/market/data-quality/{code},
+    必须展示四个维度与缺失/问题明细, 且缺失维度不按 0 分表述。"""
+    html = _index()
+    assert "switchDataTab('health')" in html
+    assert 'id="dataHealthPanel"' in html
+    assert "/api/market/data-quality/" in html
+    assert "function loadDataHealth" in html
+    for label in ("行情", "K线", "资金流", "财务"):
+        assert label in html
+    assert "不按 0 分计算" in html
+
+
+def test_sector_board_drilldown_wires_constituent_endpoint():
+    """板块下钻: 行/气泡需可点击并调用新增成分股端点, 拿不到时明确不可用。"""
+    js = (ROOT / "web/static/js/sector-board.js").read_text(encoding="utf-8")
+    html = _index()
+    assert "/api/market/sector_stocks?" in js
+    assert "data-sb-sector=" in js
+    assert "data-sb-stock=" in js
+    assert 'id="sbDrawer"' in html
+    assert "该板块暂未返回成分股" in js
+    assert "缺失数据不补零" in js
+
+
+def test_data_caliber_card_names_stop_and_fallback_paths():
+    """数据口径卡: 必须写明北向停披、板块回退、净值时效与「—」语义,
+    防止后续改版把诚实性说明删掉。"""
+    html = _index()
+    assert 'id="dataCaliberCard"' in html
+    assert "2024-08" in html
+    assert "成交额" in html and "冒充净流入" in html
+    assert "新浪行业资金榜" in html and "前 50" in html
+    assert "QDII/FOF" in html
+    assert "未自动复权" in html
+    assert "unavailable_fields" in html
 
 
 def test_aurora_theme_stock_hex_are_tokenized():

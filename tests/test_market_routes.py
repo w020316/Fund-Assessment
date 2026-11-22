@@ -90,8 +90,8 @@ _MOCK_RANKING = [
 ]
 
 _MOCK_SECTOR = [
-    {"name": "白酒", "change_pct": 2.5, "main_net_inflow": 50000000, "main_inflow_pct": 52.6},
-    {"name": "半导体", "change_pct": -1.2, "main_net_inflow": -30000000, "main_inflow_pct": 48.0},
+    {"name": "白酒", "code": "BK0477", "change_pct": 2.5, "main_net_inflow": 50000000, "main_inflow_pct": 52.6},
+    {"name": "半导体", "code": "BK0475", "change_pct": -1.2, "main_net_inflow": -30000000, "main_inflow_pct": 48.0},
 ]
 
 _MOCK_SEARCH = [
@@ -182,7 +182,51 @@ class TestSectorFlow:
         data = resp.json()
         assert len(data["data"]) == 2
         assert data["data"][0]["sector"] == "白酒"
+        assert data["data"][0]["code"] == "BK0477"
         assert data["data"][0]["main_net_inflow"] == 50000000
+
+
+class TestSectorStocks:
+    """GET /api/market/sector_stocks(板块成分股下钻)"""
+
+    _MOCK_STOCKS = {
+        "code": "BK0477",
+        "source": "eastmoney",
+        "items": [
+            {"code": "600519", "name": "贵州茅台", "price": 1688.0, "change_pct": 1.11, "amount": 1.2e8},
+            {"code": "000858", "name": "五粮液", "price": None, "change_pct": None, "amount": None},
+        ],
+    }
+
+    def test_returns_constituents(self, client):
+        with patch("web.routes.market.ds2.get_sector_stocks", return_value=self._MOCK_STOCKS):
+            resp = client.get("/api/market/sector_stocks?code=BK0477&limit=10")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert [x["code"] for x in body["data"]] == ["600519", "000858"]
+        # 缺失价格/涨跌幅保持 None, 不补 0
+        assert body["data"][1]["price"] is None
+        assert body["data"][1]["change_pct"] is None
+        assert body["_meta"]["data_source"] == "eastmoney"
+        assert body["_meta"]["quality_score"] == 100.0
+        assert body["_meta"]["degraded"] is False
+        assert body["_meta"]["sector_code"] == "BK0477"
+
+    def test_requires_code_or_name(self, client):
+        resp = client.get("/api/market/sector_stocks")
+        assert resp.status_code == 400
+
+    def test_empty_items_marks_degraded(self, client):
+        """没拿到成分股时 quality=0/degraded, 前端据此显示不可用而不是 0 只。"""
+        with patch("web.routes.market.ds2.get_sector_stocks",
+                   return_value={"code": "BK0477", "source": "eastmoney", "items": []}):
+            resp = client.get("/api/market/sector_stocks?code=BK0477")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["data"] == []
+        assert body["_meta"]["quality_score"] == 0.0
+        assert body["_meta"]["degraded"] is True
+        assert "constituents" in body["_meta"]["unavailable_fields"]
 
 
 class TestHeatmap:

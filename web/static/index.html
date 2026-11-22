@@ -1021,7 +1021,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 <!-- ===== STAGE7: global-dashboard ===== 全球市场面板 + 版本弹窗样式(引用既有 token, 红涨绿跌) -->
 <link rel="stylesheet" href="/static/css/global-market.css">
 <!-- 2026-11-22: 终端化收尾(板块三视图/行情大屏栅格/K线周期/基金徽章),须最后加载以覆盖存量布局 -->
-<link rel="stylesheet" href="/static/css/terminal-ui.css">
+<link rel="stylesheet" href="/static/css/terminal-ui.css?v=20261122d">
 <!-- 性能优化:lightweight-charts 改为懒加载(仅在用户点击"走势"时加载),避免阻塞首屏 -->
 <link rel="preconnect" href="https://unpkg.com" crossorigin>
 <link rel="dns-prefetch" href="https://unpkg.com">
@@ -1283,6 +1283,20 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
             <div class="pred-empty">切换到本页自动加载板块行情</div>
           </div>
         </div>
+
+        <div class="sb-drawer-backdrop" id="sbDrawerBackdrop" hidden></div>
+        <aside class="sb-drawer" id="sbDrawer" role="dialog" aria-modal="true" aria-labelledby="sbDrawerTitle" aria-hidden="true" hidden>
+          <div class="sb-drawer-head">
+            <div class="sb-drawer-heading">
+              <div class="sb-drawer-title" id="sbDrawerTitle">板块成分股</div>
+              <div class="sb-drawer-sub" id="sbDrawerSub">—</div>
+            </div>
+            <button class="btn btn-sm btn-outline" type="button" id="sbDrawerClose" aria-label="关闭成分股面板">关闭</button>
+          </div>
+          <div class="sb-drawer-meta" id="sbDrawerMeta">—</div>
+          <div class="sb-drawer-body" id="sbDrawerBody"><div class="pred-empty">加载中…</div></div>
+          <div class="sb-drawer-foot">点击个股进入「行情总览」查看详情。缺失值显示「—」，不补 0。</div>
+        </aside>
       </div>
 
       <div class="page" id="page-hud-holdings">
@@ -2743,12 +2757,14 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
             <div class="tab" role="button" tabindex="0" aria-label="融资融券" onclick="switchDataTab('margin')">融资融券</div>
             <div class="tab" role="button" tabindex="0" aria-label="大宗交易" onclick="switchDataTab('block')">大宗交易</div>
             <div class="tab" role="button" tabindex="0" aria-label="股东户数" onclick="switchDataTab('shareholder')">股东户数</div>
+            <div class="tab" role="button" tabindex="0" aria-label="数据体检" onclick="switchDataTab('health')">数据体检</div>
           </div>
           <div style="display:flex;gap:8px;margin-bottom:12px;">
             <input class="input" id="dataCodeInput" placeholder="输入股票代码（可选）" style="max-width:200px;">
             <button class="btn btn-sm btn-primary" onclick="loadDataTab()">查询</button>
           </div>
-          <div class="table-wrap" tabindex="0" style="max-height:500px;overflow-y:auto;">
+          <div id="dataHealthPanel" class="dh-panel" hidden></div>
+          <div class="table-wrap" id="dataTableWrap" tabindex="0" style="max-height:500px;overflow-y:auto;">
             <table>
               <thead id="dataThead"></thead>
               <tbody id="dataTbody"></tbody>
@@ -2912,6 +2928,38 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
           <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><circle cx="12" cy="12" r="3"/><path d="m5.8 7.8 2.9 2.9"/><path d="M5 17h.01"/><path d="M19 17h.01"/><path d="M8 19h8"/></svg> 版本与更新</div>
           <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">当前版本：<span id="versionCurrent" style="font:500 12px/1.4 var(--qf-font-mono,monospace);color:var(--text-secondary);">—</span>；检测到新版本会自动弹窗提示。</div>
           <button class="btn btn-sm btn-outline" id="versionDetailBtn" type="button" onclick="window.openVersionModal && window.openVersionModal()">查看更新内容</button>
+        </div>
+
+        <!-- 数据口径与来源: 解释「—」语义、停更口径与回退路径, 不展示任何推算值 -->
+        <div class="card mt-16" id="dataCaliberCard">
+          <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M8 7h8"/><path d="M8 11h6"/></svg> 数据口径与来源</div>
+          <div class="dc-grid">
+            <div class="dc-item">
+              <div class="dc-h">缺失值「—」不等于 0</div>
+              <p>上游未返回、字段停更或解析失败统一显示「—」，并在响应的 <code>unavailable_fields</code> 中标注；排序、图表与合计均不把缺失值按 0 计入。</p>
+            </div>
+            <div class="dc-item">
+              <div class="dc-h">北向资金自 2024-08 起停披</div>
+              <p>交易所已停止披露每日北向净买入额。本系统只展示上游仍提供的合计/沪深拆分；缺失即「—」，不再用成交额或其它字段冒充净流入。</p>
+            </div>
+            <div class="dc-item">
+              <div class="dc-h">板块涨跌与资金流</div>
+              <p>优先东财行业板块（全量约 496 个）；接口失败时回退新浪行业资金榜（仅涨幅前 50），此时广度统计不完整。面板会标注实际来源，温度计评分只采用全量口径。</p>
+            </div>
+            <div class="dc-item">
+              <div class="dc-h">基金净值与盘中估算</div>
+              <p>公募基金净值在交易日收盘后更新，QDII/FOF 可能延迟 1~2 个交易日；盘中「估算」是第三方估算值，不是官方净值，不能用于成交确认。</p>
+            </div>
+            <div class="dc-item">
+              <div class="dc-h">K 线为原始价格</div>
+              <p>日/周/月 K 线来自 mootdx，未自动复权；除权除息日可能出现价格跳空，长周期收益请以复权净值或区间涨幅为准。</p>
+            </div>
+            <div class="dc-item">
+              <div class="dc-h">免费公开数据源的时延</div>
+              <p>腾讯、东财、新浪等公开接口可能延迟数十秒或触发限流，跨境市场延迟更明显。每个面板都带更新时间与质量分（<code>quality_score</code> / <code>degraded</code>），以标注为准。</p>
+            </div>
+          </div>
+          <div class="dc-note">口径说明只解释数据来源与缺失语义，不构成投资建议。</div>
         </div>
       </div>
 
@@ -8420,11 +8468,98 @@ function switchDataTab(tab) {
   // event 依赖修复(2026-07-31):同 switchHotTab,改为通过 onclick 属性查找,不依赖全局 event。
   const tabEl = document.querySelector(`#dataTabs .tab[onclick*="${tab}"]`);
   if (tabEl) tabEl.classList.add('active');
+  const isHealth = tab === 'health';
+  const wrap = document.getElementById('dataTableWrap');
+  const healthPanel = document.getElementById('dataHealthPanel');
+  if (wrap) wrap.hidden = isHealth;
+  if (healthPanel) healthPanel.hidden = !isHealth;
   loadDataTab();
+}
+
+function dhScoreColor(score) {
+  const n = Number(score);
+  if (!isFinite(n)) return 'var(--text-muted)';
+  if (n >= 80) return 'var(--qf-sem-down, #34D399)';
+  if (n >= 60) return 'var(--qf-sem-warn, #F5A524)';
+  return 'var(--qf-sem-up, #F87171)';
+}
+
+async function loadDataHealth(rawCode) {
+  const panel = document.getElementById('dataHealthPanel');
+  if (!panel) return;
+  const code = (rawCode || '').trim() || '600519';
+  panel.innerHTML = '<div class="pred-empty">正在并行检查 ' + escapeHtml(code) + ' 的行情 / K线 / 资金流 / 财务四个维度…</div>';
+  let payload;
+  try {
+    payload = await api('/api/market/data-quality/' + encodeURIComponent(code));
+  } catch (e) {
+    panel.innerHTML = '<div class="pred-empty"><b>数据体检请求失败</b><br>'
+      + escapeHtml(e && e.message ? e.message : '数据源暂不可用或请求超时') + '</div>';
+    return;
+  }
+  if (!payload || payload.stock_code == null) {
+    panel.innerHTML = '<div class="pred-empty">未获取到该标的的数据质量结果</div>';
+    return;
+  }
+  const dims = payload.data_dimensions || {};
+  const dimDefs = [
+    { key: 'quote', label: '行情', note: '腾讯实时报价' },
+    { key: 'kline', label: 'K线', note: 'mootdx 日线 30 根' },
+    { key: 'capital_flow', label: '资金流', note: '个股主力资金明细' },
+    { key: 'financial', label: '财务', note: '财务快照' }
+  ];
+  const dimCards = dimDefs.map(function (d) {
+    const ok = dims[d.key] === true;
+    return '<div class="dh-dim ' + (ok ? 'is-ok' : 'is-missing') + '">'
+      + '<div class="dh-dim-head"><span class="dh-dim-name">' + d.label + '</span>'
+      + '<span class="dh-dim-state">' + (ok ? '已获取' : '未获取') + '</span></div>'
+      + '<div class="dh-dim-note">' + d.note + '</div></div>';
+  }).join('');
+  const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
+  const criticals = Array.isArray(payload.criticals) ? payload.criticals : [];
+  const issueList = Array.isArray(payload.issues) ? payload.issues : [];
+  const issueCount = (payload.issues_count != null) ? Number(payload.issues_count) : (issueList.length || warnings.length + criticals.length);
+  const levelText = { INFO: '提示', WARNING: '警告', CRITICAL: '严重' };
+  let issueHtml;
+  if (issueList.length) {
+    issueHtml = '<ul class="dh-issues">' + issueList.map(function (it) {
+      const lvl = String(it.level || 'INFO').toUpperCase();
+      const field = it.field ? '<b>' + escapeHtml(String(it.field)) + '</b> ' : '';
+      const suggestion = it.suggestion ? '<span class="dh-issue-sug">建议：' + escapeHtml(String(it.suggestion)) + '</span>' : '';
+      return '<li class="dh-issue ' + (lvl === 'CRITICAL' ? 'is-critical' : (lvl === 'WARNING' ? 'is-warning' : 'is-info')) + '">'
+        + '<span class="dh-issue-level">' + (levelText[lvl] || escapeHtml(lvl)) + '</span>'
+        + '<span class="dh-issue-text">' + field + escapeHtml(String(it.message || '')) + suggestion + '</span></li>';
+    }).join('') + '</ul>';
+  } else if (warnings.length || criticals.length) {
+    issueHtml = '<ul class="dh-issues">' + criticals.concat(warnings).map(function (s) {
+      return '<li class="dh-issue is-warning"><span class="dh-issue-level">问题</span><span class="dh-issue-text">' + escapeHtml(String(s)) + '</span></li>';
+    }).join('') + '</ul>';
+  } else if (issueCount > 0) {
+    issueHtml = '<div class="dh-ok-note">上游返回 ' + issueCount + ' 条结构化问题，但未提供可读摘要。</div>';
+  } else {
+    issueHtml = '<div class="dh-ok-note">四个维度均可取数，未发现数据告警。</div>';
+  }
+  const score = Number(payload.quality_score);
+  const validText = payload.is_valid ? '校验通过' : '校验未通过';
+  const missingCount = dimDefs.filter(function (d) { return dims[d.key] !== true; }).length;
+
+  panel.innerHTML = '<div class="dh-head">'
+    + '<div class="dh-head-main"><div class="dh-code">' + escapeHtml(payload.stock_code) + '</div>'
+    + '<div class="dh-verdict">' + escapeHtml(validText)
+    + ' · 缺失 ' + missingCount + '/4 维 · 问题 ' + issueCount + ' 条</div></div>'
+    + '<div class="dh-score" style="color:' + dhScoreColor(score) + '">'
+    + (isFinite(score) ? score.toFixed(1) : '—') + '<small>分</small></div></div>'
+    + '<div class="dh-grid">' + dimCards + '</div>'
+    + '<div class="dh-section-title">检查明细</div>' + issueHtml
+    + '<div class="pred-muted dh-foot">四个维度并行探测（行情 / K线 / 资金流 / 财务）；「未获取」表示该维度上游失败或未返回，不按 0 分计算，也不代表标的没有数据。综合分为数据完整度加权结果，仅用于判断本次分析的取数质量。</div>';
 }
 
 async function loadDataTab() {
   const code = document.getElementById('dataCodeInput').value.trim();
+  if (currentDataTab === 'health') {
+    await loadDataHealth(code);
+    return;
+  }
   const thead = document.getElementById('dataThead');
   const tbody = document.getElementById('dataTbody');
 
@@ -9531,11 +9666,11 @@ document.addEventListener('DOMContentLoaded', () => {
 <!-- ===== STAGE6-PRED: 时段分析/次日预测/AI 准确率看板(监控容器;包装 switchPage 接入) ===== -->
 <script src="/static/js/prediction.js"></script>
 <!-- ===== STAGE6-PRED: 板块二级页(行情容器;复用既有 /api/market/sector_flow) ===== -->
-<script src="/static/js/sector-board.js"></script>
+<script src="/static/js/sector-board.js?v=20261122c"></script>
 <!-- ===== STAGE6-PRED: 今日推荐 + 持仓份额行内编辑 + 北向/QDII 口径说明 ===== -->
 <script src="/static/js/recommendations.js"></script>
 <!-- ===== STAGE7: workbench ===== 工作台一屏判读(复用既有端点;包装 switchPage 接入) ===== -->
-<script src="/static/js/workbench.js"></script>
+<script src="/static/js/workbench.js?v=20261122c"></script>
 <!-- ===== STAGE7: global-dashboard ===== 全球市场面板(全球指数全景/行业板块/速览条;包装 switchPage 接入) ===== -->
 <script src="/static/js/global-market.js"></script>
 <!-- ===== STAGE7: version-modal ===== 版本更新弹窗(health.version vs localStorage 自动弹出;暴露 window.openVersionModal) ===== -->
