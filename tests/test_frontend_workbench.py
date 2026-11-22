@@ -980,3 +980,38 @@ def test_fund_chart_has_period_switch_and_cost_line():
     ):
         assert needle in text, f"index.html 缺少 {needle}"
     assert "period=1y`" not in text, "净值走势不应再把周期硬编码为 1y"
+
+
+def test_stock_flow_series_uses_single_fetch_and_switches_period():
+    """个股资金流时间序列(2026-11-22 第四批)。
+
+    历史序列复用 /api/market/stock_flow_streak 的同一次取数(history),
+    前端按 5/10/20/60 日切片, 不再额外请求上游; 缺失保持「不补数」口径。
+    """
+    text = _index()
+    for needle in (
+        "STOCK_FLOW_DAYS = [5, 10, 20, 60]",
+        'data-flow-days="${n}"',
+        "onStockFlowDaysClick(this)",
+        "addHistogramSeries(",
+        "addLineSeries(",
+        "priceScaleId: 'left'",
+        "Array.isArray(d.history) ? d.history : []",
+        "上游仅返回主力净额，超大/大单拆分缺失",
+        "缺失不补数",
+        "这是取数问题，不是没有资金流",
+    ):
+        assert needle in text, f"index.html 缺少 {needle}"
+    # 切片只发生在本地, 不能为切换周期再发一次上游请求
+    assert "stock_flow_history" not in text
+    assert "stock_flow_streak/history" not in text
+
+
+def test_stock_flow_chart_survives_render_cleanup():
+    """重新渲染个股详情时必须先销毁旧图, 否则 lightweight-charts 会叠图/泄漏。"""
+    text = _index()
+    assert "function _disposeStockFlowChart(" in text or "_stockFlowChart.remove()" in text
+    idx = text.find("function renderStockDetail(")
+    assert idx != -1
+    body = text[idx: idx + 2000]
+    assert "_stockFlowChart" in body, "renderStockDetail 开头应销毁旧资金流图"

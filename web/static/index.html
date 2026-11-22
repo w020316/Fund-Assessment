@@ -1021,7 +1021,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 <!-- ===== STAGE7: global-dashboard ===== 全球市场面板 + 版本弹窗样式(引用既有 token, 红涨绿跌) -->
 <link rel="stylesheet" href="/static/css/global-market.css">
 <!-- 2026-11-22: 终端化收尾(板块三视图/行情大屏栅格/K线周期/基金徽章),须最后加载以覆盖存量布局 -->
-<link rel="stylesheet" href="/static/css/terminal-ui.css?v=20261122e">
+<link rel="stylesheet" href="/static/css/terminal-ui.css?v=20261122f">
 <!-- 性能优化:lightweight-charts 改为懒加载(仅在用户点击"走势"时加载),避免阻塞首屏 -->
 <link rel="preconnect" href="https://unpkg.com" crossorigin>
 <link rel="dns-prefetch" href="https://unpkg.com">
@@ -4479,6 +4479,126 @@ const _FLOW_SOURCE_TEXT = {
   unavailable: '不可用'
 };
 
+// ===== 个股资金流时间序列(与连增共用一次取数, 周期切换本地切片) =====
+const STOCK_FLOW_DAYS = [5, 10, 20, 60];
+const _stockFlowDaysByCode = {};
+const _stockFlowData = {};
+let _stockFlowChart = null;
+let _stockFlowChartSeq = 0;
+
+function onStockFlowDaysClick(btn) {
+  const code = btn.getAttribute('data-code') || '';
+  const days = Number(btn.getAttribute('data-flow-days'));
+  if (!code || !STOCK_FLOW_DAYS.includes(days)) return;
+  _stockFlowDaysByCode[code] = days;
+  renderStockFlowChart(code);
+}
+
+function _syncStockFlowButtons(code, days) {
+  document.querySelectorAll('[data-flow-days]').forEach(btn => {
+    if (btn.getAttribute('data-code') !== code) return;
+    const on = Number(btn.getAttribute('data-flow-days')) === days;
+    btn.classList.toggle('is-active', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+}
+
+async function renderStockFlowChart(code) {
+  const container = document.getElementById('stockFlowChart');
+  const hint = document.getElementById('stockFlowHint');
+  const note = document.getElementById('stockFlowNote');
+  if (!container || _lastStockDetailCode !== code) return;
+  const days = _stockFlowDaysByCode[code] || 20;
+  const info = _stockFlowData[code] || { points: [], source: 'unavailable', failed: true };
+  _syncStockFlowButtons(code, days);
+  if (hint) hint.textContent = '· 近 ' + days + ' 日';
+
+  if (_stockFlowChart) {
+    try { _stockFlowChart.remove(); } catch (e) { /* 已随 DOM 移除 */ }
+    _stockFlowChart = null;
+  }
+  container.innerHTML = '';
+
+  const all = Array.isArray(info.points) ? info.points.filter(p => p && p.date && isFinite(Number(p.main_net))) : [];
+  const points = all.slice(-days);
+  const sourceText = _FLOW_SOURCE_TEXT[info.source] || _FLOW_SOURCE_TEXT.unavailable;
+  if (!points.length) {
+    const emptyText = info.failed
+      ? '资金流取数失败（上游限流或断连）——这是取数问题，不是没有资金流'
+      : '近 ' + days + ' 日暂无历史资金流数据（' + escapeHtml(info.reason || '上游未返回') + '），不补数';
+    container.innerHTML = '<div class="qf-flow-empty" style="height:100%;display:flex;align-items:center;justify-content:center;text-align:center;padding:0 12px;">'
+      + emptyText + '</div>';
+    if (note) note.textContent = '单位 亿元 · 来源 ' + sourceText + ' · 缺失不补数';
+    return;
+  }
+
+  const seq = ++_stockFlowChartSeq;
+  try {
+    await _loadLightweightCharts();
+  } catch (e) {
+    container.innerHTML = '<div class="qf-flow-empty" style="height:100%;display:flex;align-items:center;justify-content:center;">图表库加载失败，请检查网络后重试</div>';
+    return;
+  }
+  if (seq !== _stockFlowChartSeq || _lastStockDetailCode !== code) return;
+
+  // 图表专用色(canvas 不接受 CSS var): 轴/网格=#8B92A8/#2A3142, 累计线=#00D9FF。
+  // A 股口径: 红=净流入, 绿=净流出。
+  const chart = LightweightCharts.createChart(container, {
+    autoSize: true,
+    layout: { background: { type: 'solid', color: 'transparent' }, textColor: '#8B92A8', fontSize: 11 },
+    grid: { vertLines: { color: 'rgba(28,35,51,0.5)' }, horzLines: { color: 'rgba(28,35,51,0.5)' } },
+    rightPriceScale: { borderColor: '#2A3142' },
+    leftPriceScale: { visible: true, borderColor: '#2A3142' },
+    timeScale: { borderColor: '#2A3142', rightOffset: 3 },
+    crosshair: { mode: 0 },
+    handleScroll: false,
+    handleScale: false,
+  });
+  const bars = chart.addHistogramSeries({
+    priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+    priceLineVisible: false,
+    lastValueVisible: false,
+  });
+  const cumLine = chart.addLineSeries({
+    color: '#00D9FF',
+    lineWidth: 1,
+    priceScaleId: 'left',
+    priceLineVisible: false,
+    lastValueVisible: false,
+    crosshairMarkerVisible: false,
+  });
+
+  const barData = [];
+  const cumData = [];
+  let acc = 0;
+  points.forEach(p => {
+    const v = Number(p.main_net) / 1e8;
+    barData.push({
+      time: p.date,
+      value: Number(v.toFixed(4)),
+      color: v >= 0 ? 'rgba(248,113,113,0.82)' : 'rgba(52,211,153,0.82)',
+    });
+    acc += v;
+    cumData.push({ time: p.date, value: Number(acc.toFixed(4)) });
+  });
+  bars.setData(barData);
+  cumLine.setData(cumData);
+  _stockFlowChart = chart;
+
+  const inDays = points.filter(p => Number(p.main_net) > 0).length;
+  const outDays = points.length - inDays;
+  const sum = points.reduce((a, p) => a + Number(p.main_net), 0) / 1e8;
+  const missingBreakdown = points.every(p => p.super_large_net == null && p.large_net == null);
+  if (note) {
+    note.textContent = '单位 亿元 · 来源 ' + sourceText
+      + ' · 红柱=净流入 绿柱=净流出 青线=区间累计'
+      + ' · ' + points.length + ' 个交易日（流入 ' + inDays + ' / 流出 ' + outDays + '）'
+      + ' · 区间累计 ' + (sum >= 0 ? '+' : '') + sum.toFixed(2) + '亿'
+      + (missingBreakdown ? ' · 上游仅返回主力净额，超大/大单拆分缺失' : '')
+      + (all.length > points.length ? ' · 共返回 ' + all.length + ' 日，当前显示最近 ' + days + ' 日' : '');
+  }
+}
+
 let _flowStreakSeq = 0;
 /** 个股资金连增：只有 history_available 才谈"连增"，新浪快照只能说明当日。 */
 async function loadStockFlowStreak(code) {
@@ -4497,9 +4617,18 @@ async function loadStockFlowStreak(code) {
   if (seq !== _flowStreakSeq || _lastStockDetailCode !== code) return;
   const d = (resp && resp.data) || null;
   if (!d) {
+    _stockFlowData[code] = { points: [], source: 'unavailable', failed: true };
+    renderStockFlowChart(code);
     paint('<span style="color:var(--color-warning);">连续净流入：取数失败（上游限流或断连），不是"没有净流入"</span>');
     return;
   }
+  _stockFlowData[code] = {
+    points: Array.isArray(d.history) ? d.history : [],
+    source: d.source || 'unavailable',
+    failed: false,
+    reason: (resp._meta && resp._meta.reason) || '',
+  };
+  renderStockFlowChart(code);
 
   const source = _FLOW_SOURCE_TEXT[d.source] || _FLOW_SOURCE_TEXT.unavailable;
   if (d.history_available && typeof d.streak === 'number' && d.streak > 0) {
@@ -4651,6 +4780,10 @@ async function loadStockDetail(code) {
 }
 
 function renderStockDetail(d, meta) {
+  if (_stockFlowChart) {
+    try { _stockFlowChart.remove(); } catch (e) { /* 旧图随 DOM 移除 */ }
+    _stockFlowChart = null;
+  }
   const q = d.quote || {};
   const f = d.financial || {};
   const c = d.capital_flow || {};
@@ -4711,6 +4844,18 @@ function renderStockDetail(d, meta) {
         <div style="font-weight:600;margin-bottom:6px;">近期区间</div>
         ${_stockRangeHTML(k)}
       </div>
+    </div>
+    <div class="card stock-flow-card">
+      <div class="stock-flow-head">
+        <span class="stock-flow-title">主力资金走势
+          <span class="stock-flow-hint" id="stockFlowHint">· 加载中…</span>
+        </span>
+        <span class="fund-chart-periods" role="group" aria-label="资金流统计天数">
+          ${STOCK_FLOW_DAYS.map(n => `<button type="button" class="fund-chart-period${n === (_stockFlowDaysByCode[d.code] || 20) ? ' is-active' : ''}" data-code="${escapeHtml(d.code)}" data-flow-days="${n}" aria-pressed="${n === (_stockFlowDaysByCode[d.code] || 20) ? 'true' : 'false'}" onclick="onStockFlowDaysClick(this)">${n}日</button>`).join('')}
+        </span>
+      </div>
+      <div id="stockFlowChart" class="stock-flow-chart"></div>
+      <div id="stockFlowNote" class="stock-flow-note">单位 亿元 · 红柱=净流入 绿柱=净流出 青线=区间累计 · 缺失不补数</div>
     </div>
     <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">
       数据源：${escapeHtml((meta && meta.data_source) || '—')}

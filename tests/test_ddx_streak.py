@@ -80,6 +80,69 @@ class TestComputeStreak:
         assert compute_streak(df)["streak"] == 1
 
 
+class TestFlowPoints:
+    """资金流历史画图点: 升序、缺失不补 0、可选字段缺失为 None。"""
+
+    def test_builds_ascending_points_with_breakdown(self):
+        df = pd.DataFrame({
+            "日期": ["2026-11-13", "2026-11-12"],
+            "主力净流入-净额": [3e7, -1e7],
+            "主力净流入-净占比": [2.5, -1.5],
+            "超大单净流入-净额": [1e7, -5e6],
+            "大单净流入-净额": [2e7, -5e6],
+            "中单净流入-净额": [-1e7, 4e6],
+            "小单净流入-净额": [-2e7, 6e6],
+        })
+        points = ddx._df_to_flow_points(df)
+        assert [p["date"] for p in points] == ["2026-11-12", "2026-11-13"]
+        assert points[0]["main_net"] == pytest.approx(-1e7)
+        assert points[1]["main_ratio"] == pytest.approx(2.5)
+        assert points[1]["super_large_net"] == pytest.approx(1e7)
+        assert points[1]["small_net"] == pytest.approx(-2e7)
+
+    def test_missing_main_net_row_is_skipped_not_zero(self):
+        df = pd.DataFrame({
+            "日期": ["2026-11-12", "2026-11-13"],
+            "主力净流入-净额": [None, 2e7],
+        })
+        points = ddx._df_to_flow_points(df)
+        assert len(points) == 1
+        assert points[0]["date"] == "2026-11-13"
+
+    def test_sina_style_df_leaves_breakdown_none(self):
+        df = _make_df([1e7, -2e7])
+        points = ddx._df_to_flow_points(df)
+        assert len(points) == 2
+        assert points[0]["main_ratio"] == pytest.approx(1.0)
+        assert points[0]["super_large_net"] is None
+        assert points[0]["large_net"] is None
+        assert points[0]["medium_net"] is None
+        assert points[0]["small_net"] is None
+
+    def test_days_keeps_latest_window(self):
+        df = _make_df([1e7, 2e7, 3e7, 4e7])
+        points = ddx._df_to_flow_points(df, days=2)
+        assert [p["main_net"] for p in points] == [pytest.approx(3e7), pytest.approx(4e7)]
+
+    def test_missing_date_column_returns_empty(self):
+        df = pd.DataFrame({"主力净流入-净额": [1e7]})
+        assert ddx._df_to_flow_points(df) == []
+
+
+class TestFlowHistoryInDetail:
+    def test_include_history_attaches_same_fetch(self, monkeypatch):
+        monkeypatch.setattr(ddx, "_fetch_em_history", lambda code: _make_df([1e7, 2e7, 3e7]))
+        out = ddx.fetch_flow_streak("600519", include_history=True)
+        assert out["source"] == "eastmoney"
+        assert len(out["history"]) == 3
+        assert out["history"][-1]["main_net"] == pytest.approx(3e7)
+
+    def test_default_call_does_not_include_history(self, monkeypatch):
+        monkeypatch.setattr(ddx, "_fetch_em_history", lambda code: _make_df([1e7, 2e7]))
+        out = ddx.fetch_flow_streak("600519")
+        assert "history" not in out
+
+
 class TestMarketOf:
     @pytest.mark.parametrize("code,expected", [
         ("600519", "sh"), ("000001", "sz"), ("300750", "sz"),
@@ -467,14 +530,21 @@ class TestStockFlowStreakEndpoint:
             "streak": 3, "net_today": 5e8, "net_sum": 9e8, "ratio_today": 4.5,
             "start_date": "2026-11-11", "end_date": "2026-11-13",
             "source": "eastmoney", "history_available": True,
+            "history": [
+                {"date": "2026-11-12", "main_net": 4e8, "main_ratio": 3.0},
+                {"date": "2026-11-13", "main_net": 5e8, "main_ratio": 4.5},
+            ],
         }
-        monkeypatch.setattr(market_route, "fetch_flow_streak", lambda code: stats)
+        monkeypatch.setattr(market_route, "fetch_flow_streak", lambda code, include_history=False: stats)
         self._patch_cache(monkeypatch, market_route)
 
         body = client.get("/api/market/stock_flow_streak?code=600519").json()
         assert body["data"]["streak"] == 3
         assert body["data"]["source"] == "eastmoney"
         assert body["data"]["history_available"] is True
+        assert [p["date"] for p in body["data"]["history"]] == ["2026-11-12", "2026-11-13"]
+        assert body["data"]["history"][-1]["main_net"] == pytest.approx(5e8)
+        assert body["_meta"]["history_points"] == 2
         assert body["_meta"]["quality_score"] == 100
         assert body["_meta"]["degraded"] is False
 
@@ -486,20 +556,23 @@ class TestStockFlowStreakEndpoint:
             "start_date": None, "end_date": None,
             "source": "sina", "history_available": False,
         }
-        monkeypatch.setattr(market_route, "fetch_flow_streak", lambda code: snapshot)
+        monkeypatch.setattr(market_route, "fetch_flow_streak", lambda code, include_history=False: snapshot)
         self._patch_cache(monkeypatch, market_route)
 
         body = client.get("/api/market/stock_flow_streak?code=600519").json()
         assert body["data"]["history_available"] is False
         assert body["data"]["streak"] is None
         assert body["data"]["net_today"] == pytest.approx(7.4e8)
+        assert body["data"]["history"] == []
+        assert body["_meta"]["history_points"] == 0
+        assert "快照" in body["_meta"]["reason"]
         assert body["_meta"]["quality_score"] == 60
         assert body["_meta"]["degraded"] is True
 
     def test_unavailable_is_not_zero(self, client, monkeypatch):
         import web.routes.market as market_route
 
-        monkeypatch.setattr(market_route, "fetch_flow_streak", lambda code: None)
+        monkeypatch.setattr(market_route, "fetch_flow_streak", lambda code, include_history=False: None)
         self._patch_cache(monkeypatch, market_route)
 
         body = client.get("/api/market/stock_flow_streak?code=600519").json()

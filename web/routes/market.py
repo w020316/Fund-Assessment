@@ -13,7 +13,7 @@ except ImportError:
     _HAS_AKSHARE = False
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from loguru import logger
 
 from src.analysis.ddx_streak import build_ddx_streak, fetch_flow_streak
@@ -598,6 +598,16 @@ class DdxStreakItem(BaseModel):
     source: str | None = None
 
 
+class StockFlowPoint(BaseModel):
+    date: str
+    main_net: float
+    main_ratio: float | None = None
+    super_large_net: float | None = None
+    large_net: float | None = None
+    medium_net: float | None = None
+    small_net: float | None = None
+
+
 class StockFlowStreak(BaseModel):
     code: str
     streak: int | None = None
@@ -608,6 +618,7 @@ class StockFlowStreak(BaseModel):
     end_date: str | None = None
     source: str = "unavailable"
     history_available: bool = False
+    history: list[StockFlowPoint] = Field(default_factory=list)
 
 
 _DDX_CANDIDATES = 12
@@ -816,7 +827,7 @@ async def stock_flow_streak(
     与 /ddx_streak 的口径一致；历史源不可用时退到新浪当日快照，并在
     ``history_available`` 中明确标出"只有今日、没有连增"。
     """
-    cache_key = f"market:stock_flow_streak:{code}"
+    cache_key = f"market:stock_flow_streak:v2:{code}"
     cached = cache.get(cache_key)
     if cached is not None:
         quality = 100.0 if cached.get("history_available") else (60.0 if cached.get("source") != "unavailable" else 0.0)
@@ -824,12 +835,12 @@ async def stock_flow_streak(
             "data": cached,
             "_meta": _build_meta(
                 "mixed", cached=True, quality_score=quality,
-                extra={"source": cached.get("source")},
+                extra={"source": cached.get("source"), "history_points": len(cached.get("history") or [])},
             ),
         }
 
     try:
-        stats = await asyncio.to_thread(fetch_flow_streak, code)
+        stats = await asyncio.to_thread(fetch_flow_streak, code, True)
     except Exception as e:
         logger.warning(f"stock_flow_streak {code} failed: {e}")
         stats = None
@@ -841,18 +852,25 @@ async def stock_flow_streak(
             "data": payload,
             "_meta": _build_meta(
                 "mixed", cached=False, quality_score=0.0,
-                extra={"source": "unavailable", "reason": "历史资金流与当日快照均未取到"},
+                extra={"source": "unavailable", "history_points": 0, "reason": "历史资金流与当日快照均未取到"},
             ),
         }
 
     payload = StockFlowStreak(code=code, **stats).model_dump()
     quality = 100.0 if payload["history_available"] else 60.0
+    extra: dict = {"source": payload.get("source"), "history_points": len(payload.get("history") or [])}
+    if not payload.get("history"):
+        extra["reason"] = (
+            "仅取得当日快照，历史多日序列未返回"
+            if payload["history_available"]
+            else "历史资金流不可用，仅有当日快照或均未取到"
+        )
     cache.set(cache_key, payload, ttl=300)
     return {
         "data": payload,
         "_meta": _build_meta(
             "mixed", cached=False, quality_score=quality,
-            extra={"source": payload.get("source")},
+            extra=extra,
         ),
     }
 

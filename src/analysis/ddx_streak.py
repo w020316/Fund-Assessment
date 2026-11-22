@@ -33,6 +33,17 @@ _RATIO_COL_CANDIDATES = ("主力净流入-净占比", "主力净占比")
 _DATE_COL = "日期"
 _MAX_ROWS = 60
 
+# 东财 fflow/daykline 的 fields2 顺序(f51..f61)对应的列名。
+# 只取画图需要的净额与主力占比;其余占比字段不返回,避免无谓载荷。
+_EM_COL_INDEX = {
+    1: "主力净流入-净额",
+    2: "小单净流入-净额",
+    3: "中单净流入-净额",
+    4: "大单净流入-净额",
+    5: "超大单净流入-净额",
+    6: "主力净流入-净占比",
+}
+
 _EM_FLOW_URL = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get"
 _SINA_FLOW_URL = "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/MoneyFlow.ssi_ssfx_flzjtj"
 _SINA_HIST_URL = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/MoneyFlow.ssl_qsfx_zjlrqs"
@@ -158,13 +169,18 @@ def _fetch_em_history(code: str) -> pd.DataFrame | None:
         if len(parts) < 7:
             continue
         try:
-            rows.append({
-                _DATE_COL: str(parts[0])[:10],
-                "主力净流入-净额": float(parts[1]),
-                "主力净流入-净占比": float(parts[6]),
-            })
+            main = float(parts[1])
         except (TypeError, ValueError):
             continue
+        row: dict = {_DATE_COL: str(parts[0])[:10], "主力净流入-净额": main}
+        for idx, col in _EM_COL_INDEX.items():
+            if idx == 1 or idx >= len(parts):
+                continue
+            try:
+                row[col] = float(parts[idx])
+            except (TypeError, ValueError):
+                row[col] = None
+        rows.append(row)
     return pd.DataFrame(rows) if rows else None
 
 
@@ -266,6 +282,60 @@ def _fetch_sina_snapshot(code: str) -> dict | None:
     }
 
 
+def _df_to_flow_points(df: pd.DataFrame | None, days: int = _MAX_ROWS) -> list[dict]:
+    """资金流历史 → 画图点(升序)。缺失字段返回 None, 缺行直接跳过, 不补 0。
+
+    只把上游真实返回的交易日转成点: 主力净额缺失/非数值的行丢弃, 而不是
+    用 0 填成"平盘"; 新浪兜底只有主力净额与占比, 超大/大/中/小单为 None。
+    """
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+        return []
+    work = df.copy()
+    work.columns = [str(c).strip() for c in work.columns]
+    main_col = next((c for c in _MAIN_COL_CANDIDATES if c in work.columns), None)
+    if main_col is None or _DATE_COL not in work.columns:
+        return []
+    try:
+        days = max(1, min(int(days), _MAX_ROWS))
+    except (TypeError, ValueError):
+        days = _MAX_ROWS
+    work = work.sort_values(_DATE_COL).tail(days)
+
+    def _opt(row, col: str, ndigits: int) -> float | None:
+        if col not in work.columns:
+            return None
+        v = row.get(col)
+        if v is None or pd.isna(v):
+            return None
+        try:
+            return round(float(v), ndigits)
+        except (TypeError, ValueError):
+            return None
+
+    points: list[dict] = []
+    for _, row in work.iterrows():
+        main = row.get(main_col)
+        if main is None or pd.isna(main):
+            continue
+        date_text = str(row.get(_DATE_COL) or "")[:10]
+        if len(date_text) != 10:
+            continue
+        try:
+            main_net = round(float(main), 2)
+        except (TypeError, ValueError):
+            continue
+        points.append({
+            "date": date_text,
+            "main_net": main_net,
+            "main_ratio": _opt(row, "主力净流入-净占比", 4),
+            "super_large_net": _opt(row, "超大单净流入-净额", 2),
+            "large_net": _opt(row, "大单净流入-净额", 2),
+            "medium_net": _opt(row, "中单净流入-净额", 2),
+            "small_net": _opt(row, "小单净流入-净额", 2),
+        })
+    return points
+
+
 # 已知 down 的源暂停重试的时长(秒): 12 只候选逐只等同一个 5s 超时,
 # 会把整轮取数拖过 deadline, 连可用的新浪兜底都轮不到。
 # C-03(2026-11-17):固定 600s 是**非对称惩罚** —— 冷却到期只给一次探测机会,
@@ -295,11 +365,15 @@ def _with_skips(payload: dict | None, skipped: list[str]) -> dict | None:
     return {**payload, "skipped_sources": list(skipped)}
 
 
-def fetch_flow_streak(code: str) -> dict | None:
+def fetch_flow_streak(code: str, include_history: bool = False) -> dict | None:
     """个股资金流详情：优先历史连增，失败时退到当日快照。
 
     返回字典中 ``history_available`` 明确区分"算出了连增"与"只有今日快照"；
     两者都不可用时返回 None，由调用方按缺失处理。
+
+    ``include_history=True`` 时附带 ``history``：与连增来自同一次上游取数
+    的 60 日序列（升序画图点），避免个股详情再发一轮资金流请求、重复计数
+    数据源健康度。候选池调用保持 False，不把 60 日明细带进榜单响应。
     """
     df = None
     source = "eastmoney"
@@ -362,11 +436,15 @@ def fetch_flow_streak(code: str) -> dict | None:
     if stats:
         stats["source"] = source
         stats["history_available"] = True
+        if include_history:
+            stats["history"] = _df_to_flow_points(df, _MAX_ROWS)
         return _with_skips(stats, skipped)
     snapshot = _last_row_snapshot(df)
     if snapshot:
         snapshot["source"] = source
         snapshot["history_available"] = True
+        if include_history:
+            snapshot["history"] = _df_to_flow_points(df, _MAX_ROWS)
         return _with_skips(snapshot, skipped)
     return _with_skips(None, skipped)
 
