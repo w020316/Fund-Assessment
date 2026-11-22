@@ -261,6 +261,7 @@ from web.routes import global_market as global_route
 from web.routes import holdings as holdings_route
 from web.routes import evolution as evolution_route
 from web.routes import market as market_route
+from web.routes import mcp as mcp_route
 from web.routes import monitor as monitor_route
 from web.routes import news as news_route
 from web.routes import portfolio as portfolio_route
@@ -280,6 +281,8 @@ app.include_router(trade_route.router, prefix="/api/trade", tags=["交易"])
 app.include_router(monitor_route.router, prefix="/api/monitor", tags=["监控"])
 app.include_router(config_route.router, prefix="/api/config", tags=["配置"])
 app.include_router(market_route.router, prefix="/api/market", tags=["行情"])
+# MCP: 只读数据能力暴露给 AI Agent(无 /api 前缀, 标准 JSON-RPC 2.0, 限流 60/min)
+app.include_router(mcp_route.router, tags=["MCP"])
 app.include_router(agent_route.router, prefix="/api/agent", tags=["AI Agent"])
 app.include_router(fund_route.router, prefix="/api/fund", tags=["基金"])
 app.include_router(global_route.router, prefix="/api/global", tags=["国际市场"])

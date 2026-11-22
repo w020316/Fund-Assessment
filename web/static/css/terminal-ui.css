@@ -1579,3 +1579,65 @@ tr:hover td { background: var(--qf-panel-hover); }
   .ih-table .ih-name { max-width: 150px; }
   .ih-head { gap: 10px; }
 }
+
+/* ---------- 10. MCP 接口卡片 ---------- */
+.mcp-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.mcp-label {
+  font-size: 10.5px;
+  letter-spacing: .08em;
+  color: var(--qf-text-muted);
+}
+.mcp-code {
+  padding: 4px 10px;
+  border: 1px solid var(--qf-panel-line);
+  border-radius: var(--qf-radius-xs);
+  background: var(--qf-bg-deep);
+  color: var(--qf-text-primary);
+  font: 11.5px/1.5 var(--qf-font-mono);
+  word-break: break-all;
+}
+.mcp-tag {
+  padding: 1px 7px;
+  border: 1px solid rgba(90, 200, 250, .35);
+  border-radius: 999px;
+  background: rgba(90, 200, 250, .08);
+  color: var(--qf-sem-info);
+  font-size: 10px;
+}
+.mcp-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.mcp-chip {
+  padding: 2px 8px;
+  border: 1px solid var(--qf-panel-line);
+  border-radius: 999px;
+  background: var(--qf-panel-tint);
+  color: var(--qf-text-secondary);
+  font-size: 10.5px;
+}
+.mcp-note {
+  margin-bottom: 8px;
+  font-size: 11px;
+  line-height: 1.8;
+  color: var(--qf-text-muted);
+}
+.mcp-snippet {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--qf-panel-line);
+  border-radius: var(--qf-radius-sm);
+  background: var(--qf-bg-deep);
+  color: var(--qf-text-secondary);
+  font: 11px/1.7 var(--qf-font-mono);
+  overflow-x: auto;
+  white-space: pre;
+}
