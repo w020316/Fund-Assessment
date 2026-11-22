@@ -188,20 +188,33 @@
 }
 
 /* --- 持仓份额行内编辑(R7.1) --- */
+.pred-share-actions {
+  /* 2026-11-22: 角标与「改」同行排布，避免窄列里角标独占多行把整行拉高 */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+.pred-share-actions .btn {
+  /* 份额列内容宽约 96px，按钮不能沿用全局 44/64px 最小宽，否则会被挤到第二行 */
+  min-width: 28px;
+  flex: 0 0 auto;
+}
+.pred-share-actions .pred-share-estimated { flex: 0 0 auto; }
 .pred-share-estimated {
   /* 2026-11-19:原先 inline + nowrap 会横向溢出「份额」列, 盖住成本/现净值列。
-     改为块级并允许换行, 始终收在本单元格内。 */
-  display: block;
+     2026-11-22:文案缩为「份额估算」(完整解释在 title), 与「改」并排收在单元格内。 */
+  display: inline-flex;
+  align-items: center;
   max-width: 100%;
-  margin: 4px 0 0;
   padding: 0 4px;
-  font-size: 11px;
-  line-height: 1.5;
+  font-size: 10.5px;
+  line-height: 1.6;
   color: var(--color-warning, #f59e0b);
   border: 1px dashed var(--color-warning, #f59e0b);
   border-radius: 4px;
-  white-space: normal;
-  word-break: break-all;
+  white-space: nowrap;
 }
 .pred-share-edit-input {
   width: 110px;

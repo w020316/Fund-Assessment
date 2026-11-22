@@ -826,12 +826,13 @@ def test_watchlist_does_not_coerce_missing_quote_to_zero():
 
 def test_sector_board_sort_puts_missing_last_and_fmtYi_guards_null():
     """板块二级页: 缺失涨跌幅不得 `Number(x || 0)` 归一后参与排序(会被排进中段/
-    领跌区, 口径与 workbench renderSectors 的 M-04 一致); fmtYi 对 null 不得经
-    Number(null)===0 画成 "0.00 亿"。"""
+    领跌区, 口径与 workbench renderSectors 的 M-04 一致); fmtYi 对 null/空串
+    不得经 Number(null)===0 画成 "0.00 亿"(2026-11-22 三视图重写后统一走 isNum)。"""
     js = (ROOT / "web/static/js/sector-board.js").read_text(encoding="utf-8")
     assert "Number(b.change_pct || 0)" not in js, "排序仍把缺失涨跌幅当 0"
     assert ".concat(noPct);" in js
-    assert "if (v == null || !isFinite(n)) return '—';" in js
+    assert "if (!isNum(v)) return '—';" in js
+    assert "function isNum(v) { return v !== null && v !== undefined && v !== ''" in js
 
 
 def test_aurora_theme_stock_hex_are_tokenized():

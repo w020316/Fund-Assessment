@@ -1218,3 +1218,80 @@
   .qf-disc-chips { grid-template-columns: 1fr; }
   .qf-disc-score { text-align: left; }
 }
+
+/* ---------- 资金水位（2026-11-22） ---------- */
+#page-workbench .wb-cap-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+#page-workbench .wb-cap-kpi {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--wb-line);
+  border-radius: 8px;
+  background: var(--wb-surface-2);
+}
+#page-workbench .wb-cap-k {
+  font-size: 10px;
+  letter-spacing: .04em;
+  color: var(--wb-faint);
+}
+#page-workbench .wb-cap-v {
+  margin-top: 4px;
+  font: 600 17px/1.2 var(--wb-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--wb-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#page-workbench .wb-cap-v.is-up { color: var(--wb-up); }
+#page-workbench .wb-cap-v.is-down { color: var(--wb-down); }
+#page-workbench .wb-cap-note {
+  margin-top: 3px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--wb-dim);
+}
+#page-workbench .wb-cap-cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 12px;
+}
+#page-workbench .wb-cap-row {
+  display: grid;
+  grid-template-columns: minmax(88px, 146px) minmax(0, 1fr) 74px 58px;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+}
+#page-workbench .wb-cap-name {
+  font-size: 11px;
+  color: var(--wb-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#page-workbench .wb-cap-val,
+#page-workbench .wb-cap-pct {
+  text-align: right;
+  font: 600 11px/1 var(--wb-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--wb-dim);
+}
+#page-workbench .wb-cap-val.is-up,
+#page-workbench .wb-cap-pct.is-up { color: var(--wb-up); }
+#page-workbench .wb-cap-val.is-down,
+#page-workbench .wb-cap-pct.is-down { color: var(--wb-down); }
+
+@media (max-width: 1100px) {
+  #page-workbench .wb-cap-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  #page-workbench .wb-cap-cols { grid-template-columns: 1fr; gap: 14px; }
+}
+@media (max-width: 640px) {
+  #page-workbench .wb-cap-row { grid-template-columns: minmax(74px, 1fr) minmax(0, 1.2fr) 66px 52px; }
+}

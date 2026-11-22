@@ -80,6 +80,11 @@
     if (abs >= 1e4) return sign + (abs / 1e4).toFixed(0) + '万';
     return sign + abs.toFixed(0);
   }
+  /** 已是「亿元」的数值 → 带符号文本（capital-flow 端点口径） */
+  function fmtYiVal(v, signed) {
+    if (!isNum(v)) return '—';
+    return (signed && v > 0 ? '+' : '') + Number(v).toFixed(2) + '亿';
+  }
   function fmtMoney(v) {
     if (!isNum(v)) return '—';
     var sign = v > 0 ? '+' : (v < 0 ? '-' : '');
@@ -900,6 +905,82 @@
       + '</div>';
   }
 
+  function capRow(item, maxAbs, dir) {
+    var v = Number(item.main_net_inflow);
+    var w = Math.max(2, Math.round(Math.abs(v) / maxAbs * 100));
+    var pct = isNum(item.change_pct) ? item.change_pct : null;
+    return '<div class="wb-cap-row">'
+      + '<span class="wb-cap-name" title="' + esc(item.name || '') + '">' + esc(item.name || '—') + '</span>'
+      + '<span class="wb-bar ' + (dir > 0 ? 'is-up' : 'is-down') + '"><i style="width:' + w + '%"></i></span>'
+      + '<span class="wb-cap-val ' + (dir > 0 ? 'is-up' : 'is-down') + '">' + esc(fmtYiVal(v, true)) + '</span>'
+      + '<span class="wb-cap-pct ' + clsOf(pct) + '">' + esc(pctText(pct)) + '</span>'
+      + '</div>';
+  }
+
+  /* 资金水位：北向 + 板块主力。北向自 2024-08 停披，available=false 时显「—」，
+     不能把 null 兜成 0；板块 TOP5 只保留方向真正一致的记录（上游 top_outflow
+     在普涨日可能包含正数，直接叫"净流出"会说谎）。 */
+  function renderCapital(capR) {
+    var el = $id('wbCapitalBody');
+    if (!el) return;
+    var metaEl = $id('wbCapitalMeta');
+    if (!capR || !capR.ok || !capR.body || !capR.body.data) {
+      if (metaEl) metaEl.textContent = '取数失败';
+      el.innerHTML = '<div class="wb-empty"><b>资金数据暂不可用</b><br>上游未返回北向/板块资金，缺失字段显示「—」而不是 0。</div>';
+      return;
+    }
+    var d = capR.body.data || {};
+    var nb = d.northbound || {};
+    var smf = d.sector_main_flow || {};
+    var nbOk = nb.available === true && isNum(nb.total_net_inflow);
+    var nbVal = nbOk ? fmtYiVal(nb.total_net_inflow, true) : '—';
+    var nbNote;
+    if (nbOk) {
+      nbNote = (nb.sh_sz_split_available
+        ? ('沪 ' + fmtYiVal(nb.sh_net_inflow, true) + ' · 深 ' + fmtYiVal(nb.sz_net_inflow, true))
+        : '沪深拆分未提供')
+        + (nb.date ? ' · ' + nb.date : '');
+    } else {
+      nbNote = '2024-08 起停止披露 · 缺失显「—」';
+    }
+
+    var allIn = (Array.isArray(smf.top_inflow) ? smf.top_inflow : [])
+      .filter(function (x) { return isNum(x.main_net_inflow) && Number(x.main_net_inflow) > 0; }).slice(0, 5);
+    var allOut = (Array.isArray(smf.top_outflow) ? smf.top_outflow : [])
+      .filter(function (x) { return isNum(x.main_net_inflow) && Number(x.main_net_inflow) < 0; }).slice(0, 5);
+    var smfOk = isNum(smf.total_net_inflow) && (allIn.length > 0 || allOut.length > 0);
+    var totalVal = smfOk ? fmtYiVal(smf.total_net_inflow, true) : '—';
+    var sumIn = allIn.reduce(function (s, x) { return s + Number(x.main_net_inflow); }, 0);
+    var sumOut = allOut.reduce(function (s, x) { return s + Number(x.main_net_inflow); }, 0);
+    var maxIn = allIn.length ? Math.abs(Number(allIn[0].main_net_inflow)) : 1;
+    var maxOut = allOut.length ? Math.abs(Number(allOut[0].main_net_inflow)) : 1;
+
+    if (metaEl) metaEl.textContent = d.update_time ? ('更新 ' + clockText(d.update_time)) : '东财行业板块口径';
+
+    el.innerHTML = '<div class="wb-cap-grid">'
+      + '<div class="wb-cap-kpi"><div class="wb-cap-k">北向合计</div>'
+      + '<div class="wb-cap-v">' + esc(nbVal) + '</div>'
+      + '<div class="wb-cap-note">' + esc(nbNote) + '</div></div>'
+      + '<div class="wb-cap-kpi"><div class="wb-cap-k">板块主力合计</div>'
+      + '<div class="wb-cap-v ' + clsOf(smfOk ? smf.total_net_inflow : null) + '">' + esc(totalVal) + '</div>'
+      + '<div class="wb-cap-note">' + (smfOk ? '东财行业板块口径' : '上游未返回板块资金流') + '</div></div>'
+      + '<div class="wb-cap-kpi"><div class="wb-cap-k">TOP5 净流入</div>'
+      + '<div class="wb-cap-v ' + clsOf(allIn.length ? sumIn : null) + '">' + esc(allIn.length ? fmtYiVal(sumIn, true) : '—') + '</div>'
+      + '<div class="wb-cap-note">' + (allIn.length ? ('最强 ' + esc(allIn[0].name || '—') + ' · ' + esc(pctText(allIn[0].change_pct))) : '暂无净流入板块（不是 0）') + '</div></div>'
+      + '<div class="wb-cap-kpi"><div class="wb-cap-k">TOP5 净流出</div>'
+      + '<div class="wb-cap-v ' + clsOf(allOut.length ? sumOut : null) + '">' + esc(allOut.length ? fmtYiVal(sumOut, true) : '—') + '</div>'
+      + '<div class="wb-cap-note">' + (allOut.length ? ('最强 ' + esc(allOut[0].name || '—') + ' · ' + esc(pctText(allOut[0].change_pct))) : '暂无净流出板块（不是 0）') + '</div></div>'
+      + '</div>'
+      + '<div class="wb-cap-cols">'
+      + '<div><div class="wb-heat-title is-up"><span>净流入 TOP5</span><span>净额 / 涨跌</span></div>'
+      + (allIn.length ? allIn.map(function (x) { return capRow(x, maxIn, 1); }).join('') : '<div class="wb-empty">暂无净流入板块</div>')
+      + '</div>'
+      + '<div><div class="wb-heat-title is-down"><span>净流出 TOP5</span><span>净额 / 涨跌</span></div>'
+      + (allOut.length ? allOut.map(function (x) { return capRow(x, maxOut, -1); }).join('') : '<div class="wb-empty">暂无净流出板块</div>')
+      + '</div>'
+      + '</div>';
+  }
+
   /* ================= 加载编排 ================= */
   /* 面板超时/失败时的占位响应。必须是独立对象(不能共享同一个可变引用,
      否则某个面板若改写字段会污染其他面板的判定)。 */
@@ -914,7 +995,7 @@
     if (btn) { btn.disabled = true; btn.textContent = '刷新中'; }
     var suffix = force ? ('?_t=' + Date.now()) : '';
     try {
-      /* allSettled 而不是 all:七个面板各自结算,任一超时/抛错只让该面板显示失败态,
+      /* allSettled 而不是 all:每个面板各自结算,任一超时/抛错只让该面板显示失败态,
          绝不阻塞其余面板渲染, 也不会让 await 永不返回导致 loading 卡死。 */
       var settled = await Promise.allSettled([
         fetchJSON('/api/market/index_realtime' + suffix),
@@ -923,13 +1004,14 @@
         fetchJSON('/api/market/sector_flow' + suffix),
         fetchJSON('/api/market/hot_stocks' + suffix),
         fetchJSON('/api/portfolio/watchboard' + suffix),
-        statusIn ? Promise.resolve(statusIn) : fetchStatus()
+        statusIn ? Promise.resolve(statusIn) : fetchStatus(),
+        fetchJSON('/api/market/capital-flow' + suffix)
       ]);
       var results = settled.map(function (r) {
         if (r && r.status === 'fulfilled') return r.value || failedPanel('empty-panel');
         return failedPanel((r && r.reason && r.reason.message) ? r.reason.message : 'panel-rejected');
       });
-      var idx = results[0], thermoR = results[1], boardR = results[2], sectorR = results[3], hotR = results[4], pfR = results[5];
+      var idx = results[0], thermoR = results[1], boardR = results[2], sectorR = results[3], hotR = results[4], pfR = results[5], capR = results[7];
       var indices = (idx.ok && idx.body && Array.isArray(idx.body.data)) ? idx.body.data : null;
       var thermo = (thermoR.ok && thermoR.body && thermoR.body.data) ? thermoR.body.data : null;
       var board = (boardR.ok && boardR.body && boardR.body.data) ? boardR.body.data : null;
@@ -956,6 +1038,7 @@
       renderLadder(board);
       renderSectors(sectors, sectorMeta);
       renderHot(hot);
+      renderCapital(capR);
       renderPortfolio(pfR);
       /* 资金连增要逐股拉资金流（1~3s），异步补拉，不拖慢首屏其他面板 */
       loadDdx(suffix);
@@ -968,6 +1051,7 @@
       results.slice(0, 6).forEach(function (r, i) {
         if (!r || !r.ok) failedNames.push(panelNames[i]);
       });
+      if (!capR.ok) failedNames.push('资金');
       var foot = $id('wbFootTime');
       if (foot) {
         foot.textContent = failedNames.length

@@ -104,7 +104,11 @@
     if (!row) return;
     const cell = row.children[2]; // 第 3 列 = 份额
     if (!cell || cell.querySelector('.pred-share-edit-input')) return;
-    const oldText = (cell.textContent || '').replace('份额为估算值,请复核', '').trim();
+    const oldText = (cell.textContent || '')
+      .replace('份额为估算值,请复核', '')
+      .replace('份额估算', '')
+      .replace('改', '')
+      .trim();
     cell.innerHTML = '<input class="pred-share-edit-input" type="number" min="0.01" step="0.01" value="'
       + esc(parseFloat(oldText.replace(/,/g, '')) || 0) + '" aria-label="编辑 ' + esc(code) + ' 的份额">'
       + '<button class="btn btn-sm btn-primary" style="padding:4px 8px;min-height:32px;" onclick="RecommendPage.saveShare(\'' + code + '\')">存</button> '
@@ -155,17 +159,23 @@
         const badge = document.createElement('span');
         badge.className = 'pred-share-estimated';
         badge.title = '该份额为近似值(±5%), 请向券商核对后在此行内修正';
-        badge.textContent = '份额为估算值,请复核';
-        cell.appendChild(badge);
+        badge.textContent = '份额估算';
         const btn = document.createElement('button');
         btn.className = 'btn btn-sm';
-        btn.style.cssText = 'padding:2px 8px;min-height:28px;margin:4px 0 0;';
+        btn.style.cssText = 'padding:2px 8px;min-height:28px;';
         btn.setAttribute('aria-label', '行内编辑 ' + code + ' 的份额');
         btn.textContent = '改';
         btn.addEventListener('click', function () { editShareRow(code); });
-        cell.appendChild(btn);
+        /* 2026-11-22: 角标与「改」并排收在份额列内，避免 100px 窄列里
+           角标单独换 3 行、把整行拉高。 */
+        const wrap = document.createElement('span');
+        wrap.className = 'pred-share-actions';
+        wrap.appendChild(badge);
+        wrap.appendChild(btn);
+        cell.appendChild(wrap);
       } else if (!estimatedCodes.has(code) && hasBadge && force) {
-        hasBadge.remove();
+        const wrap = hasBadge.closest('.pred-share-actions');
+        if (wrap) wrap.remove(); else hasBadge.remove();
       }
     });
   }

@@ -1020,6 +1020,8 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 <link rel="stylesheet" href="/static/css/workbench.css">
 <!-- ===== STAGE7: global-dashboard ===== 全球市场面板 + 版本弹窗样式(引用既有 token, 红涨绿跌) -->
 <link rel="stylesheet" href="/static/css/global-market.css">
+<!-- 2026-11-22: 终端化收尾(板块三视图/行情大屏栅格/K线周期/基金徽章),须最后加载以覆盖存量布局 -->
+<link rel="stylesheet" href="/static/css/terminal-ui.css">
 <!-- 性能优化:lightweight-charts 改为懒加载(仅在用户点击"走势"时加载),避免阻塞首屏 -->
 <link rel="preconnect" href="https://unpkg.com" crossorigin>
 <link rel="dns-prefetch" href="https://unpkg.com">
@@ -1207,6 +1209,17 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
               <div class="wb-pb" id="wbDisciplineBody"><div class="wb-empty">加载中…</div></div>
             </section>
 
+            <!-- 资金水位 -->
+            <section class="wb-panel wb-span-12" aria-label="资金水位">
+              <div class="wb-ph">
+                <span class="wb-ph-icon"></span>
+                <span class="wb-ph-title">资金水位</span>
+                <span class="wb-ph-sub">北向（停披显「—」） · 板块主力净流入 TOP5</span>
+                <span class="wb-ph-meta"><span id="wbCapitalMeta">—</span></span>
+              </div>
+              <div class="wb-pb" id="wbCapitalBody"><div class="wb-empty">加载中…</div></div>
+            </section>
+
             <!-- 持仓快照 -->
             <section class="wb-panel wb-span-12" aria-label="持仓盘中估算">
               <div class="wb-ph">
@@ -1232,16 +1245,39 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
         <div class="qf-page-head">
           <div class="qf-page-head-main">
             <div class="qf-page-title">板块行情</div>
-            <div class="qf-page-sub">行业板块涨跌与资金流排名；点击板块可下钻成分股，数据为盘中快照。</div>
+            <div class="qf-page-sub">板块涨跌与主力资金一屏对照：横轴资金、纵轴涨跌的四象限分布，一眼分辨「涨且有资金」与「涨但资金流出」。缺失字段显示「—」，不按 0 计入。</div>
           </div>
           <div class="qf-page-actions">
-            <button class="btn btn-sm btn-primary" onclick="SectorBoard.load(true)">刷新</button>
+            <span id="predSectorFreshness"></span>
+            <button class="btn btn-sm btn-outline" type="button" onclick="SectorBoard.load(true)">刷新</button>
           </div>
         </div>
-        <div class="card mb-16">
-          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
-            <span>板块涨跌榜</span>
-            <span id="predSectorFreshness"></span>
+
+        <div class="qf-kpi-grid mb-16" id="sectorKpis">
+          <div class="qf-kpi"><div class="qf-kpi-label">上涨板块</div><div class="qf-kpi-value" id="sbKpiUp">—</div><div class="qf-kpi-note" id="sbKpiUpNote">加载中…</div></div>
+          <div class="qf-kpi"><div class="qf-kpi-label">下跌板块</div><div class="qf-kpi-value" id="sbKpiDown">—</div><div class="qf-kpi-note" id="sbKpiDownNote">加载中…</div></div>
+          <div class="qf-kpi"><div class="qf-kpi-label">最强净流入</div><div class="qf-kpi-value" id="sbKpiIn">—</div><div class="qf-kpi-note" id="sbKpiInNote">加载中…</div></div>
+          <div class="qf-kpi"><div class="qf-kpi-label">最强净流出</div><div class="qf-kpi-value" id="sbKpiOut">—</div><div class="qf-kpi-note" id="sbKpiOutNote">加载中…</div></div>
+        </div>
+
+        <div class="card mb-16 sb-card">
+          <div class="sb-toolbar">
+            <div class="sb-tabs" role="tablist" aria-label="板块视图切换">
+              <button class="sb-tab is-active" type="button" role="tab" aria-selected="true" data-sb-tab="board">涨跌榜</button>
+              <button class="sb-tab" type="button" role="tab" aria-selected="false" data-sb-tab="flow">资金流</button>
+              <button class="sb-tab" type="button" role="tab" aria-selected="false" data-sb-tab="graph">强弱分布</button>
+            </div>
+            <div class="sb-toolbar-meta" id="sectorMeta">—</div>
+          </div>
+          <div class="sb-filters" id="sbFilters">
+            <input class="input" id="sbSearch" type="search" placeholder="筛选板块名称，如 半导体 / 证券" autocomplete="off" aria-label="按板块名称筛选">
+            <div class="sb-chips" role="group" aria-label="板块筛选">
+              <button class="sb-chip is-active" type="button" data-sb-filter="all">全部</button>
+              <button class="sb-chip" type="button" data-sb-filter="up">上涨</button>
+              <button class="sb-chip" type="button" data-sb-filter="down">下跌</button>
+              <button class="sb-chip" type="button" data-sb-filter="inflow">净流入</button>
+              <button class="sb-chip" type="button" data-sb-filter="outflow">净流出</button>
+            </div>
           </div>
           <div id="predSectorBoardBody">
             <div class="pred-empty">切换到本页自动加载板块行情</div>
@@ -2018,7 +2054,14 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
           </div>
           <!-- K线图 -->
           <div class="card">
-            <div class="card-title">K线走势</div>
+            <div class="card-title kline-card-title">
+              <span>K线走势 <span class="kline-period-note" id="klinePeriodNote">日K · MA5/10/20</span></span>
+              <span class="kline-periods" role="group" aria-label="K线周期切换">
+                <button class="kline-period is-active" type="button" data-kline-period="daily" aria-pressed="true" onclick="setKlinePeriod('daily', this)">日</button>
+                <button class="kline-period" type="button" data-kline-period="weekly" aria-pressed="false" onclick="setKlinePeriod('weekly', this)">周</button>
+                <button class="kline-period" type="button" data-kline-period="monthly" aria-pressed="false" onclick="setKlinePeriod('monthly', this)">月</button>
+              </span>
+            </div>
             <div style="display:flex;gap:8px;margin-bottom:12px;">
               <input class="input" id="klineCode" placeholder="股票代码" style="max-width:140px;" value="600519">
               <button class="btn btn-sm btn-primary" onclick="loadKline()">加载K线</button>
@@ -3571,7 +3614,16 @@ function switchPage(name) {
     if (tabItem) tabItem.classList.add('active');
     document.querySelectorAll('.hud-subtab').forEach(t => t.classList.remove('active'));
     const subtab = document.querySelector(`.hud-subtab[data-page="${name}"]`);
-    if (subtab) subtab.classList.add('active');
+    if (subtab) {
+      subtab.classList.add('active');
+      /* 2026-11-22: 移动端二级导航是横向滚动条，当前页在末端（如「板块」）时
+         默认不可见，用户会以为没有切过去。切页后把 active 项滚到视口中间。 */
+      const bar = subtab.parentElement;
+      if (bar && bar.scrollWidth > bar.clientWidth) {
+        const left = subtab.offsetLeft - (bar.clientWidth - subtab.offsetWidth) / 2;
+        bar.scrollLeft = Math.max(0, left);
+      }
+    }
   }
   refreshTokenBanner();
   /* ===== STAGE7: workbench ===== 深链：刷新/分享保持在当前子页。
@@ -5397,15 +5449,42 @@ function drawRadarChart(scores) {
 }
 
 // K线图（纯SVG蜡烛图+MA线）
+let klinePeriod = 'daily';
+let _klineSeq = 0;
+const KLINE_PERIOD_TEXT = { daily: '日K', weekly: '周K', monthly: '月K' };
+
+function setKlinePeriod(period, btn) {
+  if (!KLINE_PERIOD_TEXT[period]) return;
+  klinePeriod = period;
+  document.querySelectorAll('.kline-period').forEach(b => {
+    const on = b === btn || b.getAttribute('data-kline-period') === period;
+    b.classList.toggle('is-active', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+  loadKline();
+}
+
 async function loadKline() {
   const code = document.getElementById('klineCode').value.trim() || '600519';
-  const data = await api(`/api/market/stock_kline?code=${code}&count=120`);
+  const period = KLINE_PERIOD_TEXT[klinePeriod] ? klinePeriod : 'daily';
+  const seq = ++_klineSeq;
+  const note = document.getElementById('klinePeriodNote');
+  // 先反映周期切换，再等取数；慢请求/限流时按钮状态与说明不会"看起来没生效"。
+  if (note) note.textContent = KLINE_PERIOD_TEXT[period] + ' · 120 根 · MA5/10/20';
+  const data = await api(`/api/market/stock_kline?code=${encodeURIComponent(code)}&period=${period}&count=120`);
+  if (seq !== _klineSeq) return;   // 快速连点日/周/月时，只画最后一次请求
   const svg = document.getElementById('klineChart');
   if (!svg) return;
 
   // mock 数据误导修复(2026-07-31):原代码用 Math.random 生成 60 根假 K 线(起始价 1800=贵州茅台),
   // API 失败时用户看到假 K 线可能误判走势并据此决策。改为:API 无数据时显示空状态。
-  const items = (data && data.data) ? data.data : [];
+  // 2026-11-22:除空数组外,还需剔除 O/H/L/C 非正数的残行(上游缺失时可能兜成 0,
+  // 会让坐标轴从 0 起、把整根蜡烛压扁成一条线)。
+  const rawItems = (data && data.data) ? data.data : [];
+  const items = rawItems.filter(k => k && ['open', 'high', 'low', 'close'].every(key => {
+    const v = Number(k[key]);
+    return isFinite(v) && v > 0;
+  }));
   if (!items || items.length === 0) {
     // 阶段5 空态瘦身: 无数据时把画布压到 120px, 避免 300px 空框占满首屏
     svg.setAttribute('viewBox', '0 0 600 120');
@@ -5487,9 +5566,9 @@ async function loadKline() {
     <path d="${maPath(ma5)}" fill="none" stroke="#f59e0b" stroke-width="1" opacity="0.8"/>
     <path d="${maPath(ma10)}" fill="none" stroke="#3b82f6" stroke-width="1" opacity="0.8"/>
     <path d="${maPath(ma20)}" fill="none" stroke="#8b5cf6" stroke-width="1" opacity="0.8"/>
-    <circle cx="${W-padR-80}" cy="${padT+10}" r="3" fill="#f59e0b"/><text x="${W-padR-72}" y="${padT+14}" fill="var(--text-muted)" font-size="10">MA5</text>
-    <circle cx="${W-padR-40}" cy="${padT+10}" r="3" fill="#3b82f6"/><text x="${W-padR-32}" y="${padT+14}" fill="var(--text-muted)" font-size="10">MA10</text>
-    <circle cx="${W-padR}" cy="${padT+10}" r="3" fill="#8b5cf6"/><text x="${W-padR+8}" y="${padT+14}" fill="var(--text-muted)" font-size="10">MA20</text>
+    <circle cx="${W-padR-122}" cy="${padT+10}" r="3" fill="#f59e0b"/><text x="${W-padR-92}" y="${padT+14}" text-anchor="end" fill="var(--text-muted)" font-size="10">MA5</text>
+    <circle cx="${W-padR-76}" cy="${padT+10}" r="3" fill="#3b82f6"/><text x="${W-padR-46}" y="${padT+14}" text-anchor="end" fill="var(--text-muted)" font-size="10">MA10</text>
+    <circle cx="${W-padR-30}" cy="${padT+10}" r="3" fill="#8b5cf6"/><text x="${W-padR}" y="${padT+14}" text-anchor="end" fill="var(--text-muted)" font-size="10">MA20</text>
   `;
 }
 
@@ -6118,11 +6197,12 @@ async function loadFundData() {
       <td>${p.shares}</td>
       <td>${(p.cost_nav || 0).toFixed(4)}</td>
       <td>${p.current_nav == null ? '<span title="实时净值暂无数据" style="color:var(--text-muted);">数据缺失</span>' : p.current_nav.toFixed(4)}
-        <!-- ===== STAGE5: freshness ===== K6:净值"截至日期/滞后"标识 + 置信度(P0-2) -->
-        <div>${Freshness.html({
+        <!-- ===== STAGE5: freshness ===== K6:净值"截至日期/滞后"标识 + 置信度(P0-2)
+             置信度说明不再内联展开（长文案会把整列撑成多行并压到涨跌幅列），改挂 title 悬浮查看 -->
+        <div class="fund-nav-meta"${p.confidence === 'low' && p.confidence_reason ? ' title="' + escapeHtml(p.confidence_reason) + '"' : ''}>${Freshness.html({
           asOf: p.nav_date || '',
           estimated: p.confidence === 'low' && !p.nav_date,
-          note: p.confidence === 'low' ? (p.confidence_reason || '') : ''
+          note: ''
         })}${p.confidence === 'low' ? ` <button class="btn btn-sm" style="padding:2px 8px;color:var(--color-warning);" title="进入补录向导复核该基金" data-code="${escapeHtml(p.fund_code)}" onclick="onFundWizardReviewClick(this)">复核</button>` : ''}</div>
       </td>
       <td style="color:${p.change_pct == null ? 'var(--text-muted)' : changeColorStr};">${p.change_pct == null ? '数据缺失' : p.change_pct.toFixed(2) + '%'}</td>

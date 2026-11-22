@@ -2,62 +2,496 @@
  * STAGE6-PRED: sector-board.js — 行情容器"板块"二级页(R2.1)。
  *
  * - 数据源: 既有公开端点 GET /api/market/sector_flow(零新端点)
- * - 板块涨跌榜: 名称/涨跌幅/主力净流入/主力净流入占比, 红涨绿跌, ≥30 行
- * - 数据源失败显示明确错误态; 右上角 Freshness 角标(统一组件)
- * 注: 上游 sector_flow 不提供领涨股字段(PRD R2.1 的"领涨股"列上游不支持),
- *     以主力净流入/主力净流入占比替代呈现 —— 已在汇报中登记为偏离点。
+ * - 三个视图: 涨跌榜 / 资金流 / 强弱分布
+ * - 强弱分布: 横轴主力净流入、纵轴涨跌幅的四象限气泡图(不虚构板块关系)
+ * - 缺失数据一律「—」并说明原因, 不按 0 计入排序与图表
+ * - 深链 #sector-board 首次落地自动加载
  */
 /* global escapeHtml, Freshness */
 (function () {
   'use strict';
 
+  var state = {
+    loading: false,
+    data: null,
+    meta: null,
+    loadedAt: 0,
+    tab: 'board',
+    filter: 'all',
+    query: '',
+    lastError: ''
+  };
+  var searchTimer = null;
+  var CACHE_MS = 15000;
+
+  function $(id) { return document.getElementById(id); }
   function esc(s) { return (typeof escapeHtml === 'function') ? escapeHtml(s == null ? '' : String(s)) : ''; }
 
-  function fmtYi(v) {
-    // C-02 收尾(2026-11-17):null(上游缺失)不得经 Number(null)===0 画成 "0.00 亿"。
-    const n = Number(v);
-    if (v == null || !isFinite(n)) return '—';
-    return (n / 1e8).toFixed(2) + ' 亿';
+  function isNum(v) { return v !== null && v !== undefined && v !== '' && isFinite(Number(v)); }
+  function hasPct(it) { return it && isNum(it.change_pct); }
+
+  function fmtPct(v) {
+    if (!isNum(v)) return '—';
+    var n = Number(v);
+    return (n > 0 ? '+' : '') + n.toFixed(2) + '%';
   }
 
-  function pctCls(v) {
-    const n = Number(v);
-    if (!isFinite(n) || n === 0) return 'pred-flat';
-    return n > 0 ? 'pred-up' : 'pred-down';
+  function fmtYi(v, signed) {
+    if (!isNum(v)) return '—';
+    var n = Number(v);
+    var sign = signed && n > 0 ? '+' : '';
+    return sign + (n / 1e8).toFixed(2) + '\u00a0亿';
   }
 
-  function rowHTML(item, idx, flowUnavailable, ratioUnavailable) {
-    // M-04: `Number(null) === 0` 会把"没拿到涨跌幅"渲染成 0.00%(还带绿/红中性色);
-    // 先判"是否真的有数", 缺失一律渲染「—」(旧实现在 NaN 分支会把「—」拼成「—%」)。
-    const pctKnown = item.change_pct !== null && item.change_pct !== undefined
-      && isFinite(Number(item.change_pct));
-    const pct = pctKnown ? Number(item.change_pct) : null;
-    const sign = pctKnown && pct > 0 ? '+' : '';
-    // 2026-11-08：资金流字段不可用时渲染 '—'，不能渲染 0.00 —— 用户会把
-    // "没拿到资金流"读成"主力净流入为零"，这是两件完全不同的事。
-    const flowCell = flowUnavailable
-      ? '<td>—</td>'
-      : '<td class="' + pctCls(Number(item.main_net_inflow)) + '">' + esc(fmtYi(item.main_net_inflow)) + '</td>';
-    const ratioCell = ratioUnavailable
-      ? '<td>—</td>'
-      : '<td>' + esc(item.large_order_ratio == null || !isFinite(Number(item.large_order_ratio))
-          ? '—'
-          : Number(item.large_order_ratio).toFixed(2)) + '</td>';
-    return '<tr><td>' + esc(idx + 1) + '</td>'
-      + '<td>' + esc(item.sector) + '</td>'
-      + '<td class="' + pctCls(pct) + '">' + (pctKnown ? esc(sign + pct.toFixed(2) + '%') : '—') + '</td>'
+  function clsOf(v) {
+    if (!isNum(v) || Number(v) === 0) return '';
+    return Number(v) > 0 ? 'is-up' : 'is-down';
+  }
+
+  function pctOf(n, total) {
+    if (!total) return '—';
+    return (n / total * 100).toFixed(0) + '%';
+  }
+
+  function sourceText(meta) {
+    if (!meta) return '板块行情';
+    if (meta.data_source === 'sina') return '新浪板块资金';
+    if (meta.data_source === 'eastmoney') return '东财板块行情';
+    return meta.data_source || '板块行情';
+  }
+
+  function flowUnavailableReason() {
+    var meta = state.meta || {};
+    var unavailable = meta.unavailable_fields || [];
+    if (meta.degraded && unavailable.indexOf('main_net_inflow') >= 0) {
+      return '上游未返回板块资金流';
+    }
+    var items = state.data || [];
+    var known = items.filter(function (it) { return isNum(it.main_net_inflow); });
+    if (!known.length) return '上游未返回板块资金流';
+    if (known.every(function (it) { return Number(it.main_net_inflow) === 0; })) {
+      return '上游资金流字段全为 0，按未提供处理';
+    }
+    return '';
+  }
+
+  function ratioUnavailable() {
+    var meta = state.meta || {};
+    var unavailable = meta.unavailable_fields || [];
+    return !!(meta.degraded && unavailable.indexOf('large_order_ratio') >= 0);
+  }
+
+  function setKpi(id, value, note, cls) {
+    var v = $(id);
+    if (!v) return;
+    v.textContent = value;
+    v.className = 'qf-kpi-value' + (cls ? ' ' + cls : '');
+    var n = $(id + 'Note');
+    if (n) n.textContent = note;
+  }
+
+  function renderKpis() {
+    var items = state.data || [];
+    if (!items.length) {
+      setKpi('sbKpiUp', '—', '暂无板块数据', '');
+      setKpi('sbKpiDown', '—', '暂无板块数据', '');
+      setKpi('sbKpiIn', '—', '暂无板块数据', '');
+      setKpi('sbKpiOut', '—', '暂无板块数据', '');
+      return;
+    }
+    var pctItems = items.filter(hasPct);
+    var up = pctItems.filter(function (it) { return Number(it.change_pct) > 0; }).length;
+    var down = pctItems.filter(function (it) { return Number(it.change_pct) < 0; }).length;
+    var flat = pctItems.length - up - down;
+    var noPct = items.length - pctItems.length;
+    var upNote = '占比 ' + pctOf(up, pctItems.length)
+      + (flat ? ' · 平盘 ' + flat : '')
+      + (noPct ? ' · ' + noPct + ' 个缺失涨跌幅' : '');
+    var downNote = '占比 ' + pctOf(down, pctItems.length)
+      + (noPct ? ' · 缺失不计入' : '');
+
+    setKpi('sbKpiUp', up + ' 个', upNote, up > 0 ? 'is-up' : '');
+    setKpi('sbKpiDown', down + ' 个', downNote, down > 0 ? 'is-down' : '');
+
+    var reason = flowUnavailableReason();
+    if (reason) {
+      setKpi('sbKpiIn', '—', reason + '，不按 0 计', '');
+      setKpi('sbKpiOut', '—', reason + '，不按 0 计', '');
+      return;
+    }
+    var flows = items.filter(function (it) { return isNum(it.main_net_inflow); });
+    var total = flows.reduce(function (sum, it) { return sum + Number(it.main_net_inflow); }, 0);
+    var positives = flows.filter(function (it) { return Number(it.main_net_inflow) > 0; })
+      .sort(function (a, b) { return Number(b.main_net_inflow) - Number(a.main_net_inflow); });
+    var negatives = flows.filter(function (it) { return Number(it.main_net_inflow) < 0; })
+      .sort(function (a, b) { return Number(a.main_net_inflow) - Number(b.main_net_inflow); });
+    var topIn = positives[0];
+    var topOut = negatives[0];
+
+    if (topIn) {
+      setKpi('sbKpiIn', fmtYi(topIn.main_net_inflow, true),
+        (topIn.sector || '—') + ' · ' + fmtPct(topIn.change_pct) + ' · 合计 ' + fmtYi(total, true), 'is-up');
+    } else {
+      setKpi('sbKpiIn', '—', '今日暂无净流入板块 · 合计 ' + fmtYi(total, true), '');
+    }
+    if (topOut) {
+      setKpi('sbKpiOut', fmtYi(topOut.main_net_inflow, true),
+        (topOut.sector || '—') + ' · ' + fmtPct(topOut.change_pct), 'is-down');
+    } else {
+      setKpi('sbKpiOut', '—', '今日暂无净流出板块（不是 0）', '');
+    }
+  }
+
+  function renderMeta() {
+    var el = $('sectorMeta');
+    var badge = $('predSectorFreshness');
+    var meta = state.meta || {};
+    var asOf = meta.timestamp ? String(meta.timestamp).slice(11, 19) : '';
+    var n = (state.data || []).length;
+    if (el) {
+      el.textContent = !state.data && state.lastError
+        ? '数据源暂不可用'
+        : sourceText(meta)
+          + (asOf ? ' · ' + asOf : '')
+          + ' · ' + n + ' 个板块'
+          + (state.loading ? ' · 刷新中…' : (state.lastError ? ' · 刷新失败，保留上次数据' : ''));
+    }
+    if (badge) {
+      badge.innerHTML = asOf
+        ? Freshness.html({ asOf: asOf, note: sourceText(meta) })
+        : '';
+    }
+  }
+
+  function sortedItems() {
+    var items = state.data || [];
+    var has = items.filter(hasPct);
+    var noPct = items.filter(function (it) { return !hasPct(it); });
+    has.sort(function (a, b) { return Number(b.change_pct) - Number(a.change_pct); });
+    return has.concat(noPct);
+  }
+
+  function filteredItems() {
+    var list = sortedItems();
+    var q = state.query.trim().toLowerCase();
+    if (q) {
+      list = list.filter(function (it) { return String(it.sector || '').toLowerCase().indexOf(q) >= 0; });
+    }
+    var f = state.filter;
+    if (f === 'up') list = list.filter(function (it) { return hasPct(it) && Number(it.change_pct) > 0; });
+    else if (f === 'down') list = list.filter(function (it) { return hasPct(it) && Number(it.change_pct) < 0; });
+    else if (f === 'inflow') list = list.filter(function (it) { return isNum(it.main_net_inflow) && Number(it.main_net_inflow) > 0; });
+    else if (f === 'outflow') list = list.filter(function (it) { return isNum(it.main_net_inflow) && Number(it.main_net_inflow) < 0; });
+    return list;
+  }
+
+  function boardRowHTML(item, idx, flowOk, ratioOk) {
+    var pctKnown = hasPct(item);
+    var pct = pctKnown ? Number(item.change_pct) : null;
+    var flowCell = flowOk
+      ? '<td class="sb-num ' + clsOf(item.main_net_inflow) + '">' + esc(fmtYi(item.main_net_inflow, true)) + '</td>'
+      : '<td class="sb-num">—</td>';
+    var ratioCell = ratioOk
+      ? '<td class="sb-num">' + (isNum(item.large_order_ratio) ? Number(item.large_order_ratio).toFixed(2) : '—') + '</td>'
+      : '<td class="sb-num">—</td>';
+    return '<tr>'
+      + '<td class="sb-rank">' + (idx + 1) + '</td>'
+      + '<td class="sb-name">' + esc(item.sector || '—') + '</td>'
+      + '<td class="sb-num ' + clsOf(pct) + '">' + (pctKnown ? esc(fmtPct(pct)) : '—') + '</td>'
       + flowCell + ratioCell + '</tr>';
+  }
+
+  function renderBoard() {
+    var el = $('predSectorBoardBody');
+    if (!el) return;
+    var reason = flowUnavailableReason();
+    var flowOk = !reason;
+    var ratioOk = !ratioUnavailable();
+    var list = filteredItems();
+    if (!list.length) {
+      el.innerHTML = '<div class="pred-empty">没有符合筛选条件的板块。'
+        + '<button class="btn btn-sm btn-outline" type="button" data-sb-reset style="margin-left:8px;">清除筛选</button></div>';
+      return;
+    }
+    var rows = list.map(function (it, i) { return boardRowHTML(it, i, flowOk, ratioOk); }).join('');
+    var banner = reason
+      ? '<div class="sb-banner">⚠ ' + esc(reason) + '，主力净流入与占比列显示「—」（不是 0）</div>'
+      : '';
+    el.innerHTML = banner
+      + '<div class="table-wrap sb-table-wrap" tabindex="0">'
+      + '<table class="pred-sector-table sb-table">'
+      + '<thead><tr><th class="sb-rank">#</th><th>板块名称</th><th class="sb-num">涨跌幅</th>'
+      + '<th class="sb-num">主力净流入</th><th class="sb-num">净流入占比</th></tr></thead>'
+      + '<tbody>' + rows + '</tbody></table></div>'
+      + '<div class="pred-muted sb-foot">共 ' + list.length + ' 个板块'
+      + (list.length !== (state.data || []).length ? '（已筛选，全市场 ' + (state.data || []).length + ' 个）' : '')
+      + ' · 红涨绿跌 · 盘中快照，非投资建议</div>';
+  }
+
+  function flowRows(list, maxAbs, direction) {
+    if (!list.length) return '<div class="pred-empty">暂无' + (direction > 0 ? '净流入' : '净流出') + '板块</div>';
+    return list.map(function (it) {
+      var v = Number(it.main_net_inflow);
+      var w = Math.max(2, Math.round(Math.abs(v) / maxAbs * 100));
+      return '<div class="sb-flow-row">'
+        + '<span class="sb-flow-name" title="' + esc(it.sector || '') + '">' + esc(it.sector || '—') + '</span>'
+        + '<span class="sb-flow-bar"><i class="' + clsOf(v) + '" style="width:' + w + '%"></i></span>'
+        + '<span class="sb-flow-val ' + clsOf(v) + '">' + esc(fmtYi(v, true)) + '</span>'
+        + '<span class="sb-flow-pct ' + clsOf(it.change_pct) + '">' + esc(fmtPct(it.change_pct)) + '</span>'
+        + '</div>';
+    }).join('');
+  }
+
+  function renderFlow() {
+    var el = $('predSectorBoardBody');
+    if (!el) return;
+    var reason = flowUnavailableReason();
+    if (reason) {
+      el.innerHTML = '<div class="pred-empty"><b>资金流暂不可用</b><br>' + esc(reason)
+        + '。涨跌幅仍可在「涨跌榜」查看；缺失字段显示「—」而不是 0。</div>';
+      return;
+    }
+    var items = (state.data || []).filter(function (it) { return isNum(it.main_net_inflow); });
+    var pos = items.filter(function (it) { return Number(it.main_net_inflow) > 0; })
+      .sort(function (a, b) { return Number(b.main_net_inflow) - Number(a.main_net_inflow); }).slice(0, 8);
+    var neg = items.filter(function (it) { return Number(it.main_net_inflow) < 0; })
+      .sort(function (a, b) { return Number(a.main_net_inflow) - Number(b.main_net_inflow); }).slice(0, 8);
+    var maxPos = pos.length ? Math.abs(Number(pos[0].main_net_inflow)) : 1;
+    var maxNeg = neg.length ? Math.abs(Number(neg[0].main_net_inflow)) : 1;
+    var total = items.reduce(function (sum, it) { return sum + Number(it.main_net_inflow); }, 0);
+    var inflowCount = items.filter(function (it) { return Number(it.main_net_inflow) > 0; }).length;
+    var outflowCount = items.filter(function (it) { return Number(it.main_net_inflow) < 0; }).length;
+
+    el.innerHTML = '<div class="sb-flow-head">'
+      + '<div><span class="sb-flow-head-label">板块主力合计</span>'
+      + '<b class="sb-flow-head-val ' + clsOf(total) + '">' + esc(fmtYi(total, true)) + '</b></div>'
+      + '<div class="pred-muted">净流入 ' + inflowCount + ' 个 · 净流出 ' + outflowCount
+      + ' 个 · 共 ' + items.length + ' 个板块</div></div>'
+      + '<div class="sb-flow-cols">'
+      + '<section><h3 class="sb-flow-title is-up">主力净流入 TOP8</h3>'
+      + flowRows(pos, maxPos, 1) + '</section>'
+      + '<section><h3 class="sb-flow-title is-down">主力净流出 TOP8</h3>'
+      + flowRows(neg, maxNeg, -1) + '</section>'
+      + '</div>'
+      + '<div class="pred-muted sb-foot">资金流为东财行业板块口径；左右两栏条形各自缩放，仅用于组内比较。缺失值不补零。</div>';
+  }
+
+  function shortName(name) {
+    var s = String(name || '');
+    return s.length > 10 ? s.slice(0, 10) + '…' : s;
+  }
+
+  function placeLabels(points, bounds) {
+    var candidates = points.slice().sort(function (a, b) { return b.score - a.score; }).slice(0, 10);
+    /* 标签避让：不仅彼此不重叠，也不压住其它气泡；放不下就留白，
+       明细仍可悬停/聚焦气泡查看。 */
+    var obstacles = points.map(function (p) {
+      return { x: p.x - p.r - 2, y: p.y - p.r - 2, w: p.r * 2 + 4, h: p.r * 2 + 4 };
+    });
+    var placed = [];
+    var out = [];
+    function hits(box) {
+      var all = placed.concat(obstacles);
+      for (var i = 0; i < all.length; i++) {
+        var p = all[i];
+        if (box.x < p.x + p.w && box.x + box.w > p.x && box.y < p.y + p.h && box.y + box.h > p.y) return true;
+      }
+      return false;
+    }
+    candidates.forEach(function (p) {
+      var text = shortName(p.item.sector);
+      var w = text.length * 10 + 6;
+      var h = 13;
+      var tries = [
+        [p.x + p.r + 5, p.y + 3],
+        [p.x - p.r - 5 - w, p.y + 3],
+        [p.x - w / 2, p.y - p.r - 9],
+        [p.x - w / 2, p.y + p.r + 13],
+        [p.x + p.r + 2, p.y - p.r + 2],
+        [p.x + p.r + 2, p.y + p.r + 12],
+        [p.x - p.r - 2 - w, p.y - p.r + 2],
+        [p.x - p.r - 2 - w, p.y + p.r + 12]
+      ];
+      for (var i = 0; i < tries.length; i++) {
+        var tx = tries[i][0];
+        var ty = tries[i][1];
+        if (tx < bounds.x || tx + w > bounds.x + bounds.w) continue;
+        if (ty - 10 < bounds.y || ty > bounds.y + bounds.h) continue;
+        var box = { x: tx, y: ty - 10, w: w, h: h };
+        if (hits(box)) continue;
+        placed.push(box);
+        out.push('<text class="sb-bubble-label" x="' + tx.toFixed(1) + '" y="' + ty.toFixed(1) + '">' + esc(text) + '</text>');
+        break;
+      }
+    });
+    return out.join('');
+  }
+
+  function renderGraph() {
+    var el = $('predSectorBoardBody');
+    if (!el) return;
+    var reason = flowUnavailableReason();
+    if (reason) {
+      el.innerHTML = '<div class="pred-empty"><b>强弱分布暂不可用</b><br>' + esc(reason)
+        + '。该图同时需要涨跌幅与主力净流入，缺一不可；缺失字段不以 0 顶替。</div>';
+      return;
+    }
+    var all = state.data || [];
+    var points = all.filter(function (it) {
+      return hasPct(it) && isNum(it.main_net_inflow);
+    }).map(function (it) {
+      return { item: it, pct: Number(it.change_pct), flow: Number(it.main_net_inflow) };
+    });
+    var missing = all.length - points.length;
+    if (points.length < 3) {
+      el.innerHTML = '<div class="pred-empty">可用于绘图的板块不足（' + points.length + ' 个），暂不绘制分布图。</div>';
+      return;
+    }
+
+    var W = 920, H = 470, padL = 60, padR = 24, padT = 30, padB = 46;
+    var chartW = W - padL - padR;
+    var chartH = H - padT - padB;
+    var midX = padL + chartW / 2;
+    var midY = padT + chartH / 2;
+    var maxPos = Math.max(1, Math.max.apply(null, points.filter(function (p) { return p.flow > 0; }).map(function (p) { return p.flow; }).concat([0])));
+    var maxNeg = Math.max(1, Math.max.apply(null, points.filter(function (p) { return p.flow < 0; }).map(function (p) { return -p.flow; }).concat([0])));
+    if (!points.some(function (p) { return p.flow > 0; })) maxPos = maxNeg;
+    if (!points.some(function (p) { return p.flow < 0; })) maxNeg = maxPos;
+    var maxFlow = Math.max(maxPos, maxNeg);
+    var maxAbsPct = Math.max(0.5, Math.max.apply(null, points.map(function (p) { return Math.abs(p.pct); })));
+    var halfW = chartW / 2;
+    var halfH = chartH / 2;
+
+    function xOf(flow) {
+      /* 资金流分布高度右偏(多数板块 <1 亿、个别 60 亿+),线性轴会把大多数点
+         挤在 0 附近;按 √|flow| 展开两侧,轴刻度仍标真实金额,并在脚注注明。 */
+      return flow >= 0
+        ? midX + Math.sqrt(flow / maxPos) * halfW
+        : midX - Math.sqrt((-flow) / maxNeg) * halfW;
+    }
+    function yOf(pct) {
+      var clipped = Math.max(-maxAbsPct, Math.min(maxAbsPct, pct));
+      return midY - (clipped / maxAbsPct) * halfH;
+    }
+
+    var pctTicks = [maxAbsPct, maxAbsPct / 2, 0, -maxAbsPct / 2, -maxAbsPct];
+    var yAxis = pctTicks.map(function (v) {
+      var y = yOf(v);
+      return '<line class="sb-grid-line' + (v === 0 ? ' is-zero' : '') + '" x1="' + padL + '" y1="' + y.toFixed(1)
+        + '" x2="' + (W - padR) + '" y2="' + y.toFixed(1) + '"/>'
+        + '<text class="sb-axis-text" x="' + (padL - 8) + '" y="' + (y + 3.5).toFixed(1) + '" text-anchor="end">'
+        + esc((v > 0 ? '+' : '') + v.toFixed(1) + '%') + '</text>';
+    }).join('');
+
+    var xTicks = [
+      { v: -maxNeg, label: '-' + (maxNeg / 1e8).toFixed(1) + ' 亿' },
+      { v: -maxNeg / 2, label: '-' + (maxNeg / 2 / 1e8).toFixed(1) },
+      { v: 0, label: '0' },
+      { v: maxPos / 2, label: '+' + (maxPos / 2 / 1e8).toFixed(1) },
+      { v: maxPos, label: '+' + (maxPos / 1e8).toFixed(1) + ' 亿' }
+    ];
+    var xAxis = xTicks.map(function (t) {
+      var x = t.v === 0 ? midX : xOf(t.v);
+      return '<line class="sb-grid-line' + (t.v === 0 ? ' is-zero' : '') + '" x1="' + x.toFixed(1) + '" y1="' + padT
+        + '" x2="' + x.toFixed(1) + '" y2="' + (padT + chartH) + '"/>'
+        + '<text class="sb-axis-text" x="' + x.toFixed(1) + '" y="' + (padT + chartH + 20) + '" text-anchor="middle">'
+        + esc(t.label) + '</text>';
+    }).join('');
+
+    var bubbles = points.map(function (p) {
+      var r = 3.5 + 12 * Math.sqrt(Math.abs(p.flow) / maxFlow);
+      var cls = clsOf(p.flow);
+      var title = (p.item.sector || '—') + '｜涨跌幅 ' + fmtPct(p.pct)
+        + '｜主力净流入 ' + fmtYi(p.flow, true)
+        + (isNum(p.item.large_order_ratio) ? '｜占比 ' + Number(p.item.large_order_ratio).toFixed(2) : '');
+      p.x = xOf(p.flow);
+      p.y = yOf(p.pct);
+      p.r = r;
+      p.score = (Math.abs(p.flow) / maxFlow) * 0.65 + (Math.abs(p.pct) / maxAbsPct) * 0.35;
+      return '<g class="sb-bubble ' + cls + '" tabindex="0" role="img" aria-label="' + esc(title) + '">'
+        + '<title>' + esc(title) + '</title>'
+        + '<circle cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="' + r.toFixed(1) + '"/>'
+        + '</g>';
+    }).join('');
+
+    var labels = placeLabels(points, { x: padL, y: padT, w: chartW, h: chartH });
+    var quadrants = ''
+      + '<rect class="sb-quad is-up" x="' + midX + '" y="' + padT + '" width="' + halfW + '" height="' + halfH + '"/>'
+      + '<rect class="sb-quad is-warn" x="' + padL + '" y="' + padT + '" width="' + halfW + '" height="' + halfH + '"/>'
+      + '<rect class="sb-quad is-down" x="' + padL + '" y="' + midY + '" width="' + halfW + '" height="' + halfH + '"/>'
+      + '<rect class="sb-quad is-warn" x="' + midX + '" y="' + midY + '" width="' + halfW + '" height="' + halfH + '"/>'
+      + '<text class="sb-quad-label is-warn" x="' + (padL + 10) + '" y="' + (padT + 17) + '">涨 · 资金流出</text>'
+      + '<text class="sb-quad-label is-up" x="' + (W - padR - 10) + '" y="' + (padT + 17) + '" text-anchor="end">涨 · 资金流入</text>'
+      + '<text class="sb-quad-label is-down" x="' + (padL + 10) + '" y="' + (padT + chartH - 10) + '">跌 · 资金流出</text>'
+      + '<text class="sb-quad-label is-warn" x="' + (W - padR - 10) + '" y="' + (padT + chartH - 10) + '" text-anchor="end">跌 · 资金流入</text>';
+
+    el.innerHTML = '<div class="sb-graph-wrap">'
+      + '<svg class="sb-graph" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="板块主力净流入与涨跌幅四象限气泡图">'
+      + quadrants + yAxis + xAxis
+      + '<text class="sb-axis-title" x="' + padL + '" y="' + (padT - 12) + '">涨跌幅（%）</text>'
+      + '<text class="sb-axis-title" x="' + (W - padR) + '" y="' + (H - 10) + '" text-anchor="end">主力净流入（左右分栏）</text>'
+      + bubbles + labels
+      + '</svg></div>'
+      + '<div class="sb-legend">'
+      + '<span><i class="sb-dot is-up"></i>主力净流入</span>'
+      + '<span><i class="sb-dot is-down"></i>主力净流出</span>'
+      + '<span>气泡越大 = |净流入| 越大</span>'
+      + '<span>绘入 ' + points.length + ' 个板块' + (missing ? '；' + missing + ' 个字段缺失未入图' : '') + '</span>'
+      + '</div>'
+      + '<div class="pred-muted sb-foot">横轴以 0 为中线左右等宽分栏、按 √|净流入| 展开（两侧各自缩放），避免小额资金挤在 0 附近；悬停或聚焦气泡查看明细。缺失字段不按 0 入图。</div>';
+  }
+
+  function renderTab() {
+    var tabs = document.querySelectorAll('#page-sector-board .sb-tab');
+    for (var i = 0; i < tabs.length; i++) {
+      var on = tabs[i].getAttribute('data-sb-tab') === state.tab;
+      tabs[i].classList.toggle('is-active', on);
+      tabs[i].setAttribute('aria-selected', on ? 'true' : 'false');
+    }
+    var filters = $('sbFilters');
+    if (filters) filters.style.display = state.tab === 'board' ? '' : 'none';
+    if (state.tab === 'flow') renderFlow();
+    else if (state.tab === 'graph') renderGraph();
+    else renderBoard();
+  }
+
+  function renderAll() {
+    renderKpis();
+    renderMeta();
+    renderTab();
+  }
+
+  function renderLoadError() {
+    setKpi('sbKpiUp', '—', '数据源暂不可用', '');
+    setKpi('sbKpiDown', '—', '数据源暂不可用', '');
+    setKpi('sbKpiIn', '—', '数据源暂不可用', '');
+    setKpi('sbKpiOut', '—', '数据源暂不可用', '');
+    var el = $('predSectorBoardBody');
+    if (el) {
+      el.innerHTML = '<div class="pred-empty"><b>板块数据加载失败</b><br>数据源暂不可用或请求超时，请重试。'
+        + '<button class="btn btn-sm btn-outline" type="button" data-sb-retry style="margin-left:8px;">重试</button></div>';
+    }
+    var meta = $('sectorMeta');
+    if (meta) meta.textContent = '数据源暂不可用';
+    var badge = $('predSectorFreshness');
+    if (badge) badge.innerHTML = '';
+  }
+
+  function ensureLoadingPlaceholder() {
+    if (state.data) return;
+    var el = $('predSectorBoardBody');
+    if (el) el.innerHTML = '<div class="pred-empty">加载板块行情…</div>';
   }
 
   async function fetchJSON(url) {
     try {
-      const headers = {};
+      var headers = {};
       try {
-        const t = localStorage.getItem('admin_token');
-        if (t) headers['Authorization'] = 'Bearer ' + t;
+        var t = localStorage.getItem('admin_token');
+        if (t) headers.Authorization = 'Bearer ' + t;
       } catch (e) { /* ignore */ }
-      const resp = await fetch(url, { headers: headers });
-      const body = await resp.json();
+      var resp = await fetch(url, { headers: headers });
+      var body = await resp.json();
       return { ok: resp.ok, body: body };
     } catch (e) {
       return { ok: false, body: null, error: e };
@@ -65,76 +499,121 @@
   }
 
   async function load(force) {
-    const el = document.getElementById('predSectorBoardBody');
-    const badge = document.getElementById('predSectorFreshness');
-    if (!el) return;
-    el.innerHTML = '<div class="pred-empty">加载中…</div>';
-    const r = await fetchJSON('/api/market/sector_flow' + (force ? '?_t=' + Date.now() : ''));
-    const items = (r.ok && r.body && Array.isArray(r.body.data)) ? r.body.data : null;
-    if (!items) {
-      el.innerHTML = '<div class="pred-empty">板块数据加载失败: 数据源暂不可用, 请点击「刷新」重试</div>';
-      if (badge) badge.innerHTML = '';
+    if (state.loading) return;
+    if (!force && state.data && Date.now() - state.loadedAt < CACHE_MS) {
+      renderAll();
       return;
     }
-    if (!items.length) {
-      el.innerHTML = '<div class="pred-empty">数据源暂未返回板块数据, 请稍后重试</div>';
-      if (badge) badge.innerHTML = '';
-      return;
+    state.loading = true;
+    ensureLoadingPlaceholder();
+    renderMeta();
+    try {
+      var r = await fetchJSON('/api/market/sector_flow' + (force ? '?_t=' + Date.now() : ''));
+      var items = (r.ok && r.body && Array.isArray(r.body.data)) ? r.body.data : null;
+      if (!items) {
+        state.lastError = 'fetch-failed';
+        if (!state.data) renderLoadError();
+        return;
+      }
+      state.lastError = '';
+      state.data = items;
+      state.meta = (r.body && r.body._meta) || {};
+      state.loadedAt = Date.now();
+      if (!items.length) {
+        var el = $('predSectorBoardBody');
+        if (el) el.innerHTML = '<div class="pred-empty">数据源暂未返回板块数据，请稍后重试。</div>';
+        renderKpis();
+        renderMeta();
+        return;
+      }
+      renderAll();
+    } finally {
+      state.loading = false;
+      renderMeta();
     }
-    /* C-02 收尾(2026-11-17):缺失涨跌幅不得按 0 参与排序(Number(null||0)===0
-       会把"没拿到"排进榜单中段/领跌区)。口径与 workbench.js renderSectors 的
-       M-04 一致: 有值按涨跌幅降序在前, 缺失固定排末尾。 */
-    const hasPct = items.filter(function (it) {
-      return it.change_pct !== null && it.change_pct !== undefined && isFinite(Number(it.change_pct));
-    });
-    const noPct = items.filter(function (it) { return hasPct.indexOf(it) < 0; });
-    const sorted = hasPct.slice().sort(function (a, b) { return b.change_pct - a.change_pct; })
-      .concat(noPct);
-    const meta = (r.body && r.body._meta) || {};
-    // 后端在资金流字段全 0 时会下发 degraded + unavailable_fields（2026-11-08 起），
-    // 据此把整列渲染成 '—' 并给出说明，而不是让 50 行数据一起"说谎"。
-    const unavailable = (meta.unavailable_fields || []);
-    const flowUnavailable = !!(meta.degraded && unavailable.indexOf('main_net_inflow') >= 0);
-    const ratioUnavailable = !!(meta.degraded && unavailable.indexOf('large_order_ratio') >= 0);
-    const flowBanner = (flowUnavailable || ratioUnavailable)
-      ? '<div class="pred-muted" style="margin-bottom:8px;padding:8px 12px;border:1px solid var(--color-warning);border-radius:6px;">⚠ 上游未返回板块资金流，'
-        + (flowUnavailable ? '主力净流入' : '') + (flowUnavailable && ratioUnavailable ? '、' : '')
-        + (ratioUnavailable ? '主力净流入占比' : '') + '列暂不可用（不是 0）</div>'
-      : '';
-    const asOf = (r.body && r.body._meta && r.body._meta.timestamp) ? String(r.body._meta.timestamp).slice(11, 19) : '';
-    const sourceNote = meta.data_source === 'sina' ? '新浪板块资金'
-      : (meta.data_source === 'eastmoney' ? '东财板块行情' : (meta.data_source || '板块行情'));
-    if (badge) {
-      badge.innerHTML = Freshness.html({ asOf: asOf, note: sourceNote });
-    }
-    const rows = sorted.map(function (it, i) { return rowHTML(it, i, flowUnavailable, ratioUnavailable); }).join('');
-    el.innerHTML = flowBanner
-      + '<div class="table-wrap" style="max-height:520px;overflow-y:auto;">'
-      + '<table class="pred-sector-table">'
-      + '<thead><tr><th>#</th><th>板块名称</th><th>涨跌幅</th><th>主力净流入</th><th>主力净流入占比</th></tr></thead>'
-      + '<tbody>' + rows + '</tbody></table></div>'
-      + '<div class="pred-muted" style="margin-top:6px;">共 ' + sorted.length + ' 个板块 · 红涨绿跌 · 点击左侧「行情总览」返回</div>';
   }
 
-  window.SectorBoard = { load: load };
+  function setTab(tab) {
+    if (['board', 'flow', 'graph'].indexOf(tab) < 0) return;
+    state.tab = tab;
+    if (!state.data) load(false);
+    else renderTab();
+  }
 
-  // switchPage 包装接入('sector-board' 页加载), 不改 index.html 既有函数
+  function bindUI() {
+    var page = $('page-sector-board');
+    if (!page || page.__sbBound) return;
+    page.__sbBound = true;
+
+    page.addEventListener('click', function (e) {
+      var t = e.target;
+      var tabBtn = t.closest ? t.closest('[data-sb-tab]') : null;
+      if (tabBtn) { setTab(tabBtn.getAttribute('data-sb-tab')); return; }
+      var chip = t.closest ? t.closest('[data-sb-filter]') : null;
+      if (chip) {
+        state.filter = chip.getAttribute('data-sb-filter');
+        var chips = page.querySelectorAll('.sb-chip');
+        for (var i = 0; i < chips.length; i++) chips[i].classList.toggle('is-active', chips[i] === chip);
+        renderTab();
+        return;
+      }
+      if (t.closest && t.closest('[data-sb-retry]')) { load(true); return; }
+      if (t.closest && t.closest('[data-sb-reset]')) {
+        state.filter = 'all';
+        state.query = '';
+        var input = $('sbSearch');
+        if (input) input.value = '';
+        var allChip = page.querySelector('[data-sb-filter="all"]');
+        if (allChip) {
+          var all = page.querySelectorAll('.sb-chip');
+          for (var j = 0; j < all.length; j++) all[j].classList.toggle('is-active', all[j] === allChip);
+        }
+        renderTab();
+      }
+    });
+
+    var input = $('sbSearch');
+    if (input) {
+      input.addEventListener('input', function () {
+        state.query = input.value;
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(function () {
+          if (state.tab === 'board') renderBoard();
+        }, 120);
+      });
+    }
+  }
+
+  function maybeAutoLoad() {
+    var page = $('page-sector-board');
+    if (page && page.classList.contains('active')) load(false);
+  }
+
   function wrapSwitchPage() {
     if (typeof window.switchPage !== 'function' || window.__sectorBoardWrapped) return;
     window.__sectorBoardWrapped = true;
-    const orig = window.switchPage;
+    var orig = window.switchPage;
     window.switchPage = function (name) {
-      const out = orig.apply(this, arguments);
+      var out = orig.apply(this, arguments);
       if (name === 'sector-board') {
-        try { window.SectorBoard.load(false); } catch (e) { /* ignore */ }
+        try { load(false); } catch (e) { /* ignore */ }
       }
       return out;
     };
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', wrapSwitchPage);
-  } else {
+  function init() {
+    bindUI();
     wrapSwitchPage();
+    maybeAutoLoad();
   }
+
+  window.SectorBoard = { load: load, setTab: setTab };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+  window.addEventListener('hashchange', maybeAutoLoad);
 })();
