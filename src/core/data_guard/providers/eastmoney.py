@@ -371,6 +371,76 @@ def fetch_shareholder_count_raw(stock_code: str) -> dict | None:
     }
 
 
+def _quarter_ends(count: int = 4) -> list[str]:
+    """最近若干个已结束季度的报告期(YYYY-MM-DD), 用于十大流通股东回溯。"""
+    now = datetime.now()
+    y, m = now.year, now.month
+    if m <= 3:
+        qy, qm = y - 1, 12
+    elif m <= 6:
+        qy, qm = y, 3
+    elif m <= 9:
+        qy, qm = y, 6
+    else:
+        qy, qm = y, 9
+    day = {3: 31, 6: 30, 9: 30, 12: 31}
+    out: list[str] = []
+    for _ in range(max(1, count)):
+        out.append(f"{qy:04d}-{qm:02d}-{day[qm]:02d}")
+        if qm == 3:
+            qy, qm = qy - 1, 12
+        elif qm == 6:
+            qy, qm = qy, 3
+        elif qm == 9:
+            qy, qm = qy, 6
+        else:
+            qy, qm = qy, 9
+    return out
+
+
+def fetch_top10_free_holders_raw(stock_code: str, attempts: int = 4) -> dict | None:
+    """十大流通股东取数+解析(东财 F10); 最近季度无数据时向前回溯。
+
+    返回 {end_date, holders:[...]}; 全部季度都无数据/请求失败 → None。
+    """
+    code = str(stock_code or "").strip().upper()
+    if code.startswith(("6", "9")):
+        prefix = "SH"
+    elif code.startswith(("4", "8")):
+        prefix = "BJ"
+    else:
+        prefix = "SZ"
+    url = "https://emweb.securities.eastmoney.com/PC_HSF10/ShareholderResearch/PageSDLTGD"
+    for date in _quarter_ends(attempts):
+        try:
+            resp = _ds2.em_get(url, params={"code": f"{prefix}{code}", "date": date})
+            data = resp.json()
+        except Exception as e:  # noqa: BLE001 — 单季度失败继续回溯
+            _ds2.logger.info(f"top10 holders {code} {date} failed: {e}")
+            continue
+        rows = data.get("sdltgd") or []
+        if not rows:
+            continue
+        holders: list[dict] = []
+        for item in rows:
+            try:
+                rank = _safe_int(item.get("HOLDER_RANK", 0))
+            except Exception:  # noqa: BLE001
+                rank = 0
+            holders.append({
+                "rank": rank,
+                "name": _safe_str(item.get("HOLDER_NAME", "")),
+                "holder_type": _safe_str(item.get("HOLDER_TYPE", "")),
+                "shares_type": _safe_str(item.get("SHARES_TYPE", "")),
+                "hold_num": _opt_float(item.get("HOLD_NUM")),
+                "free_ratio": _opt_float(item.get("FREE_HOLDNUM_RATIO")),
+                "change_raw": _safe_str(item.get("HOLD_NUM_CHANGE", "")),
+                "change_ratio": _opt_float(item.get("CHANGE_RATIO")),
+            })
+        return {"end_date": str(rows[0].get("END_DATE", "") or date)[:10], "holders": holders}
+    return None
+
+
 def fetch_stock_news_raw(stock_code: str, page: int = 1, page_size: int = 10) -> list[dict]:
     """东财个股新闻(jsonp)取数+解析(原 get_stock_news 主体, 无来源标记)。异常向上抛出。"""
     url = "https://search-api-web.eastmoney.com/search/jsonp"

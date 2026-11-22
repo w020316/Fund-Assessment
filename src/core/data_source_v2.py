@@ -1319,6 +1319,21 @@ def _get_shareholder_count_fallback(stock_code: str) -> dict:
     return {}
 
 
+def get_top10_free_holders(stock_code: str) -> dict:
+    """十大流通股东门面(东财 F10): 非法代码拒绝, 失败返回空 dict(不造假)。"""
+    from src.core.data_guard.providers.eastmoney import fetch_top10_free_holders_raw
+
+    if not _is_stock_code(stock_code):
+        logger.warning(f"get_top10_free_holders 拒绝非法股票代码: {stock_code!r}")
+        return {}
+    try:
+        result = fetch_top10_free_holders_raw(stock_code)
+    except Exception as e:
+        logger.warning(f"get_top10_free_holders failed: {e}")
+        result = None
+    return result or {}
+
+
 def get_stock_news(stock_code: str, page: int = 1, page_size: int = 10) -> list[dict]:
     """个股新闻门面(M4-B2 绞杀迁移): 东财 jsonp 取数+解析在
     data_guard.providers.eastmoney.fetch_stock_news_raw, 新浪降级在

@@ -1201,6 +1201,26 @@ async def shareholder(code: str = Depends(_code_or_422)):
         return {"data": [], "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
 
 
+@router.get("/institution_holdings")
+async def institution_holdings(code: str = Depends(_code_or_422)):
+    """十大流通股东：国家队 / 机构 / 外资 / 产业资本拆分。"""
+    cache_key = f"market:institution_holdings:{code}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {"data": cached, "_meta": _build_meta("eastmoney", cached=True)}
+    try:
+        raw = await asyncio.to_thread(ds2.get_top10_free_holders, code)
+        from src.analysis.institution_holdings import analyze_holders
+        data = analyze_holders(raw)
+        quality = 80.0 if data.get("available") else 0.0
+        cache.set(cache_key, data, ttl=1800)
+        return {"data": data, "_meta": _build_meta("eastmoney", cached=False, quality_score=quality)}
+    except Exception as e:
+        logger.warning(f"institution_holdings failed: {e}")
+        from src.analysis.institution_holdings import analyze_holders
+        return {"data": analyze_holders({}), "_meta": _build_meta("eastmoney", cached=False, quality_score=0.0)}
+
+
 @router.get("/news")
 async def news(
     code: str = Query("", description="股票代码（可选，为空时返回全局新闻）"),
