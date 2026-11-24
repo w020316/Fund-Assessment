@@ -1222,6 +1222,8 @@
       try { QF.shell.unboot(); } catch (e2) { /* 回退失败也要保证 enabled=false，cmdk 依赖它短路 */ }
       QF.shell.enabled = false;
     }
+    /* S9-19: 无论成功失败都标记 boot 完成，取消 index.html 预上色脚本的 4s 失效保险 */
+    try { document.documentElement.classList.add('qf-boot-done'); } catch (e3) { /* 忽略 */ }
   }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', start, { once: true });

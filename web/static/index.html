@@ -1030,6 +1030,35 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 <link rel="dns-prefetch" href="https://unpkg.com">
 </head>
 <body class="hud-theme">
+<script>
+/* S9-19 CLS 预上色：渐进渲染画出首帧前就定好两件首屏态，消除 DCL 才落位的位移（实测 tokenBanner 下推 61/123px、shell 迁移 0.092）。
+   1) tokenBanner：与 refreshTokenBanner/_hasAdminToken 同口径预判，配 html.qf-no-token 让隐藏的静态横幅首帧即占位；
+   2) qf-shell：与 isShellOff 同口径预判挂壳；4s 内未见 qf-boot-done（脚本加载失败/boot 未完成）自动摘除回退。 */
+(function () {
+  var h = document.documentElement;
+  try {
+    var noToken = true;
+    try { noToken = !localStorage.getItem('admin_token'); } catch (e) { noToken = true; }
+    if (noToken) h.classList.add('qf-no-token');
+  } catch (e) { /* 忽略 */ }
+  try {
+    var off = /[?&]shell=off(&|$)/.test(location.search);
+    if (!off) { try { off = localStorage.getItem('qf.shell.off') === '1'; } catch (e) { /* 隐私模式按未关闭 */ } }
+    if (off) return;
+    var b = document.body;
+    b.classList.add('qf-shell');
+    b.setAttribute('data-qf-shell', 'v1');
+    h.classList.add('qf-boot-pre');
+    setTimeout(function () {
+      if (!h.classList.contains('qf-boot-done')) {
+        b.classList.remove('qf-shell');
+        b.removeAttribute('data-qf-shell');
+        h.classList.remove('qf-boot-pre');
+      }
+    }, 4000);
+  } catch (e) { /* 任何异常按未启用处理，与 qf-shell.js 同口径 */ }
+})();
+</script>
 <div class="app">
   <!-- ========== 顶部状态栏 ========== -->
   <header class="topbar">
@@ -1051,7 +1080,10 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
   </header>
 
   <!-- ===== 阶段四 U2: 未配置管理员 Token 的页面级提示（由 refreshTokenBanner 控制） ===== -->
-  <div id="tokenBanner" class="token-banner" role="status" aria-live="polite" hidden></div>
+  <div id="tokenBanner" class="token-banner" role="status" aria-live="polite" hidden><span class="token-banner-icon" aria-hidden="true">!</span>
+    <span class="token-banner-text">未配置管理员 Token：持仓、交易、策略参数、组合建议等需要鉴权的功能会显示为不可用。</span>
+    <button type="button" class="btn btn-sm btn-outline" onclick="gotoSettingsForToken()">去设置</button>
+    <button type="button" class="token-banner-close" aria-label="关闭提示" onclick="this.parentElement.hidden=true;document.documentElement.classList.remove('qf-no-token');_syncTokenBannerHeight(this.parentElement)">×</button></div>
 
   <div class="main-layout">
     <!-- ========== 左侧导航 ========== -->
@@ -3230,6 +3262,7 @@ function refreshTokenBanner() {
   const bar = document.getElementById('tokenBanner');
   if (!bar) return;
   if (_hasAdminToken()) {
+    document.documentElement.classList.remove('qf-no-token');
     bar.hidden = true;
     bar.innerHTML = '';
     _syncTokenBannerHeight(bar);
@@ -3239,7 +3272,7 @@ function refreshTokenBanner() {
   bar.innerHTML = `<span class="token-banner-icon" aria-hidden="true">!</span>
     <span class="token-banner-text">未配置管理员 Token：持仓、交易、策略参数、组合建议等需要鉴权的功能会显示为不可用。</span>
     <button type="button" class="btn btn-sm btn-outline" onclick="gotoSettingsForToken()">去设置</button>
-    <button type="button" class="token-banner-close" aria-label="关闭提示" onclick="this.parentElement.hidden=true;_syncTokenBannerHeight(this.parentElement)">×</button>`;
+    <button type="button" class="token-banner-close" aria-label="关闭提示" onclick="this.parentElement.hidden=true;document.documentElement.classList.remove('qf-no-token');_syncTokenBannerHeight(this.parentElement)">×</button>`;
   _syncTokenBannerHeight(bar);
 }
 

@@ -735,6 +735,8 @@ tr:hover td { background: var(--qf-panel-hover); }
   flex-direction: column;
   gap: 6px;
   margin: 2px 0 4px;
+  /* S9-19: 涨跌家数异步到达前预留最终高度(实测 37px), 避免 0→37px 插入造成 CLS */
+  min-height: 38px;
 }
 .wb-breadth-bar {
   display: flex;

@@ -38,6 +38,21 @@ class TestHealthEndpoint:
         assert data["status"] == "ok"
 
 
+class TestRootRedirect:
+    """根路径重定向（S9-19）"""
+
+    def test_root_redirects_to_index(self, client):
+        resp = client.get("/", follow_redirects=False)
+        assert resp.status_code == 307
+        assert resp.headers["location"].startswith("/static/index.html")
+
+    def test_root_redirect_preserves_query(self, client):
+        """?shell=off 是文档承诺的骨架回滚开关，重定向丢查询串会让它静默失效。"""
+        resp = client.get("/?shell=off", follow_redirects=False)
+        assert resp.status_code == 307
+        assert resp.headers["location"] == "/static/index.html?shell=off"
+
+
 class TestMarketEndpoints:
     """行情端点测试"""
 

@@ -4,7 +4,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 # 借鉴 encode/starlette(10.5K Star)内置 GZip 中间件,响应压缩 70%+,零新依赖
 from fastapi.middleware.gzip import GZipMiddleware
@@ -306,8 +306,10 @@ if _static_dir.is_dir():
 
 
 @app.get("/")
-async def root():
-    return RedirectResponse(url="/static/index.html")
+async def root(request: Request):
+    # S9-19: 重定向必须透传查询串, 否则文档承诺的 ?shell=off 回滚开关从根路径进入时被静默丢弃
+    query = request.url.query
+    return RedirectResponse(url="/static/index.html" + (("?" + query) if query else ""))
 
 
 @app.head("/")

@@ -162,6 +162,10 @@ body.hud-theme .fw-header {
   border-bottom: 1px solid color-mix(in srgb, var(--color-warning, #f59e0b) 35%, transparent);
 }
 .token-banner[hidden] { display: none; }
+/* S9-19: 首帧前按 admin_token 预判（body 内联脚本挂 html.qf-no-token），让隐藏的静态横幅
+   首帧即占位，与 boot 后 refreshTokenBanner 渲染同构，消除 61/123px 的下推位移。
+   手动关闭与配置 Token 后都会移除该类，本规则即失效，关闭行为不受影响。 */
+html.qf-no-token .token-banner[hidden] { display: flex; }
 .token-banner-icon {
   flex: 0 0 auto;
   width: 18px;

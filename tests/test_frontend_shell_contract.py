@@ -317,3 +317,51 @@ def test_cmdk_init_short_circuits_on_disabled_shell():
     init_pos = js.index("init: function ()")
     init_seg = js[init_pos: js.index("open: open,", init_pos)]
     assert "QF.shell.enabled === false" in init_seg, "init() 未做 enabled 短路"
+
+
+def test_pre_paint_script_is_first_body_element():
+    """S9-19：body 首个元素必须是预上色内联脚本——渐进渲染画出首帧前就要定好
+    tokenBanner 占位与 qf-shell 态，否则 DCL 才落位会造成 0.1+ 的 CLS。"""
+    src = _index()
+    body_pos = src.index("<body")
+    pre_pos = src.index("qf-no-token")
+    first_content = src.index("<div class=\"app\">", body_pos)
+    assert body_pos < pre_pos < first_content, "预上色脚本不在 body 首个元素位置"
+    # token 预判与 _hasAdminToken 同口径（读 localStorage['admin_token']）
+    assert "localStorage.getItem('admin_token')" in src[pre_pos:pre_pos + 800]
+    # shell 预判必须同时覆盖 URL 参数与 localStorage 两个回滚入口
+    seg = src[body_pos:pre_pos + 1200]
+    assert "shell=off" in seg and "qf.shell.off" in seg, "shell 预判缺少回滚开关口径"
+    # 失效保险：qf-shell.js 未完成 boot（qf-boot-done 缺席）时自动摘除预上色
+    assert "qf-boot-done" in seg, "预上色脚本缺少 4s 失效保险"
+
+
+def test_shell_js_marks_boot_done_to_cancel_failsafe():
+    """S9-19：start() 无论 boot 成败都要给 html 标 qf-boot-done，取消预上色脚本的
+    4s 保险；否则慢网络下保险误摘除 body.qf-shell，会出现半壳状态。"""
+    js = _read(SHELL_JS)
+    start_pos = js.index("function start()")
+    start_seg = js[start_pos: js.index("if (document.readyState === 'loading'", start_pos)]
+    assert "qf-boot-done" in start_seg, "start() 未标记 qf-boot-done"
+
+
+def test_token_banner_static_prerender_matches_runtime():
+    """S9-19：#tokenBanner 必须静态预渲染完整内容（与 refreshTokenBanner 同构），
+    配合 html.qf-no-token 强制显示规则实现首帧占位；空 div 占位会被 boot 后
+    innerHTML 填充再次撑高，等于白做。"""
+    src = _index()
+    assert "未配置管理员 Token：持仓、交易、策略参数、组合建议等需要鉴权的功能会显示为不可用。" in src
+    assert src.count("qf-no-token") >= 3, "预判/关闭/has-token 三处必须同步维护该类"
+    # 关闭按钮必须摘掉 qf-no-token，否则 CSS 强制显示规则会让横幅关不掉
+    close_handlers = re.findall(r"token-banner-close[^>]*onclick=\"([^\"]+)\"", src)
+    assert len(close_handlers) >= 2, "静态与运行时两份关闭按钮必须都在"
+    for handler in close_handlers:
+        assert "classList.remove('qf-no-token')" in handler, "关闭按钮未摘 qf-no-token"
+
+
+def test_token_banner_force_display_beats_hidden_rule():
+    """S9-19：强制显示规则优先级必须压过 .token-banner[hidden]{display:none}，
+    且只作用于 html.qf-no-token 作用域（配了 Token 的用户不得闪现横幅）。"""
+    css = _read(ROOT / "web/static/css/hud.css")
+    assert "html.qf-no-token .token-banner[hidden] { display: flex; }" in css
+    assert ".token-banner[hidden] { display: none; }" in css
