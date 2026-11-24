@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -68,6 +69,32 @@ def _code_or_422(code: str = Query("", description="股票代码(可选,为空�
             },
         )
     return code
+
+
+def _code_strict(code: str = Query(..., description="股票代码")) -> str:
+    """必填股票代码校验: 必须 6 位数字(S9-04, 2026-11-24)。
+
+    根因: /chanlun、/signals 只限长度未限字符集, 非法串会打进 pytdx 二进制
+    协议与缓存 key, 绕过 A-09 后建立的 `_CODE_RE` 统一防线。必填端点不能
+    复用 `_code_or_422`(它放行空串), 故单独收口;detail 结构与其保持一致。
+    """
+    if not _CODE_RE.fullmatch(code):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "INVALID_STOCK_CODE",
+                "message": "股票代码必须是 6 位数字(例如 600519)。",
+                "field": "code",
+            },
+        )
+    return code
+
+
+# mootdx 是常驻 socket 客户端, 挂起时 to_thread 会占用默认执行器线程且不可取消;
+# 与 strategy.py 扫描端点同款: 专用 2 线程池 + wait_for, 把挂起面封顶在池内(S9-01)。
+_KLINE_POOL_SIZE = 2
+_kline_pool = ThreadPoolExecutor(max_workers=_KLINE_POOL_SIZE, thread_name_prefix="kline")
+_KLINE_TIMEOUT_S = 15.0
 
 
 def _rows_quality(rows: Any, base: float = _DEFAULT_QUALITY) -> float:
@@ -384,7 +411,7 @@ async def stock_kline(
 
 @router.get("/chanlun")
 async def chanlun_structure(
-    code: str = Query(..., min_length=6, max_length=10, description="股票代码"),
+    code: str = Depends(_code_strict),
     period: str = Query("daily", pattern="^(daily|weekly|monthly)$", description="周期"),
     count: int = Query(180, ge=60, le=500, description="K 线条数"),
 ):
@@ -394,7 +421,13 @@ async def chanlun_structure(
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("mootdx", cached=True)}
     try:
-        rows = await asyncio.to_thread(ds2.get_kline_mootdx, code, period=period, count=count)
+        loop = asyncio.get_running_loop()
+        rows = await asyncio.wait_for(
+            loop.run_in_executor(
+                _kline_pool, lambda: ds2.get_kline_mootdx(code, period=period, count=count)
+            ),
+            timeout=_KLINE_TIMEOUT_S,
+        )
         from src.analysis.chanlun import analyze_chanlun
         data = analyze_chanlun(rows, code=code, period=period)
         quality = 80.0 if data.get("available") else 0.0
@@ -414,7 +447,7 @@ async def chanlun_structure(
 
 @router.get("/signals")
 async def stock_signals(
-    code: str = Query(..., min_length=6, max_length=10, description="股票代码"),
+    code: str = Depends(_code_strict),
     period: str = Query("daily", pattern="^(daily|weekly|monthly)$", description="周期"),
     count: int = Query(180, ge=60, le=500, description="K 线条数"),
 ):
@@ -424,7 +457,13 @@ async def stock_signals(
     if cached is not None:
         return {"data": cached, "_meta": _build_meta("mootdx", cached=True)}
     try:
-        rows = await asyncio.to_thread(ds2.get_kline_mootdx, code, period=period, count=count)
+        loop = asyncio.get_running_loop()
+        rows = await asyncio.wait_for(
+            loop.run_in_executor(
+                _kline_pool, lambda: ds2.get_kline_mootdx(code, period=period, count=count)
+            ),
+            timeout=_KLINE_TIMEOUT_S,
+        )
         from src.analysis.signal_scan import scan_signals
         data = scan_signals(rows, code=code, period=period)
         quality = 80.0 if data.get("available") else 0.0

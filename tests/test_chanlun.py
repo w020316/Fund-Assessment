@@ -129,3 +129,55 @@ def test_chanlun_route_returns_structure(monkeypatch):
     assert data["code"] == "600000"
     assert isinstance(data["strokes"], list) and isinstance(data["pivots"], list)
     assert body["_meta"]["data_source"] == "mootdx"
+
+
+def test_chanlun_route_rejects_non_numeric_code(monkeypatch):
+    """S9-04: /chanlun、/signals 的 code 必须是 6 位数字, 非法串不得打进 pytdx。"""
+    monkeypatch.setattr(
+        "web.routes.market.ds2.get_kline_mootdx",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("非法代码不应触达上游")),
+    )
+    for url in ("/api/market/chanlun?code=600519%22%29+OR+%281%3D1",
+                "/api/market/chanlun?code=60051a",
+                "/api/market/signals?code=sh600519"):
+        resp = client.get(url)
+        assert resp.status_code == 422, url
+        assert resp.json()["detail"]["code"] == "INVALID_STOCK_CODE"
+
+
+def test_chanlun_route_upstream_hang_times_out(monkeypatch):
+    """S9-01: 上游挂起必须在 15s(测试缩至 0.2s)内返回降级态, 不得占死线程池外请求。"""
+    import time as _time
+
+    def _hang(*a, **k):
+        _time.sleep(1.0)
+        return []
+
+    monkeypatch.setattr("web.routes.market.ds2.get_kline_mootdx", _hang)
+    from web.routes import market as market_route
+    monkeypatch.setattr(market_route, "_KLINE_TIMEOUT_S", 0.2)
+    market_route.cache.delete("market:chanlun:600001:daily:120")
+
+    resp = client.get("/api/market/chanlun?code=600001&period=daily&count=120")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["available"] is False
+    assert "K 线获取失败" in data["reason"]
+    assert data["bars"] == [] and data["signals"] == []
+
+
+def test_chanlun_route_upstream_exception_degrades(monkeypatch):
+    """上游抛异常 → available=False 带原因, 不补 0、不写缓存(S9-08 异常路径)。"""
+    def _boom(*a, **k):
+        raise RuntimeError("mootdx socket reset")
+
+    monkeypatch.setattr("web.routes.market.ds2.get_kline_mootdx", _boom)
+    from web.routes import market as market_route
+    market_route.cache.delete("market:chanlun:600002:daily:120")
+
+    resp = client.get("/api/market/chanlun?code=600002&period=daily&count=120")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["available"] is False
+    assert resp.json()["_meta"]["quality_score"] == 0.0
+    assert market_route.cache.get("market:chanlun:600002:daily:120") is None
