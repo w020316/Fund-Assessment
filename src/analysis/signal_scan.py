@@ -35,7 +35,9 @@ def _clean(rows: Any) -> list[dict[str, Any]]:
             continue
         o, h, low, c = (_num(r.get("open")), _num(r.get("high")),
                         _num(r.get("low")), _num(r.get("close")))
-        vol = _num(r.get("volume")) or 0.0
+        # S9-14: 缺失的成交量保持 None(经 DataFrame 变 NaN)——补 0 会把
+        # VOL_MA20 归零, 量能类信号被静默判成"不满足"而非"不可判"。
+        vol = _num(r.get("volume"))
         if None in (o, h, low, c) or h < low or h <= 0 or low <= 0:
             continue
         out.append({
@@ -148,7 +150,11 @@ def _scan(df: pd.DataFrame) -> list[dict[str, Any]]:
 
     vol = _val(last, "volume")
     vol_ma = _val(last, "VOL_MA20")
-    if vol is not None and vol_ma and vol_ma > 0:
+    if vol is None or vol_ma is None:
+        # S9-14: 量能缺失不是"不满足", 必须显式告知不可判; neutral/0 不影响多空分
+        _add(out, "volume_unavailable", "量能数据缺失", "neutral", 0,
+             "原因：上游未返回成交量或 20 日均量样本不足，放量类信号本次不可判")
+    elif vol_ma > 0:
         ratio = vol / vol_ma
         c_open = _val(last, "open")
         if ratio >= 1.5 and close is not None and c_open is not None and close > c_open:

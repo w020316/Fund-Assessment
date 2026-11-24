@@ -73,3 +73,52 @@ def test_signals_route_shape(monkeypatch):
     assert data["summary"]["stance"] in ("偏多", "偏空", "中性")
     assert isinstance(data["signals"], list)
     assert body["_meta"]["data_source"] == "mootdx"
+
+
+def test_missing_volume_is_unavailable_not_unsatisfied():
+    """S9-14: 量能缺失必须显式输出 volume_unavailable, 不得静默判成"不放量"。"""
+    rows = _trend(90, 0.4)
+    for r in rows:
+        r["volume"] = None
+    out = scan_signals(rows, code="600001")
+    assert out["available"] is True
+    keys = [s["key"] for s in out["signals"]]
+    assert "volume_unavailable" in keys, "量能缺失未显式标记"
+    assert not any(k.startswith("volume_surge") for k in keys), "缺失量能仍触发放量信号"
+    unavailable = next(s for s in out["signals"] if s["key"] == "volume_unavailable")
+    assert unavailable["direction"] == "neutral" and unavailable["strength"] == 0, (
+        "不可判信号不得计入多空分"
+    )
+    assert "上游未返回成交量" in unavailable["evidence"]
+    # neutral/0 不改变多空评分口径
+    s = out["summary"]
+    assert s["bull_score"] + s["bear_score"] == sum(
+        x["strength"] for x in out["signals"] if x["direction"] in ("bull", "bear")
+    )
+
+
+def test_partial_volume_missing_degrades_ma20_window():
+    """量能窗口内混有缺失 → VOL_MA20 为 NaN → 同样进入不可判分支, 不补 0。"""
+    rows = _trend(90, 0.4)
+    for r in rows[-5:]:
+        r["volume"] = None
+    out = scan_signals(rows, code="600001")
+    keys = [s["key"] for s in out["signals"]]
+    assert "volume_unavailable" in keys
+
+
+def test_signals_route_upstream_exception_degrades(monkeypatch):
+    """S9-08: /signals 上游异常 → available=False 带原因, 不写缓存。"""
+    def _boom(*a, **k):
+        raise RuntimeError("mootdx socket reset")
+
+    monkeypatch.setattr("web.routes.market.ds2.get_kline_mootdx", _boom)
+    from web.routes import market as market_route
+    market_route.cache.delete("market:signals:600003:daily:120")
+
+    resp = client.get("/api/market/signals?code=600003&period=daily&count=120")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["available"] is False
+    assert "K 线获取失败" in data["reason"]
+    assert market_route.cache.get("market:signals:600003:daily:120") is None

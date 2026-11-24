@@ -61,6 +61,12 @@
       if (date > bars[n - 1].date) return n - 1;
       return null;
     };
+    /* S9-13(2026-11-24): 完全早于可视窗口的元素不再夹到 0 画假矩形/竖线——
+       9216f1b 只处理了"部分可见", 这里补"完全不可见"的分支; 部分可见的
+       仍夹到窗口边缘正常绘制。 */
+    var beforeWindow = function (date) {
+      return !!bars.length && String(date) < String(bars[0].date);
+    };
 
     var grid = '';
     for (var g = 0; g <= 4; g++) {
@@ -84,6 +90,7 @@
     }).join('');
 
     var pivots = (data.pivots || []).map(function (p) {
+      if (beforeWindow(p.start_date) && beforeWindow(p.end_date)) return '';
       var a = clampIdx(p.start_date), b = clampIdx(p.end_date);
       if (a === null || b === null || b < a) return '';
       var x1 = x(a), x2 = x(b);
@@ -95,6 +102,7 @@
     }).join('');
 
     var points = (data.strokes || []).map(function (s) {
+      if (beforeWindow(s.start_date) && beforeWindow(s.end_date)) return null;
       var a = clampIdx(s.start_date), b = clampIdx(s.end_date);
       if (a === null || b === null) return null;
       return [x(a), y(s.start_price), x(b), y(s.end_price)];
