@@ -81,3 +81,37 @@ def test_parse_error_and_get_405():
 
     resp = client.get("/mcp")
     assert resp.status_code == 405
+
+
+def test_tools_call_upstream_error_does_not_leak_internals(monkeypatch):
+    """S9-11: 上游异常只回固定文案, str(e) 里的内部路径/上游 URL 不得外泄。"""
+    def _boom(*a, **k):
+        raise RuntimeError("connect to tcp://10.0.0.1:7709 failed: /app/pylibs/secret.sock")
+
+    monkeypatch.setattr("src.core.data_source_v2.get_kline_mootdx", _boom)
+    resp = _rpc("tools/call", {"name": "get_stock_kline", "arguments": {"code": "600519"}})
+    assert resp.status_code == 200
+    result = resp.json()["result"]
+    assert result["isError"] is True
+    text = result["content"][0]["text"]
+    assert "10.0.0.1" not in text and "/app/pylibs" not in text and "RuntimeError" not in text
+    assert "上游数据暂不可用" in text
+
+
+def test_tools_call_value_error_keeps_validation_message():
+    """S9-11: 自产校验文案(ValueError)仍原样回传, 便于 Agent 自纠参数。"""
+    resp = _rpc("tools/call", {"name": "get_stock_kline",
+                               "arguments": {"code": "600519", "count": 999}})
+    assert resp.status_code == 200
+    result = resp.json()["result"]
+    assert result["isError"] is True
+    assert "30-250" in result["content"][0]["text"]
+
+
+def test_mcp_post_exempt_from_write_limit():
+    """S9-02: /mcp 不吃匿名写桶(10/min), 连打 12 次 tools/list 不得 429。"""
+    body = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+    codes = []
+    for _ in range(12):
+        codes.append(client.post("/mcp", json=body).status_code)
+    assert all(c == 200 for c in codes), codes

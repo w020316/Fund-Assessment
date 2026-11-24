@@ -241,6 +241,11 @@ WRITE_LIMIT_EXEMPT_PATHS = frozenset({
     "/api/review/three_question",
     "/api/news/search",
     "/api/skills/dispatch",
+    # /mcp 是 JSON-RPC 只读端点,全部工具仅暴露公开行情数据(S9-02, 2026-11-24):
+    # 它已自带 @limiter.limit("60/minute") 指纹分桶,若再叠加写配额会以
+    # 匿名共享桶 10/min 生效——一个 Agent 的 tools/call 就能打满全站匿名写配额,
+    # 且与模块声明的 60/min 直接矛盾。
+    "/mcp",
 })
 # /api/agent/* 各端点自身已挂 @limiter.limit("3/minute")(LLM 高成本),
 # 若再叠加写配额会出现"LLM 调用吃掉改持仓的 10 次额度"的串味,

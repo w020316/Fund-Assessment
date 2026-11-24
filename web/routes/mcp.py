@@ -4,6 +4,12 @@
 - 不写入、不调用 LLM、不涉及交易；
 - 工具入参做白名单与范围校验，错误以 MCP isError 返回，不回传堆栈；
 - 限流 60 次/分钟，避免被当成免费行情代理刷爆。
+
+公开端点声明（S9-03, 2026-11-24）：/mcp 为刻意匿名开放的只读端点——
+7 个工具仅返回公开市场数据（指数/板块/K线/缠论/信号/十大流通股东/复盘），
+不含用户持仓、交易、策略参数等敏感数据，因此不挂 require_admin；
+它不受「未配令牌 fail-closed 503」模型约束（那是针对敏感数据的防线）。
+若未来新增任何触及用户数据的工具，必须先挂鉴权再上线。
 """
 from __future__ import annotations
 
@@ -217,10 +223,19 @@ def _call_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         payload = handler(args or {})
         text = json.dumps({"ok": True, "tool": name, "data": payload}, ensure_ascii=False, default=str)
         return {"content": [{"type": "text", "text": text}], "isError": False}
-    except Exception as e:  # noqa: BLE001 — 工具错误按 MCP 约定返回 isError
-        logger.warning(f"mcp tool {name} failed: {e}")
-        msg = str(e) or e.__class__.__name__
+    except ValueError as e:
+        # ValueError 只由本模块的入参校验(_code/_period/_count)抛出,文案自产可回传
+        logger.warning(f"mcp tool {name} invalid args: {e}")
+        msg = str(e) or "参数不合法"
         text = json.dumps({"ok": False, "tool": name, "error": msg}, ensure_ascii=False)
+        return {"content": [{"type": "text", "text": text}], "isError": True}
+    except Exception as e:  # noqa: BLE001 — 工具错误按 MCP 约定返回 isError
+        # 上游/未知异常不回传原文(S9-11):str(e) 可能含内部路径与上游 URL
+        logger.warning(f"mcp tool {name} failed: {e}")
+        text = json.dumps(
+            {"ok": False, "tool": name, "error": "工具执行失败：上游数据暂不可用，请稍后重试。"},
+            ensure_ascii=False,
+        )
         return {"content": [{"type": "text", "text": text}], "isError": True}
 
 
