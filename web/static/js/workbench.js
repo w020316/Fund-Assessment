@@ -280,7 +280,8 @@
          isNum 系 helper(pctText/clsOf/num)对 null 已渲染「—」/中性色。 */
       var pct = it.change_pct;
       var c = clsOf(pct);
-      return '<div class="wb-idx ' + c + '">'
+      /* STAGE8: 指数卡带 data-index-code，供顶部指数条点击后高亮命中（不加其它逻辑） */
+      return '<div class="wb-idx ' + c + '" data-index-code="' + esc(String(it.code || '')) + '">'
         + '<div class="wb-idx-top"><span class="wb-idx-name">' + esc(it.name || '—') + '</span></div>'
         + '<div class="wb-idx-pct ' + c + '">' + esc(pctText(pct)) + '</div>'
         + '<div class="wb-idx-sub"><span>' + esc(num(it.price, 2)) + '</span><b>成交 ' + esc(fmtAmountWan(it.amount)) + '</b></div>'
@@ -438,8 +439,12 @@
   function renderHold(board, thermo) {
     var el = $id('wbHoldBody');
     if (!el) return;
+    if (window.QF && QF.panel) QF.panel.state(el, 'ready');
     if (!board) {
       el.innerHTML = '<div class="wb-empty"><b>复盘数据暂不可用</b><br>涨停/炸板池未返回，承接状态无法计算。</div>';
+      if (window.QF && QF.panel) QF.panel.state(el, 'empty', {
+        title: '承接分析暂无数据', reason: '原因：涨停池/炸板池与指数均值未返回，稍后「刷新」重试'
+      });
       return;
     }
     var m = board.market || {};
@@ -534,6 +539,7 @@
   function renderRadar(board, thermo) {
     var el = $id('wbRadarBody');
     if (!el) return;
+    if (window.QF && QF.panel) QF.panel.state(el, 'ready');
     var dims = radarDims(board, thermo);
     var cx = 165, cy = 132, r = 94;
     var rings = [0.25, 0.5, 0.75, 1];
@@ -708,8 +714,12 @@
   function renderDiscipline(board, thermo) {
     var el = $id('wbDisciplineBody');
     if (!el) return;
+    if (window.QF && QF.panel) QF.panel.state(el, 'ready');
     if (!board) {
       el.innerHTML = '<div class="wb-empty"><b>纪律数据暂不可用</b><br>复盘与温度数据未返回，无法做开仓检查。</div>';
+      if (window.QF && QF.panel) QF.panel.state(el, 'empty', {
+        title: '开仓纪律暂无数据', reason: '原因：复盘与温度数据未返回，无法做 5 项开仓检查，稍后「刷新」重试'
+      });
       return;
     }
     var checks = disciplineChecks(board, thermo);
@@ -859,11 +869,15 @@
   function renderDdx(r) {
     var el = $id('wbDdxBody');
     if (!el) return;
+    if (window.QF && QF.panel) QF.panel.state(el, 'ready');
     var metaEl = $id('wbDdxMeta');
     var data = (r && r.ok && r.body && r.body.data) ? r.body.data : null;
     if (!data) {
       if (metaEl) metaEl.textContent = '不可用';
       el.innerHTML = '<div class="wb-empty"><b>资金流数据暂不可用</b><br>个股资金流上游取数失败，本面板不影响其他判读；稍后「刷新」重试。</div>';
+      if (window.QF && QF.panel) QF.panel.state(el, 'empty', {
+        title: '资金连增暂无数据', reason: '原因：个股资金流上游取数失败，稍后「刷新」重试'
+      });
       return;
     }
     var sampled = isNum(data.sampled) ? data.sampled : 0;
@@ -877,6 +891,12 @@
           ? '上游限流冷却中（约 2 分钟），冷却结束后自动重试；不影响其他判读。'
           : '候选股逐股资金流均未取到（上游限流或断连），不影响其他判读；稍后「刷新」重试。')
         + '</div>';
+      if (window.QF && QF.panel) QF.panel.state(el, 'empty', {
+        title: data.cooldown ? '资金流限流冷却中' : '资金流取数失败',
+        reason: data.cooldown
+          ? '原因：上游限流冷却（约 2 分钟），冷却结束后自动重试'
+          : '原因：候选股逐股资金流均未取到（上游限流或断连），稍后「刷新」重试'
+      });
       return;
     }
     if (metaEl) {

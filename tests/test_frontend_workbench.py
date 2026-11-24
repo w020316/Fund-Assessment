@@ -809,11 +809,32 @@ def test_index_bar_and_cards_do_not_render_dash_percent():
     assert "priceKnown" in body
 
 
-def test_index_sparkline_guards_null_change_pct():
-    """`null >= 0` 在 JS 里为 true(null 被强转为 0), 缺失涨跌幅不得画成"上涨"走势。"""
+def test_index_cards_drop_synthetic_sparkline_and_explain_missing_amount():
+    """指数卡不再画任何合成走势(后端无分时/历史点位, PRNG 曲线＝把生成数据当真实行情)。
+
+    原用例锁的是「drawSparkline 调用仍存在且带 null 守卫」; 产品决策改为整体移除合成走势,
+    断言对象消失 → 1 换 1 改锁"彻底删除 + 缺失值必须解释":
+    ① index.html 中不得残留 drawSparkline / sparkline(含注释、CSS、死代码);
+    ② 卡片必须有 方向箭头(.qf-idx-dir) 与 成交额(.qf-idx-amount) 两个出口;
+    ③ 成交额缺失不得被 Number() 归一成 0(M-04 同类), 必须带"上游未返回成交额"的 title;
+    ④ pctKnown / priceKnown / amountKnown 三个守卫与 data-index-code 钩子仍在。
+    """
     html = _index()
-    assert "drawSparkline(svgId, idx.change_pct >= 0" not in html, "sparkline 仍在裸比较 null >= 0"
-    assert "drawSparkline(svgId, idx.change_pct != null && idx.change_pct >= 0" in html
+    # ① 合成走势彻底消失(不是隐藏、不留注释、不留死代码)
+    assert "drawSparkline" not in html, "index.html 仍残留 drawSparkline(函数或调用)"
+    assert "sparkline" not in html.lower(), "index.html 仍残留 sparkline(样式/槽位/注释)"
+    # ② 卡片出口
+    assert 'class="qf-idx-dir"' in html, "指数卡缺少方向箭头节点 .qf-idx-dir"
+    assert 'class="qf-idx-amount"' in html, "指数卡缺少成交额节点 .qf-idx-amount"
+    assert "成交 " in html and "fmtMoney(idx.amount)" in html, "成交额未按「成交 1.23亿」渲染"
+    # ③ 缺失必须解释, 且不得用 Number() 归一
+    assert "上游未返回成交额" in html, "成交额缺失时未给出原因"
+    assert "fmtMoney(Number(" not in html, "成交额经 Number() 归一(缺失会被画成 0.00)"
+    # ④ 守卫与钩子
+    body = html[html.index("async function loadIndexData()"):html.index("async function loadGlobalIndexBar()")]
+    assert "const amountKnown = idx.amount != null && isFinite(idx.amount);" in body, "amountKnown 守卫缺失或写法不符"
+    assert "pctKnown" in body and "priceKnown" in body, "涨跌幅/价格守卫被连带删除"
+    assert 'data-index-code="${escapeHtml(idx.code)}"' in body, "指数卡缺少 data-index-code 钩子(指数条点击依赖)"
 
 
 def test_watchlist_does_not_coerce_missing_quote_to_zero():

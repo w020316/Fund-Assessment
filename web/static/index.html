@@ -437,9 +437,6 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 /* Loading（静态占位，无扫光动画） */
 .pulse-loading { position:relative; }
 
-/* 迷你走势 */
-.sparkline { display:inline-block; vertical-align:middle; }
-
 /* 热力图 */
 .heatmap { display:flex; flex-wrap:wrap; gap:4px; }
 .heatmap-cell {
@@ -1022,6 +1019,9 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 <link rel="stylesheet" href="/static/css/global-market.css">
 <!-- 2026-11-22: 终端化收尾(板块三视图/行情大屏栅格/K线周期/基金徽章),须最后加载以覆盖存量布局 -->
 <link rel="stylesheet" href="/static/css/terminal-ui.css?v=20261122q">
+<!-- ===== STAGE8: shell ===== 终端化骨架层(必须排在 terminal-ui.css 之后;全部规则挂 body.qf-shell,
+     移除该类即回滚;?shell=off 时 qf-shell.js 直接 return,外观与线上一致) -->
+<link rel="stylesheet" href="/static/css/qf-shell.css?v=20261122a">
 <!-- 性能优化:lightweight-charts 改为懒加载(仅在用户点击"走势"时加载),避免阻塞首屏 -->
 <link rel="preconnect" href="https://unpkg.com" crossorigin>
 <link rel="dns-prefetch" href="https://unpkg.com">
@@ -1133,7 +1133,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 
           <div class="wb-grid">
             <!-- 承接分析 -->
-            <section class="wb-panel wb-span-5" aria-label="承接分析">
+            <section class="wb-panel wb-span-5" aria-label="承接分析" data-qf-panel>
               <div class="wb-ph">
                 <span class="wb-ph-icon"></span>
                 <span class="wb-ph-title">承接分析</span>
@@ -1144,7 +1144,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
             </section>
 
             <!-- 情绪雷达 -->
-            <section class="wb-panel wb-span-7" aria-label="情绪雷达">
+            <section class="wb-panel wb-span-7" aria-label="情绪雷达" data-qf-panel>
               <div class="wb-ph">
                 <span class="wb-ph-icon"></span>
                 <span class="wb-ph-title">情绪雷达</span>
@@ -1196,7 +1196,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
             </section>
 
             <!-- 资金连增（DDX 连增口径） -->
-            <section class="wb-panel wb-span-7" aria-label="资金连增">
+            <section class="wb-panel wb-span-7" aria-label="资金连增" data-qf-panel>
               <div class="wb-ph">
                 <span class="wb-ph-icon"></span>
                 <span class="wb-ph-title">资金连增</span>
@@ -1207,7 +1207,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
             </section>
 
             <!-- 开仓纪律 -->
-            <section class="wb-panel wb-span-5" aria-label="开仓纪律">
+            <section class="wb-panel wb-span-5" aria-label="开仓纪律" data-qf-panel>
               <div class="wb-ph">
                 <span class="wb-ph-icon"></span>
                 <span class="wb-ph-title">开仓纪律</span>
@@ -2120,7 +2120,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
         </div>
 
         <div class="grid-2 mb-16">
-          <div class="card">
+          <div class="card" data-qf-panel>
             <div class="card-title">五维评估</div>
             <div style="display:flex;align-items:center;gap:20px;">
               <svg id="radarChart" width="280" height="280" viewBox="0 0 280 280"></svg>
@@ -2132,7 +2132,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
             </div>
           </div>
           <!-- K线图 -->
-          <div class="card">
+          <div class="card" data-qf-panel>
             <div class="card-title kline-card-title">
               <span>K线走势 <span class="kline-period-note" id="klinePeriodNote">日K · MA5/10/20</span></span>
               <span class="kline-periods" role="group" aria-label="K线周期切换">
@@ -2410,8 +2410,8 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
               </div>
             </div>
             <div class="table-wrap" tabindex="0" style="max-height:360px;overflow-y:auto;">
-              <table>
-                <thead><tr><th>代码</th><th>名称</th><th>数量</th><th>成本</th><th>现价</th><th>盈亏</th><th>盈亏%</th><th>操作</th></tr></thead>
+              <table class="qf-table">
+                <thead><tr><th>代码</th><th>名称</th><th data-sort-key="qty" data-sort-type="num">数量</th><th data-sort-key="cost" data-sort-type="num">成本</th><th data-sort-key="price" data-sort-type="num">现价</th><th data-sort-key="pnl" data-sort-type="num">盈亏</th><th data-sort-key="pnl_pct" data-sort-type="num">盈亏%</th><th>操作</th></tr></thead>
                 <tbody id="positionBody"></tbody>
               </table>
             </div>
@@ -2603,8 +2603,8 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
             <div id="fundRestoreBanner" style="display:none;margin-bottom:8px;padding:8px 12px;border:1px solid var(--color-warning,#f59e0b);border-radius:6px;background:rgba(245,158,11,0.08);font-size:12px;color:var(--text-secondary);"></div>
             <!-- ===== STAGE5: fund-cards ===== 桌面保留表格(P1-1);<768px 由下方卡片列表替代 -->
             <div class="table-wrap" tabindex="0" id="fundPositionTableWrap" style="max-height:400px;overflow-y:auto;">
-              <table>
-                <thead><tr><th>代码</th><th>名称</th><th>份额</th><th>成本</th><th>现净值</th><th>涨跌幅</th><th>盈亏</th><th>操作</th></tr></thead>
+              <table class="qf-table">
+                <thead><tr><th>代码</th><th>名称</th><th data-sort-key="shares" data-sort-type="num">份额</th><th data-sort-key="cost" data-sort-type="num">成本</th><th data-sort-key="nav" data-sort-type="num">现净值</th><th data-sort-key="change_pct" data-sort-type="num">涨跌幅</th><th data-sort-key="pnl" data-sort-type="num">盈亏</th><th>操作</th></tr></thead>
                 <tbody id="fundPositionBody"></tbody>
               </table>
             </div>
@@ -2888,8 +2888,8 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
             <button class="btn btn-sm btn-primary" onclick="loadDataTab()">查询</button>
           </div>
           <div id="dataHealthPanel" class="dh-panel" hidden></div>
-          <div class="table-wrap" id="dataTableWrap" tabindex="0" style="max-height:500px;overflow-y:auto;">
-            <table>
+          <div class="table-wrap qf-table-wrap" id="dataTableWrap" tabindex="0" style="max-height:500px;overflow-y:auto;">
+            <table class="qf-table">
               <thead id="dataThead"></thead>
               <tbody id="dataTbody"></tbody>
             </table>
@@ -4601,6 +4601,12 @@ async function loadIndexData() {
   }).join('');
 
   // 指数卡片
+  // 卡片 title 里的"更新于 HH:MM:SS"取同一次渲染的时间戳(每轮刷新只算一次)
+  const _idxClock = (() => {
+    const d = new Date();
+    const p = n => String(n).padStart(2, '0');
+    return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+  })();
   container.innerHTML = indices.map(idx => {
     const color = changeColor(idx.change_pct);
     const sign = changeSign(idx.change_pct);
@@ -4608,14 +4614,27 @@ async function loadIndexData() {
     // 滚动(否则 Number("null")/Number("") 会被当成真值), 涨跌幅缺失不拼「%」。
     const pctKnown = idx.change_pct != null && isFinite(idx.change_pct);
     const priceKnown = idx.price != null && isFinite(idx.price);
-    const svgId = 'spark-' + idx.code.replace(/\./g, '_').replace(/[^\w]/g, '_');
-    return `<div class="card">
+    const amountKnown = idx.amount != null && isFinite(idx.amount);
+    // 2026-11-22 数据诚实性(主理人拍板): 指数卡不再画任何合成走势(后端无分时/历史点位),
+    // 改为 方向箭头 + 成交额; 缺失一律「—」并带 title 说明原因与更新时间。
+    const dirText = !pctKnown ? '—' : (idx.change_pct > 0 ? '▲' : (idx.change_pct < 0 ? '▼' : '·'));
+    const dirColor = !pctKnown ? 'var(--qf-text-muted)'
+      : (idx.change_pct > 0 ? 'var(--qf-sem-up)' : (idx.change_pct < 0 ? 'var(--qf-sem-down)' : 'var(--qf-text-muted)'));
+    const dirTitle = !pctKnown ? ('上游未返回涨跌幅（更新于 ' + _idxClock + '）')
+      : ('方向：' + (idx.change_pct > 0 ? '上涨' : (idx.change_pct < 0 ? '下跌' : '平盘')) + '（更新于 ' + _idxClock + '）');
+    const amountText = amountKnown ? ('成交 ' + fmtMoney(idx.amount)) : '—';
+    const amountTitle = amountKnown ? ('成交额，按亿/万收敛（更新于 ' + _idxClock + '）')
+      : ('上游未返回成交额（更新于 ' + _idxClock + '）');
+    return `<div class="card" data-index-code="${escapeHtml(idx.code)}">
       <div class="flex-between mb-12">
         <div>
           <div style="font-size:12px;color:var(--text-muted);">${escapeHtml(idx.name)}</div>
           <div class="qf-count" ${priceKnown ? `data-countup="${idx.price}"` : ''} style="font-size:28px;font-weight:700;color:${color};">—</div>
         </div>
-        <svg id="${svgId}" class="sparkline" width="100" height="40" viewBox="0 0 100 40"></svg>
+        <div style="text-align:right;">
+          <div class="qf-idx-dir" style="font-size:18px;line-height:1;color:${dirColor};" title="${escapeHtml(dirTitle)}">${dirText}</div>
+          <div class="qf-idx-amount" style="font-size:11px;color:var(--text-muted);margin-top:6px;font-variant-numeric:tabular-nums;" title="${escapeHtml(amountTitle)}">${escapeHtml(amountText)}</div>
+        </div>
       </div>
       <div style="display:flex;gap:16px;font-size:13px;">
         <span style="color:${color};">${sign}${fmtNum(idx.change)}</span>
@@ -4626,12 +4645,11 @@ async function loadIndexData() {
     </div>`;
   }).join('');
 
-  // 生成模拟迷你走势线
-  indices.forEach(idx => {
-    const svgId = 'spark-' + idx.code.replace(/\./g, '_').replace(/[^\w]/g, '_');
-    // C-02 收尾:JS 里 `null >= 0` 为 true(null 被强转为 0), 缺失涨跌幅不得画成"上涨"走势
-    drawSparkline(svgId, idx.change_pct != null && idx.change_pct >= 0, idx.code);
-  });
+  // ===== STAGE8: shell ===== 顶部指数情绪条改由 QF.indexbar 渲染(名称/点位/涨跌幅/成交额/箭头,
+  // 整卡可点; 数据诚实: 不画任何合成的迷你走势)。QF 未加载(?shell=off)时保留上面的存量渲染。
+  if (window.QF && window.QF.indexbar && typeof QF.indexbar.render === 'function') {
+    try { QF.indexbar.render(bar, indices); } catch (e) { console.warn('QF.indexbar 渲染失败, 保留存量指数条', e); }
+  }
 
   // 阶段5 signature #2: 首次渲染播放数字滚动; 后续刷新直接写真值
   const priceEls = container.querySelectorAll('[data-countup]');
@@ -4676,48 +4694,6 @@ async function loadGlobalIndexBar() {
     </div>`;
   }).join('');
   globalBar.innerHTML = globalHtml;
-}
-
-// 迷你走势线（纯SVG）
-function drawSparkline(svgId, isUp, seedStr) {
-  const svg = document.getElementById(svgId);
-  if (!svg) return;
-  // 走势线抖动修复(2026-07-31):原代码用 Math.random 生成走势线,每次刷新都变形,
-  // 用户误以为指数在实时波动。改为基于种子(seedStr=idx.code)的确定性 PRNG,
-  // 保证同一指数每次刷新走势线一致,仅涨跌方向(isUp)影响斜率。
-  let hash = 0;
-  for (let i = 0; i < (seedStr || svgId).length; i++) {
-    hash = ((hash << 5) - hash) + (seedStr || svgId).charCodeAt(i);
-    hash |= 0;
-  }
-  let rng = Math.abs(hash) || 1;
-  const nextRand = () => { rng = (rng * 9301 + 49297) % 233280; return rng / 233280; };
-
-  const points = [];
-  let val = 20;
-  for (let i = 0; i < 20; i++) {
-    val += (nextRand() - (isUp ? 0.4 : 0.6)) * 3;
-    val = Math.max(5, Math.min(35, val));
-    points.push(val);
-  }
-  const min = Math.min(...points);
-  const max = Math.max(...points);
-  const range = max - min || 1;
-  const pathD = points.map((p, i) => {
-    const x = (i / (points.length - 1)) * 95 + 2;
-    const y = 38 - ((p - min) / range) * 34;
-    return (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1);
-  }).join(' ');
-
-  const color = isUp ? 'var(--color-up)' : 'var(--color-down)';
-  svg.innerHTML = `
-    <defs><linearGradient id="grad-${svgId}" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="${color}" stop-opacity="0.3"/>
-      <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
-    </linearGradient></defs>
-    <path d="${pathD}" fill="none" stroke="${color}" stroke-width="1.5"/>
-    <path d="${pathD} L97,38 L2,38 Z" fill="url(#grad-${svgId})"/>
-  `;
 }
 
 /* ===== 阶段二 R-03/R-04: 股票检索、个股详情、资金面 ===== */
@@ -5922,13 +5898,22 @@ function drawRadarChart(scores) {
   // 综合评分永远 67.0 显示"建议买入",用户误以为是真实分析结果。改为:无数据时显示空状态。
   if (!scores) {
     // 阶段5 空态瘦身: 无数据时把画布压到 120px, 避免 280px 空框占满首屏
-    svg.setAttribute('viewBox', '0 0 280 120');
-    svg.setAttribute('height', '120');
-    svg.innerHTML = `<text x="140" y="54" text-anchor="middle" fill="var(--text-muted)" font-size="12">暂无评分数据</text>
-      <text x="140" y="80" text-anchor="middle" fill="var(--text-muted)" font-size="11">输入股票代码后点击「一键分析」</text>`;
+    // 2026-11-22(STAGE8 §10): 空态高度 120 → 220, 与 ready 态同量级, 消除「面板被挤空/看起来坏了」的误读;
+    // 同时改走 QF.panel.state('empty'), 明确写出「为什么空 + 怎么拿到数据」。
+    svg.setAttribute('viewBox', '0 0 280 220');
+    svg.setAttribute('height', '220');
+    svg.innerHTML = `<text x="140" y="104" text-anchor="middle" fill="var(--text-muted)" font-size="12">暂无评分数据</text>
+      <text x="140" y="130" text-anchor="middle" fill="var(--text-muted)" font-size="11">输入股票代码后点击「一键分析」</text>`;
     document.getElementById('signalLevel').innerHTML = '<span class="signal" style="background:var(--text-muted)22;color:var(--text-muted);">待分析</span>';
+    if (window.QF && QF.panel) {
+      QF.panel.state(svg, 'empty', {
+        title: '五维评估暂无评分',
+        reason: '原因：五维评分需「一键分析」按标的生成，尚未对本标的调用'
+      });
+    }
     return;
   }
+  if (window.QF && QF.panel) QF.panel.state(svg, 'ready');
   // 有数据: 恢复完整画布(空态曾把它压到 120px)
   svg.setAttribute('viewBox', '0 0 280 280');
   svg.setAttribute('height', '280');
@@ -6045,12 +6030,20 @@ async function loadKline() {
   }));
   if (!items || items.length === 0) {
     // 阶段5 空态瘦身: 无数据时把画布压到 120px, 避免 300px 空框占满首屏
-    svg.setAttribute('viewBox', '0 0 600 120');
-    svg.setAttribute('height', '120');
-    svg.innerHTML = `<text x="300" y="56" text-anchor="middle" fill="var(--text-muted)" font-size="13">暂无K线数据</text>
-      <text x="300" y="82" text-anchor="middle" fill="var(--text-muted)" font-size="11">请检查股票代码或稍后重试</text>`;
+    // 2026-11-22(STAGE8 §10): 空态高度 120 → 220, 并改走 QF.panel.state('empty') 说明原因与恢复方式。
+    svg.setAttribute('viewBox', '0 0 600 220');
+    svg.setAttribute('height', '220');
+    svg.innerHTML = `<text x="300" y="104" text-anchor="middle" fill="var(--text-muted)" font-size="13">暂无K线数据</text>
+      <text x="300" y="130" text-anchor="middle" fill="var(--text-muted)" font-size="11">请检查股票代码或稍后重试</text>`;
+    if (window.QF && QF.panel) {
+      QF.panel.state(svg, 'empty', {
+        title: 'K线走势暂无数据',
+        reason: '原因：上游未返回该标的的有效 K 线（代码有误或限流），可改代码后点「加载K线」重试'
+      });
+    }
     return;
   }
+  if (window.QF && QF.panel) QF.panel.state(svg, 'ready');
   // 有数据: 恢复完整画布(空态曾把它压到 120px)
   svg.setAttribute('viewBox', '0 0 600 300');
   svg.setAttribute('height', '300');
@@ -10288,5 +10281,8 @@ document.addEventListener('DOMContentLoaded', () => {
 <script src="/static/js/global-market.js"></script>
 <!-- ===== STAGE7: version-modal ===== 版本更新弹窗(health.version vs localStorage 自动弹出;暴露 window.openVersionModal) ===== -->
 <script src="/static/js/version-modal.js"></script>
+<!-- ===== STAGE8: shell ===== 终端化骨架(必须是链上最外层 switchPage 包装,故排在所有存量脚本之后) ===== -->
+<script src="/static/js/qf-shell.js?v=20261122a"></script>
+<script src="/static/js/qf-cmdk.js?v=20261122a"></script>
 </body>
 </html>

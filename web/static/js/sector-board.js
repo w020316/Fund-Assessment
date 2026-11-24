@@ -123,11 +123,16 @@
     var down = pctItems.filter(function (it) { return Number(it.change_pct) < 0; }).length;
     var flat = pctItems.length - up - down;
     var noPct = items.length - pctItems.length;
-    var upNote = '占比 ' + pctOf(up, pctItems.length)
+    /* 口径(2026-11-22 收口): 分母恒为「有涨跌幅的板块数」pctItems.length,
+       且 up + flat + down === pctItems.length(构造上必然成立);
+       缺失涨跌幅的板块既不进分子也不进分母, 两个 KPI 用同一句话说明, 不再一处写
+       「N 个缺失涨跌幅」、一处写「缺失不计入」。 */
+    var denom = pctItems.length;
+    var missNote = noPct ? ' · 缺失涨跌幅 ' + noPct + ' 个不计入' : '';
+    var upNote = '占比 ' + pctOf(up, denom) + '（分母 ' + denom + ' 个）'
       + (flat ? ' · 平盘 ' + flat : '')
-      + (noPct ? ' · ' + noPct + ' 个缺失涨跌幅' : '');
-    var downNote = '占比 ' + pctOf(down, pctItems.length)
-      + (noPct ? ' · 缺失不计入' : '');
+      + missNote;
+    var downNote = '占比 ' + pctOf(down, denom) + '（分母 ' + denom + ' 个）' + missNote;
 
     setKpi('sbKpiUp', up + ' 个', upNote, up > 0 ? 'is-up' : '');
     setKpi('sbKpiDown', down + ' 个', downNote, down > 0 ? 'is-down' : '');
@@ -239,9 +244,9 @@
       : '';
     el.innerHTML = banner
       + '<div class="table-wrap sb-table-wrap" tabindex="0">'
-      + '<table class="pred-sector-table sb-table">'
-      + '<thead><tr><th class="sb-rank">#</th><th>板块名称</th><th class="sb-num">涨跌幅</th>'
-      + '<th class="sb-num">主力净流入</th><th class="sb-num">净流入占比</th></tr></thead>'
+      + '<table class="pred-sector-table sb-table qf-table">'
+      + '<thead><tr><th class="sb-rank">#</th><th>板块名称</th><th class="sb-num" data-sort-key="change_pct" data-sort-type="num">涨跌幅(%)</th>'
+      + '<th class="sb-num" data-sort-key="net_inflow" data-sort-type="num">主力净流入(亿)</th><th class="sb-num" data-sort-key="net_ratio" data-sort-type="num">净流入占比(%)</th></tr></thead>'
       + '<tbody>' + rows + '</tbody></table></div>'
       + '<div class="pred-muted sb-foot">共 ' + list.length + ' 个板块'
       + (list.length !== (state.data || []).length ? '（已筛选，全市场 ' + (state.data || []).length + ' 个）' : '')
@@ -683,9 +688,9 @@
     }).join('');
 
     body.innerHTML = '<div class="sb-drawer-table-wrap" tabindex="0">'
-      + '<table class="pred-sector-table sb-table sb-stock-table">'
-      + '<thead><tr><th>代码</th><th>名称</th><th class="sb-num">最新价</th>'
-      + '<th class="sb-num">涨跌幅</th><th class="sb-num">成交额</th></tr></thead>'
+      + '<table class="pred-sector-table sb-table sb-stock-table qf-table">'
+      + '<thead><tr><th>代码</th><th>名称</th><th class="sb-num" data-sort-key="price" data-sort-type="num">最新价</th>'
+      + '<th class="sb-num" data-sort-key="change_pct" data-sort-type="num">涨跌幅</th><th class="sb-num" data-sort-key="amount" data-sort-type="num">成交额</th></tr></thead>'
       + '<tbody>' + rows + '</tbody></table></div>'
       + '<div class="pred-muted sb-foot">共 ' + list.length + ' 只 · 按涨跌幅降序，缺失值排在最后 · 点击任意个股进入行情总览</div>';
   }

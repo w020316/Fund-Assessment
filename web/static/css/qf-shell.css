@@ -1,0 +1,634 @@
+/* ============================================================================
+   STAGE8 · QuantFlow Pro 终端化骨架层（qf-shell）
+   ----------------------------------------------------------------------------
+   ① 全文件只在 `body.qf-shell` 作用域下生效：移除该类即整体回滚到存量外观；
+   ② 本文件必须排在 terminal-ui.css 之后（index.html <head> 末尾），
+      用「作用域 + 更高特异性」双保险覆盖骨架宽度/高度，但**不碰任何页面内样式**；
+   ③ 只允许三类选择器：
+        body.qf-shell …        （骨架：轨道 / 顶栏 / 上下文条）
+        .qf-*                  （新增组件）
+        body.qf-shell .page …  （密度，且必须包在 @media (min-width:901px)）
+   ④ 颜色只用 tokens.css 的 --qf-* 变量；涨红(up) / 跌绿(down) 见 --qf-sem-up/down；
+   ⑤ 间距一律 4px 网格（4 / 8 / 12 / 16 / 20 / 24）。
+   ========================================================================== */
+
+/* ---------------------------------------------------------------------------
+   0. 布局令牌（只追加，不改 tokens.css 既有值）
+   --------------------------------------------------------------------------- */
+body.qf-shell {
+  --qf-rail-w: 56px;
+  --qf-rail-w-pinned: 168px;
+  --qf-tab-h: 28px;
+  --qf-row-h: 28px;
+  --qf-ctx-h: 36px;
+  --qf-topbar-h: 48px;
+  --qf-content-pad: 12px;
+  --qf-flyout-w: 220px;
+  --qf-index-h: 40px;
+}
+
+/* ---------------------------------------------------------------------------
+   1. 轨道：侧栏恒 56px（pinned 才 168px），内容区自动吃掉剩余宽度
+   现存实现里 body.hud-theme .sidebar 是 (0,2,1)，这里必须是 (0,3,1) 才能压过。
+   --------------------------------------------------------------------------- */
+@media (min-width: 901px) {
+  body.qf-shell.hud-theme .topbar { height: var(--qf-topbar-h); min-height: var(--qf-topbar-h); padding: 0 16px; gap: 12px; }
+  body.qf-shell.hud-theme .sidebar {
+    width: var(--qf-rail-w);
+    min-width: var(--qf-rail-w);
+    flex: 0 0 var(--qf-rail-w);
+    padding: 8px 0;
+    overflow: visible;            /* 关键：flyout 用 fixed，但基准 rect 需要可读 */
+    transition: flex-basis var(--duration-base) var(--ease-out);
+  }
+  body.qf-shell.qf-nav-pinned.hud-theme .sidebar { width: var(--qf-rail-w-pinned); min-width: var(--qf-rail-w-pinned); flex-basis: var(--qf-rail-w-pinned); }
+  body.qf-shell.hud-theme .content { padding: var(--qf-content-pad); }
+
+  /* 56px 图标轨：隐藏文字与 kbd，保留 aria-label / title 兜底 */
+  body.qf-shell .nav-item {
+    height: 44px;
+    justify-content: center;
+    padding: 0;
+    border-left-width: 0;
+    flex-direction: row;
+    position: relative;
+    font-size: 12px;
+  }
+  body.qf-shell .nav-item > span:not(.nav-icon) { display: none; }
+  body.qf-shell .nav-item .nav-icon {
+    width: auto;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  body.qf-shell .nav-item.active { background: var(--qf-cyan-soft); }
+  body.qf-shell .nav-item.active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 8px;
+    bottom: 8px;
+    width: 2px;
+    border-radius: 0 2px 2px 0;
+    background: var(--qf-neon-cyan);
+  }
+
+  /* pinned（168px）：恢复文字与 kbd */
+  body.qf-shell.qf-nav-pinned .nav-item { justify-content: flex-start; padding: 0 12px; gap: 10px; }
+  body.qf-shell.qf-nav-pinned .nav-item > span:not(.nav-icon) { display: inline; }
+  body.qf-shell.qf-nav-pinned .nav-item .kbd { display: inline-block; margin-left: auto; }
+  body.qf-shell.qf-nav-pinned .nav-item.active::before { left: 0; }
+}
+
+/* 侧栏底部：钉住按钮（JS 注入，不改原 DOM 结构） */
+.qf-rail-pin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 8px 6px 0;
+  min-height: 36px;
+  padding: 0 8px;
+  border: 1px solid var(--qf-line-1);
+  border-radius: var(--qf-radius-xs);
+  background: transparent;
+  color: var(--qf-text-muted);
+  font: 500 11px/1 var(--qf-font-body);
+  cursor: pointer;
+  transition: color var(--duration-base) var(--ease-standard),
+    border-color var(--duration-base) var(--ease-standard),
+    background-color var(--duration-base) var(--ease-standard);
+}
+.qf-rail-pin:hover { color: var(--qf-text-primary); border-color: var(--qf-cyan-line); background: var(--qf-cyan-soft); }
+.qf-rail-pin[aria-pressed="true"] { color: var(--qf-neon-cyan); border-color: var(--qf-cyan-line); }
+.qf-rail-pin__grip {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  border-left: 1px solid currentColor;
+  border-right: 1px solid currentColor;
+  opacity: .8;
+}
+.qf-rail-pin__text { display: none; }
+body.qf-shell.qf-nav-pinned .qf-rail-pin__text { display: inline; }
+
+/* ---------------------------------------------------------------------------
+   2. 二级页浮层 .qf-flyout（fixed，规避 .main-layout{overflow:hidden} 裁剪）
+   --------------------------------------------------------------------------- */
+.qf-flyout {
+  position: fixed;
+  z-index: var(--qf-z-overlay);
+  width: var(--qf-flyout-w);
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--qf-line-2);
+  border-radius: var(--qf-radius-sm);
+  background: var(--qf-bg-elev);
+  box-shadow: var(--qf-shadow-2);
+}
+.qf-flyout[hidden] { display: none; }
+.qf-flyout__title {
+  display: block;
+  padding: 4px 8px 8px;
+  font: 500 11px/1.2 var(--qf-font-body);
+  letter-spacing: .04em;
+  color: var(--qf-text-muted);
+  border-bottom: 1px solid var(--qf-panel-line);
+  margin-bottom: 4px;
+}
+.qf-flyout__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--qf-radius-xs);
+  background: transparent;
+  color: var(--qf-text-secondary);
+  font: 500 12.5px/1 var(--qf-font-body);
+  text-align: left;
+  cursor: pointer;
+}
+.qf-flyout__item:hover,
+.qf-flyout__item:focus-visible { background: var(--qf-cyan-soft); color: var(--qf-text-primary); outline: none; }
+.qf-flyout__item.is-active { color: var(--qf-neon-cyan); background: var(--qf-cyan-soft); }
+.qf-flyout__kbd { margin-left: auto; font: 500 10px/1 var(--qf-font-mono); color: var(--qf-text-muted); }
+
+/* ---------------------------------------------------------------------------
+   3. 上下文条 .qf-ctxbar（36px，sticky）
+   --------------------------------------------------------------------------- */
+body.qf-shell .qf-ctxbar {
+  position: sticky;
+  top: 0;
+  z-index: var(--qf-z-sticky);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--qf-ctx-h);
+  min-height: var(--qf-ctx-h);
+  margin: 0 0 8px;
+  padding: 0 4px 0 8px;
+  background: var(--qf-bg-deep);
+  border-bottom: 1px solid var(--qf-line-1);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+body.qf-shell .qf-ctxbar__id {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  max-width: 40%;
+  overflow: hidden;
+  white-space: nowrap;
+}
+body.qf-shell .qf-ctxbar__group { font: 500 11px/1 var(--qf-font-body); letter-spacing: .04em; color: var(--qf-text-muted); }
+body.qf-shell .qf-ctxbar__sep { color: var(--qf-text-disabled); font-size: 11px; }
+body.qf-shell .qf-ctxbar__page { font: 600 13px/1 var(--qf-font-body); color: var(--qf-text-primary); text-overflow: ellipsis; overflow: hidden; }
+body.qf-shell .qf-ctxbar__tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  white-space: nowrap;
+}
+body.qf-shell .qf-ctxbar__tabs::-webkit-scrollbar { display: none; }
+body.qf-shell .qf-ctxbar__ops {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+body.qf-shell .qf-ctxbar__ops::-webkit-scrollbar { display: none; }
+/* 搬进上下文条的风险页窗口 tab：必须单行（存量 .st6-window-tabs 是 flex-wrap:wrap，
+   在移动端窄轨道里会折成 4 行，把 chrome 撑到 200px+） */
+body.qf-shell .qf-ctxbar .st6-window-tabs {
+  flex-wrap: nowrap;
+  margin: 0;
+  padding: 0;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+body.qf-shell .qf-ctxbar .st6-window-tabs::-webkit-scrollbar { display: none; }
+body.qf-shell .qf-ctxbar .st6-window-tab { flex: 0 0 auto; white-space: nowrap; }
+body.qf-shell .qf-ctxbar > .qf-ctxbar__tabs > [data-qf-slot-group],
+body.qf-shell .qf-ctxbar > .qf-ctxbar__tabs > [data-qf-slot-page],
+body.qf-shell .qf-ctxbar > .qf-ctxbar__ops > [data-qf-slot-group],
+body.qf-shell .qf-ctxbar > .qf-ctxbar__ops > [data-qf-slot-page] { display: none; }
+body.qf-shell .qf-ctxbar > .qf-ctxbar__tabs > .is-active,
+body.qf-shell .qf-ctxbar > .qf-ctxbar__ops > .is-active { display: flex; align-items: center; gap: 6px; }
+body.qf-shell .qf-ctxbar__kbd {
+  flex: 0 0 auto;
+  min-width: 36px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--qf-panel-line);
+  border-radius: var(--qf-radius-xs);
+  background: var(--qf-panel-tint);
+  color: var(--qf-text-muted);
+  font: 500 11px/1 var(--qf-font-mono);
+  cursor: pointer;
+}
+body.qf-shell .qf-ctxbar__kbd:hover { color: var(--qf-neon-cyan); border-color: var(--qf-cyan-line); }
+
+/* ---------------------------------------------------------------------------
+   4. 密度（只在 ≥901px 生效；移动端 48px 触点契约留在 hud.css 不动）
+   --------------------------------------------------------------------------- */
+@media (min-width: 901px) {
+  /* 二级 tab：视觉 28，命中区 44（::after 撑开，不改高度契约） */
+  body.qf-shell.hud-theme .qf-ctxbar .hud-subtabs,
+  body.qf-shell .qf-ctxbar .hud-subtabs {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 4px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    border-radius: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  body.qf-shell.hud-theme .qf-ctxbar .hud-subtab {
+    position: relative;
+    height: var(--qf-tab-h);
+    min-height: var(--qf-tab-h);
+    padding: 0 10px;
+    border-radius: var(--qf-radius-xs);
+    font-size: 12.5px;
+    flex: 0 0 auto;
+  }
+  body.qf-shell.hud-theme .qf-ctxbar .hud-subtab::after { content: ''; position: absolute; inset: -8px -3px; }
+  body.qf-shell.hud-theme .qf-ctxbar .hud-subtab.active { background: transparent; color: var(--qf-neon-cyan); box-shadow: inset 0 -2px 0 var(--qf-neon-cyan); }
+  /* 风险页窗口 tab 同样收进上下文条（单行/间距已在基础规则里，这里只补视觉） */
+  body.qf-shell.hud-theme .qf-ctxbar .st6-window-tabs { border: 0; background: transparent; }
+  body.qf-shell.hud-theme .qf-ctxbar .st6-window-tab { height: 24px; min-height: 24px; padding: 0 8px; font-size: 11.5px; }
+  /* 上下文条内的页面级操作按钮：统一 24px 高，不做主次重排（M7 本轮不承诺） */
+  body.qf-shell.hud-theme .qf-ctxbar .btn {
+    height: 24px;
+    min-height: 24px;
+    padding: 0 10px;
+    font-size: 11.5px;
+    border-radius: var(--qf-radius-xs);
+  }
+  body.qf-shell.hud-theme .qf-ctxbar .btn-primary { border-color: var(--qf-cyan-line); }
+
+  /* 卡片与标题密度 */
+  body.qf-shell.hud-theme .page .card { padding: 12px; border-radius: var(--qf-radius-xs); }
+  body.qf-shell.hud-theme .page .card-title { margin-bottom: 8px; font-size: 13px; }
+  body.qf-shell.hud-theme .page .mb-16 { margin-bottom: 8px; }
+  /* 已标记面板：头部 32px + body 落点 */
+  body.qf-shell .card[data-qf-panel],
+  body.qf-shell .wb-panel[data-qf-panel] { padding: 0; overflow: hidden; }
+  body.qf-shell .card[data-qf-panel] > .card-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    min-height: 32px;
+    margin: 0;
+    padding: 0 10px;
+    font-size: 13px;
+    border-bottom: 1px solid var(--qf-panel-line);
+    background: var(--qf-panel-bg-2);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   5. 指数情绪条（顶部）：名称 / 点位 / 涨跌幅 / 成交额 / 箭头，整卡可点
+   —— 不画迷你走势（后端无分时点位，避免把生成数据当真实行情）
+   --------------------------------------------------------------------------- */
+body.qf-shell .qf-index-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  flex: 1 1 auto;
+  justify-content: flex-start;
+}
+body.qf-shell .qf-index-bar::-webkit-scrollbar { display: none; }
+body.qf-shell .qf-idx {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--qf-radius-xs);
+  background: var(--qf-panel-tint);
+  color: inherit;
+  font: 500 12px/28px var(--qf-font-body);
+  white-space: nowrap;
+  cursor: pointer;
+}
+body.qf-shell .qf-idx:hover { border-color: var(--qf-line-2); background: var(--qf-panel-tint-hi); }
+body.qf-shell .qf-idx:focus-visible { outline: none; box-shadow: var(--qf-focus-ring); }
+body.qf-shell .qf-idx.is-active { border-color: var(--qf-cyan-line); background: var(--qf-cyan-soft); }
+body.qf-shell .qf-idx__name { font-size: 11.5px; color: var(--qf-text-muted); }
+body.qf-shell .qf-idx__price { font-family: var(--qf-font-mono); font-variant-numeric: tabular-nums; font-size: 13px; font-weight: 600; }
+body.qf-shell .qf-idx__pct { font-family: var(--qf-font-mono); font-variant-numeric: tabular-nums; font-size: 11.5px; }
+body.qf-shell .qf-idx__amt { font-family: var(--qf-font-mono); font-variant-numeric: tabular-nums; font-size: 11px; color: var(--qf-text-muted); }
+body.qf-shell .qf-idx__arrow { font-size: 10px; line-height: 1; }
+body.qf-shell .qf-idx.is-up,
+body.qf-shell .qf-idx.is-up .qf-idx__price,
+body.qf-shell .qf-idx.is-up .qf-idx__pct { color: var(--qf-sem-up); }
+body.qf-shell .qf-idx.is-down,
+body.qf-shell .qf-idx.is-down .qf-idx__price,
+body.qf-shell .qf-idx.is-down .qf-idx__pct { color: var(--qf-sem-down); }
+body.qf-shell .qf-idx.is-flat,
+body.qf-shell .qf-idx.is-flat .qf-idx__price { color: var(--qf-text-secondary); }
+/* 指数条点击后高亮对应的工作台指数卡（QF.indexbar.jumpTo 写入类名，不改业务数据） */
+body.qf-shell .wb-idx.is-active,
+body.qf-shell .wb-idx.qf-idx-target { box-shadow: inset 0 0 0 1px var(--qf-neon-cyan); }
+/* 900–1200：横向滚动，不换行、不产生页面级横向滚动 */
+@media (max-width: 1200px) and (min-width: 901px) {
+  body.qf-shell .qf-index-bar { overflow-x: auto; flex-wrap: nowrap; }
+}
+
+/* ---------------------------------------------------------------------------
+   6. 缺失值 / 面板三态
+   --------------------------------------------------------------------------- */
+.qf-missing { color: var(--qf-text-disabled); cursor: help; border-bottom: 1px dashed var(--qf-panel-line-soft); }
+body.qf-shell [data-qf-panel] { position: relative; }
+/* 非 ready 态的内容隐藏由 QF.panel.state 用内联 display 完成
+   （存量 HTML 大量 style="display:flex"，CSS 类压不住），此处不再保留第二套机制。 */
+body.qf-shell .qf-panel__state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 12px;
+  min-height: 72px;
+  font-size: 12.5px;
+  color: var(--qf-text-secondary);
+}
+body.qf-shell .qf-panel__state-title { font-weight: 600; color: var(--qf-text-primary); }
+body.qf-shell .qf-panel__state-detail,
+body.qf-shell .panel-empty-hint { color: var(--qf-text-muted); font-size: 11.5px; }
+body.qf-shell .qf-panel__state-code { font-family: var(--qf-font-mono); font-size: 11px; color: var(--qf-sem-warn); }
+body.qf-shell .qf-panel__state-actions { display: flex; gap: 8px; margin-top: 4px; }
+body.qf-shell .panel-retry {
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--qf-cyan-line);
+  border-radius: var(--qf-radius-xs);
+  background: transparent;
+  color: var(--qf-neon-cyan);
+  font: 500 11.5px/1 var(--qf-font-body);
+  cursor: pointer;
+}
+body.qf-shell .panel-retry:hover { background: var(--qf-cyan-soft); }
+body.qf-shell .qf-panel__skel { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+body.qf-shell .qf-skel {
+  display: block;
+  height: 12px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--qf-panel-tint) 0%, var(--qf-panel-tint-hi) 50%, var(--qf-panel-tint) 100%);
+  background-size: 200% 100%;
+  animation: qf-skel-shimmer 1.2s linear infinite;
+}
+body.qf-shell .qf-skel:nth-child(even) { width: 72%; }
+@keyframes qf-skel-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  body.qf-shell .qf-skel { animation: none; }
+}
+
+/* ---------------------------------------------------------------------------
+   7. 表格规范 .qf-table
+   --------------------------------------------------------------------------- */
+body.qf-shell .qf-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
+body.qf-shell .qf-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: var(--qf-z-sticky);
+  height: 28px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--qf-text-muted);
+  text-align: left;
+  white-space: nowrap;
+  background: var(--qf-panel-bg-2);
+  border-bottom: 1px solid var(--qf-panel-line);
+}
+body.qf-shell .qf-table thead th[data-sort-key] { cursor: pointer; user-select: none; }
+body.qf-shell .qf-table thead th[data-sort-key]::after { content: '⇅'; margin-left: 4px; font-size: 9px; opacity: .45; }
+body.qf-shell .qf-table thead th[aria-sort="descending"]::after { content: '▼'; opacity: .9; color: var(--qf-neon-cyan); }
+body.qf-shell .qf-table thead th[aria-sort="ascending"]::after { content: '▲'; opacity: .9; color: var(--qf-neon-cyan); }
+body.qf-shell .qf-table tbody td { height: var(--qf-row-h); padding: 0 8px; line-height: 1.4; }
+body.qf-shell .qf-table tbody tr:hover td { background: var(--qf-panel-hover); }
+body.qf-shell .qf-table .is-num,
+body.qf-shell .qf-table td[data-num],
+body.qf-shell .qf-table .sb-num { text-align: right; font-family: var(--qf-font-mono); font-variant-numeric: tabular-nums; }
+body.qf-shell .qf-table td:first-child,
+body.qf-shell .qf-table th:first-child { position: sticky; left: 0; background: var(--qf-panel-bg); z-index: calc(var(--qf-z-sticky) - 1); }
+body.qf-shell .qf-table thead th:first-child { background: var(--qf-panel-bg-2); }
+body.qf-shell .qf-table-wrap { overflow: auto; max-height: var(--qf-table-max-h, 60vh); }
+
+/* ---------------------------------------------------------------------------
+   8. 工作台模板编辑态（只对静态面板节点做 appendChild 重排）
+   --------------------------------------------------------------------------- */
+body.qf-shell .qf-wb-hidden { display: none !important; }
+body.qf-shell .qf-wb-collapsed .wb-pb { display: none; }
+body.qf-shell .qf-wb-dense .wb-grid { grid-auto-flow: dense; }
+body.qf-shell .qf-wb-ctl { display: none; align-items: center; gap: 2px; margin-left: 4px; }
+body.qf-shell.qf-wb-edit .wb-panel .qf-wb-ctl { display: inline-flex; }
+body.qf-shell .qf-wb-ctl button {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--qf-panel-line);
+  border-radius: 2px;
+  background: var(--qf-panel-tint);
+  color: var(--qf-text-muted);
+  font: 500 10px/1 var(--qf-font-mono);
+  cursor: pointer;
+}
+body.qf-shell .qf-wb-ctl button:hover { color: var(--qf-neon-cyan); border-color: var(--qf-cyan-line); }
+body.qf-shell .qf-wb-ctl button[aria-pressed="true"] { color: var(--qf-sem-warn); border-color: var(--qf-warn-line); }
+body.qf-shell .qf-wb-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: var(--qf-z-sticky);
+  display: none;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--qf-line-2);
+  border-radius: var(--qf-radius-xs);
+  background: var(--qf-bg-elev);
+  box-shadow: var(--qf-shadow-1);
+  font-size: 12px;
+  color: var(--qf-text-secondary);
+}
+body.qf-shell.qf-wb-edit .qf-wb-bar { display: flex; }
+body.qf-shell .qf-wb-bar .btn { height: 24px; min-height: 24px; padding: 0 10px; font-size: 11.5px; }
+body.qf-shell .qf-wb-bar__spacer { flex: 1 1 auto; }
+body.qf-shell .qf-wb-toggle {
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--qf-line-2);
+  border-radius: var(--qf-radius-xs);
+  background: transparent;
+  color: var(--qf-text-secondary);
+  font: 500 11.5px/1 var(--qf-font-body);
+  cursor: pointer;
+}
+body.qf-shell .qf-wb-toggle[aria-pressed="true"] { color: var(--qf-neon-cyan); border-color: var(--qf-cyan-line); background: var(--qf-cyan-soft); }
+
+/* ---------------------------------------------------------------------------
+   9. 命令面板 .qf-cmdk
+   --------------------------------------------------------------------------- */
+body.qf-cmdk-open { overflow: hidden; }
+.qf-cmdk {
+  position: fixed;
+  inset: 0;
+  z-index: var(--qf-z-modal);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 8vh 16px 16px;
+}
+.qf-cmdk[hidden] { display: none; }
+.qf-cmdk__scrim { position: absolute; inset: 0; background: var(--qf-bg-scrim); backdrop-filter: blur(2px); }
+.qf-cmdk__box {
+  position: relative;
+  width: 640px;
+  max-width: 100%;
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--qf-line-2);
+  border-radius: var(--qf-radius-sm);
+  background: var(--qf-bg-elev);
+  box-shadow: var(--qf-shadow-3);
+  overflow: hidden;
+}
+.qf-cmdk__input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--qf-panel-line);
+}
+.qf-cmdk__input {
+  flex: 1 1 auto;
+  height: 32px;
+  border: 0;
+  background: transparent;
+  color: var(--qf-text-primary);
+  font: 400 14px/1 var(--qf-font-body);
+  outline: none;
+}
+.qf-cmdk__input::placeholder { color: var(--qf-text-disabled); }
+.qf-cmdk__esc {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 1px solid var(--qf-panel-line);
+  border-radius: 2px;
+  font: 500 10px/1 var(--qf-font-mono);
+  color: var(--qf-text-muted);
+}
+.qf-cmdk__list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px; }
+.qf-cmdk__group {
+  display: block;
+  padding: 8px 8px 4px;
+  font: 500 11px/1.2 var(--qf-font-body);
+  letter-spacing: .04em;
+  color: var(--qf-text-muted);
+}
+.qf-cmdk__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: var(--qf-radius-xs);
+  background: transparent;
+  color: var(--qf-text-secondary);
+  font: 500 13px/1 var(--qf-font-body);
+  text-align: left;
+  cursor: pointer;
+}
+.qf-cmdk__item[aria-selected="true"] { background: var(--qf-cyan-soft); border-left-color: var(--qf-neon-cyan); color: var(--qf-text-primary); }
+.qf-cmdk__item-main { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qf-cmdk__item-meta { flex: 0 0 auto; font: 500 11px/1 var(--qf-font-mono); color: var(--qf-text-muted); }
+.qf-cmdk__empty { padding: 16px 12px; color: var(--qf-text-muted); font-size: 12.5px; }
+.qf-cmdk__foot {
+  display: flex;
+  gap: 16px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--qf-panel-line);
+  font: 500 11px/1 var(--qf-font-body);
+  color: var(--qf-text-muted);
+}
+.qf-cmdk__foot kbd {
+  display: inline-block;
+  min-width: 16px;
+  margin-right: 2px;
+  padding: 1px 4px;
+  border: 1px solid var(--qf-panel-line);
+  border-radius: 2px;
+  font: 500 10px/1.2 var(--qf-font-mono);
+  text-align: center;
+}
+
+/* ---------------------------------------------------------------------------
+   10. 断点收口
+   >1200：单行铺开；900–1200：指数条横向滚动；<900：骨架规则整体不生效
+   --------------------------------------------------------------------------- */
+@media (max-width: 900px) {
+  /* 移动端：侧栏 display:none、底部 tab、48px 触点契约全部沿用存量（hud.css 不动）。
+     上下文条不作为骨架收窄手段，只承接被搬移的二级 tab 与页面操作按钮，
+     因此高度必须自适应（hud.css 在 ≤768 把 .hud-subtab / .btn-sm 顶到 48px）。 */
+  body.qf-shell .qf-ctxbar {
+    height: auto;
+    min-height: var(--qf-ctx-h);
+    max-height: 56px;
+    padding: 2px 4px;
+    margin-bottom: 8px;
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }
+  body.qf-shell .qf-ctxbar__id { display: none; }
+  body.qf-shell .qf-ctxbar__tabs { flex: 1 1 0; min-width: 0; overflow-x: auto; overflow-y: hidden; }
+  body.qf-shell .qf-ctxbar__tabs > .is-active { min-width: 0; overflow: hidden; }
+  body.qf-shell .qf-ctxbar__tabs .hud-subtabs { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
+  /* 移动端上下文条里的页面操作按钮：一律单行 + 横向滚动。
+     否则「持仓补录向导 / 导入持仓 / 刷新…」在 390px 下会折成 2~5 行，
+     把 chrome 从 56px 撑到 220px（实测 fund 页 221px）。48px 触点高度保持不变。 */
+  body.qf-shell .qf-ctxbar__ops { flex: 0 0 auto; max-width: 42%; overflow-x: auto; overflow-y: hidden; }
+  body.qf-shell .qf-ctxbar__ops > .is-active { flex-wrap: nowrap; }
+  body.qf-shell .qf-ctxbar__ops .qf-page-actions,
+  body.qf-shell .qf-ctxbar__ops > .is-active > div {
+    display: flex;
+    /* 存量 HTML 在 .hud-group-header 里写死了内联 flex-wrap:wrap，
+       只有 !important 能把它拉回单行（作用域仅限 ctxbar 内、仅 ≤900px） */
+    flex-wrap: nowrap !important;
+    gap: 6px;
+  }
+  body.qf-shell .qf-ctxbar__ops .btn,
+  body.qf-shell .qf-ctxbar__ops button { white-space: nowrap; flex: 0 0 auto; }
+  body.qf-shell .qf-ctxbar__kbd { display: none; }
+}
