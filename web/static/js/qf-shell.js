@@ -317,8 +317,8 @@
     /* 断言通过后才 remove：页头整块 + 搬空的 .hud-group-header */
     heads.forEach(function (h) { if (h && h.parentNode) h.parentNode.removeChild(h); });
     $$('.page > .hud-group-header').forEach(function (hdr) {
-      if (!hdr.children.length) { hdr.parentNode.removeChild(hdr); }
-      else { hdr.parentNode.removeChild(hdr); }   /* 子节点已全部搬走，只剩空白文本 */
+      /* 子节点已全部搬走，只剩空白文本，直接整块移除 */
+      if (hdr.parentNode) hdr.parentNode.removeChild(hdr);
     });
     /* 标题回填到导航索引（命令面板与 ctxbar 复用同一文案） */
     Object.keys(pageTitles).forEach(function (pid) {
@@ -470,12 +470,15 @@
   function positionFlyout(anchorEl) {
     if (!flyoutEl || !anchorEl) return;
     var r = anchorEl.getBoundingClientRect();
-    var w = 220;
+    /* S9-17: 实测尺寸定位, 固定 240px 估高在 item 多时底部溢出视口 */
+    var w = flyoutEl.offsetWidth || 220;
+    var h = flyoutEl.offsetHeight || 240;
     var left = r.right + 6;
     if (left + w > window.innerWidth - 8) left = Math.max(8, r.left - w - 6);
-    var top = Math.max(8, Math.min(r.top, window.innerHeight - 240));
-    flyoutEl.style.left = Math.round(left) + 'px';
-    flyoutEl.style.top = Math.round(top) + 'px';
+    var top = r.top;
+    if (top + h > window.innerHeight - 8) top = window.innerHeight - h - 8;
+    flyoutEl.style.left = Math.round(Math.max(8, left)) + 'px';
+    flyoutEl.style.top = Math.round(Math.max(8, top)) + 'px';
   }
 
   QF.flyout.attach = function () {
@@ -830,10 +833,21 @@
 
   QF.table.enhanceAll = function () {
     $$('.qf-table').forEach(function (t) { QF.table.enhance(t); });
-    /* 表格可能是后续渲染出来的：一次性再补一轮（不带轮询） */
+    /* 表格可能是后续渲染出来的：一次性再补一轮（不带轮询）。
+       S9-15: 页面大量节点经 HTML 字符串重建, 每次变更都会进来, 原实现对每个
+       .qf-table 全表重扫且无防抖/无 try——行情轮询页有性能放大。合并为
+       150ms 一轮 + 异常隔离 + 无表时零开销。 */
     if (typeof MutationObserver === 'function' && document.body) {
+      var moTimer = 0;
       var mo = new MutationObserver(function () {
-        $$('.qf-table').forEach(function (t) { QF.table.enhance(t); });
+        if (moTimer) return;
+        moTimer = setTimeout(function () {
+          moTimer = 0;
+          var tables = $$('.qf-table');
+          if (!tables.length) return;
+          try { tables.forEach(function (t) { QF.table.enhance(t); }); }
+          catch (e) { if (window.console && console.warn) console.warn('[QF] table enhance 失败', e); }
+        }, 150);
       });
       mo.observe(document.body, { childList: true, subtree: true });
     }
@@ -955,6 +969,12 @@
     var raw = null;
     try { raw = window.localStorage.getItem(WB_KEY); } catch (e) { return wbDefault(); }
     if (!raw) return wbDefault();
+    /* S9-16: 超大但合法的 JSON 会同步 parse + sanitizeOrder O(n²) 去重, 10 个
+       面板的布局远用不到 64KB——超限视为损坏, 直接清掉回默认布局。 */
+    if (raw.length > 65536) {
+      try { window.localStorage.removeItem(WB_KEY); } catch (e2) { /* 忽略 */ }
+      return wbDefault();
+    }
     var parsed = null;
     try { parsed = JSON.parse(raw); } catch (e) { parsed = null; }
     if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.order)) {

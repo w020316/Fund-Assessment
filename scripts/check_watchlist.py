@@ -15,7 +15,7 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="更新自选股行情")
     parser.add_argument("--source", type=str, default="default", help="数据源")
-    args = parser.parse_args()
+    parser.parse_args()
 
     ds_manager = DataSourceManager(config)
 

@@ -1,14 +1,11 @@
 import sys
 import os
-from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from loguru import logger
-
 from src.core.data_source import DataSourceManager
-from src.core.risk_manager import RiskManager, RiskLevel, TradeRecord
+from src.core.risk_manager import RiskManager, RiskLevel
 from src.core.executor import (
     SimulatedBroker,
     TradeExecutor,
@@ -104,7 +101,7 @@ def verify_trade_executor(vr: VerifyResult) -> None:
     try:
         rm = RiskManager(db_path=risk_db, initial_assets=1_000_000.0)
         broker = SimulatedBroker(initial_cash=1_000_000.0)
-        executor = TradeExecutor(broker=broker, risk_manager=rm, db_path=test_db)
+        TradeExecutor(broker=broker, risk_manager=rm, db_path=test_db)
         vr.check("TradeExecutor 初始化", True)
     except Exception as e:
         vr.check("TradeExecutor 初始化", False, str(e))

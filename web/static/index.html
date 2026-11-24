@@ -6802,6 +6802,17 @@ async function restoreFundPositionsFromBackup() {
     showToast('恢复需要管理员 Token，请先在「设置 → 管理密码」中配置', 'error');
     return;
   }
+  // S9-09(2026-11-24): 恢复是全量覆盖且 .bak 仅保留一份, 误点一次就会把陈旧
+  // 备份写回服务器。确认框必须亮明「覆盖」语义与备份时间点, 由用户显式放行。
+  const t = new Date(backup.ts || Date.now()).toLocaleString('zh-CN');
+  const ok = confirm(
+    '即将用本机备份覆盖服务器持仓：\n\n' +
+    '· 备份时间：' + t + '\n' +
+    '· 备份持仓：' + positions.length + ' 只\n' +
+    '· 服务器当前持仓将被全量替换（不可撤销）\n\n' +
+    '若你是有意清空持仓，请取消后到持仓页逐条删除。确定恢复吗？'
+  );
+  if (!ok) return;
   const resp = await api('/api/fund/positions', {
     method: 'POST',
     body: JSON.stringify({ positions: positions })

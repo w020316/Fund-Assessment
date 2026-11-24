@@ -58,3 +58,17 @@ def test_fund_positions_have_local_backup_and_manual_restore():
     assert "'/api/fund/positions'" in restore_body, "恢复未调用持仓写端点"
     # 不允许自动写: loadFundData 内不得直接 POST 持仓端点
     assert "method: 'POST'" not in load_body
+
+
+def test_restore_from_backup_requires_confirm_before_write():
+    """S9-09: 全量覆盖且 .bak 仅留一份, POST 前必须有 confirm() 明示覆盖语义。"""
+    src = INDEX.read_text(encoding="utf-8", errors="replace")
+    restore_body = _function_body(src, "restoreFundPositionsFromBackup")
+    assert "confirm(" in restore_body, "恢复写操作前缺少确认框"
+    confirm_pos = restore_body.index("confirm(")
+    write_pos = restore_body.index("method: 'POST'")
+    assert confirm_pos < write_pos, "confirm() 必须出现在写请求之前"
+    # 确认文案必须亮明备份时间与不可撤销的覆盖语义
+    assert "备份时间" in restore_body
+    assert "不可撤销" in restore_body
+    assert "全量替换" in restore_body
