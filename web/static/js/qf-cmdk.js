@@ -450,6 +450,10 @@
 
   QF.cmdk = {
     init: function () {
+      /* S9-07: enabled 不能只在脚本加载时判一次——qf-shell 的 DOMContentLoaded
+         回调先注册先执行, boot 失败置 enabled=false 后 cmdk.init() 仍会被本文件
+         底部的自动初始化调到, Ctrl+K 将被半回滚态的骨架接管。此处短路兜底。 */
+      if (!QF.shell || QF.shell.enabled === false) return;
       if (state.built && el.root) return;
       build();
       document.addEventListener('keydown', onKeyDownCapture, true);

@@ -288,14 +288,17 @@
       heads.push(head);
     });
 
-    /* 执行搬移（先校验节点仍然在文档里） */
+    /* 预校验（S9-06）：任何一步不可用就整体放弃——不得先搬后判留下"节点已离开
+       原位、页头未删"的半搬态。全部可用才执行搬移；搬完的数量断言保留作兜底。 */
     for (var i = 0; i < plan.length; i++) {
       var step = plan[i];
       if (!step.node || !step.target || !document.contains(step.node)) {
         if (window.console && console.error) console.error('[QF] migrate 放弃：节点不可用', step);
         return false;
       }
-      step.target.appendChild(step.node);
+    }
+    for (var j = 0; j < plan.length; j++) {
+      plan[j].target.appendChild(plan[j].node);
     }
 
     /* 数量断言：搬移不得让节点消失（move 语义下数量必须一致） */
@@ -365,6 +368,8 @@
       return r;
     };
     wrapped.__qfWrapped = true;
+    wrapped.__qfOrig = orig;  /* unboot 按此还原原生 switchPage（S9-05） */
+    wrapped.__qfSync = sync;
     window.switchPage = wrapped;
     return true;
   }
@@ -1155,10 +1160,46 @@
   };
 
   /* ---- 10. 启动：脚本在 </body> 前最后一个加载，DOM 已就绪 ---- */
+
+  /**
+   * 完整回退（S9-05, 2026-11-24）：boot 任何一步抛异常时, 只摘 body.qf-shell
+   * 会留下无样式裸块（#qfCtxbar/#qfWbBar/#qfRailPin/#qfFlyout/#qfWbEditBtn）、
+   * 包装版 switchPage 与面板初始态——半回滚态比不回滚更破。unboot 幂等地
+   * 清掉全部注入节点与属性, 把应用还原到与 ?shell=off 一致的状态。
+   */
+  QF.shell.unboot = function () {
+    ['qfCtxbar', 'qfFlyout', 'qfRailPin', 'qfWbBar', 'qfWbEditBtn', 'qfIndexBar']
+      .forEach(function (id) {
+        var n = document.getElementById(id);
+        if (n && n.parentNode) n.parentNode.removeChild(n);
+      });
+    $$('.index-item').forEach(function (n) { n.hidden = false; });
+    var gi = document.getElementById('globalIndexBar');
+    if (gi) gi.hidden = false;
+    $$('.qf-panel__state').forEach(function (n) {
+      if (n.parentNode) n.parentNode.removeChild(n);
+    });
+    $$('[data-qf-panel]').forEach(function (n) {
+      n.removeAttribute('data-panel-state');
+      n.removeAttribute('data-empty-reason');
+    });
+    if (typeof window.switchPage === 'function' && window.switchPage.__qfWrapped &&
+        typeof window.switchPage.__qfOrig === 'function') {
+      window.switchPage = window.switchPage.__qfOrig;
+    }
+    document.body.classList.remove('qf-shell', 'qf-nav-pinned', 'qf-wb-edit');
+    document.body.removeAttribute('data-qf-shell');
+    QF.shell.booted = false;
+    QF.shell.migrated = false;
+    QF.shell.enabled = false;
+  };
+
   function start() {
-    try { QF.shell.boot(); } catch (e) {
-      if (window.console && console.error) console.error('[QF] boot 失败，骨架未启用', e);
-      document.body.classList.remove('qf-shell');
+    try {
+      QF.shell.boot();
+    } catch (e) {
+      if (window.console && console.error) console.error('[QF] boot 失败，骨架完整回退到存量布局', e);
+      try { QF.shell.unboot(); } catch (e2) { /* 回退失败也要保证 enabled=false，cmdk 依赖它短路 */ }
       QF.shell.enabled = false;
     }
   }

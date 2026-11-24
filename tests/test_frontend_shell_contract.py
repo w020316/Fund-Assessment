@@ -266,3 +266,54 @@ def test_shell_css_scopes_skeleton_rules_under_body_qf_shell():
             rule_start = max(head.rfind("}"), head.rfind("\n\n"))
             sel = head[rule_start + 1: m.start()].strip().splitlines()[-1]
             assert "body.qf-shell" in sel, f"未作用域化的骨架规则: {sel.strip()!r} -> {selector}"
+
+
+# ---------------------------------------------------------------- S9 修复锁定（2026-11-24）
+
+
+def test_boot_failure_fully_rolls_back_via_unboot():
+    """S9-05：boot 失败必须走 unboot() 完整回退（摘节点/解包 switchPage/复位标志），
+    不得只摘 body.qf-shell 留下半回滚裸块态。"""
+    js = _read(SHELL_JS)
+    assert "QF.shell.unboot = function" in js, "缺少 unboot 实现"
+    # start() 的 catch 分支必须调用 unboot，而不是只 remove qf-shell 类
+    start_pos = js.index("function start()")
+    catch_part = js[start_pos: js.index("if (document.readyState === 'loading')", start_pos)]
+    assert "QF.shell.unboot()" in catch_part, "start() 失败分支未调用 unboot()"
+    assert catch_part.count("classList.remove") == 0 or "qf-nav-pinned" in catch_part, (
+        "失败分支不得只做 body 类级回退"
+    )
+    # unboot 必须清理全部注入节点 + 还原原生 switchPage + 复位 enabled
+    unboot_part = js[js.index("QF.shell.unboot = function"): js.index("function start()")]
+    for node_id in ("qfCtxbar", "qfFlyout", "qfRailPin", "qfWbBar", "qfWbEditBtn", "qfIndexBar"):
+        assert node_id in unboot_part, f"unboot 未清理 #{node_id}"
+    assert "__qfOrig" in unboot_part, "unboot 未还原原生 switchPage"
+    assert "QF.shell.enabled = false" in unboot_part, "unboot 未复位 enabled"
+
+
+def test_migrate_validates_plan_before_moving_nodes():
+    """S9-06：migrate 必须先整单预校验再搬移，不得边搬边判留下半搬态。"""
+    js = _read(SHELL_JS)
+    migrate_pos = js.index("function migrate(")
+    seg = js[migrate_pos: js.index("/* ---- 4.2 sync", migrate_pos)]
+    validate_pos = seg.index("预校验（S9-06）")
+    move_pos = seg.index("plan[j].target.appendChild")
+    assert validate_pos < move_pos, "预校验必须发生在搬移之前"
+    # 搬移循环里不得再混合 return false 的中途放弃分支
+    move_loop = seg[move_pos: seg.index("/* 数量断言", move_pos)]
+    assert "return false" not in move_loop, "搬移循环中仍有中途放弃分支"
+
+
+def test_switchpage_wrapper_keeps_original_for_restore():
+    """S9-05 配套：wrapSwitchPage 必须把原函数挂在 __qfOrig 上，unboot 才有得还原。"""
+    js = _read(SHELL_JS)
+    assert "wrapped.__qfOrig = orig" in js, "包装函数未保存原生 switchPage 引用"
+
+
+def test_cmdk_init_short_circuits_on_disabled_shell():
+    """S9-07：cmdk.init() 内部必须重新判定 QF.shell.enabled——shell 的 DOMContentLoaded
+    回调先注册先执行，boot 失败置 enabled=false 后自动初始化仍会调 init()。"""
+    js = _read(CMDK_JS)
+    init_pos = js.index("init: function ()")
+    init_seg = js[init_pos: js.index("open: open,", init_pos)]
+    assert "QF.shell.enabled === false" in init_seg, "init() 未做 enabled 短路"
