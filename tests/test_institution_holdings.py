@@ -22,6 +22,12 @@ def test_classify_national_team_and_foreign():
     assert classify_holder("MORGAN STANLEY & CO. INTERNATIONAL PLC", "QFII") == "外资"
 
 
+def test_classify_private_company_with_huijin_substring_is_not_national_team():
+    """S9-17: 裸「汇金」关键词已移除, 民企不得因子串误判国家队(汇金机电/汇金通等)。"""
+    assert classify_holder("河北汇金机电股份有限公司", "其它") == "其他"
+    assert classify_holder("青岛汇金通电力设备股份有限公司", "其它") == "其他"
+
+
 def test_classify_institution_industry_person():
     assert classify_holder("招商银行股份有限公司-某某灵活配置混合型基金", "基金") == "机构"
     assert classify_holder("中国贵州茅台酒厂(集团)有限责任公司", "其它") == "产业资本"
