@@ -29,7 +29,7 @@ body.hud-theme{
   --text-primary:var(--qf-text-primary);
   --text-secondary:var(--qf-text-secondary);
   --text-muted:var(--qf-text-muted);
-  --text-tertiary:var(--qf-text-disabled);
+  --text-tertiary:var(--qf-text-muted);
   --text-warning:var(--qf-sem-warn);
   --accent:var(--qf-neon-cyan);
   --accent-blue:var(--qf-neon-cyan);

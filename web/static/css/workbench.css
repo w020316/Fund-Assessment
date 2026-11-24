@@ -1295,3 +1295,8 @@
 @media (max-width: 640px) {
   #page-workbench .wb-cap-row { grid-template-columns: minmax(74px, 1fr) minmax(0, 1.2fr) 66px 52px; }
 }
+
+/* ===== S9-18: 触控目标 ≥44px（仅触控断点；桌面保持紧凑密度） ===== */
+@media (max-width: 500px) {
+  .qf-flow-row { min-height: 44px; }
+}

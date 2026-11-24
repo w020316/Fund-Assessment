@@ -140,12 +140,12 @@
 }
 #page-sector-board #sbSearch {
   max-width: 260px;
-  min-height: 32px;
+  min-height: 44px;
   font-size: 12px;
 }
 .sb-chips { display: flex; flex-wrap: wrap; gap: 5px; }
 .sb-chip {
-  min-height: 28px;
+  min-height: 44px;
   padding: 0 11px;
   border: 1px solid var(--qf-panel-line);
   border-radius: 999px;
@@ -804,7 +804,7 @@ tr:hover td { background: var(--qf-panel-hover); }
 .ms-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; }
 .ms-dot.is-def { background: var(--qf-sem-info); }
 .ms-dot.is-off { background: var(--qf-sem-warn); }
-.ms-neutral-note { margin-left: auto; color: var(--qf-text-disabled); }
+.ms-neutral-note { margin-left: auto; color: var(--qf-text-muted); }
 
 .ms-cols {
   display: grid;
@@ -883,7 +883,7 @@ tr:hover td { background: var(--qf-panel-hover); }
   margin-top: 10px;
   font-size: 11px;
   line-height: 1.8;
-  color: var(--qf-text-disabled);
+  color: var(--qf-text-muted);
 }
 .ms-foot {
   margin-top: 10px;
@@ -964,7 +964,7 @@ tr:hover td { background: var(--qf-panel-hover); }
   font-size: 12px;
 }
 .rn-preview strong { color: var(--qf-text-primary); }
-.rn-note-meta { font-size: 11px; color: var(--qf-text-disabled); margin-top: 6px; }
+.rn-note-meta { font-size: 11px; color: var(--qf-text-muted); margin-top: 6px; }
 
 @media (prefers-reduced-motion: reduce) {
   .ms-row, .wb-breadth-bar > i, .rn-input { transition: none; }
@@ -998,7 +998,7 @@ tr:hover td { background: var(--qf-panel-hover); }
   font-size: 11px;
   color: var(--qf-text-muted);
 }
-.sf-field .input { width: 100%; min-height: 34px; }
+.sf-field .input { width: 100%; min-height: 44px; }
 .sf-run { min-height: 34px; white-space: nowrap; }
 .sf-empty {
   padding: 14px 4px;
@@ -1111,7 +1111,7 @@ tr:hover td { background: var(--qf-panel-hover); }
   border-top: 1px dashed var(--qf-panel-line-dash);
   font-size: 11px;
   line-height: 1.8;
-  color: var(--qf-text-disabled);
+  color: var(--qf-text-muted);
 }
 
 @media (max-width: 900px) {
@@ -1224,7 +1224,7 @@ tr:hover td { background: var(--qf-panel-hover); }
 .dqc-foot {
   margin-top: 8px;
   font-size: 10.5px;
-  color: var(--qf-text-disabled);
+  color: var(--qf-text-muted);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1234,8 +1234,8 @@ tr:hover td { background: var(--qf-panel-hover); }
 
 /* ---------- 7. 缠论结构（简化） ---------- */
 .cl-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.cl-code { width: 108px; min-height: 32px; }
-.cl-period { width: 92px; min-height: 32px; }
+.cl-code { width: 108px; min-height: 44px; }
+.cl-period { width: 92px; min-height: 44px; }
 .cl-empty {
   padding: 16px 4px;
   font-size: 12px;
@@ -1243,7 +1243,7 @@ tr:hover td { background: var(--qf-panel-hover); }
   color: var(--qf-text-muted);
 }
 .cl-empty-warn b { color: var(--qf-sem-warn); }
-.cl-note { color: var(--qf-text-disabled); }
+.cl-note { color: var(--qf-text-muted); }
 
 .cl-summary {
   display: grid;
@@ -1288,7 +1288,7 @@ tr:hover td { background: var(--qf-panel-hover); }
 }
 .cl-chart { display: block; width: 100%; min-width: 660px; height: auto; }
 .cl-grid { stroke: rgba(148, 163, 184, .12); stroke-width: 1; }
-.cl-axis { fill: var(--qf-text-disabled); font: 9px var(--qf-font-mono); }
+.cl-axis { fill: var(--qf-text-muted); font: 9px var(--qf-font-mono); }
 .cl-candle-up line, .cl-candle-up rect { stroke: var(--qf-sem-up); fill: var(--qf-sem-up); }
 .cl-candle-down line, .cl-candle-down rect { stroke: var(--qf-sem-down); fill: var(--qf-sem-down); }
 .cl-candle-up rect { fill-opacity: .85; }
@@ -1319,7 +1319,7 @@ tr:hover td { background: var(--qf-panel-hover); }
 .cl-lg-pivot { background: rgba(90, 200, 250, .7); }
 .cl-lg-up { background: var(--qf-sem-up); }
 .cl-lg-down { background: var(--qf-sem-down); }
-.cl-legend-note { margin-left: auto; color: var(--qf-text-disabled); }
+.cl-legend-note { margin-left: auto; color: var(--qf-text-muted); }
 
 .cl-tables {
   display: grid;
@@ -1348,7 +1348,7 @@ tr:hover td { background: var(--qf-panel-hover); }
   border-top: 1px dashed var(--qf-panel-line-dash);
   font-size: 10.5px;
   line-height: 1.8;
-  color: var(--qf-text-disabled);
+  color: var(--qf-text-muted);
 }
 
 @media (max-width: 900px) {
@@ -1363,8 +1363,8 @@ tr:hover td { background: var(--qf-panel-hover); }
 
 /* ---------- 8. 多信号扫描（规则引擎） ---------- */
 .ss-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.ss-code { width: 108px; min-height: 32px; }
-.ss-period { width: 92px; min-height: 32px; }
+.ss-code { width: 108px; min-height: 44px; }
+.ss-period { width: 92px; min-height: 44px; }
 .ss-empty {
   padding: 16px 4px;
   font-size: 12px;
@@ -1372,7 +1372,7 @@ tr:hover td { background: var(--qf-panel-hover); }
   color: var(--qf-text-muted);
 }
 .ss-empty.is-warn b { color: var(--qf-sem-warn); }
-.ss-foot-note { color: var(--qf-text-disabled); }
+.ss-foot-note { color: var(--qf-text-muted); }
 
 .ss-head {
   display: flex;
@@ -1397,7 +1397,7 @@ tr:hover td { background: var(--qf-panel-hover); }
 .ss-counts b { font-weight: 600; }
 .ss-counts .is-bull { color: var(--qf-sem-up); }
 .ss-counts .is-bear { color: var(--qf-sem-down); }
-.ss-score { margin-left: auto; color: var(--qf-text-disabled); }
+.ss-score { margin-left: auto; color: var(--qf-text-muted); }
 
 .ss-strength {
   display: flex;
@@ -1460,7 +1460,7 @@ tr:hover td { background: var(--qf-panel-hover); }
   border-top: 1px dashed var(--qf-panel-line-dash);
   font-size: 10.5px;
   line-height: 1.8;
-  color: var(--qf-text-disabled);
+  color: var(--qf-text-muted);
 }
 
 @media (max-width: 1100px) {
@@ -1475,7 +1475,7 @@ tr:hover td { background: var(--qf-panel-hover); }
 
 /* ---------- 9. 国家队 / 机构持仓 ---------- */
 .ih-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.ih-code { width: 108px; min-height: 32px; }
+.ih-code { width: 108px; min-height: 44px; }
 .ih-empty {
   padding: 16px 4px;
   font-size: 12px;
@@ -1566,7 +1566,7 @@ tr:hover td { background: var(--qf-panel-hover); }
   border-top: 1px dashed var(--qf-panel-line-dash);
   font-size: 10.5px;
   line-height: 1.8;
-  color: var(--qf-text-disabled);
+  color: var(--qf-text-muted);
 }
 
 @media (max-width: 1100px) {
@@ -1640,4 +1640,9 @@ tr:hover td { background: var(--qf-panel-hover); }
   font: 11px/1.7 var(--qf-font-mono);
   overflow-x: auto;
   white-space: pre;
+}
+
+/* ===== S9-18: 触控目标 ≥44px（仅触控断点收紧，桌面保持紧凑） ===== */
+@media (max-width: 500px) {
+  .kline-period { min-height: 44px; min-width: 44px; }
 }

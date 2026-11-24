@@ -632,3 +632,9 @@ body.qf-cmdk-open { overflow: hidden; }
   body.qf-shell .qf-ctxbar__ops button { white-space: nowrap; flex: 0 0 auto; }
   body.qf-shell .qf-ctxbar__kbd { display: none; }
 }
+
+/* ===== S9-18: 工作台编辑条按钮触控目标 ≥44px（仅触控断点） ===== */
+@media (max-width: 500px) {
+  body.qf-shell .qf-wb-bar .btn,
+  body.qf-shell .qf-wb-toggle { min-height: 44px; min-width: 44px; }
+}

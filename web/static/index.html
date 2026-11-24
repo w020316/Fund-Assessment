@@ -431,6 +431,9 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 @media (max-width:640px) {
   /* top 同样要避让 Token 横幅（移动端横幅会换行到 2~3 行） */
   .api-error-panel { left:12px; right:12px; top:var(--token-banner-bottom, 56px); max-width:none; }
+  /* S9-18: 触控目标 ≥44px(仅移动端收紧, 桌面保持紧凑) */
+  .api-error-panel .aep-retry { min-height:44px; min-width:44px; }
+  .api-error-panel .aep-close { min-width:44px; min-height:44px; font-size:20px; }
 }
 @keyframes toast-in { from { opacity:0; transform:translateX(40px); } to { opacity:1; transform:translateX(0); } }
 
@@ -1570,7 +1573,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
           <div class="qf-section-title">指数行情</div>
           <div style="display:flex;align-items:center;gap:12px;">
             <div class="data-freshness" id="marketFreshness"><span class="freshness-icon"></span><span>—</span></div>
-            <button class="btn btn-sm btn-outline" style="min-height:32px;" onclick="openIndicatorHelp()"
+            <button class="btn btn-sm btn-outline" onclick="openIndicatorHelp()"
                     title="看不懂 K线/均线/MACD？点这里">指标说明</button>
           </div>
         </div>
