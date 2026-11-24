@@ -47,7 +47,7 @@
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
-  padding: 2px 2px 0;
+  padding: 4px 4px 0;
 }
 
 #page-workbench .wb-head-left,
@@ -331,7 +331,7 @@
 }
 
 #page-workbench .wb-ph-sub {
-  margin-left: 2px;
+  margin-left: 4px;
   font-size: 10px;
   color: var(--wb-faint);
   white-space: nowrap;
@@ -831,7 +831,7 @@
 
 #page-workbench .wb-ddx-streak {
   justify-self: start;
-  padding: 1px 4px;
+  padding: 0 4px;
   border-radius: 4px;
   border: 1px solid rgba(124, 134, 255, .4);
   background: var(--wb-accent-soft);
@@ -1227,7 +1227,7 @@
 }
 #page-workbench .wb-cap-kpi {
   min-width: 0;
-  padding: 10px 12px;
+  padding: 12px;
   border: 1px solid var(--wb-line);
   border-radius: 8px;
   background: var(--wb-surface-2);
@@ -1249,7 +1249,7 @@
 #page-workbench .wb-cap-v.is-up { color: var(--wb-up); }
 #page-workbench .wb-cap-v.is-down { color: var(--wb-down); }
 #page-workbench .wb-cap-note {
-  margin-top: 3px;
+  margin-top: 4px;
   font-size: 10px;
   line-height: 1.5;
   color: var(--wb-dim);

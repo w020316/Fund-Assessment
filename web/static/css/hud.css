@@ -14,6 +14,10 @@
    中 up/down 为泛指涨跌语义色,此处按存量语义映射,已记录)。
    ============================================================ */
 
+/* S9-21: 表单控件与按钮不声明 font-family 时落到 UA 默认(Windows 下 Arial),
+   与全站 HarmonyOS Sans 体系不一致;统一继承正文字体。 */
+input, select, textarea, button { font-family: inherit; }
+
 body.hud-theme {
   /* ---- HUD 色板(STAGE5 R1 真源统一：--hud-* 真源仅此一处，
        色值一律引用 tokens.css 的 --qf-* token，不再重复定义字面量；
