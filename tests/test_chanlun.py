@@ -128,7 +128,7 @@ def test_chanlun_route_returns_structure(monkeypatch):
     assert data["available"] is True
     assert data["code"] == "600000"
     assert isinstance(data["strokes"], list) and isinstance(data["pivots"], list)
-    assert body["_meta"]["data_source"] == "mootdx"
+    assert body["_meta"]["data_source"] == "multi"
 
 
 def test_chanlun_route_rejects_non_numeric_code(monkeypatch):

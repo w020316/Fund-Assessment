@@ -382,7 +382,7 @@ async def stock_kline(
     cache_key = f"market:stock_kline:{code}:{period}:{count}"
     cached = cache.get(cache_key)
     if cached is not None:
-        return {"data": cached, "_meta": _build_meta("mootdx", cached=True)}
+        return {"data": cached, "_meta": _build_meta("multi", cached=True)}
     # P1 修复(2026-08-01):整个函数体包裹,确保数据源/模型构造/cache.set 异常也返回空数据而非 500
     try:
         data = await asyncio.to_thread(ds2.get_kline_mootdx, code, period=period, count=count)
@@ -403,10 +403,10 @@ async def stock_kline(
             validator = get_data_validator()
             vr = validator.validate_kline([r.model_dump() for r in result], expected_count=count)
             quality_score = vr.quality_score
-        return {"data": result, "_meta": _build_meta("mootdx", cached=False, quality_score=quality_score)}
+        return {"data": result, "_meta": _build_meta("multi", cached=False, quality_score=quality_score)}
     except Exception as e:
         logger.warning(f"stock_kline failed: {e}")
-        return {"data": [], "_meta": _build_meta("mootdx", cached=False, quality_score=0.0)}
+        return {"data": [], "_meta": _build_meta("multi", cached=False, quality_score=0.0)}
 
 
 @router.get("/chanlun")
@@ -419,7 +419,7 @@ async def chanlun_structure(
     cache_key = f"market:chanlun:{code}:{period}:{count}"
     cached = cache.get(cache_key)
     if cached is not None:
-        return {"data": cached, "_meta": _build_meta("mootdx", cached=True)}
+        return {"data": cached, "_meta": _build_meta("multi", cached=True)}
     try:
         loop = asyncio.get_running_loop()
         rows = await asyncio.wait_for(
@@ -432,7 +432,7 @@ async def chanlun_structure(
         data = analyze_chanlun(rows, code=code, period=period)
         quality = 80.0 if data.get("available") else 0.0
         cache.set(cache_key, data, ttl=300)
-        return {"data": data, "_meta": _build_meta("mootdx", cached=False, quality_score=quality)}
+        return {"data": data, "_meta": _build_meta("multi", cached=False, quality_score=quality)}
     except Exception as e:
         logger.warning(f"chanlun failed: {e}")
         payload = {
@@ -442,7 +442,7 @@ async def chanlun_structure(
             "divergence": None, "signals": [], "summary": None,
             "note": "简化缠论：仅供结构参考，不构成买卖建议。",
         }
-        return {"data": payload, "_meta": _build_meta("mootdx", cached=False, quality_score=0.0)}
+        return {"data": payload, "_meta": _build_meta("multi", cached=False, quality_score=0.0)}
 
 
 @router.get("/signals")
@@ -455,7 +455,7 @@ async def stock_signals(
     cache_key = f"market:signals:{code}:{period}:{count}"
     cached = cache.get(cache_key)
     if cached is not None:
-        return {"data": cached, "_meta": _build_meta("mootdx", cached=True)}
+        return {"data": cached, "_meta": _build_meta("multi", cached=True)}
     try:
         loop = asyncio.get_running_loop()
         rows = await asyncio.wait_for(
@@ -468,7 +468,7 @@ async def stock_signals(
         data = scan_signals(rows, code=code, period=period)
         quality = 80.0 if data.get("available") else 0.0
         cache.set(cache_key, data, ttl=300)
-        return {"data": data, "_meta": _build_meta("mootdx", cached=False, quality_score=quality)}
+        return {"data": data, "_meta": _build_meta("multi", cached=False, quality_score=quality)}
     except Exception as e:
         logger.warning(f"stock_signals failed: {e}")
         payload = {
@@ -477,7 +477,7 @@ async def stock_signals(
             "bars": 0, "signals": [], "summary": None,
             "note": "规则信号：不含 LLM，不构成买卖建议。",
         }
-        return {"data": payload, "_meta": _build_meta("mootdx", cached=False, quality_score=0.0)}
+        return {"data": payload, "_meta": _build_meta("multi", cached=False, quality_score=0.0)}
 
 
 @router.get("/fund_realtime")
@@ -1252,7 +1252,9 @@ async def institution_holdings(code: str = Depends(_code_or_422)):
         from src.analysis.institution_holdings import analyze_holders
         data = analyze_holders(raw)
         quality = 80.0 if data.get("available") else 0.0
-        cache.set(cache_key, data, ttl=1800)
+        # S9-10: 失败/空结果(available=False)不得固化 30 分钟——瞬时上游故障
+        # 会被缓存放大; 成功季报数据才值得长 TTL, 失败只缓存 60s 供防穿透。
+        cache.set(cache_key, data, ttl=1800 if data.get("available") else 60)
         return {"data": data, "_meta": _build_meta("eastmoney", cached=False, quality_score=quality)}
     except Exception as e:
         logger.warning(f"institution_holdings failed: {e}")

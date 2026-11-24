@@ -72,7 +72,7 @@ def test_signals_route_shape(monkeypatch):
     assert data["available"] is True
     assert data["summary"]["stance"] in ("偏多", "偏空", "中性")
     assert isinstance(data["signals"], list)
-    assert body["_meta"]["data_source"] == "mootdx"
+    assert body["_meta"]["data_source"] == "multi"
 
 
 def test_missing_volume_is_unavailable_not_unsatisfied():

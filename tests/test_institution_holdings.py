@@ -88,3 +88,42 @@ def test_institution_holdings_route(monkeypatch):
     data = resp.json()["data"]
     assert data["available"] is True
     assert data["summary"]["categories"]["国家队"]["ratio"] == 12.5
+
+
+def test_institution_holdings_failure_ttl_is_short(monkeypatch):
+    """S9-10: available=False 的失败结果只允许 60s 短缓存, 不得固化 30 分钟。"""
+    captured = {}
+
+    monkeypatch.setattr("web.routes.market.ds2.get_top10_free_holders", lambda code: {})
+    from web.routes import market as market_route
+    orig_set = market_route.cache.set
+    monkeypatch.setattr(
+        market_route.cache, "set",
+        lambda key, value, ttl=300: (captured.__setitem__(key, ttl), orig_set(key, value, ttl=ttl))[1],
+    )
+    market_route.cache.delete("market:institution_holdings:600009")
+
+    resp = client.get("/api/market/institution_holdings?code=600009")
+    assert resp.status_code == 200
+    assert resp.json()["data"]["available"] is False
+    assert captured.get("market:institution_holdings:600009") == 60, "失败结果被长缓存固化"
+
+
+def test_institution_holdings_success_ttl_keeps_long(monkeypatch):
+    """成功季报数据仍享受 1800s 长 TTL（防瞬时故障与长缓存两个语义都要保住）。"""
+    payload = {"end_date": "2026-09-30", "holders": [_holder(1, "中央汇金", "其它", 12.5)]}
+    captured = {}
+
+    monkeypatch.setattr("web.routes.market.ds2.get_top10_free_holders", lambda code: payload)
+    from web.routes import market as market_route
+    orig_set = market_route.cache.set
+    monkeypatch.setattr(
+        market_route.cache, "set",
+        lambda key, value, ttl=300: (captured.__setitem__(key, ttl), orig_set(key, value, ttl=ttl))[1],
+    )
+    market_route.cache.delete("market:institution_holdings:600010")
+
+    resp = client.get("/api/market/institution_holdings?code=600010")
+    assert resp.status_code == 200
+    assert resp.json()["data"]["available"] is True
+    assert captured.get("market:institution_holdings:600010") == 1800
