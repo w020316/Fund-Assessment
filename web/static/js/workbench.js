@@ -423,7 +423,7 @@
       return '<div class="wb-stat">'
         + '<div class="wb-stat-k">' + esc(c.k) + '</div>'
         + '<div class="wb-stat-v ' + c.cls + '">' + esc(String(c.v)) + '</div>'
-        + '<div class="wb-stat-s">' + esc(c.s) + '</div>'
+        + '<div class="wb-stat-s" title="' + esc(c.s) + '">' + esc(c.s) + '</div>'
         + '</div>';
     }).join('');
   }
@@ -995,7 +995,7 @@
         var c = clsOf(pct);
         var pnlKnown = p.est_day_pnl !== null && p.est_day_pnl !== undefined;
         return '<div class="wb-pf-item" title="' + esc(p.fund_name || '') + '">'
-          + '<div class="wb-pf-name">' + esc(p.fund_name || '—') + '</div>'
+          + '<div class="wb-pf-name" title="' + esc(p.fund_name || '') + '">' + esc(p.fund_name || '—') + '</div>'
           + '<div class="wb-pf-code">' + esc(p.fund_code || '') + '</div>'
           + '<div class="wb-pf-pct ' + c + '">' + esc(isNum(pct) ? pctText(pct) : '—') + '</div>'
           + '<div class="wb-pf-pnl' + (pnlKnown ? '' : ' is-muted') + '">' + esc(pnlKnown ? fmtMoney(Number(p.est_day_pnl)) : '—') + '</div>'
