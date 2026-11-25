@@ -301,3 +301,133 @@ class TestStrategiesAuthAndBounds:
             resp = client.post("/api/config/user_positions", json=payload)
         assert resp.status_code == 422
         mock_write.assert_not_called()
+
+
+# ===== r9-S2 覆盖率补强: yaml 回退链与端点异常兜底分支 =====
+
+class TestLoadYamlFallbacks:
+    """_load_yaml: 主文件缺失/损坏时回退 .bak，全部缺失返回空 dict"""
+
+    def test_missing_file_uses_bak(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("web.routes.config._CONFIG_DIR", tmp_path)
+        (tmp_path / "settings.yaml.bak").write_text("app:\n  name: FromBak\n", encoding="utf-8")
+        from web.routes import config as config_route
+        assert config_route._load_yaml("settings.yaml") == {"app": {"name": "FromBak"}}
+
+    def test_corrupt_file_falls_back_to_bak(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("web.routes.config._CONFIG_DIR", tmp_path)
+        (tmp_path / "settings.yaml").write_text("{ 损坏的 yaml: [", encoding="utf-8")
+        (tmp_path / "settings.yaml.bak").write_text("app:\n  name: FromBak\n", encoding="utf-8")
+        from web.routes import config as config_route
+        assert config_route._load_yaml("settings.yaml") == {"app": {"name": "FromBak"}}
+
+    def test_no_file_no_bak_returns_empty(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("web.routes.config._CONFIG_DIR", tmp_path)
+        from web.routes import config as config_route
+        assert config_route._load_yaml("settings.yaml") == {}
+
+    def test_save_yaml_failure_raises(self, tmp_path, monkeypatch):
+        """写临时文件失败时 warning + raise，调用方据此走异常兜底分支"""
+        monkeypatch.setattr("web.routes.config._CONFIG_DIR", tmp_path)
+        with patch("yaml.dump", side_effect=OSError("disk full")):
+            from web.routes import config as config_route
+            with pytest.raises(OSError):
+                config_route._save_yaml("settings.yaml", {"a": 1})
+
+
+class TestEndpointExceptionFallbacks:
+    """端点 try/except 兜底: 配置损坏时返回空结构, 不抛 500"""
+
+    def test_get_settings_exception_returns_empty(self, client):
+        with patch("web.routes.config._load_yaml", side_effect=RuntimeError("io")):
+            resp = client.get("/api/config/settings")
+        assert resp.status_code == 200
+        assert resp.json()["settings"] == {}
+
+    def test_update_settings_exception_returns_empty(self, client):
+        with patch("web.routes.config._load_yaml", return_value={}), \
+             patch("web.routes.config._save_yaml", side_effect=OSError("disk full")):
+            resp = client.put("/api/config/settings", json={"settings": {"a": 1}})
+        assert resp.status_code == 200
+        assert resp.json()["settings"] == {}
+
+    def test_get_strategies_exception_returns_empty(self, client):
+        with patch("web.routes.config._load_yaml", side_effect=RuntimeError("io")):
+            resp = client.get("/api/config/strategies")
+        assert resp.status_code == 200
+        assert resp.json()["strategies"] == {}
+
+    def test_update_strategies_exception_returns_empty(self, client):
+        with patch("web.routes.config.load_strategies_yaml", side_effect=RuntimeError("io")):
+            resp = client.put("/api/config/strategies", json={"strategies": {"a": 1}})
+        assert resp.status_code == 200
+        assert resp.json()["strategies"] == {}
+
+    def test_sector_map_exception_returns_empty_sectors(self, client):
+        with patch("web.routes.config._load_yaml", side_effect=RuntimeError("io")):
+            resp = client.get("/api/config/sector-map")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["sectors"] == {}
+        assert data["unmapped_label"] == "其他"
+
+
+class TestTestNotifyWechatAndFailure:
+    """test_notify: 企业微信分支与未预期异常兜底"""
+
+    def test_notify_wechat_enabled_returns_success(self, client):
+        mock_cfg = MagicMock()
+
+        def cfg_get(key, default=None):
+            values = {
+                "notify.dingtalk.enabled": False,
+                "notify.wechat.enabled": True,
+                "notify.wechat.webhook": "https://qyapi.weixin.qq.com/cgi-bin/webhook?key=xxx",
+            }
+            return values.get(key, default)
+
+        mock_cfg.get = cfg_get
+        mock_notifier = MagicMock()
+        with patch("src.utils.config.get_config", return_value=mock_cfg), \
+             patch("src.utils.notify.WeComNotifier", return_value=mock_notifier):
+            resp = client.post("/api/config/test_notify")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert "企业微信" in data["message"]
+        mock_notifier.send.assert_called_once()
+
+    def test_notify_unexpected_exception_returns_generic_message(self, client):
+        """异常详情(可能含 webhook URL)不返回客户端，只给通用提示"""
+        with patch("src.utils.config.get_config", side_effect=RuntimeError("https://oapi.dingtalk.com/robot/send?access_token=SECRET")):
+            resp = client.post("/api/config/test_notify")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert "SECRET" not in data["message"]
+        assert "通知测试失败" in data["message"]
+
+
+class TestUserPositionsFallbacks:
+    """user_positions: safe_read_json 返回 None 与写入异常兜底"""
+
+    def test_get_user_positions_none_returns_default(self, client):
+        with patch("web.routes.config.safe_read_json", return_value=None):
+            resp = client.get("/api/config/user_positions")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["positions"] == []
+        assert data["available_cash"] == 800000.0
+
+    def test_save_user_positions_exception_returns_failure(self, client):
+        """写入异常(可能含路径信息)不返回客户端，只给通用提示"""
+        with patch("web.routes.config.atomic_write_json", side_effect=OSError("D:/secret/path permission denied")):
+            resp = client.post("/api/config/user_positions", json={
+                "positions": [{"code": "600519"}], "available_cash": 100.0,
+            })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert "secret/path" not in data["message"]
+        assert "保存失败" in data["message"]

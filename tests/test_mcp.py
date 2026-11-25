@@ -115,3 +115,119 @@ def test_mcp_post_exempt_from_write_limit():
     for _ in range(12):
         codes.append(client.post("/mcp", json=body).status_code)
     assert all(c == 200 for c in codes), codes
+
+
+# ===== r9-S2 覆盖率补强: 端点分支 + 7 个工具 handler =====
+
+def test_ping_method():
+    resp = _rpc("ping")
+    assert resp.status_code == 200
+    assert resp.json()["result"] == {}
+
+
+def test_batch_request_rejected():
+    """批量请求(数组 body)按规范拒绝 -32600。"""
+    resp = client.post("/mcp", json=[{"jsonrpc": "2.0", "id": 1, "method": "ping"}])
+    assert resp.status_code == 200
+    assert resp.json()["error"]["code"] == -32600
+
+
+def test_tools_call_arguments_not_object():
+    """arguments 非对象 → -32602, 不进入 handler。"""
+    resp = _rpc("tools/call", {"name": "get_stock_kline", "arguments": [1, 2]})
+    assert resp.status_code == 200
+    err = resp.json()["error"]
+    assert err["code"] == -32602
+    assert "arguments must be an object" in err["message"]
+
+
+def test_version_returns_7char_hash(monkeypatch):
+    from web.routes.mcp import _version
+    monkeypatch.setenv("GIT_COMMIT", "abcdef1234567890")
+    assert _version() == "abcdef1"
+    # 无部署指纹时回退默认版本号
+    monkeypatch.delenv("GIT_COMMIT", raising=False)
+    monkeypatch.delenv("RENDER_GIT_COMMIT", raising=False)
+    assert _version() == "1.0.0"
+
+
+def test_period_and_count_validation_messages():
+    """_period/_count 校验文案可回传, Agent 能自纠参数。"""
+    resp = _rpc("tools/call", {"name": "get_stock_kline",
+                               "arguments": {"code": "600519", "period": "hourly"}})
+    assert "period" in resp.json()["result"]["content"][0]["text"]
+
+    resp = _rpc("tools/call", {"name": "get_stock_kline",
+                               "arguments": {"code": "600519", "count": "abc"}})
+    assert "整数" in resp.json()["result"]["content"][0]["text"]
+
+
+def test_tools_call_sector_flow(monkeypatch):
+    rows = [{"name": "半导体", "code": "BK1036", "change_pct": 2.1,
+             "main_net_inflow": 123.4, "extra_internal": "should-drop"}]
+    monkeypatch.setattr("src.core.data_source_v2.get_sector_ranking", lambda: rows)
+    payload = _call_tool_json("get_sector_flow", {})
+    assert payload["ok"] is True
+    item = payload["data"]["data"][0]
+    assert item["name"] == "半导体" and "extra_internal" not in item
+
+
+def test_tools_call_stock_kline(monkeypatch):
+    rows = [{"date": "2026-01-02", "open": 1.0, "high": 2.0, "low": 0.5,
+             "close": 1.5, "volume": 100.0}]
+    monkeypatch.setattr("src.core.data_source_v2.get_kline_mootdx",
+                        lambda code, period="daily", count=120: rows)
+    payload = _call_tool_json("get_stock_kline", {"code": "600519", "count": 30})
+    assert payload["ok"] is True
+    data = payload["data"]
+    assert data["code"] == "600519" and data["count"] == 1 and len(data["data"]) == 1
+
+
+def test_tools_call_chanlun_truncates_bars(monkeypatch):
+    monkeypatch.setattr("src.core.data_source_v2.get_kline_mootdx",
+                        lambda code, period="daily", count=180: [])
+    monkeypatch.setattr("src.analysis.chanlun.analyze_chanlun",
+                        lambda rows, code, period: {"available": True, "bars": list(range(100))})
+    payload = _call_tool_json("get_chanlun_structure", {"code": "600519"})
+    assert payload["ok"] is True
+    assert len(payload["data"]["bars"]) == 60  # MCP 响应控制体积
+
+
+def test_tools_call_signals(monkeypatch):
+    monkeypatch.setattr("src.core.data_source_v2.get_kline_mootdx",
+                        lambda code, period="daily", count=180: [])
+    monkeypatch.setattr("src.analysis.signal_scan.scan_signals",
+                        lambda rows, code, period: {"available": True, "code": code})
+    payload = _call_tool_json("scan_stock_signals", {"code": "600519"})
+    assert payload["ok"] is True
+    assert payload["data"]["code"] == "600519"
+
+
+def test_tools_call_holdings(monkeypatch):
+    monkeypatch.setattr("src.core.data_source_v2.get_top10_free_holders",
+                        lambda code: [{"holder": "x"}])
+    monkeypatch.setattr("src.analysis.institution_holdings.analyze_holders",
+                        lambda raw: {"available": True, "code": None, "categories": []})
+    payload = _call_tool_json("get_institution_holdings", {"code": "600519"})
+    assert payload["ok"] is True
+    assert payload["data"]["available"] is True
+
+
+def test_tools_call_review_board_filters_keys(monkeypatch):
+    data = {"date": "2026-11-25", "available": True, "data_quality": "normal",
+            "market": {}, "limit": {}, "temperature": 55, "tonight": {},
+            "review": {}, "internal_only": "drop-me"}
+    monkeypatch.setattr("src.analysis.market_review.build_review_board", lambda _: data)
+    payload = _call_tool_json("get_review_board", {})
+    assert payload["ok"] is True
+    assert "internal_only" not in payload["data"]
+    assert payload["data"]["temperature"] == 55
+
+
+def _call_tool_json(name, arguments):
+    """tools/call 快捷封装: 返回解析后的 content JSON。"""
+    resp = _rpc("tools/call", {"name": name, "arguments": arguments})
+    assert resp.status_code == 200
+    result = resp.json()["result"]
+    assert result["isError"] is False
+    return json.loads(result["content"][0]["text"])

@@ -285,3 +285,180 @@ class TestAlertsAuth:
                               headers={"Authorization": "Bearer unit-test-token"})
         assert resp.status_code == 200
         assert resp.json() == []
+
+
+# ===== r9-S2 覆盖率补强: 告警生成分支 / 写失败 / 北向回退链 =====
+
+class TestDefaultAlertsBranches:
+    """_generate_default_alerts 各分支(需 isolated_watchlist 隔离文件)"""
+
+    def _add_watch(self, client, code):
+        client.post("/api/monitor/watchlist", json={"stock_code": code, "rules": ["price_surge"]})
+
+    def test_price_alert_band_3_to_5pct(self, client, isolated_watchlist):
+        """涨跌幅 3%~5% → price_alert(info)，不升级为 price_surge"""
+        self._add_watch(client, "600519")
+        quotes = [{"code": "600519", "name": "贵州茅台", "price": 1688.0, "change_pct": 4.2}]
+        with patch("web.routes.monitor.ds2.get_realtime_quote_tencent", return_value=quotes), \
+             patch("web.routes.monitor.ds2.get_index_realtime", return_value=[]):
+            data = client.get("/api/monitor/alerts").json()
+        surge = [a for a in data if a["stock_code"] == "600519"]
+        assert len(surge) == 1
+        assert surge[0]["alert_type"] == "price_alert"
+        assert surge[0]["severity"] == "info"
+
+    def test_critical_surge_at_8pct(self, client, isolated_watchlist):
+        """涨跌幅 >=8% → severity=critical"""
+        self._add_watch(client, "600519")
+        quotes = [{"code": "600519", "name": "贵州茅台", "price": 1688.0, "change_pct": 8.5}]
+        with patch("web.routes.monitor.ds2.get_realtime_quote_tencent", return_value=quotes), \
+             patch("web.routes.monitor.ds2.get_index_realtime", return_value=[]):
+            data = client.get("/api/monitor/alerts").json()
+        surge = [a for a in data if a["stock_code"] == "600519"]
+        assert surge[0]["severity"] == "critical"
+
+    def test_quotes_failure_degrades_to_calm(self, client, isolated_watchlist):
+        """行情接口异常 → 降级为空行情, 无自选股级告警, 最终给"平稳"提示"""
+        self._add_watch(client, "600519")
+        with patch("web.routes.monitor.ds2.get_realtime_quote_tencent",
+                   side_effect=RuntimeError("network")), \
+             patch("web.routes.monitor.ds2.get_index_realtime", return_value=[]):
+            data = client.get("/api/monitor/alerts").json()
+        assert len(data) == 1
+        assert data[0]["alert_type"] == "market_status"
+        assert "平稳" in data[0]["message"]
+
+    def test_change_pct_non_numeric_parsed_as_zero(self, client, isolated_watchlist):
+        """change_pct 为脏数据(非数值)时解析告警降级为 0, 不抛 500"""
+        self._add_watch(client, "600519")
+        quotes = [{"code": "600519", "name": "贵州茅台", "price": 1688.0, "change_pct": "abc"}]
+        with patch("web.routes.monitor.ds2.get_realtime_quote_tencent", return_value=quotes), \
+             patch("web.routes.monitor.ds2.get_index_realtime", return_value=[]):
+            data = client.get("/api/monitor/alerts").json()
+        assert len(data) == 1  # 仅"平稳"，无个股告警
+        assert data[0]["alert_type"] == "market_status"
+
+    def test_index_alert_market_alert(self, client, isolated_watchlist):
+        """指数涨跌幅 >=2% → market_alert(warning)"""
+        self._add_watch(client, "600519")
+        quotes = [{"code": "600519", "name": "贵州茅台", "price": 1.0, "change_pct": 0.1}]
+        idx = [{"code": "sh000001", "name": "上证指数", "change_pct": 2.5}]
+        with patch("web.routes.monitor.ds2.get_realtime_quote_tencent", return_value=quotes), \
+             patch("web.routes.monitor.ds2.get_index_realtime", return_value=idx):
+            data = client.get("/api/monitor/alerts").json()
+        market = [a for a in data if a["alert_type"] == "market_alert"]
+        assert len(market) == 1
+        assert market[0]["stock_code"] == "sh000001"
+
+    def test_index_fetch_failure_ignored(self, client, isolated_watchlist):
+        """指数接口异常 → 跳过指数告警, 不影响其余告警生成"""
+        self._add_watch(client, "600519")
+        quotes = [{"code": "600519", "name": "贵州茅台", "price": 1.0, "change_pct": 6.0}]
+        with patch("web.routes.monitor.ds2.get_realtime_quote_tencent", return_value=quotes), \
+             patch("web.routes.monitor.ds2.get_index_realtime", side_effect=RuntimeError("idx down")):
+            data = client.get("/api/monitor/alerts").json()
+        assert [a["alert_type"] for a in data if a["stock_code"] == "600519"] == ["price_surge"]
+        assert all(a["alert_type"] != "market_alert" for a in data)
+
+
+class TestWatchlistCorruptAndSaveFailure:
+    """watchlist 文件损坏回退与写失败提示"""
+
+    def test_watchlist_non_dict_file_returns_empty(self, client, isolated_watchlist):
+        """watchlist 文件内容为非 dict(JSON 数组/标量)时按空处理, 不抛 500"""
+        isolated_watchlist.write_text('["not", "a", "dict"]', encoding="utf-8")
+        resp = client.get("/api/monitor/watchlist")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_add_watchlist_save_failure_returns_failure(self, client, isolated_watchlist):
+        """写文件异常 → success=False, 不抛 500"""
+        with patch("web.routes.monitor.atomic_write_json", side_effect=OSError("disk full")):
+            resp = client.post("/api/monitor/watchlist", json={"stock_code": "600519"})
+        assert resp.status_code == 200
+        assert resp.json()["success"] is False
+        assert "添加失败" in resp.json()["message"]
+
+    def test_remove_watchlist_save_failure_returns_failure(self, client, isolated_watchlist):
+        client.post("/api/monitor/watchlist", json={"stock_code": "600519"})
+        with patch("web.routes.monitor.atomic_write_json", side_effect=OSError("disk full")):
+            resp = client.delete("/api/monitor/watchlist/600519")
+        assert resp.status_code == 200
+        assert resp.json()["success"] is False
+        assert "移除失败" in resp.json()["message"]
+
+
+class TestAlertsWithMonitorHappyPath:
+    """_HAS_MONITOR=True 时 alerts 走 StockMonitor 成功路径"""
+
+    def test_alerts_monitor_success(self, client):
+        with patch("web.routes.monitor._HAS_MONITOR", True), \
+             patch("web.routes.monitor.StockMonitor") as mock_cls:
+            mock_cls.return_value.check_alerts.return_value = [{
+                "stock_code": "600519", "alert_type": "price_surge",
+                "severity": "critical", "message": "急涨", "detail": {"change_pct": 9.1},
+            }]
+            resp = client.get("/api/monitor/alerts", params={"stock_code": "600519"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["alert_type"] == "price_surge"
+        assert data[0]["detail"]["change_pct"] == 9.1
+
+
+class TestCapitalFlowEmptyBranches:
+    """capital_flow: 北向空数据降级 + 明细空数据兜底"""
+
+    def test_northbound_empty_data_degrades(self, client):
+        with patch("web.routes.monitor.ds2.get_northbound_flow_realtime", return_value=None):
+            resp = client.get("/api/monitor/capital_flow")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["data_quality"] == "degraded"
+        assert data["northbound_change"] == 0
+
+    def test_capital_flow_detail_empty_returns_default_degraded(self, client):
+        """明细接口返回空 dict 时返回全零 + degraded, 不产生无返回值 500"""
+        with patch("web.routes.monitor.ds2.get_northbound_flow_realtime",
+                   return_value=_MOCK_NORTHBOUND), \
+             patch("web.routes.monitor.ds2.get_capital_flow_detail", return_value={}):
+            resp = client.get("/api/monitor/capital_flow", params={"stock_code": "600519"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["main_net_inflow"] == 0
+        assert data["data_quality"] == "degraded"
+
+
+class TestNorthboundQuantFallback:
+    """northbound: ds2 失败后 _HAS_MONITOR=True 时走 TradingQuant 回退链"""
+
+    def test_northbound_quant_fallback_success(self, client):
+        quant_result = {
+            "total_net_inflow": 12000000000,
+            "sh_net_inflow": 7000000000,
+            "sz_net_inflow": 5000000000,
+            "top_stocks": [{"code": "600519", "name": "贵州茅台", "net_inflow": 6e8}],
+        }
+        with patch("web.routes.monitor.ds2.get_northbound_flow_realtime",
+                   side_effect=RuntimeError("ds2 down")), \
+             patch("web.routes.monitor._HAS_MONITOR", True), \
+             patch("src.strategies.trading_quant.TradingQuant") as mock_cls:
+            mock_cls.return_value.northbound_flow.return_value = quant_result
+            resp = client.get("/api/monitor/northbound")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_net_inflow"] == 12000000000
+        assert data["top_stocks"][0]["code"] == "600519"
+
+    def test_northbound_quant_failure_returns_degraded(self, client):
+        """回退链也失败 → 全零 + degraded, 不抛 500"""
+        with patch("web.routes.monitor.ds2.get_northbound_flow_realtime",
+                   side_effect=RuntimeError("ds2 down")), \
+             patch("web.routes.monitor._HAS_MONITOR", True), \
+             patch("src.strategies.trading_quant.TradingQuant",
+                   side_effect=RuntimeError("quant down")):
+            resp = client.get("/api/monitor/northbound")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_net_inflow"] == 0
+        assert data["data_quality"] == "degraded"
