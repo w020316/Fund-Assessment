@@ -10,7 +10,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
-from starlette.requests import Request
 from loguru import logger
 
 # 借鉴 la-deps/slowapi(1.0K Star)FastAPI 限流中间件
