@@ -635,8 +635,12 @@ body.qf-cmdk-open { overflow: hidden; }
   body.qf-shell .qf-ctxbar__kbd { display: none; }
 }
 
-/* ===== S9-18: 工作台编辑条按钮触控目标 ≥44px（仅触控断点） ===== */
+/* ===== S9-18: 工作台编辑条按钮触控目标 ≥44px（仅触控断点）；
+   r9-S2: 命中区经透明热区扩至 ≥48×48——wb-bar 内 gap 8px + 自身 padding 8px/12px，
+   -2px 扩展量仍在面板可视区内，相邻按钮（gap 8px）无重叠 ===== */
 @media (max-width: 500px) {
   body.qf-shell .qf-wb-bar .btn,
-  body.qf-shell .qf-wb-toggle { min-height: 44px; min-width: 44px; }
+  body.qf-shell .qf-wb-toggle { min-height: 44px; min-width: 44px; position: relative; }
+  body.qf-shell .qf-wb-bar .btn::after,
+  body.qf-shell .qf-wb-toggle::after { content: ''; position: absolute; inset: -2px; }
 }

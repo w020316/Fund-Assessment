@@ -143,6 +143,11 @@
   min-height: 44px;
   font-size: 12px;
 }
+/* r9-S2: input 元素不支持伪元素热区，触屏设备直接命中区 44→48px；
+   仅 pointer:coarse 生效（桌面不受影响），sb-filters gap 10px 可容纳 4px 增量 */
+@media (pointer: coarse) {
+  #page-sector-board #sbSearch { min-height: 48px; }
+}
 .sb-chips { display: flex; flex-wrap: wrap; gap: 5px; }
 .sb-chip {
   min-height: 44px;
@@ -154,7 +159,11 @@
   font: 500 11.5px/1 var(--qf-font-display, inherit);
   cursor: pointer;
   transition: color .15s ease, border-color .15s ease, background .15s ease;
+  /* r9-S2: 透明热区把命中区扩至 ≥48×48；chips gap 5px > 4px 扩展量，无重叠。
+     不改视觉尺寸（44px 视觉保持不变），仅扩展可点击范围 */
+  position: relative;
 }
+.sb-chip::after { content: ''; position: absolute; inset: -2px; }
 .sb-chip:hover { color: var(--qf-text-primary); border-color: var(--qf-panel-line-hi); }
 .sb-chip.is-active {
   color: var(--qf-neon-cyan);

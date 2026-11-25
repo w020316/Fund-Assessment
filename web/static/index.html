@@ -431,9 +431,12 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
 @media (max-width:640px) {
   /* top 同样要避让 Token 横幅（移动端横幅会换行到 2~3 行） */
   .api-error-panel { left:12px; right:12px; top:var(--token-banner-bottom, 56px); max-width:none; }
-  /* S9-18: 触控目标 ≥44px(仅移动端收紧, 桌面保持紧凑) */
-  .api-error-panel .aep-retry { min-height:44px; min-width:44px; }
-  .api-error-panel .aep-close { min-width:44px; min-height:44px; font-size:20px; }
+  /* S9-18: 触控目标 ≥44px(仅移动端收紧, 桌面保持紧凑)；
+     r9-S2: 命中区经透明热区扩至 ≥48×48——按钮与关闭钮间 gap 12px > 4px 扩展量，无重叠 */
+  .api-error-panel .aep-retry { min-height:44px; min-width:44px; position:relative; }
+  .api-error-panel .aep-close { min-width:44px; min-height:44px; font-size:20px; position:relative; }
+  .api-error-panel .aep-retry::after,
+  .api-error-panel .aep-close::after { content:''; position:absolute; inset:-2px; }
 }
 @keyframes toast-in { from { opacity:0; transform:translateX(40px); } to { opacity:1; transform:translateX(0); } }
 
