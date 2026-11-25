@@ -144,6 +144,31 @@
 }
 .pred-trend .pred-trend-bar.is-low { background: var(--color-warning, #f59e0b); }
 
+/* --- 准确率周报(r9 roadmap N-1): 每周一行, 横向条形 + 双口径数字 --- */
+.pred-week-grid { display: flex; flex-direction: column; gap: 8px; }
+.pred-week-row {
+  display: grid;
+  grid-template-columns: 110px minmax(80px, 160px) 64px 1fr;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border, #2a3142);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+.pred-week-label { font: 500 12px/1.4 var(--qf-font-mono, monospace); color: var(--text-secondary, #b8bfD0); white-space: nowrap; }
+.pred-week-bar {
+  height: 10px; border-radius: 5px; overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+}
+.pred-week-bar-fill { display: block; height: 100%; border-radius: 5px; background: var(--accent-cyan, #00D9FF); }
+.pred-week-bar-fill.is-low { background: var(--color-warning, #f59e0b); }
+.pred-week-rate { font-size: 15px; font-weight: 700; text-align: right; }
+.pred-week-meta { font-size: 11px; color: var(--text-muted, #8b92a8); text-align: right; }
+@media (max-width: 640px) {
+  .pred-week-row { grid-template-columns: 96px 1fr 56px; }
+  .pred-week-meta { grid-column: 1 / -1; text-align: left; }
+}
+
 /* --- 板块二级页表格 --- */
 .pred-sector-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .pred-sector-table th, .pred-sector-table td {

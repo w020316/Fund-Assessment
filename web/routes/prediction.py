@@ -8,6 +8,7 @@
 - GET  /api/prediction/recommendations        公开读
 - POST /api/prediction/recommendations/generate require_admin
 - GET  /api/prediction/accuracy               公开读
+- GET  /api/prediction/accuracy/weekly       公开读(N-1 周报, 纯只读不落库)
 - POST /api/prediction/verify                 require_admin
 - GET  /api/prediction/export                 require_admin(SQLite 全库字节流, Action 备份用)
 
@@ -120,6 +121,18 @@ async def post_generate_recommendations():
 async def get_accuracy():
     """A7: 三窗口命中率 + 30 日走势(公开读; 双通道同源, 数字与库内一致)。"""
     data = await svc.async_accuracy_dashboard()
+    return success(data)
+
+
+@router.get("/accuracy/weekly")
+async def get_accuracy_weekly(
+    weeks: int = Query(8, ge=1, le=12, description="近 N 个自然周(周一起始, 含空周)"),
+):
+    """A7b(roadmap N-1): 准确率周报(公开读; 近 N 周聚合, 与 /accuracy 同一验证行口径)。
+
+    纯只读不落库; 样本 <5 的周 hit_rate=None 不展示数字; 空周如实输出 total=0。
+    """
+    data = await svc.async_accuracy_weekly(weeks)
     return success(data)
 
 

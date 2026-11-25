@@ -49,3 +49,11 @@ jobs:
           python -m pytest tests/ -q \
             --cov=src --cov=web --cov-report=term-missing \
             --cov-fail-under=78
+
+      # r9 R-1(承 qa-final 遗留风险): 依赖已知 CVE 扫描。
+      # 报告不阻断(白名单噪声需先观察一轮), 输出在 Actions 日志可检索;
+      # 待基线数据稳定后再决定是否升级为 blocking 门禁。
+      - name: pip-audit (dependency CVE scan, report only)
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt --desc off || true

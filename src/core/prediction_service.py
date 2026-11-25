@@ -51,6 +51,11 @@ def beijing_today_str() -> str:
     return beijing_now().strftime("%Y-%m-%d")
 
 
+def _utc_now_iso() -> str:
+    """ISO 8601 UTC 时间戳(与 prediction_store 落库口径一致, 周报 generated_at 用)。"""
+    return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _extract_date_part(update_time: str) -> str:
     if not update_time:
         return ""
@@ -988,6 +993,87 @@ def get_accuracy_dashboard() -> dict[str, Any]:
     return compute_accuracy(persist=False)
 
 
+def get_accuracy_weekly(
+    weeks: int = 8,
+    store: Any | None = None,
+    today: str | None = None,
+) -> dict[str, Any]:
+    """N-1 预测准确率周报: 近 N 个自然周(周一起始)命中率聚合, 纯只读不落库。
+
+    口径与 compute_accuracy 完全一致(同一验证行双通道, 样本 <5 → hit_rate=None):
+    - prediction: rule 方向直接取验证行 hit; llm 用同一实际涨跌按 LLM 方向重判
+    - recommendation: 仅 rule
+    空周(该周无任何验证行)也如实输出 total=0, 不用插值掩盖断档。
+    """
+    store = store or get_store()
+    today = today or beijing_today_str()
+    weeks = max(1, min(int(weeks), 12))
+    band = float(sig.load_signal_config().get("verify", {}).get("flat_band_pct", 0.3))
+
+    d = _dt.datetime.strptime(today, "%Y-%m-%d").date()
+    this_monday = d - _dt.timedelta(days=d.weekday())
+    start = (this_monday - _dt.timedelta(weeks=weeks - 1)).strftime("%Y-%m-%d")
+    rows = store.list_verifications_between(start, today, include_missing=False)
+    preds = {p["id"]: p for p in store.list_predictions(days=weeks * 7 + 10)}
+
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for r in rows:
+        rd = _dt.datetime.strptime(r["trade_date"], "%Y-%m-%d").date()
+        ws = (rd - _dt.timedelta(days=rd.weekday())).strftime("%Y-%m-%d")
+        groups.setdefault(ws, []).append(r)
+
+    week_objs: list[dict[str, Any]] = []
+    insufficient = False
+    for i in range(weeks):
+        ws_date = this_monday - _dt.timedelta(weeks=weeks - 1 - i)
+        ws = ws_date.strftime("%Y-%m-%d")
+        we_date = min(ws_date + _dt.timedelta(days=6), d)
+        we = we_date.strftime("%Y-%m-%d")
+        w_rows = groups.get(ws, [])
+        entry: dict[str, Any] = {
+            "week_start": ws,
+            "week_end": we,
+            "label": f"{ws[5:]}~{we[5:]}",
+        }
+        for kind in ("prediction", "recommendation"):
+            k_rows = [r for r in w_rows if r["target_kind"] == kind]
+            hits = sum(1 for r in k_rows if r["hit"] == 1)
+            total = len(k_rows)
+            rate: float | None = round(hits / total, 4) if total >= 5 else None
+            if total < 5:
+                insufficient = True
+            entry[kind] = {"rule": {"hits": hits, "total": total, "hit_rate": rate}}
+            if kind == "prediction":
+                # llm 重判口径与 compute_accuracy 相同(同批实际涨跌, LLM 方向重判)
+                llm_rows = []
+                for r in k_rows:
+                    p = preds.get(r["target_id"])
+                    if p and p.get("llm_direction"):
+                        llm_rows.append((r, p))
+                llm_hits = sum(
+                    1 for r, p in llm_rows
+                    if sig.classify_hit(p["llm_direction"], r["actual_return"], band) == 1
+                )
+                llm_total = len(llm_rows)
+                llm_rate: float | None = (
+                    round(llm_hits / llm_total, 4) if llm_total >= 5 else None
+                )
+                entry[kind]["llm"] = {
+                    "hits": llm_hits, "total": llm_total, "hit_rate": llm_rate,
+                }
+            else:
+                entry[kind]["llm"] = {"hits": 0, "total": 0, "hit_rate": None}
+        week_objs.append(entry)
+
+    return {
+        "weeks": week_objs,
+        "weeks_requested": weeks,
+        "insufficient_sample": insufficient,
+        "stat_end": today,
+        "generated_at": _utc_now_iso(),
+    }
+
+
 def get_predictions(days: int = 30) -> list[dict[str, Any]]:
     return get_store().list_predictions(days=days)
 
@@ -1021,3 +1107,7 @@ async def async_verify_daily() -> dict[str, Any]:
 
 async def async_accuracy_dashboard() -> dict[str, Any]:
     return await asyncio.to_thread(get_accuracy_dashboard)
+
+
+async def async_accuracy_weekly(weeks: int = 8) -> dict[str, Any]:
+    return await asyncio.to_thread(get_accuracy_weekly, weeks)

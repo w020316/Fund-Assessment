@@ -243,10 +243,49 @@
       + trendHTML(d.trend_30d);
   }
 
+  // ===== 准确率周报(roadmap N-1): 与看板同一验证行口径, 近 N 个自然周聚合 =====
+
+  function weekRowHTML(w) {
+    const pred = (w.prediction && w.prediction.rule) || {};
+    const llm = (w.prediction && w.prediction.llm) || {};
+    const rec = (w.recommendation && w.recommendation.rule) || {};
+    const barW = pred.hit_rate == null ? 0 : Math.round(pred.hit_rate * 100);
+    const barCls = pred.hit_rate == null ? '' : (pred.hit_rate >= 0.5 ? ' is-hi' : ' is-low');
+    const rateCls = pred.hit_rate == null ? 'pred-flat' : (pred.hit_rate >= 0.5 ? 'pred-up' : 'pred-down');
+    return '<div class="pred-week-row">'
+      + '<span class="pred-week-label">' + esc(w.label) + '</span>'
+      + '<span class="pred-week-bar"><span class="pred-week-bar-fill' + barCls + '" style="width:' + barW + '%;"></span></span>'
+      + '<span class="pred-week-rate ' + rateCls + '">' + esc(fmtRate(pred.hit_rate)) + '</span>'
+      + '<span class="pred-week-meta">预测 ' + esc(pred.hits) + '/' + esc(pred.total)
+      + ' · AI 口径 ' + esc(fmtRate(llm.hit_rate)) + ' (' + esc(llm.hits) + '/' + esc(llm.total) + ')'
+      + ' · 推荐 ' + esc(fmtRate(rec.hit_rate)) + ' (' + esc(rec.hits) + '/' + esc(rec.total) + ')</span>'
+      + '</div>';
+  }
+
+  async function loadAccuracyWeekly() {
+    const el = document.getElementById('predWeeklyBody');
+    if (!el) return;
+    el.innerHTML = '<div class="pred-empty">加载中…</div>';
+    const r = await fetchJSON('/api/prediction/accuracy/weekly?weeks=8');
+    if (!r.ok || !r.body || !r.body.data) {
+      el.innerHTML = '<div class="pred-empty">周报数据加载失败, 请稍后重试</div>';
+      return;
+    }
+    const d = r.body.data;
+    const rows = (d.weeks || []).map(weekRowHTML).join('');
+    const insufficient = d.insufficient_sample
+      ? '<div class="pred-insufficient" style="margin-bottom:6px;">部分周样本不足(<5 条), 对应命中率不展示数字; 空周如实显示 0 条</div>' : '';
+    el.innerHTML = insufficient
+      + '<div class="pred-week-grid">' + rows + '</div>'
+      + '<div class="pred-muted" style="margin-top:8px;">条形=预测规则口径命中率(绿=≥50%, 橙=低于50%) · 口径与上方看板一致 · 共 '
+      + esc(d.weeks_requested || 8) + ' 周</div>';
+  }
+
   function loadAll() {
     loadSessions();
     loadPrediction();
     loadAccuracy();
+    loadAccuracyWeekly();
   }
 
   // ===== switchPage 包装接入(不改 index.html 既有函数; 与 stage6 同模式) =====
@@ -270,6 +309,7 @@
     loadSessions: loadSessions,
     loadPrediction: loadPrediction,
     loadAccuracy: loadAccuracy,
+    loadAccuracyWeekly: loadAccuracyWeekly,
     collect: collect,
   };
 
