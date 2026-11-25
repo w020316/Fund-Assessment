@@ -143,6 +143,16 @@
   min-height: 44px;
   font-size: 12px;
 }
+/* r9-S5 R1: 异步容器按实测渲染高度预留空间, 消除数据填充时的 CLS 位移
+   （review 0.202→目标 ≤0.05 / risk 0.053→≤0.05；高度实测值见
+   docs/quality-stage5-2026-11-25-r9.md） */
+#marketAssessmentBody { min-height: 240px; }
+#reviewCompare { min-height: 150px; }
+#reviewDisciplineBody { min-height: 120px; }
+#st6RiskBody { min-height: 300px; }
+#st6AttrBody { min-height: 600px; }
+#st6RbBody { min-height: 160px; }
+#st6XrayBody { min-height: 90px; }
 /* r9-S2: input 元素不支持伪元素热区，触屏设备直接命中区 44→48px；
    仅 pointer:coarse 生效（桌面不受影响），sb-filters gap 10px 可容纳 4px 增量 */
 @media (pointer: coarse) {

@@ -2181,7 +2181,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
             </div>
             <div style="display:flex;gap:8px;margin-bottom:12px;">
               <input class="input" id="klineCode" placeholder="股票代码" style="max-width:140px;" value="600519" aria-label="K线股票代码">
-              <button class="btn btn-sm btn-primary" onclick="loadKline()">加载K线</button>
+              <button class="btn btn-sm btn-primary" id="klineLoadBtn" onclick="loadKline()">加载K线</button>
             </div>
             <svg id="klineChart" width="100%" height="300" viewBox="0 0 600 300" preserveAspectRatio="xMidYMid meet"></svg>
           </div>
@@ -2198,7 +2198,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
                 <option value="weekly">周线</option>
                 <option value="monthly">月线</option>
               </select>
-              <button class="btn btn-sm btn-primary" type="button" onclick="Chanlun.load(true)">分析结构</button>
+              <button class="btn btn-sm btn-primary" type="button" id="clLoadBtn" onclick="Chanlun.load(true)">分析结构</button>
             </span>
           </div>
           <div id="clBody"><div class="cl-empty">输入代码后点击「分析结构」；当前实现分型 / 笔 / 中枢 / MACD 面积背驰，未实现线段与级别递归。</div></div>
@@ -2215,7 +2215,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
                 <option value="weekly">周线</option>
                 <option value="monthly">月线</option>
               </select>
-              <button class="btn btn-sm btn-primary" type="button" onclick="SignalScan.load(true)">扫描信号</button>
+              <button class="btn btn-sm btn-primary" type="button" id="ssLoadBtn" onclick="SignalScan.load(true)">扫描信号</button>
             </span>
           </div>
           <div id="ssBody"><div class="ss-empty">输入代码后点击「扫描信号」；均线 / MACD / RSI / KDJ / 布林 / 量能 / 新高新低逐条给出证据，可解释、可复核。</div></div>
@@ -6051,6 +6051,10 @@ async function loadKline() {
   const period = KLINE_PERIOD_TEXT[klinePeriod] ? klinePeriod : 'daily';
   const seq = ++_klineSeq;
   const note = document.getElementById('klinePeriodNote');
+  /* r9-S5 R1: 按钮加载态(取数约 3-15s, 禁用防重复点击) */
+  const kbtn = document.getElementById('klineLoadBtn');
+  if (kbtn) { kbtn.disabled = true; kbtn.textContent = '加载中…'; }
+  try {
   // 先反映周期切换，再等取数；慢请求/限流时按钮状态与说明不会"看起来没生效"。
   if (note) note.textContent = KLINE_PERIOD_TEXT[period] + ' · 120 根 · MA5/10/20';
   const data = await api(`/api/market/stock_kline?code=${encodeURIComponent(code)}&period=${period}&count=120`);
@@ -6160,6 +6164,10 @@ async function loadKline() {
     <circle cx="${W-padR-76}" cy="${padT+10}" r="3" fill="#3b82f6"/><text x="${W-padR-46}" y="${padT+14}" text-anchor="end" fill="var(--text-muted)" font-size="10">MA10</text>
     <circle cx="${W-padR-30}" cy="${padT+10}" r="3" fill="#8b5cf6"/><text x="${W-padR}" y="${padT+14}" text-anchor="end" fill="var(--text-muted)" font-size="10">MA20</text>
   `;
+  } finally {
+    // r9-S5 R1: 成功/失败/早退(空数据)统一恢复按钮
+    if (kbtn) { kbtn.disabled = false; kbtn.textContent = '加载K线'; }
+  }
 }
 
 // 扫描

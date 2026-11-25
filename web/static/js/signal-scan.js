@@ -87,8 +87,11 @@
     }
     state.loading = true;
     var seq = ++state.seq;
+    /* r9-S5 R1: 按钮 loading 态(约 5-10s 计算期间禁用防重复点击) */
+    var btn = document.getElementById('ssLoadBtn');
+    if (btn) { btn.disabled = true; btn.textContent = '扫描中…'; }
     var body = $('ssBody');
-    if (body) body.innerHTML = '<div class="ss-empty">正在拉取 K 线并逐条核对信号…</div>';
+    if (body) body.innerHTML = '<div class="ss-empty">正在拉取 K 线并逐条核对信号…（约 5-10 秒）</div>';
     try {
       var resp = await api('/api/market/signals?code=' + encodeURIComponent(code)
         + '&period=' + encodeURIComponent(period) + '&count=180');
@@ -105,7 +108,10 @@
           + '<br><span class="ss-foot-note">不会用 0 或模拟数据代替真实 K 线。</span></div>';
       }
     } finally {
-      if (seq === state.seq) state.loading = false;
+      if (seq === state.seq) {
+        state.loading = false;
+        if (btn) { btn.disabled = false; btn.textContent = '扫描信号'; }
+      }
     }
   }
 

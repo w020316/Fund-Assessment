@@ -229,6 +229,9 @@
     }
     state.loading = true;
     var seq = ++state.seq;
+    /* r9-S5 R1: 按钮 loading 态(约 5-10s 计算期间禁用防重复点击, 文案给明确预期) */
+    var btn = document.getElementById('clLoadBtn');
+    if (btn) { btn.disabled = true; btn.textContent = '计算中…'; }
     renderEmpty('正在拉取 K 线并计算分型 / 笔 / 中枢…');
     try {
       var resp = await api('/api/market/chanlun?code=' + encodeURIComponent(code)
@@ -246,7 +249,10 @@
           + esc(e && e.message ? e.message : '请求失败') + '<br><span class="cl-note">不会用 0 或模拟数据代替真实 K 线。</span></div>';
       }
     } finally {
-      if (seq === state.seq) state.loading = false;
+      if (seq === state.seq) {
+        state.loading = false;
+        if (btn) { btn.disabled = false; btn.textContent = '分析结构'; }
+      }
     }
   }
 
