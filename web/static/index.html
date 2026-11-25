@@ -1465,7 +1465,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
           <div class="card-title">账本备份(JSON 全量)</div>
           <div class="st6-ledger-actions">
             <button class="btn btn-sm btn-primary" onclick="St6Portfolio.downloadExport()">导出账本</button>
-            <input type="file" id="st6LedgerFile" accept=".json" style="display:none;" onchange="St6Portfolio.ledgerFileChosen(this)">
+            <input type="file" id="st6LedgerFile" accept=".json" style="display:none;" onchange="St6Portfolio.ledgerFileChosen(this)" aria-label="导入交割单 JSON 文件">
             <button class="btn btn-sm" onclick="document.getElementById('st6LedgerFile').click()">选择账本文件</button>
             <button class="btn btn-sm" onclick="St6Portfolio.ledgerPreview()">预览影响</button>
           </div>
@@ -1596,7 +1596,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
         <div class="card mb-16" id="stockSearchCard" role="region" aria-labelledby="stockSearchTitle">
           <div class="card-title" id="stockSearchTitle">股票检索</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <input class="input" id="stockSearchInput" placeholder="输入代码或名称，如 600519 / 贵州茅台" style="flex:1;min-width:200px;" onkeydown="if(event.key==='Enter')searchStocks()">
+            <input class="input" id="stockSearchInput" placeholder="输入代码或名称，如 600519 / 贵州茅台" style="flex:1;min-width:200px;" onkeydown="if(event.key==='Enter')searchStocks()" aria-label="搜索股票代码或名称">
             <button class="btn btn-primary" onclick="searchStocks()">搜索</button>
           </div>
           <div id="stockSearchResults" style="margin-top:8px;"></div>
@@ -1863,7 +1863,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
         <!-- 搜索栏 -->
         <div class="card mb-16">
           <div style="display:flex;gap:12px;align-items:center;">
-            <input class="input" id="aiStockInput" placeholder="输入股票代码，如 600519" style="max-width:240px;" onkeydown="if(event.key==='Enter')runAiAnalysis()">
+            <input class="input" id="aiStockInput" placeholder="输入股票代码，如 600519" style="max-width:240px;" onkeydown="if(event.key==='Enter')runAiAnalysis()" aria-label="智能分析股票代码">
             <button class="btn btn-primary" onclick="runAiAnalysis()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/></svg> 深度分析</button>
             <button class="btn btn-outline" onclick="runQuickAnalysis()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9z"/></svg> 快速分析</button>
           </div>
@@ -1986,8 +1986,8 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
           <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
             <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">股票话术匹配 / 生成</div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;">
-              <input class="input" id="stockScriptCode" placeholder="股票代码，如 600519" maxlength="6" style="max-width:160px;">
-              <input class="input" id="stockScriptName" placeholder="名称(可选)" style="max-width:160px;">
+              <input class="input" id="stockScriptCode" placeholder="股票代码，如 600519" maxlength="6" style="max-width:160px;" aria-label="股票代码">
+              <input class="input" id="stockScriptName" placeholder="名称(可选)" style="max-width:160px;" aria-label="股票名称">
               <button class="btn btn-primary btn-sm" onclick="matchStockScripts()">匹配话术</button>
             </div>
             <div id="stockScriptBody" style="margin-top:8px;"></div>
@@ -2101,7 +2101,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
         <div class="card mb-16">
           <div class="card-title">一句话调度 AI 投研团队</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <input class="input" id="dispatchQuery" style="flex:1;min-width:240px;" placeholder="例如:帮我复盘今天大盘 / 600519 值不值得买 / 我的基金要不要加仓" onkeydown="if(event.key==='Enter')ReviewDesk.runDispatch(this)">
+            <input class="input" id="dispatchQuery" style="flex:1;min-width:240px;" placeholder="例如:帮我复盘今天大盘 / 600519 值不值得买 / 我的基金要不要加仓" onkeydown="if(event.key==='Enter')ReviewDesk.runDispatch(this)" aria-label="调度指令输入">
             <button class="btn btn-primary" onclick="ReviewDesk.runDispatch(this)">生成调度方案</button>
           </div>
           <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;" id="dispatchExamples"></div>
@@ -2180,7 +2180,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
               </span>
             </div>
             <div style="display:flex;gap:8px;margin-bottom:12px;">
-              <input class="input" id="klineCode" placeholder="股票代码" style="max-width:140px;" value="600519">
+              <input class="input" id="klineCode" placeholder="股票代码" style="max-width:140px;" value="600519" aria-label="K线股票代码">
               <button class="btn btn-sm btn-primary" onclick="loadKline()">加载K线</button>
             </div>
             <svg id="klineChart" width="100%" height="300" viewBox="0 0 600 300" preserveAspectRatio="xMidYMid meet"></svg>
@@ -2272,10 +2272,10 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
         <div class="card mt-16" id="strategyLabCard">
           <div class="card-title">策略验证(分析 / 回测 / 样本外验证)</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
-            <input class="input" id="strategyLabCode" placeholder="股票代码" style="max-width:140px;" value="600519">
+            <input class="input" id="strategyLabCode" placeholder="股票代码" style="max-width:140px;" value="600519" aria-label="策略实验室股票代码">
             <button class="btn btn-sm btn-primary" onclick="runStrategyAnalyze()">策略分析</button>
             <button class="btn btn-sm btn-outline" onclick="runStrategyBacktest()">回测</button>
-            <input class="input" id="strategyLabRuns" type="number" min="100" max="5000" step="100" value="1000" style="max-width:110px;" title="蒙特卡洛次数">
+            <input class="input" id="strategyLabRuns" type="number" min="100" max="5000" step="100" value="1000" style="max-width:110px;" title="蒙特卡洛次数" aria-label="回测运行次数">
             <button class="btn btn-sm btn-outline" onclick="runStrategyValidate()">样本外验证</button>
             <a class="btn btn-sm btn-outline" href="/static/factor-research.html">因子研究实验室</a>
             <a class="btn btn-sm btn-outline" href="/static/ma-optimizer.html">MA参数热力图</a>
@@ -2341,7 +2341,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
             </div>
             <div class="form-group">
               <label class="form-label">委托价格</label>
-              <input class="input" id="sellPrice" type="number" step="0.01" placeholder="留空为市价">
+              <input class="input" id="sellPrice" type="number" step="0.01" placeholder="留空为市价" aria-label="卖出价格，留空为市价">
             </div>
             <div class="form-group">
               <label for="sellStrategy" class="form-label">策略选择</label>
@@ -2427,19 +2427,19 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
                 <div>
                   <label style="font-size:11px;color:var(--text-muted);">股票代码</label>
-                  <input class="input" id="addStockCode" placeholder="如 600519" style="width:100%;">
+                  <input class="input" id="addStockCode" placeholder="如 600519" style="width:100%;" aria-label="添加股票代码">
                 </div>
                 <div>
                   <label style="font-size:11px;color:var(--text-muted);">名称</label>
-                  <input class="input" id="addStockName" placeholder="如 贵州茅台" style="width:100%;">
+                  <input class="input" id="addStockName" placeholder="如 贵州茅台" style="width:100%;" aria-label="添加股票名称">
                 </div>
                 <div>
                   <label style="font-size:11px;color:var(--text-muted);">数量(股)</label>
-                  <input class="input" id="addStockQty" type="number" value="100" style="width:100%;">
+                  <input class="input" id="addStockQty" type="number" value="100" style="width:100%;" aria-label="持仓数量">
                 </div>
                 <div>
                   <label style="font-size:11px;color:var(--text-muted);">成本价</label>
-                  <input class="input" id="addStockCost" type="number" step="0.01" value="100" style="width:100%;">
+                  <input class="input" id="addStockCost" type="number" step="0.01" value="100" style="width:100%;" aria-label="持仓成本价">
                 </div>
               </div>
               <div style="margin-top:8px;display:flex;gap:8px;">
@@ -2567,7 +2567,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
           <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
             <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">智能检索(Tavily + LLM 总结)</div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;">
-              <input class="input" id="newsSearchInput" placeholder="输入关键词（如 白酒板块、降准、新能源补贴）" style="flex:1;min-width:200px;" onkeydown="if(event.key==='Enter')newsAiSearch()">
+              <input class="input" id="newsSearchInput" placeholder="输入关键词（如 白酒板块、降准、新能源补贴）" style="flex:1;min-width:200px;" onkeydown="if(event.key==='Enter')newsAiSearch()" aria-label="新闻搜索关键词">
               <button class="btn btn-primary" onclick="newsAiSearch()">检索</button>
             </div>
             <div id="newsSearchBody" style="margin-top:8px;"></div>
@@ -2604,7 +2604,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
           <div class="grid-4" style="gap:8px;margin-top:8px;">
             <div>
               <label style="font-size:11px;color:var(--text-muted);">每期金额(元)</label>
-              <input class="input" id="dcaAmount" type="number" value="1000" placeholder="1000">
+              <input class="input" id="dcaAmount" type="number" value="1000" placeholder="1000" aria-label="每期定投金额">
             </div>
             <div>
               <label for="dcaFreq" style="font-size:11px;color:var(--text-muted);">定投频率</label>
@@ -2615,11 +2615,11 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
             </div>
             <div>
               <label style="font-size:11px;color:var(--text-muted);">期限(年)</label>
-              <input class="input" id="dcaYears" type="number" value="5" min="1" max="50" placeholder="5">
+              <input class="input" id="dcaYears" type="number" value="5" min="1" max="50" placeholder="5" aria-label="定投年限">
             </div>
             <div>
               <label style="font-size:11px;color:var(--text-muted);">预期年化(%)</label>
-              <input class="input" id="dcaRate" type="number" value="8" step="0.1" placeholder="8">
+              <input class="input" id="dcaRate" type="number" value="8" step="0.1" placeholder="8" aria-label="年化收益率百分比">
             </div>
           </div>
           <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
@@ -2654,25 +2654,25 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
           <div class="card">
             <div class="card-title">添加基金</div>
             <div style="margin-bottom:8px;">
-              <input class="input" id="fundSearchInput" placeholder="输入基金代码或名称搜索（如 110022 或 白酒）" style="width:100%;" oninput="debounceFundSearch(this.value)">
+              <input class="input" id="fundSearchInput" placeholder="输入基金代码或名称搜索（如 110022 或 白酒）" style="width:100%;" oninput="debounceFundSearch(this.value)" aria-label="搜索基金代码或名称">
               <div id="fundSearchResult" style="margin-top:4px;max-height:120px;overflow-y:auto;"></div>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;">
               <div>
                 <label style="font-size:11px;color:var(--text-muted);">基金代码</label>
-                <input class="input" id="fundCodeInput" placeholder="如 110022">
+                <input class="input" id="fundCodeInput" placeholder="如 110022" aria-label="基金代码">
               </div>
               <div>
                 <label style="font-size:11px;color:var(--text-muted);">基金名称</label>
-                <input class="input" id="fundNameInput" placeholder="如 易方达消费">
+                <input class="input" id="fundNameInput" placeholder="如 易方达消费" aria-label="基金名称">
               </div>
               <div>
                 <label style="font-size:11px;color:var(--text-muted);">份额</label>
-                <input class="input" id="fundSharesInput" type="number" placeholder="1000">
+                <input class="input" id="fundSharesInput" type="number" placeholder="1000" aria-label="持有份额">
               </div>
               <div>
                 <label style="font-size:11px;color:var(--text-muted);">成本净值</label>
-                <input class="input" id="fundCostInput" type="number" step="0.001" placeholder="2.500">
+                <input class="input" id="fundCostInput" type="number" step="0.001" placeholder="2.500" aria-label="持仓成本价">
               </div>
               <div>
                 <label for="fundDateInput" style="font-size:11px;color:var(--text-muted);">买入日期</label>
@@ -2680,7 +2680,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
               </div>
               <div>
                 <label style="font-size:11px;color:var(--text-muted);">备注</label>
-                <input class="input" id="fundNoteInput" placeholder="可选">
+                <input class="input" id="fundNoteInput" placeholder="可选" aria-label="持仓备注">
               </div>
             </div>
             <button class="btn btn-sm btn-primary" style="width:100%;margin-top:12px;" onclick="addFundPosition()">添加持仓</button>
@@ -2754,7 +2754,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
               </p>
               <label class="btn btn-sm" style="display:block;text-align:center;cursor:pointer;border:1px dashed var(--border);padding:20px;margin-bottom:12px;">
                 点击选择文件(CSV/Excel/图片)
-                <input type="file" id="uploadFileInput" style="display:none;" accept=".csv,.xlsx,.xls,.png,.jpg,.jpeg,.webp" onchange="handleUploadFile(this.files[0])">
+                <input type="file" id="uploadFileInput" style="display:none;" accept=".csv,.xlsx,.xls,.png,.jpg,.jpeg,.webp" onchange="handleUploadFile(this.files[0])" aria-label="上传持仓文件">
               </label>
               <div id="uploadResult" style="display:none;"></div>
             </div>
@@ -2866,7 +2866,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
               <option value="us">美股</option>
               <option value="hk">港股</option>
             </select>
-            <input id="globalCodeInput" class="input" style="flex:1;min-width:200px;" placeholder="输入代码(如 AAPL 或 00700),逗号分隔">
+            <input id="globalCodeInput" class="input" style="flex:1;min-width:200px;" placeholder="输入代码(如 AAPL 或 00700),逗号分隔" aria-label="全球市场代码输入">
             <button class="btn btn-primary" onclick="queryGlobalStock()">查询</button>
           </div>
           <div class="table-wrap" tabindex="0">
@@ -2922,7 +2922,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
             <div class="tab" role="button" tabindex="0" aria-label="数据体检" onclick="switchDataTab('health')">数据体检</div>
           </div>
           <div style="display:flex;gap:8px;margin-bottom:12px;">
-            <input class="input" id="dataCodeInput" placeholder="输入股票代码（可选）" style="max-width:200px;">
+            <input class="input" id="dataCodeInput" placeholder="输入股票代码（可选）" style="max-width:200px;" aria-label="数据页股票代码">
             <button class="btn btn-sm btn-primary" onclick="loadDataTab()">查询</button>
           </div>
           <div id="dataHealthPanel" class="dh-panel" hidden></div>
@@ -2956,7 +2956,7 @@ a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
           <div class="card">
             <div class="card-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg> 自选股</div>
             <div style="display:flex;gap:8px;margin-bottom:12px;">
-              <input class="input" id="watchlistInput" placeholder="添加股票代码" style="max-width:160px;" onkeydown="if(event.key==='Enter')addWatchlist()">
+              <input class="input" id="watchlistInput" placeholder="添加股票代码" style="max-width:160px;" onkeydown="if(event.key==='Enter')addWatchlist()" aria-label="添加自选股代码">
               <button class="btn btn-sm btn-primary" onclick="addWatchlist()">添加</button>
             </div>
             <div class="table-wrap" tabindex="0" style="max-height:300px;overflow-y:auto;">
@@ -9671,11 +9671,11 @@ async function loadStrategyParams() {
         ${groups[group].map(([path, value]) => {
           const type = typeof value === 'boolean' ? 'boolean' : (typeof value === 'number' ? 'number' : 'text');
           const input = type === 'boolean'
-            ? `<select class="select" data-skey="${escapeHtml(path)}" data-stype="boolean">
+            ? `<select class="select" data-skey="${escapeHtml(path)}" data-stype="boolean" aria-label="配置项 ${escapeHtml(path)}">
                 <option value="true" ${value === true ? 'selected' : ''}>true</option>
                 <option value="false" ${value === false ? 'selected' : ''}>false</option>
               </select>`
-            : `<input class="input" data-skey="${escapeHtml(path)}" data-stype="${type}" type="${type === 'number' ? 'number' : 'text'}" step="any" value="${escapeHtml(value == null ? '' : value)}">`;
+            : `<input class="input" data-skey="${escapeHtml(path)}" data-stype="${type}" type="${type === 'number' ? 'number' : 'text'}" step="any" value="${escapeHtml(value == null ? '' : value)}" aria-label="${escapeHtml((STRATEGY_PARAM_META[path] || [])[0] || path)}">`;
           const pmeta = STRATEGY_PARAM_META[path] || [];
           const label = pmeta[0] || path;
           const hint = pmeta[1] || '';
