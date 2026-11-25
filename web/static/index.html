@@ -5015,9 +5015,19 @@ async function loadGateDiscipline() {
   const board = (boardResp && boardResp.data) || null;
   const thermo = (thermoResp && thermoResp.data) || null;
   if (!board && !thermo) {
-    body.innerHTML = '<div class="qf-flow-empty">开仓纪律暂不可用（复盘与温度接口均未返回）。</div>';
+    /* r9-S5 R3: 死态附内联重试 + 有限自动重试（数据常在首次请求后才就绪；
+       上限 2 次防死循环，手动「重试」不受限）。阶段四 P4-2。 */
+    body.innerHTML = '<div class="qf-flow-empty">开仓纪律暂不可用（复盘与温度接口均未返回）。'
+      + '<button type="button" class="btn btn-sm btn-outline" style="margin-left:12px;" '
+      + 'onclick="window._gateDiscRetries=0;loadGateDiscipline()">重试</button></div>';
+    if (!window._gateDiscRetries) window._gateDiscRetries = 0;
+    if (window._gateDiscRetries < 2) {
+      window._gateDiscRetries++;
+      setTimeout(() => { loadGateDiscipline(); }, 3500);
+    }
     return;
   }
+  window._gateDiscRetries = 0;
   renderDisciplineCompact('gateDisciplineBody', board, thermo, '大盘环境不达标时，三问全过的个股也应降低仓位或放弃。');
 }
 
